@@ -1,0 +1,2 @@
+# nogizaka-message-push
+监控乃木坂message，通过qq开放平台或者napcatqq监听的方式将message推送到qq
