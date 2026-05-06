@@ -1,2 +1,3 @@
 # nogizaka-message-push
-监控乃木坂message，通过qq开放平台或者napcatqq监听的方式将message推送到qq
+通过网页端获取token和session，自动续期鉴权
+轮询监听成员message，通过napcatqq达到将监听到的message发送到指定群聊，使用qq开放平台提供的bot将message发送给机器人拥有者
