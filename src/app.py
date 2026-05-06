@@ -1,5 +1,5 @@
 # ============================================================
-# app.py — 程序入口：初始化所有模块、驱动主轮询循环
+# main.py — 程序入口：初始化所有模块、驱动主轮询循环
 # ============================================================
 import asyncio
 import os
@@ -29,17 +29,17 @@ from config.config import (
     TIME_RECORD_DIR,
 )
 from config.credentials import load_all_accounts, proactive_refresh_if_expiring
-from src.logger import init_loggers, log_all, log_warn
+from src.logger import init_loggers, log_all
 
 
 # ──────────────────────────────────────────────
-# 启动健康检查
+# 改进 3：启动健康检查
 # ──────────────────────────────────────────────
 async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     """
     启动时检查：
-    1. 已启用的 QQ 推送通道是否可用
-    2. MONITOR_LIST 里每个 account_id 是否都已加载凭证
+      1. 已启用的 QQ 推送通道是否可用
+      2. MONITOR_LIST 里每个 account_id 是否都已加载凭证
 
     任意一项失败都打印警告，但不阻止程序启动，
     让运维人员能第一时间看到问题所在。
@@ -106,7 +106,7 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
             account_target_groups[m["account_id"]] = m["target_group"]
 
     while True:
-        # ── 每轮巡查前主动检查并刷新即将过期的 Token ──
+        # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
         await asyncio.gather(*[
             proactive_refresh_if_expiring(acc_id, grp)
             for acc_id, grp in account_target_groups.items()
@@ -146,7 +146,7 @@ async def main() -> None:
     os.makedirs(TIME_RECORD_DIR, exist_ok=True)
     os.makedirs(SENT_IDS_DIR, exist_ok=True)
 
-    # 1. 基础设施（init_loggers 内部会写启动分隔线）
+    # 1. 基础设施
     init_loggers()
     load_all_accounts()
 
@@ -171,7 +171,7 @@ async def main() -> None:
     qq_official.initialize(qq_client)
     fetcher.initialize(http_client, semaphore)
 
-    # 5. 启动健康检查
+    # 5. 启动健康检查（改进 3）
     await _health_check(qq_client)
     print()
 

@@ -10,16 +10,13 @@ from datetime import datetime, timezone
 import httpx
 
 from config.config import ACCOUNTS, ALERT_COOLDOWN_SECONDS, CRED_DIR, TOKEN_REFRESH_BEFORE_SECONDS
-from src.logger import log_all, log_response, log_warn
+from src.logger import log_all, log_response
 
 # ---- 运行时状态 ----
-ACCOUNT_CREDS: dict[str, dict] = {}
-_file_locks: dict[str, asyncio.Lock] = {}
-_token_refresh_locks: dict[str, asyncio.Lock] = {}
-_alert_last_sent: dict[str, float] = {}
-
-# Token 严重过期阈值（秒），超过此值触发 WARN 而非普通 INFO
-_SEVERE_OVERDUE_THRESHOLD = 600
+ACCOUNT_CREDS:        dict[str, dict]          = {}
+_file_locks:          dict[str, asyncio.Lock]  = {}
+_token_refresh_locks: dict[str, asyncio.Lock]  = {}
+_alert_last_sent:     dict[str, float]         = {}
 
 
 # ──────────────────────────────────────────────
@@ -41,7 +38,7 @@ def _clean_cookie_string(raw: str) -> dict[str, str]:
 def _save_cred(account_id: str, token: str, cookies: dict) -> None:
     os.makedirs(CRED_DIR, exist_ok=True)
     path = os.path.join(CRED_DIR, f"{account_id}.json")
-    tmp = path + ".tmp"
+    tmp  = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"token": token, "cookies": cookies}, f)
     os.replace(tmp, path)
@@ -57,20 +54,20 @@ def _save_cred(account_id: str, token: str, cookies: dict) -> None:
 def get_web_headers(group_type: str, token: str | None = None) -> dict[str, str]:
     app_tag = "nogizaka" if group_type == "nogizaka46" else "keyakizaka"
     headers = {
-        "accept": "application/json",
-        "accept-language": "zh-CN;q=1,en;q=0.9",
-        "content-type": "application/json",
-        "sec-ch-ua": '"Chromium";v="147", "Google Chrome";v="147", "Not.A/Brand";v="99"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "user-agent": (
+        "accept":               "application/json",
+        "accept-language":      "zh-CN;q=1,en;q=0.9",
+        "content-type":         "application/json",
+        "sec-ch-ua":            '"Chromium";v="147", "Google Chrome";v="147", "Not.A/Brand";v="99"',
+        "sec-ch-ua-mobile":     "?0",
+        "sec-ch-ua-platform":   '"Windows"',
+        "user-agent":           (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         ),
-        "x-talk-app-id": f"jp.co.sonymusic.communication.{app_tag} 2.5",
-        "x-talk-app-platform": "web",
-        "referer": f"https://message.{group_type}.com/",
-        "origin": f"https://message.{group_type}.com",
+        "x-talk-app-id":        f"jp.co.sonymusic.communication.{app_tag} 2.5",
+        "x-talk-app-platform":  "web",
+        "referer":              f"https://message.{group_type}.com/",
+        "origin":               f"https://message.{group_type}.com",
     }
     if token:
         headers["authorization"] = f"Bearer {token}"
@@ -122,6 +119,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
     - 若其他协程已抢先刷新（token 已变），直接返回 True。
     - 失败时触发 QQ 报警（带冷却）。
     """
+    # 延迟导入，避免循环依赖
     from src.notifier import send_alert_message
 
     lock = _token_refresh_locks.setdefault(account_id, asyncio.Lock())
@@ -136,9 +134,9 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
             return True
 
         group_type = ACCOUNTS[account_id]["group_type"]
-        url = f"https://api.message.{group_type}.com/v2/update_token"
+        url        = f"https://api.message.{group_type}.com/v2/update_token"
         cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
-        headers = get_web_headers(group_type)
+        headers    = get_web_headers(group_type)
         headers["cookie"] = cookie_str
 
         try:
@@ -170,28 +168,28 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
         except Exception as e:
             log_all(f"🔥 账号 {account_id} 续期网络异常: {e}", is_error=True)
 
-        # ---- 续期失败，触发报警 ----
-        log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)
-        now = datetime.now().timestamp()
-        last = _alert_last_sent.get(account_id, 0)
-        if now - last > ALERT_COOLDOWN_SECONDS:
-            _alert_last_sent[account_id] = now
-            try:
-                await send_alert_message(
-                    target_group,
-                    f"📢 警报：账号 {account_id} 续期失败，Cookie 已死亡！请重新抓包！",
-                )
-            except Exception:
-                pass
-        else:
-            remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
-            log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
+    # ---- 续期失败，触发报警 ----
+    log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)
+    now  = datetime.now().timestamp()
+    last = _alert_last_sent.get(account_id, 0)
+    if now - last > ALERT_COOLDOWN_SECONDS:
+        _alert_last_sent[account_id] = now
+        try:
+            await send_alert_message(
+                target_group,
+                f"📢 警报：账号 {account_id} 续期失败，Cookie 已死亡！请重新抓包！",
+            )
+        except Exception:
+            pass
+    else:
+        remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
+        log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
 
-        return False
+    return False
 
 
 # ──────────────────────────────────────────────
-# Token 主动刷新
+# 改进 1：Token 主动刷新
 # ──────────────────────────────────────────────
 def _decode_token_exp(token: str) -> int | None:
     """
@@ -234,19 +232,11 @@ async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> N
     if remaining is None:
         log_all(f"⚠️ 无法解析 {account_id} 的 Token 过期时间，跳过主动刷新", is_debug=True)
         return
-
     if remaining <= TOKEN_REFRESH_BEFORE_SECONDS:
-        # 改进：区分"严重过期"（深夜低速期间漏刷）和正常预刷新，给予不同日志级别
-        overdue = -remaining  # 正数 = 已过期的秒数
-        if overdue > _SEVERE_OVERDUE_THRESHOLD:
-            log_warn(
-                f"🔄 {account_id} Token 已过期 {int(overdue)}s（严重滞后，阈值 {TOKEN_REFRESH_BEFORE_SECONDS}s），立即刷新..."
-            )
-        else:
-            log_all(
-                f"🔄 {account_id} Token 剩余 {int(remaining)}s"
-                f"（阈值 {TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新..."
-            )
+        log_all(
+            f"🔄 {account_id} Token 剩余 {int(remaining)}s"
+            f"（阈值 {TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新...",
+        )
         await refresh_token(account_id, target_group)
     else:
         log_all(
