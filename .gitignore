@@ -1,0 +1,15 @@
+# 凭证和敏感数据
+.env
+data/web_credentials/
+
+# 运行时产生的数据目录
+data/
+
+# 日志
+logs/
+*.log
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
