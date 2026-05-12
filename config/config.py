@@ -187,6 +187,11 @@ DEBUG_LOG_QQ_PAYLOAD = _env_bool("DEBUG_LOG_QQ_PAYLOAD", False)
 GEMINI_API_KEY = _env("GEMINI_API_KEY")
 GEMINI_MODELS: list[dict] = [
     {
+        "name": "gemini-3.1-flash-lite",
+        "url":  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+        "rpm":  15,
+    },
+    {
         "name": "gemini-2.5-flash",
         "url":  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
         "rpm":  10,
