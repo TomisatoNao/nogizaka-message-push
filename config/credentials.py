@@ -202,7 +202,7 @@ def _decode_token_exp(token: str) -> int | None:
         if len(parts) != 3:
             return None
         # base64url 解码：补齐 "=" padding 后解码
-        padding = "=" * (4 - len(parts[1]) % 4)
+        padding = "=" * (-len(parts[1]) % 4)
         payload_bytes = base64.urlsafe_b64decode(parts[1] + padding)
         payload = json.loads(payload_bytes)
         exp = int(payload.get("exp", 0))

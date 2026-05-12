@@ -13,3 +13,6 @@ logs/
 __pycache__/
 *.pyc
 *.pyo
+
+# Claude Code 本地配置
+.claude/

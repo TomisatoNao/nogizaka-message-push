@@ -132,13 +132,8 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
             log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
 
         wait_time, tag = _next_interval()
-        print(
-            f"\r[{datetime.now().strftime('%H:%M:%S')}] {tag} | 下次: {wait_time}s 后",
-            end="",
-            flush=True,
-        )
+        log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
         await asyncio.sleep(wait_time)
-        print()
 
 
 async def main() -> None:

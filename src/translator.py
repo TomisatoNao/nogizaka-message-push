@@ -39,6 +39,9 @@ def initialize() -> None:
 
 
 def _is_already_chinese(text: str) -> bool:
+    for c in text:
+        if "\u3040" <= c <= "\u309f" or "\u30a0" <= c <= "\u30ff":
+            return False   # \u5305\u542b\u5e73\u5047\u540d\u6216\u7247\u5047\u540d\uff0c\u4e00\u5b9a\u662f\u65e5\u6587
     return all("\u4e00" <= c <= "\u9fff" or c in _CHINESE_CHARS for c in text)
 
 

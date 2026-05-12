@@ -181,6 +181,9 @@ async def fetch_member(member: dict) -> None:
             # ---- 401 续期 ----
             elif resp.status_code == 401:
                 log_response(resp.text)
+                if attempt >= MAX_FETCH_ATTEMPTS:
+                    log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询", is_error=True)
+                    return
                 log_all(
                     f"⚠️ {m_name} 触发 401，刷新账号 {account_id} token "
                     f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})...",
@@ -189,10 +192,7 @@ async def fetch_member(member: dict) -> None:
                 if not await refresh_token(account_id, target_group, old_token=cred["token"]):
                     log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
                     return
-                if attempt >= MAX_FETCH_ATTEMPTS:
-                    log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询", is_error=True)
-                    return
-                continue   # 重新请求
+                continue   # 用新 token 重新请求
 
             # ---- 其他错误 ----
             else:
