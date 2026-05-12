@@ -35,7 +35,7 @@ def initialize(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> None:
 # ──────────────────────────────────────────────
 # 单条消息处理
 # ──────────────────────────────────────────────
-async def _handle_message(member: dict, msg: dict, time_file: str, file_lock: asyncio.Lock,
+async def _handle_message(member: dict, msg: dict,
                            id_list: list, id_set: set, l_time_ref: list) -> bool:
     """
     翻译 → 推送 QQ → 同步 B站 → 记录状态。
@@ -51,7 +51,6 @@ async def _handle_message(member: dict, msg: dict, time_file: str, file_lock: as
     original_text = msg.get("text", "")
 
     if msg_id in id_set:
-        await write_time_record(time_file, file_lock, updated)
         l_time_ref[0] = updated
         return True
 
@@ -86,9 +85,7 @@ async def _handle_message(member: dict, msg: dict, time_file: str, file_lock: as
             bili_text += f"\n\n📝 翻译：\n{translated}"
         await post_dynamic(bili_text, cookie, bili_jct)
 
-    # 记录状态
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
-    await write_time_record(time_file, file_lock, updated)
     l_time_ref[0] = updated
     await asyncio.sleep(1.5)
     return True
@@ -166,10 +163,13 @@ async def fetch_member(member: dict) -> None:
 
                 for msg in new_msgs:
                     ok = await _handle_message(
-                        member, msg, time_file, file_lock, id_list, id_set, l_time_ref
+                        member, msg, id_list, id_set, l_time_ref
                     )
                     if not ok:
                         return  # 发送失败，中断本轮，下轮重试
+
+                # 循环处理完毕后统一持久化一次时间戳，避免每条已见消息重复写盘
+                await write_time_record(time_file, file_lock, l_time_ref[0])
 
                 new_count = len(truly_new)
                 if new_count > 0:
