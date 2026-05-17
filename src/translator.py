@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # translator.py — Gemini 翻译（串行化速率控制）
 # ============================================================
 import asyncio
@@ -20,30 +20,28 @@ _lock: asyncio.Lock   = None   # type: ignore
 _last_ts: float       = 0.0
 
 _PROMPT_TEMPLATE = (
-    "你是一个专业的日文翻译助手。请将以下日文内容翻译成中文（简体），要求：\n"
-    "1. 翻译自然流畅，符合中文表达习惯，保留原文的语气和情感\n"
-    "2. 对于偶像团体成员的对话，使用亲切的口吻\n"
-    "3. 颜文字和表情符号（如 ✨💪🏻🎂）保留原样不翻译\n"
-    "4. 只输出翻译结果，不要添加任何解释或说明\n"
-    "5. 如果原文已经是中文，直接原样输出\n\n"
+    "你是坂道系偶像团体的日文翻译。将以下成员消息翻译成中文（简体）：\n"
+    "- 翻译自然流畅，保留原文的语气、口吻和情感\n"
+    "- 颜文字（如(笑)(*´∀｀*)）和emoji保留原样，URL和话题标签不翻译\n"
+    "- 只输出翻译结果\n\n"
     "原文：\n{text}"
 )
-
-_CHINESE_CHARS = set("，。！？；：\u201c\u201d\u2018\u2019～（）…—\n\r\t ")
-
 
 def initialize() -> None:
     """在事件循环内调用，创建 asyncio.Lock。"""
     global _lock
     _lock = asyncio.Lock()
 
-
 def _is_already_chinese(text: str) -> bool:
+    """\u68c0\u67e5\u6587\u672c\u662f\u5426\u4e0d\u9700\u8981\u7ffb\u8bd1\u3002
+
+    \u5224\u65ad\u4f9d\u636e\uff1a\u5047\u540d\u662f\u65e5\u6587\u7684\u53ef\u9760\u4fe1\u53f7\u2014\u2014\u53ea\u8981\u51fa\u73b0\u5047\u540d\u5c31\u9700\u8981\u7ffb\u8bd1\uff1b
+    \u4e0d\u542b\u5047\u540d\u7684\u6587\u672c\uff08\u7eaf\u6c49\u5b57/\u82f1\u6587/emoji\uff09\u8df3\u8fc7\uff0c\u907f\u514d\u6d6a\u8d39 API \u914d\u989d\u3002
+    """
     for c in text:
         if "\u3040" <= c <= "\u309f" or "\u30a0" <= c <= "\u30ff":
-            return False   # \u5305\u542b\u5e73\u5047\u540d\u6216\u7247\u5047\u540d\uff0c\u4e00\u5b9a\u662f\u65e5\u6587
-    return all("\u4e00" <= c <= "\u9fff" or c in _CHINESE_CHARS for c in text)
-
+            return False
+    return True
 
 async def translate_text(text: str) -> str:
     """

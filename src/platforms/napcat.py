@@ -35,15 +35,15 @@ def build_message_chain(
     NapCat 支持文本与图片/视频/语音在同一个消息链里发送，
     因此这里始终把成员名和时间戳作为第一段，媒体段紧随其后。
     """
-    bj_time = (
+    jst_time = (
         datetime.strptime(updated, "%Y-%m-%dT%H:%M:%SZ")
         .replace(tzinfo=timezone.utc)
-        .astimezone(timezone(timedelta(hours=8)))
+        .astimezone(timezone(timedelta(hours=9)))
         .strftime("%m/%d %H:%M:%S")
     )
     original = msg.get("text", "")
     # 有正文时加换行分隔；纯媒体消息也保留成员名和时间戳。
-    header = f"{m_name} {bj_time}\n{original}" if original else f"{m_name} {bj_time}"
+    header = f"{m_name} {jst_time}\n{original}" if original else f"{m_name} {jst_time}"
     chain: list[dict] = [
         {"type": "text", "data": {"text": header}}
     ]

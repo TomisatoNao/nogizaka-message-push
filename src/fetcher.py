@@ -74,13 +74,13 @@ async def _handle_message(member: dict, msg: dict,
     # 同步 B站（无正文时跳过，避免只推送名字+时间戳）
     if member.get("post_to_bilibili") and original_text.strip():
         cookie, bili_jct = resolve_cookie(member)
-        bj_time = (
+        jst_time = (
             datetime.strptime(updated, "%Y-%m-%dT%H:%M:%SZ")
             .replace(tzinfo=timezone.utc)
-            .astimezone(timezone(timedelta(hours=8)))
+            .astimezone(timezone(timedelta(hours=9)))
             .strftime("%m/%d %H:%M:%S")
         )
-        bili_text = f"{m_name} {bj_time}\n{original_text}"
+        bili_text = f"{m_name} {jst_time}\n{original_text}"
         if translated:
             bili_text += f"\n\n📝 翻译：\n{translated}"
         await post_dynamic(bili_text, cookie, bili_jct)
@@ -94,7 +94,11 @@ async def _handle_message(member: dict, msg: dict,
 # ──────────────────────────────────────────────
 # 单成员轮询
 # ──────────────────────────────────────────────
-async def fetch_member(member: dict) -> None:
+async def _fetch_member_messages(member: dict):
+    """
+    Phase 1（并发抓取）：读取时间戳 → API 请求（含 401 续期/重试）→ 排序过滤。
+    返回 (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock) 或 None。
+    """
     account_id   = member["account_id"]
     group_type   = member["group_type"]
     m_id         = member["m_id"]
@@ -104,7 +108,7 @@ async def fetch_member(member: dict) -> None:
     cred = ACCOUNT_CREDS.get(account_id)
     if not cred:
         log_all(f"🚨 {m_name} 账号 {account_id} 无可用凭据", is_error=True)
-        return
+        return None
 
     os.makedirs(TIME_RECORD_DIR, exist_ok=True)
     time_file = os.path.join(TIME_RECORD_DIR, f"time_{group_type}_{m_id}.txt")
@@ -120,7 +124,7 @@ async def fetch_member(member: dict) -> None:
                 l_time = f.read().strip()
 
     id_list, id_set = load_sent_ids(group_type, m_id)
-    l_time_ref = [l_time]   # 用列表包装使其可在子函数内修改
+    l_time_ref = [l_time]
 
     for attempt in range(1, MAX_FETCH_ATTEMPTS + 1):
         try:
@@ -135,55 +139,35 @@ async def fetch_member(member: dict) -> None:
             async with _semaphore:
                 resp = await _http_client.get(url, headers=headers)
 
-            # ---- 成功 ----
             if resp.status_code == 200:
                 try:
                     msgs = resp.json().get("messages", [])
                 except Exception:
                     log_all(f"🚨 {m_name} API 响应不是合法 JSON", is_error=True)
-                    return
+                    return None
 
-                # Bug 2 修复：过滤掉 updated_at 为空的异常消息（避免 strptime 崩溃）
-                # Bug 1 修复：使用 >= 代替 >，防止同一秒多条消息在下轮被全部过滤掉；
-                #             重复推送由 id_set 去重兜底
                 new_msgs = sorted(
                     [
                         m for m in msgs
-                        if m.get("updated_at")                          # 空值直接跳过
+                        if m.get("updated_at")
                         and m.get("updated_at") >= l_time_ref[0]
                         and m.get("publish_type") not in SKIP_PUBLISH_TYPES
                     ],
                     key=lambda x: x["updated_at"],
                 )
-                if new_msgs:
+                if new_msgs and any(
+                    str(m.get("id") or m.get("updated_at", "")) not in id_set
+                    for m in new_msgs
+                ):
                     log_response(resp.text)
 
-                # 区分"检测到"和"实际推送"，让日志更清晰
-                truly_new = [m for m in new_msgs if str(m.get("id") or m.get("updated_at", "")) not in id_set]
+                return (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock)
 
-                for msg in new_msgs:
-                    ok = await _handle_message(
-                        member, msg, id_list, id_set, l_time_ref
-                    )
-                    if not ok:
-                        return  # 发送失败，中断本轮，下轮重试
-
-                # 循环处理完毕后统一持久化一次时间戳，避免每条已见消息重复写盘
-                await write_time_record(time_file, file_lock, l_time_ref[0])
-
-                new_count = len(truly_new)
-                if new_count > 0:
-                    log_all(f"✅ {m_name} 推送 {new_count} 条新消息")
-                else:
-                    log_all(f"✅ {m_name} 无新消息", is_debug=True)
-                return
-
-            # ---- 401 续期 ----
             elif resp.status_code == 401:
                 log_response(resp.text)
                 if attempt >= MAX_FETCH_ATTEMPTS:
                     log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询", is_error=True)
-                    return
+                    return None
                 log_all(
                     f"⚠️ {m_name} 触发 401，刷新账号 {account_id} token "
                     f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})...",
@@ -191,14 +175,13 @@ async def fetch_member(member: dict) -> None:
                 )
                 if not await refresh_token(account_id, target_group, old_token=cred["token"]):
                     log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
-                    return
-                continue   # 用新 token 重新请求
+                    return None
+                continue
 
-            # ---- 其他错误 ----
             else:
                 log_response(resp.text)
                 log_all(f"🚨 {m_name} 异常状态码 HTTP {resp.status_code}", is_error=True)
-                return
+                return None
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
             log_all(f"🔥 {m_name} 网络错误 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {e}", is_error=True)
@@ -209,4 +192,34 @@ async def fetch_member(member: dict) -> None:
 
         except Exception:
             log_all(f"🔥 {m_name} 未预料的错误:\n{traceback.format_exc()}", is_error=True)
-            return
+            return None
+
+    return None
+
+
+async def _push_member_messages(member: dict, new_msgs: list,
+                                 id_list: list, id_set: set,
+                                 l_time_ref: list,
+                                 time_file: str, file_lock) -> bool:
+    """
+    Phase 2（串行推送）：按时间顺序逐条推送 → 写时间戳。
+    返回 True 表示全部推送成功，False 表示有消息推送失败。
+    """
+    m_name = member["m_name"]
+    truly_new = [m for m in new_msgs
+                 if str(m.get("id") or m.get("updated_at", "")) not in id_set]
+
+    for msg in new_msgs:
+        ok = await _handle_message(member, msg, id_list, id_set, l_time_ref)
+        if not ok:
+            await write_time_record(time_file, file_lock, l_time_ref[0])
+            return False
+
+    await write_time_record(time_file, file_lock, l_time_ref[0])
+
+    new_count = len(truly_new)
+    if new_count > 0:
+        log_all(f"✅ {m_name} 推送 {new_count} 条新消息")
+    else:
+        log_all(f"✅ {m_name} 无新消息", is_debug=True)
+    return True

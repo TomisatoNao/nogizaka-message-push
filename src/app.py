@@ -112,21 +112,35 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
             for acc_id, grp in account_target_groups.items()
         ])
 
-        results = await asyncio.gather(
-            *[fetcher.fetch_member(m) for m in MONITOR_LIST],
+        # Phase 1: 并发抓取所有成员的消息
+        fetch_results = await asyncio.gather(
+            *[fetcher._fetch_member_messages(m) for m in MONITOR_LIST],
             return_exceptions=True,
         )
 
-        all_ok = True
+        # Phase 2: 按 MONITOR_LIST 顺序逐个成员串行推送
         error_members = []
-        for i, res in enumerate(results):
-            if isinstance(res, Exception):
-                name = MONITOR_LIST[i]['m_name']
-                log_all(f"💥 任务异常 [{name}]: {res}", is_error=True)
-                error_members.append(name.replace(" ", ""))
-                all_ok = False
+        for i, result in enumerate(fetch_results):
+            member = MONITOR_LIST[i]
+            name = member['m_name'].replace(" ", "")
 
-        if all_ok:
+            if isinstance(result, Exception):
+                log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
+                error_members.append(name)
+                continue
+
+            if result is None:
+                error_members.append(name)
+                continue
+
+            new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
+            ok = await fetcher._push_member_messages(
+                member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
+            )
+            if not ok:
+                error_members.append(name)
+
+        if not error_members:
             log_all(f"🔍 巡查完毕 [{member_names}]")
         else:
             log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)

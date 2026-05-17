@@ -14,13 +14,14 @@
 - **多通道 QQ 推送** — NapCat/OneBot HTTP 群聊推送 + QQ 开放平台官方 Bot 单聊推送，可独立开关
 - **Bilibili 同步** — 可选将消息发布为 B 站文字动态，支持成员独立 Cookie
 - **多媒体支持** — 图片、视频、语音消息完整转发（官方 Bot 支持媒体文件下载重传）
+- **JST 时间显示** — 推送和 B 站动态中的消息时间统一使用日本標準時 (UTC+9)
 - **启动健康检查** — 启动时校验 NapCat 连接、QQ Bot access_token、账号凭证状态
 
 ## 快速开始
 
 ### 环境要求
 
-- Python 3.8+
+- Python 3.10+
 - Windows / Linux
 
 ### 安装
