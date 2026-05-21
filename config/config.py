@@ -85,6 +85,14 @@ ACCOUNTS: dict[str, dict] = {
         "init_token":  _env("ACCOUNT_HINATA_MAIN_TOKEN"),
         "init_cookie": _env("ACCOUNT_HINATA_MAIN_COOKIE"),
     },
+    "yodel_graduated": {
+        "group_type":  "hinatazaka46",
+        "init_token":  _env("ACCOUNT_YODEL_TOKEN"),
+        "init_cookie": _env("ACCOUNT_YODEL_COOKIE"),
+        "app_tag":     "yodel",
+        "api_base":    "https://api.service.yodel-app.com",
+        "web_origin":  "https://service.yodel-app.com",
+    },
 }
 
 # ---- 监控列表 ----
@@ -136,6 +144,14 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "88",
         "m_name":           "佐藤 優羽",
+        "target_group":     752269366,
+        "post_to_bilibili": False,
+    },
+    {
+        "account_id":       "yodel_graduated",
+        "group_type":       "hinatazaka46",
+        "m_id":             "77",
+        "m_name":           "松田 好花",
         "target_group":     752269366,
         "post_to_bilibili": False,
     },

@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 import httpx
 
-from config.config import BACKTRACK_HOURS, ENABLE_TRANSLATION, SKIP_PUBLISH_TYPES, TIME_RECORD_DIR
+from config.config import ACCOUNTS, BACKTRACK_HOURS, ENABLE_TRANSLATION, SKIP_PUBLISH_TYPES, TIME_RECORD_DIR
 from src.logger import error_logger, log_all, log_response
 from config.credentials import ACCOUNT_CREDS, get_file_lock, get_web_headers, refresh_token, write_time_record
 from src.dedup import load_sent_ids, save_sent_id
@@ -128,12 +128,25 @@ async def _fetch_member_messages(member: dict):
 
     for attempt in range(1, MAX_FETCH_ATTEMPTS + 1):
         try:
-            url = (
-                f"https://api.message.{group_type}.com/v2/groups/{m_id}/timeline"
-                f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
-            )
+            acc_cfg = ACCOUNTS.get(account_id, {})
+            api_base = acc_cfg.get("api_base")
+            if api_base:
+                url = (
+                    f"{api_base}/v2/groups/{m_id}/timeline"
+                    f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
+                )
+            else:
+                url = (
+                    f"https://api.message.{group_type}.com/v2/groups/{m_id}/timeline"
+                    f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
+                )
             cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
-            headers = get_web_headers(group_type, cred["token"])
+            headers = get_web_headers(
+                group_type, cred["token"],
+                app_tag=acc_cfg.get("app_tag"),
+                api_base=api_base,
+                web_origin=acc_cfg.get("web_origin"),
+            )
             headers["cookie"] = cookie_str
 
             async with _semaphore:

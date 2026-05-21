@@ -51,8 +51,23 @@ def _save_cred(account_id: str, token: str, cookies: dict) -> None:
 # ──────────────────────────────────────────────
 # 公开 API
 # ──────────────────────────────────────────────
-def get_web_headers(group_type: str, token: str | None = None) -> dict[str, str]:
-    app_tag = "nogizaka" if group_type == "nogizaka46" else "keyakizaka"
+def get_web_headers(
+    group_type: str,
+    token: str | None = None,
+    *,
+    app_tag: str | None = None,
+    api_base: str | None = None,
+    web_origin: str | None = None,
+) -> dict[str, str]:
+    if app_tag is None:
+        app_tag = "nogizaka" if group_type == "nogizaka46" else "keyakizaka"
+    if web_origin:
+        origin  = web_origin
+        referer = web_origin.rstrip("/") + "/"
+    else:
+        origin  = f"https://message.{group_type}.com"
+        referer = f"https://message.{group_type}.com/"
+
     headers = {
         "accept":               "application/json",
         "accept-language":      "zh-CN;q=1,en;q=0.9",
@@ -60,14 +75,17 @@ def get_web_headers(group_type: str, token: str | None = None) -> dict[str, str]
         "sec-ch-ua":            '"Chromium";v="147", "Google Chrome";v="147", "Not.A/Brand";v="99"',
         "sec-ch-ua-mobile":     "?0",
         "sec-ch-ua-platform":   '"Windows"',
+        "sec-fetch-dest":       "empty",
+        "sec-fetch-mode":       "cors",
+        "sec-fetch-site":       "same-site",
         "user-agent":           (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         ),
         "x-talk-app-id":        f"jp.co.sonymusic.communication.{app_tag} 2.5",
         "x-talk-app-platform":  "web",
-        "referer":              f"https://message.{group_type}.com/",
-        "origin":               f"https://message.{group_type}.com",
+        "referer":              referer,
+        "origin":               origin,
     }
     if token:
         headers["authorization"] = f"Bearer {token}"
@@ -133,10 +151,20 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
-        group_type = ACCOUNTS[account_id]["group_type"]
-        url        = f"https://api.message.{group_type}.com/v2/update_token"
+        acc_cfg    = ACCOUNTS[account_id]
+        group_type = acc_cfg["group_type"]
+        api_base   = acc_cfg.get("api_base")
+        if api_base:
+            url = f"{api_base}/v2/update_token"
+        else:
+            url = f"https://api.message.{group_type}.com/v2/update_token"
         cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
-        headers    = get_web_headers(group_type)
+        headers    = get_web_headers(
+            group_type,
+            app_tag=acc_cfg.get("app_tag"),
+            api_base=api_base,
+            web_origin=acc_cfg.get("web_origin"),
+        )
         headers["cookie"] = cookie_str
 
         try:
@@ -154,9 +182,10 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                 if new_token:
                     cred["token"] = new_token
                     for sc in r.headers.get_list("set-cookie"):
-                        if "session=" in sc:
-                            cred["cookies"]["session"] = sc.split("session=")[1].split(";")[0]
-                            break
+                        sc = sc.split(";")[0].strip()
+                        if "=" in sc:
+                            k, v = sc.split("=", 1)
+                            cred["cookies"][k] = v
                     _save_cred(account_id, cred["token"], cred["cookies"])
                     log_all(f"✅ 账号 {account_id} 续期成功")
                     return True
