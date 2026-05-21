@@ -8,13 +8,14 @@
 
 - **多账号管理** — 支持多个账号池，自动加载持久化凭证，首次运行从 `.env` 初始化
 - **Token 自动续期** — 解码 JWT 检查 `exp`，剩余不足 5 分钟时主动刷新，API 返回 401 时触发被动刷新
-- **多成员并行轮询** — 6 名成员并发拉取，日间 2~3 分钟/次，夜间 25~30 分钟/次自适应间隔
+- **多成员并行轮询** — 7 名成员并发拉取，日间 2~3 分钟/次，夜间 25~30 分钟/次自适应间隔
 - **消息去重** — 基于消息 ID 的滑动窗口去重（每成员最多 500 条），O(1) 集合 + 有序列表
 - **Gemini 翻译** — 日文消息自动翻译为中文，多模型级联容错（3.1-flash-lite → 2.5-flash → 2.5-flash-lite → 2.5-pro），串行化限速
 - **多通道 QQ 推送** — NapCat/OneBot HTTP 群聊推送 + QQ 开放平台官方 Bot 单聊推送，可独立开关
 - **Bilibili 同步** — 可选将消息发布为 B 站文字动态，支持成员独立 Cookie
 - **多媒体支持** — 图片、视频、语音消息完整转发（官方 Bot 支持媒体文件下载重传）
 - **JST 时间显示** — 推送和 B 站动态中的消息时间统一使用日本標準時 (UTC+9)
+- **自定义 API 域名** — 支持毕业生成员独立 API 域名（如 yodel），账号级配置 app_tag / api_base / web_origin
 - **启动健康检查** — 启动时校验 NapCat 连接、QQ Bot access_token、账号凭证状态
 
 ## 快速开始
@@ -141,6 +142,7 @@ Member Message API          Gemini API            NapCat/OneBot
 | 大野 愛実 | 日向坂46 | 84 | hinata_main |
 | 片山 紗希 | 日向坂46 | 85 | hinata_shared |
 | 佐藤 優羽 | 日向坂46 | 88 | hinata_shared |
+| 松田 好花 | 日向坂46（毕业） | 77 | yodel_graduated |
 
 ## 配置参考
 
@@ -150,7 +152,7 @@ Member Message API          Gemini API            NapCat/OneBot
 - **QQ 推送通道** — `ENABLE_NAPCAT_QQ`、`ENABLE_QQ_OFFICIAL_BOT`、`QQ_BOT_API`
 - **QQ 官方 Bot** — `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}`
 - **Bilibili** — `BILIBILI_FULL_COOKIE`、`BILIBILI_BILI_JCT`、`MEMBER_85_BILIBILI_COOKIE`
-- **账号凭证** — `ACCOUNT_{NOGIZAKA_MAIN,HINATA_SHARED,HINATA_MAIN}_{TOKEN,COOKIE}`
+- **账号凭证** — `ACCOUNT_{NOGIZAKA_MAIN,HINATA_SHARED,HINATA_MAIN,YODEL}_{TOKEN,COOKIE}`
 
 ## License
 
