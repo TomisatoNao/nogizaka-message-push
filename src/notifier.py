@@ -30,9 +30,11 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     napcat_ok = True
 
     if ENABLE_NAPCAT_QQ:
-        napcat_ok = await send_qq_message(member["target_group"], message_chain)
-        if not napcat_ok:
-            log_all("⚠️ NapCat QQ 推送失败", is_error=True)
+        for gid in member["target_groups"]:
+            ok = await send_qq_message(gid, message_chain)
+            if not ok:
+                napcat_ok = False
+                log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
 
     if ENABLE_QQ_OFFICIAL_BOT:
         bots = get_bots()

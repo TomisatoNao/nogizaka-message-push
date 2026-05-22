@@ -103,7 +103,7 @@ async def _fetch_member_messages(member: dict):
     group_type   = member["group_type"]
     m_id         = member["m_id"]
     m_name       = member["m_name"]
-    target_group = member["target_group"]
+    target_group = member["target_groups"][0]
 
     cred = ACCOUNT_CREDS.get(account_id)
     if not cred:

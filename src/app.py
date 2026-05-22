@@ -103,7 +103,7 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
     account_target_groups: dict[str, int] = {}
     for m in MONITOR_LIST:
         if m["account_id"] not in account_target_groups:
-            account_target_groups[m["account_id"]] = m["target_group"]
+            account_target_groups[m["account_id"]] = m["target_groups"][0]
 
     while True:
         # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──

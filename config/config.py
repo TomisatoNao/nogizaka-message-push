@@ -102,7 +102,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "nogizaka46",
         "m_id":             "55",
         "m_name":           "冨里 奈央",
-        "target_group":     533072575,
+        "target_groups":    [533072575],
         "post_to_bilibili": False,
         # 未配置 MEMBER_55_BILIBILI_COOKIE 时使用全局默认值
     },
@@ -111,7 +111,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "34",
         "m_name":           "金村 美玖",
-        "target_group":     752269366,
+        "target_groups":    [752269366],
         "post_to_bilibili": False,
     },
     {
@@ -119,7 +119,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "36",
         "m_name":           "小坂 菜绪",
-        "target_group":     752269366,
+        "target_groups":    [752269366],
         "post_to_bilibili": False,
     },
     {
@@ -127,7 +127,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "84",
         "m_name":           "大野 愛実",
-        "target_group":     752269366,
+        "target_groups":    [752269366],
         "post_to_bilibili": False,
     },
     {
@@ -135,7 +135,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "85",
         "m_name":           "片山 紗希",
-        "target_group":     752269366,
+        "target_groups":    [752269366],
         "post_to_bilibili": False,
         "bilibili_cookie":  _env("MEMBER_85_BILIBILI_COOKIE"),   # 空字符串时自动回退全局
     },
@@ -144,7 +144,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "88",
         "m_name":           "佐藤 優羽",
-        "target_group":     752269366,
+        "target_groups":    [752269366],
         "post_to_bilibili": False,
     },
     {
@@ -152,7 +152,7 @@ MONITOR_LIST: list[dict] = [
         "group_type":       "hinatazaka46",
         "m_id":             "77",
         "m_name":           "松田 好花",
-        "target_group":     752269366,
+        "target_groups":    [752269366],
         "post_to_bilibili": False,
     },
 ]
