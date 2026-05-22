@@ -17,3 +17,9 @@ __pycache__/
 # Claude Code 本地配置
 .claude/
 CLAUDE.md
+
+# Docker 本地实验（不在远端仓库）
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.tar
