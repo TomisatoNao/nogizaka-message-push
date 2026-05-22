@@ -1,0 +1,11 @@
+services:
+  nogizaka-push:
+    build: .
+    container_name: nogizaka-push
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Tokyo
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
