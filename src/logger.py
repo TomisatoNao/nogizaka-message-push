@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
-from config.config import DEBUG_LOG_RESPONSE, ERROR_LOG_FILE, RESPONSE_LOG_FILE
+import config.config as cfg
 
 # ---- ANSI 彩色支持检测 ----
 _ANSI_SUPPORTED: bool = (
@@ -44,8 +44,24 @@ def _make_rotating_logger(name: str, filepath: str) -> logging.Logger:
 
 def init_loggers() -> None:
     global error_logger, response_logger
-    error_logger    = _make_rotating_logger("error",    ERROR_LOG_FILE)
-    response_logger = _make_rotating_logger("response", RESPONSE_LOG_FILE)
+    error_logger    = _make_rotating_logger("error",    cfg.ERROR_LOG_FILE)
+    response_logger = _make_rotating_logger("response", cfg.RESPONSE_LOG_FILE)
+
+
+def redact_sensitive(content: str) -> str:
+    """脱敏日志内容中的 token / cookie / key 等敏感信息。"""
+    safe = str(content)
+    safe = re.sub(
+        r'"(access_token|refresh_token|token|session|authorization|cookie|set-cookie)"\s*:\s*"[^"]*"',
+        r'"\1":"***HIDDEN***"',
+        safe,
+        flags=re.IGNORECASE,
+    )
+    safe = re.sub(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', "***JWT***", safe)
+    safe = re.sub(r'\bBearer\s+[A-Za-z0-9._~+/=-]+', "Bearer ***HIDDEN***", safe, flags=re.IGNORECASE)
+    safe = re.sub(r'\bQQBot\s+[A-Za-z0-9._~+/=-]+', "QQBot ***HIDDEN***", safe, flags=re.IGNORECASE)
+    safe = re.sub(r'([?&]key=)[^&\s]+', r'\1***HIDDEN***', safe, flags=re.IGNORECASE)
+    return safe
 
 
 def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> None:
@@ -57,24 +73,30 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
     else:
         tag, color = "INFO ", "\033[32m"
 
-    safe = content if len(content) <= 120 else content[:120] + "...[TRUNCATED]"
+    safe_content = redact_sensitive(content)
+    safe = safe_content if len(safe_content) <= 120 else safe_content[:120] + "...[TRUNCATED]"
     if _ANSI_SUPPORTED:
         print(f"{ts} {color}[{tag}]\033[0m {safe}")
     else:
         print(f"{ts} [{tag}] {safe}")
 
     if not is_debug and error_logger:
-        (error_logger.error if is_error else error_logger.info)(content)
+        (error_logger.error if is_error else error_logger.info)(safe_content)
 
 
 def log_response(content: str) -> None:
-    if not DEBUG_LOG_RESPONSE or not response_logger:
+    if not cfg.DEBUG_LOG_RESPONSE or not response_logger:
         return
-    # 脱敏：隐藏 token / JWT
-    safe = re.sub(
-        r'"(access_token|token|session|refresh_token)":"[^"]*"',
-        r'"\1":"***HIDDEN***"',
-        content,
-    )
-    safe = re.sub(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', "***JWT***", safe)
+    safe = redact_sensitive(content)
     response_logger.debug(safe)
+
+
+def format_httpx_error(e: Exception) -> str:
+    """将 httpx 异常格式化为包含 URL 和底层原因的详细错误信息。"""
+    detail = str(e) if str(e) else type(e).__name__
+    if hasattr(e, "request") and e.request is not None:
+        detail += f" | URL: {e.request.url}"
+    if getattr(e, "__cause__", None) is not None:
+        cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
+        detail += f" | 原因: {cause_msg}"
+    return detail

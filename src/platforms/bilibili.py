@@ -2,21 +2,15 @@
 # bilibili.py — B站动态发布（串行化速率控制）
 # ============================================================
 import asyncio
-import time
 
 import httpx
 
-from config.config import (
-    BILIBILI_BILI_JCT,
-    BILIBILI_FULL_COOKIE,
-    BILIBILI_MIN_INTERVAL,
-    BILIBILI_POST_API,
-)
+import config.config as cfg
 from src.logger import log_all
+from src.utils import RateLimiter
 
 # ---- 模块级状态（由 initialize() 在事件循环内创建） ----
-_lock:    asyncio.Lock = None   # type: ignore
-_last_ts: float        = 0.0
+_limiter: RateLimiter = None   # type: ignore
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -26,9 +20,9 @@ _HEADERS = {
 
 
 def initialize() -> None:
-    """在事件循环内调用，创建 asyncio.Lock。"""
-    global _lock
-    _lock = asyncio.Lock()
+    """在事件循环内调用，创建 RateLimiter（lambda 确保热重载后读取最新值）。"""
+    global _limiter
+    _limiter = RateLimiter(lambda: cfg.BILIBILI_MIN_INTERVAL)
 
 
 def extract_bili_jct(cookie_str: str) -> str:
@@ -44,26 +38,22 @@ def resolve_cookie(member: dict) -> tuple[str, str]:
     返回该成员应使用的 (cookie, bili_jct)。
     成员未配置独立 cookie（或值为空字符串）时回退全局默认。
     """
-    cookie   = member.get("bilibili_cookie") or BILIBILI_FULL_COOKIE
-    bili_jct = extract_bili_jct(cookie) or BILIBILI_BILI_JCT
+    cookie   = member.get("bilibili_cookie") or cfg.BILIBILI_FULL_COOKIE
+    bili_jct = extract_bili_jct(cookie) or cfg.BILIBILI_BILI_JCT
     return cookie, bili_jct
 
 
 async def post_dynamic(text: str, cookie: str, bili_jct: str) -> bool:
     """
     发布一条 B站纯文字动态。
-    _lock 覆盖速率等待 + HTTP 请求全程，多成员并发时严格串行，
+    RateLimiter 覆盖速率等待 + HTTP 请求全程，多成员并发时严格串行，
     杜绝竞态导致速率限制失效。
     """
-    global _last_ts
 
     if not text or not text.strip():
         return False
 
-    async with _lock:
-        elapsed = time.monotonic() - _last_ts
-        if elapsed < BILIBILI_MIN_INTERVAL:
-            await asyncio.sleep(BILIBILI_MIN_INTERVAL - elapsed)
+    async with _limiter:
 
         payload = {
             "dynamic_id":  0,
@@ -77,11 +67,10 @@ async def post_dynamic(text: str, cookie: str, bili_jct: str) -> bool:
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.post(
-                        BILIBILI_POST_API,
+                        cfg.BILIBILI_POST_API,
                         data=payload,
                         headers={**_HEADERS, "Cookie": cookie},
                     )
-                _last_ts = time.monotonic()
 
                 if resp.status_code == 200:
                     data = resp.json()

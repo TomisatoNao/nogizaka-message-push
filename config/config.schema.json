@@ -79,7 +79,7 @@
             "properties": {
               "group_type": {
                 "type": "string",
-                "enum": ["nogizaka46", "hinatazaka46"]
+                "enum": ["nogizaka46", "hinatazaka46", "sakurazaka46", "yodel"]
               },
               "auth_method": {
                 "type": "string",

@@ -180,14 +180,9 @@ class QQOfficialBot:
 
     def _source_headers_for_member(self, member: dict) -> dict[str, str]:
         """构造访问 message 私有媒体资源的账号请求头。"""
-        from config.credentials import ACCOUNT_CREDS, get_web_headers
+        from config.credentials import get_source_headers_for_account
 
-        cred = ACCOUNT_CREDS.get(member["account_id"])
-        if not cred:
-            return {}
-        headers = get_web_headers(member["group_type"], cred["token"])
-        headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
-        return headers
+        return get_source_headers_for_account(member["account_id"], member["group_type"])
 
     async def _download_media(self, file_url: str, source_headers: dict[str, str]) -> bytes | None:
         try:
@@ -321,9 +316,14 @@ def get_bots() -> list[QQOfficialBot]:
     return _bots
 
 
+def get_configured_bots() -> list[QQOfficialBot]:
+    """返回所有配置完整、可用于发送的 Bot 实例。"""
+    return [bot for bot in _bots if bot.is_configured()]
+
+
 def has_bots() -> bool:
     """返回是否存在至少一个配置完整的 Bot。"""
-    return len(_bots) > 0
+    return any(bot.is_configured() for bot in _bots)
 
 
 # ──────────────────────────────────────────────

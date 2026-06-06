@@ -1,14 +1,14 @@
 # ============================================================
-# qq.py — QQ 消息发送 & 消息链构造
+# napcat.py — NapCat/OneBot HTTP QQ 消息发送 & 消息链构造
 # ============================================================
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from src.utils import utc_to_jst
 
 import httpx
 
-from config.config import DEBUG_LOG_QQ_PAYLOAD, MEDIA_TYPE_MAP, QQ_BOT_API, QQ_USER_AGENT
-from src.logger import log_all
+import config.config as cfg
+from src.logger import format_httpx_error, log_all
 
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
 _client: httpx.AsyncClient = None   # type: ignore
@@ -35,12 +35,7 @@ def build_message_chain(
     NapCat 支持文本与图片/视频/语音在同一个消息链里发送，
     因此这里始终把成员名和时间戳作为第一段，媒体段紧随其后。
     """
-    jst_time = (
-        datetime.strptime(updated, "%Y-%m-%dT%H:%M:%SZ")
-        .replace(tzinfo=timezone.utc)
-        .astimezone(timezone(timedelta(hours=9)))
-        .strftime("%m/%d %H:%M:%S")
-    )
+    jst_time = utc_to_jst(updated)
     original = msg.get("text", "")
     # 有正文时加换行分隔；纯媒体消息也保留成员名和时间戳。
     header = f"{m_name} {jst_time}\n{original}" if original else f"{m_name} {jst_time}"
@@ -50,7 +45,7 @@ def build_message_chain(
 
     file_url = msg.get("file")
     if file_url:
-        media_type = MEDIA_TYPE_MAP.get(msg.get("type", ""))
+        media_type = cfg.MEDIA_TYPE_MAP.get(msg.get("type", ""))
         if media_type:
             chain.append({"type": media_type, "data": {"file": file_url}})
         else:
@@ -101,7 +96,7 @@ async def _post_message(group_id: int, message_chain: list[dict], max_retries: i
     payload_str = json.dumps(
         {"group_id": group_id, "message": message_chain}, ensure_ascii=False
     )
-    if DEBUG_LOG_QQ_PAYLOAD:
+    if cfg.DEBUG_LOG_QQ_PAYLOAD:
         log_all(
             f"📤 发送体: {len(payload_str)} 字节 | 预览: {payload_str[:200]}",
             is_debug=True,
@@ -110,14 +105,18 @@ async def _post_message(group_id: int, message_chain: list[dict], max_retries: i
     for attempt in range(max_retries):
         try:
             resp = await _client.post(
-                QQ_BOT_API,
+                cfg.QQ_BOT_API,
                 content=payload_str,
-                headers={"Content-Type": "application/json", "User-Agent": QQ_USER_AGENT},
+                headers={"Content-Type": "application/json", "User-Agent": cfg.QQ_USER_AGENT},
             )
             if resp.status_code == 200:
                 try:
                     body = resp.json()
                 except Exception:
+                    log_all(
+                        f"⚠️ Bot 返回非 JSON 响应: {resp.text[:200]}",
+                        is_error=True,
+                    )
                     return True
                 if body.get("status") == "ok" or body.get("retcode") == 0:
                     return True
@@ -131,10 +130,13 @@ async def _post_message(group_id: int, message_chain: list[dict], max_retries: i
                 )
                 if resp.status_code == 502:
                     log_all("🔥 502，代理/协议问题", is_error=True)
+                # 4xx（除 429）不可重试，直接放弃
+                if resp.status_code < 500 and resp.status_code != 429:
+                    return False
 
         except Exception as e:
             log_all(
-                f"🔥 发送异常 ({attempt + 1}/{max_retries}): {type(e).__name__}: {e}",
+                f"🔥 发送异常 ({attempt + 1}/{max_retries}): {format_httpx_error(e)}",
                 is_error=True,
             )
 

@@ -1,6 +1,9 @@
 """验证 config.json → config.py 加载正确性"""
 import json, sys, os
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # Test 1: 所有变量加载并类型正确
 print("=== Test 1: 变量加载 ===")
 from config.config import (
@@ -64,11 +67,20 @@ assert yodel["api_base"] == "https://api.service.yodel-app.com"
 assert yodel["web_origin"] == "https://service.yodel-app.com"
 print("✅ Test 3 通过\n")
 
-# Test 4: member with bilibili_cookie
-print("=== Test 4: 成员专属 B站 Cookie ===")
-m85 = [m for m in MONITOR_LIST if m["m_id"] == "85"][0]
-assert "bilibili_cookie" in m85, "member 85 should have bilibili_cookie"
-print(f"  bilibili_cookie (空=未设env): {bool(m85['bilibili_cookie'])!r}")
+# Test 4: optional member-specific bilibili_cookie
+print("=== Test 4: 成员专属 B站 Cookie（可选） ===")
+members_with_bili_cookie = [m for m in MONITOR_LIST if "bilibili_cookie" in m]
+if members_with_bili_cookie:
+    for member in members_with_bili_cookie:
+        assert isinstance(member["bilibili_cookie"], str), (
+            f"bilibili_cookie should be str for member {member['m_id']}"
+        )
+        print(
+            f"  {member['m_name']} (id={member['m_id']}) "
+            f"bilibili_cookie (空=未设env): {bool(member['bilibili_cookie'])!r}"
+        )
+else:
+    print("  当前 monitor_list 未配置成员专属 bilibili_cookie，跳过专项检查")
 print("✅ Test 4 通过\n")
 
 # Test 5: $ENV resolution

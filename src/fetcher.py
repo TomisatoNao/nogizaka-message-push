@@ -10,13 +10,14 @@ from urllib.parse import quote
 
 import httpx
 
-from config.config import ACCOUNTS, BACKTRACK_HOURS, ENABLE_TRANSLATION, SKIP_PUBLISH_TYPES, TIME_RECORD_DIR
-from src.logger import error_logger, log_all, log_response
+import config.config as cfg
+from src.logger import error_logger, format_httpx_error, log_all, log_response
 from config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
     get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
 )
 from src.dedup import load_sent_ids, save_sent_id
+from src.utils import utc_to_jst
 from src.translator import translate_text
 from src.platforms.bilibili import post_dynamic, resolve_cookie
 from src.notifier import send_member_message
@@ -35,6 +36,21 @@ def initialize(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> None:
     global _http_client, _semaphore
     _http_client = client
     _semaphore   = semaphore
+
+
+async def fetch_member_messages(member: dict):
+    """公开接口：抓取单个成员消息。"""
+    return await _fetch_member_messages(member)
+
+
+async def push_member_messages(member: dict, new_msgs: list,
+                               id_list: list, id_set: set,
+                               l_time_ref: list,
+                               time_file: str, file_lock) -> bool:
+    """公开接口：推送单个成员消息并更新状态。"""
+    return await _push_member_messages(
+        member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
+    )
 
 
 # ──────────────────────────────────────────────
@@ -61,7 +77,7 @@ async def _handle_message(member: dict, msg: dict,
 
     # 翻译
     translated = ""
-    if ENABLE_TRANSLATION and original_text.strip():
+    if cfg.ENABLE_TRANSLATION and original_text.strip():
         raw = await translate_text(original_text)
         if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
             log_all(f"⚠️ {m_name} 翻译失败，仅推送原文 ({raw})", is_error=True)
@@ -81,12 +97,7 @@ async def _handle_message(member: dict, msg: dict,
     # 同步 B站（无正文时跳过，避免只推送名字+时间戳）
     if member.get("post_to_bilibili") and original_text.strip():
         cookie, bili_jct = resolve_cookie(member)
-        jst_time = (
-            datetime.strptime(updated, "%Y-%m-%dT%H:%M:%SZ")
-            .replace(tzinfo=timezone.utc)
-            .astimezone(timezone(timedelta(hours=9)))
-            .strftime("%m/%d %H:%M:%S")
-        )
+        jst_time = utc_to_jst(updated)
         bili_text = f"{m_name} {jst_time}\n{original_text}"
         if translated:
             bili_text += f"\n\n📝 翻译：\n{translated}"
@@ -94,7 +105,7 @@ async def _handle_message(member: dict, msg: dict,
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
     l_time_ref[0] = updated
-    delay = 1.5 + random.uniform(-0.3, 0.5)  # 1.2~2.0s 随机微调
+    delay = max(0, cfg.QQ_SEND_INTERVAL + random.uniform(-0.3, 0.5))  # 基于配置值随机微调
     await asyncio.sleep(delay)
     return True
 
@@ -118,14 +129,14 @@ async def _fetch_member_messages(member: dict):
         log_all(f"🚨 {m_name} 账号 {account_id} 无可用凭据", is_error=True)
         return None
 
-    os.makedirs(TIME_RECORD_DIR, exist_ok=True)
-    time_file = os.path.join(TIME_RECORD_DIR, f"time_{group_type}_{m_id}.txt")
+    os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
+    time_file = os.path.join(cfg.TIME_RECORD_DIR, f"time_{group_type}_{m_id}.txt")
     file_lock = get_file_lock(time_file)
 
     async with file_lock:
         if not os.path.exists(time_file):
             l_time = (
-                datetime.now(timezone.utc) - timedelta(hours=BACKTRACK_HOURS)
+                datetime.now(timezone.utc) - timedelta(hours=cfg.BACKTRACK_HOURS)
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
         else:
             with open(time_file, "r", encoding="utf-8") as f:
@@ -136,7 +147,7 @@ async def _fetch_member_messages(member: dict):
 
     for attempt in range(1, MAX_FETCH_ATTEMPTS + 1):
         try:
-            acc_cfg = ACCOUNTS.get(account_id, {})
+            acc_cfg = cfg.ACCOUNTS.get(account_id, {})
             is_mobile = acc_cfg.get("auth_method") == "mobile"
 
             # ── URL 构建 ──
@@ -185,7 +196,7 @@ async def _fetch_member_messages(member: dict):
                         m for m in msgs
                         if m.get("updated_at")
                         and m.get("updated_at") >= l_time_ref[0]
-                        and m.get("publish_type") not in SKIP_PUBLISH_TYPES
+                        and m.get("publish_type") not in cfg.SKIP_PUBLISH_TYPES
                     ],
                     key=lambda x: x["updated_at"],
                 )
@@ -225,14 +236,10 @@ async def _fetch_member_messages(member: dict):
                 return None
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
-            # 构造详细错误信息：httpx 异常 str(e) 常为空，需要拆解 request URL / __cause__
-            err_detail = str(e) if str(e) else type(e).__name__
-            if hasattr(e, 'request') and e.request is not None:
-                err_detail += f" | URL: {e.request.url}"
-            if e.__cause__ is not None:
-                cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
-                err_detail += f" | 原因: {cause_msg}"
-            log_all(f"🔥 {m_name} 网络错误 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {err_detail}", is_error=True)
+            log_all(
+                f"🔥 {m_name} 网络错误 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {format_httpx_error(e)}",
+                is_error=True,
+            )
             if attempt < MAX_FETCH_ATTEMPTS:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)
                 log_all(f"⏳ {m_name} {delay:.1f}s 后重试...", is_debug=True)

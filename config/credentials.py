@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 
 from config.config import ACCOUNTS, ALERT_COOLDOWN_SECONDS, CRED_DIR, TOKEN_REFRESH_BEFORE_SECONDS
-from src.logger import log_all, log_response
+from src.logger import format_httpx_error, log_all, log_response
 
 # ---- 运行时状态 ----
 ACCOUNT_CREDS:        dict[str, dict]          = {}
@@ -41,6 +41,8 @@ _MOBILE_GROUP_CONFIG: dict[str, dict[str, str]] = {
 _GROUP_TYPE_TO_MOBILE: dict[str, str] = {
     "nogizaka46":   "nogizaka",
     "hinatazaka46": "hinatazaka",
+    "sakurazaka46": "sakurazaka",
+    "yodel":        "yodel",
 }
 
 
@@ -197,13 +199,10 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                 )
 
         except Exception as e:
-            err_detail = str(e) if str(e) else type(e).__name__
-            if hasattr(e, 'request') and e.request is not None:
-                err_detail += f" | URL: {e.request.url}"
-            if getattr(e, '__cause__', None) is not None:
-                cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
-                err_detail += f" | 原因: {cause_msg}"
-            log_all(f"🔥 账号 {account_id} 移动端续期网络异常: {err_detail}", is_error=True)
+            log_all(
+                f"🔥 账号 {account_id} 移动端续期网络异常: {format_httpx_error(e)}",
+                is_error=True,
+            )
 
     # ---- 续期失败，触发报警 ----
     log_all(f"🚨 致命错误：账号 {account_id} 移动端续期失败，refresh_token 可能已失效", is_error=True)
@@ -271,6 +270,30 @@ def get_file_lock(file_path: str) -> asyncio.Lock:
     return _file_locks[file_path]
 
 
+def get_source_headers_for_account(account_id: str, group_type: str) -> dict[str, str]:
+    """构造访问 message 私有资源的请求头，按账号认证方式自动选择 Web / mobile。"""
+    cred = ACCOUNT_CREDS.get(account_id)
+    if not cred:
+        return {}
+
+    acc_cfg = ACCOUNTS.get(account_id, {})
+    if acc_cfg.get("auth_method") == "mobile":
+        return get_mobile_headers(account_id)
+
+    token = cred.get("token", "")
+    cookies = cred.get("cookies") or {}
+    headers = get_web_headers(
+        group_type,
+        token,
+        app_tag=acc_cfg.get("app_tag"),
+        api_base=acc_cfg.get("api_base"),
+        web_origin=acc_cfg.get("web_origin"),
+    )
+    if cookies:
+        headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    return headers
+
+
 async def write_time_record(time_file: str, file_lock: asyncio.Lock, updated: str) -> None:
     tmp = time_file + ".tmp"
     async with file_lock:
@@ -320,6 +343,28 @@ def load_all_accounts() -> None:
             ACCOUNT_CREDS[acc_id] = {"token": acc_cfg["init_token"], "cookies": cookies}
             _save_cred(acc_id, acc_cfg["init_token"], cookies)
             log_all(f"📝 初始化账号凭证: {acc_id}")
+
+
+def validate_account_cred(account_id: str) -> tuple[bool, str]:
+    """校验账号凭证内容是否满足当前 auth_method 的最低要求。"""
+    acc_cfg = ACCOUNTS.get(account_id)
+    if not acc_cfg:
+        return False, "账号未在 ACCOUNTS 中定义"
+
+    cred = ACCOUNT_CREDS.get(account_id)
+    if not cred:
+        return False, "凭证未加载"
+
+    if acc_cfg.get("auth_method") == "mobile":
+        if not cred.get("refresh_token"):
+            return False, "mobile 账号缺少 refresh_token"
+        return True, "mobile 凭证完整"
+
+    if not cred.get("token"):
+        return False, "web 账号缺少 token"
+    if not cred.get("cookies"):
+        return False, "web 账号缺少 cookie"
+    return True, "web 凭证完整"
 
 
 async def refresh_token(account_id: str, target_group: int, old_token: str | None = None) -> bool:
@@ -386,13 +431,10 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                 log_all(f"🚨 账号 {account_id} 续期被拒: HTTP {r.status_code}", is_error=True)
 
         except Exception as e:
-            err_detail = str(e) if str(e) else type(e).__name__
-            if hasattr(e, 'request') and e.request is not None:
-                err_detail += f" | URL: {e.request.url}"
-            if getattr(e, '__cause__', None) is not None:
-                cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
-                err_detail += f" | 原因: {cause_msg}"
-            log_all(f"🔥 账号 {account_id} 续期网络异常: {err_detail}", is_error=True)
+            log_all(
+                f"🔥 账号 {account_id} 续期网络异常: {format_httpx_error(e)}",
+                is_error=True,
+            )
 
     # ---- 续期失败，触发报警 ----
     log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)

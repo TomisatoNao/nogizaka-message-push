@@ -1,17 +1,17 @@
 # ============================================================
 # notifier.py — QQ 多通道推送调度
 # ============================================================
-from config.config import ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT
+import config.config as cfg
 from src.logger import log_all
 from src.platforms.napcat import send_qq_message
-from src.platforms.qq_official import get_bots, has_bots
+from src.platforms.qq_official import get_configured_bots, has_bots
 
 
 def enabled_channels() -> list[str]:
     channels: list[str] = []
-    if ENABLE_NAPCAT_QQ:
+    if cfg.ENABLE_NAPCAT_QQ:
         channels.append("napcat")
-    if ENABLE_QQ_OFFICIAL_BOT and has_bots():
+    if cfg.ENABLE_QQ_OFFICIAL_BOT and has_bots():
         channels.append("official")
     return channels
 
@@ -29,21 +29,21 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
     napcat_ok = True
 
-    if ENABLE_NAPCAT_QQ:
+    if cfg.ENABLE_NAPCAT_QQ:
         for gid in member["target_groups"]:
             ok = await send_qq_message(gid, message_chain)
             if not ok:
                 napcat_ok = False
                 log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
 
-    if ENABLE_QQ_OFFICIAL_BOT:
-        bots = get_bots()
+    if cfg.ENABLE_QQ_OFFICIAL_BOT:
+        bots = get_configured_bots()
         for bot in bots:
             ok = await bot.send_message_chain(member, message_chain)
             if not ok:
                 log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 推送失败", is_error=True)
 
-    if ENABLE_NAPCAT_QQ:
+    if cfg.ENABLE_NAPCAT_QQ:
         return napcat_ok
     return True
 
@@ -56,10 +56,10 @@ async def send_alert_message(target_group: int, text: str) -> bool:
         return False
 
     ok = True
-    if ENABLE_NAPCAT_QQ:
+    if cfg.ENABLE_NAPCAT_QQ:
         ok = await send_qq_message(target_group, [{"type": "text", "data": {"text": text}}]) and ok
-    if ENABLE_QQ_OFFICIAL_BOT:
-        bots = get_bots()
+    if cfg.ENABLE_QQ_OFFICIAL_BOT:
+        bots = get_configured_bots()
         for bot in bots:
             if not await bot.send_text(text):
                 ok = False

@@ -1,10 +1,11 @@
 # ============================================================
-# main.py — 程序入口：初始化所有模块、驱动主轮询循环
+# app.py — 程序入口：初始化所有模块、驱动主轮询循环
 # ============================================================
 import asyncio
 import os
 import random
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import httpx
 
@@ -14,27 +15,14 @@ from src.platforms import bilibili
 from src.platforms import napcat
 from src.platforms import qq_official
 from src.platforms.qq_official import health_check as qq_official_health_check
-from config.config import (
-    ACCOUNTS,
-    DAY_INTERVAL,
-    DAY_START_HOUR,
-    ENABLE_NAPCAT_QQ,
-    ENABLE_QQ_OFFICIAL_BOT,
-    HTTP_SEMAPHORE_LIMIT,
-    MONITOR_LIST,
-    NIGHT_INTERVAL,
-    NIGHT_START_HOUR,
-    QQ_BOT_API,
-    SENT_IDS_DIR,
-    SLEEP_END_HOUR,
-    SLEEP_START_HOUR,
-    TIME_RECORD_DIR,
-)
+import config.config as cfg
 from config.credentials import (
     load_all_accounts, proactive_refresh_if_expiring,
     refresh_mobile_token, get_token_remaining_seconds,
 )
+from config.watcher import start_watcher
 from src.logger import init_loggers, log_all
+from src.utils import in_hour_range
 
 
 # ──────────────────────────────────────────────
@@ -51,12 +39,12 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     """
     all_ok = True
 
-    if not ENABLE_NAPCAT_QQ and not ENABLE_QQ_OFFICIAL_BOT:
+    if not cfg.ENABLE_NAPCAT_QQ and not cfg.ENABLE_QQ_OFFICIAL_BOT:
         log_all("🟡 QQ 推送通道均未启用：成员消息会被抓取并记录，但不会推送到 QQ", is_error=True)
 
     # ── 检查 NapCat 连通性 ────────────────────────────────
-    if ENABLE_NAPCAT_QQ:
-        status_url = QQ_BOT_API.rsplit("/", 1)[0] + "/get_status"
+    if cfg.ENABLE_NAPCAT_QQ:
+        status_url = cfg.QQ_BOT_API.rsplit("/", 1)[0] + "/get_status"
         try:
             resp = await qq_client.get(status_url)
             if resp.status_code == 200:
@@ -71,20 +59,30 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
         log_all("⏸️ NapCat QQ 推送未启用")
 
     # ── 检查官方 QQ Bot 凭证 ──────────────────────────────
-    if ENABLE_QQ_OFFICIAL_BOT:
+    if cfg.ENABLE_QQ_OFFICIAL_BOT:
         if not await qq_official_health_check():
             all_ok = False
     else:
         log_all("⏸️ 官方 QQ Bot 推送未启用")
 
-    # ── 检查所有账号凭证已加载 ────────────────────────────
-    from config.credentials import ACCOUNT_CREDS
-    needed = {m["account_id"] for m in MONITOR_LIST}
+    # ── 检查所有账号凭证已加载且内容完整 ────────────────────
+    from config.credentials import ACCOUNT_CREDS, validate_account_cred
+    needed = {m["account_id"] for m in cfg.MONITOR_LIST}
     missing = needed - set(ACCOUNT_CREDS.keys())
     if missing:
         log_all(f"🔴 以下账号凭证缺失：{missing}", is_error=True)
         all_ok = False
-    else:
+
+    invalid = []
+    for acc_id in sorted(needed - missing):
+        ok, reason = validate_account_cred(acc_id)
+        if not ok:
+            invalid.append(f"{acc_id}（{reason}）")
+
+    if invalid:
+        log_all(f"🔴 以下账号凭证不完整：{'；'.join(invalid)}", is_error=True)
+        all_ok = False
+    elif not missing:
         log_all(f"🟢 账号凭证完整（{len(needed)} 个账号）")
 
     return all_ok
@@ -95,10 +93,11 @@ def _get_jst_now() -> datetime:
 
 
 def _calc_sleep_seconds() -> int:
-    """若当前在休眠时段内，返回距离休眠结束的秒数；否则返回 0。"""
+    """若当前在休眠时段内，返回距离休眠结束的秒数；否则返回 0。
+    支持跨午夜休眠窗口（如 SLEEP_START=22, SLEEP_END=6）。"""
     jst = _get_jst_now()
-    if SLEEP_START_HOUR <= jst.hour < SLEEP_END_HOUR:
-        wake = jst.replace(hour=SLEEP_END_HOUR, minute=0, second=0, microsecond=0)
+    if in_hour_range(jst.hour, cfg.SLEEP_START_HOUR, cfg.SLEEP_END_HOUR):
+        wake = jst.replace(hour=cfg.SLEEP_END_HOUR, minute=0, second=0, microsecond=0)
         if wake <= jst:
             wake += timedelta(days=1)
         return int((wake - jst).total_seconds())
@@ -107,11 +106,11 @@ def _calc_sleep_seconds() -> int:
 
 def _next_interval() -> tuple[int, str]:
     jst = _get_jst_now()
-    if NIGHT_START_HOUR <= jst.hour < DAY_START_HOUR:
-        base = random.randint(*NIGHT_INTERVAL)
+    if in_hour_range(jst.hour, cfg.NIGHT_START_HOUR, cfg.DAY_START_HOUR):
+        base = random.randint(*cfg.NIGHT_INTERVAL)
         tag = "🌙 深夜低速"
     else:
-        base = random.randint(*DAY_INTERVAL)
+        base = random.randint(*cfg.DAY_INTERVAL)
         tag = "☀️ 日间巡查"
     # ±10% 抖动，最低不低于 1s
     jitter = int(base * random.uniform(-0.1, 0.1))
@@ -119,21 +118,21 @@ def _next_interval() -> tuple[int, str]:
 
 
 async def _run_loop(http_client: httpx.AsyncClient) -> None:
-    member_names = " · ".join(m["m_name"].replace(" ", "") for m in MONITOR_LIST)
-
-    # 每个账号取第一个关联成员的 target_group 作为报警目标
-    account_target_groups: dict[str, int] = {}
-    for m in MONITOR_LIST:
-        if m["account_id"] not in account_target_groups:
-            account_target_groups[m["account_id"]] = m["target_groups"][0]
-
     while True:
+        member_names = " · ".join(m["m_name"].replace(" ", "") for m in cfg.MONITOR_LIST)
+
+        # 每个账号取第一个关联成员的 target_group 作为报警目标
+        account_target_groups: dict[str, int] = {}
+        for m in cfg.MONITOR_LIST:
+            if m["account_id"] not in account_target_groups:
+                account_target_groups[m["account_id"]] = m["target_groups"][0]
+
         # ── 改进 3：休眠时段暂停轮询 ──
         sleep_sec = _calc_sleep_seconds()
         if sleep_sec > 0:
             jst = _get_jst_now()
             log_all(
-                f"😴 休眠时段（{SLEEP_START_HOUR}:00-{SLEEP_END_HOUR}:00 JST），"
+                f"😴 休眠时段（{cfg.SLEEP_START_HOUR}:00-{cfg.SLEEP_END_HOUR}:00 JST），"
                 f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
                 is_debug=True,
             )
@@ -147,12 +146,12 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
         ])
 
         # ── 改进 4：随机打乱成员轮询顺序 ──
-        shuffled = list(MONITOR_LIST)
+        shuffled = list(cfg.MONITOR_LIST)
         random.shuffle(shuffled)
 
         # Phase 1: 并发抓取所有成员的消息
         fetch_results = await asyncio.gather(
-            *[fetcher._fetch_member_messages(m) for m in shuffled],
+            *[fetcher.fetch_member_messages(m) for m in shuffled],
             return_exceptions=True,
         )
 
@@ -168,11 +167,12 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
                 continue
 
             if result is None:
+                log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
                 error_members.append(name)
                 continue
 
             new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
-            ok = await fetcher._push_member_messages(
+            ok = await fetcher.push_member_messages(
                 member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
             )
             if not ok:
@@ -191,8 +191,7 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
 async def _init_mobile_accounts() -> None:
     """启动时为所有 mobile 账号做初始 Token 刷新（仿照 nogizaka-monitor 的 init_tokens）。
     若已有有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
-    now_ts = datetime.now(timezone.utc).timestamp()
-    for acc_id, acc_cfg in ACCOUNTS.items():
+    for acc_id, acc_cfg in cfg.ACCOUNTS.items():
         if acc_cfg.get("auth_method") != "mobile":
             continue
         remaining = get_token_remaining_seconds(acc_id)
@@ -201,7 +200,7 @@ async def _init_mobile_accounts() -> None:
             continue
         # 找到该账号关联的第一个成员的目标群（用于报警）
         target_group = 0
-        for m in MONITOR_LIST:
+        for m in cfg.MONITOR_LIST:
             if m["account_id"] == acc_id:
                 target_group = m["target_groups"][0]
                 break
@@ -211,8 +210,8 @@ async def _init_mobile_accounts() -> None:
 
 async def main() -> None:
     print("=== 坂道联合监控系统 ===")
-    os.makedirs(TIME_RECORD_DIR, exist_ok=True)
-    os.makedirs(SENT_IDS_DIR, exist_ok=True)
+    os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
+    os.makedirs(cfg.SENT_IDS_DIR, exist_ok=True)
 
     # 1. 基础设施
     init_loggers()
@@ -233,7 +232,7 @@ async def main() -> None:
         transport=httpx.AsyncHTTPTransport(retries=0, http2=False, trust_env=False),
         limits=httpx.Limits(max_connections=5, max_keepalive_connections=3),
     )
-    semaphore = asyncio.Semaphore(HTTP_SEMAPHORE_LIMIT)
+    semaphore = asyncio.Semaphore(cfg.HTTP_SEMAPHORE_LIMIT)
 
     # 4. 注入依赖
     napcat.initialize(qq_client)
@@ -244,11 +243,18 @@ async def main() -> None:
     await _health_check(qq_client)
     print()
 
+    # 6. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
+    config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
+    observer = start_watcher(config_path)
+
     try:
         await _run_loop(http_client)
     except KeyboardInterrupt:
         print("\n🛑 安全退出中...")
     finally:
+        if observer is not None:
+            observer.stop()
+            observer.join()
         await asyncio.gather(http_client.aclose(), qq_client.aclose())
         print("✅ 资源清理完毕")
 

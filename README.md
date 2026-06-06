@@ -18,7 +18,7 @@
 - **JST 时间显示** — 推送和 B 站动态中的消息时间统一使用日本標準時 (UTC+9)
 - **自定义 API 域名** — 支持毕业生成员独立 API 域名（如 yodel），账号级配置 app_tag / api_base / web_origin
 - **反反爬虫** — Header 仿真（Web Chrome / 移动 iOS）、随机间隔抖动、指数退避重试、成员随机轮询顺序
-- **配置热重载** — 修改 `config.json` 自动生效（watchdog 监控），无需重启
+- **配置热重载（可选）** — 已提供 `config/watcher.py`，安装并接入 watchdog 后可自动重载；当前默认入口以启动时加载为主
 - **启动健康检查** — 启动时校验 NapCat 连接、QQ Bot access_token、账号凭证状态
 
 ## 快速开始
@@ -61,11 +61,7 @@ pip install -r requirements.txt
 
 3. **配置 `config.json`** — 成员列表、账号池、轮询参数等非敏感配置：
 
-   ```bash
-   cp config/config.example.json config/config.json   # 如有模板
-   ```
-
-   关键配置项：
+   直接编辑现有 `config/config.json`。关键配置项：
    - `accounts` — 账号池，每个账号可选 `auth_method: "web"`（默认）或 `"mobile"`
    - `monitor_list` — 监控的成员列表（ID 可通过 `python list_members.py` 查询）
    - `day_interval` / `night_interval` — 日间/夜间轮询间隔范围 [min, max]
@@ -185,6 +181,8 @@ Member Message API          Gemini API            NapCat/OneBot
 | 大野 愛実 | 日向坂46 | 84 | hinata_shared |
 | 佐藤 優羽 | 日向坂46 | 88 | hinata_shared |
 | 松田 好花 | 日向坂46（毕业） | 77 | yodel_graduated |
+| 松田好花 Staff | 日向坂46（毕业） | 81 | yodel_graduated |
+| 丹生 明里 | 日向坂46（毕业） | 47 | yodel_graduated |
 
 ### 乃木坂46 现役成员 ID 速查
 
@@ -232,12 +230,12 @@ Member Message API          Gemini API            NapCat/OneBot
 
 ## 配置参考
 
-完整配置项见 `.env.example`，主要分类：
+敏感环境变量见 `.env.example`，完整配置结构见 `config/config.schema.json`，主要分类：
 
 - **Gemini** — `GEMINI_API_KEY`
 - **QQ 推送通道** — `ENABLE_NAPCAT_QQ`、`ENABLE_QQ_OFFICIAL_BOT`、`QQ_BOT_API`
 - **QQ 官方 Bot** — `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}`
-- **Bilibili** — `BILIBILI_FULL_COOKIE`、`BILIBILI_BILI_JCT`、`MEMBER_85_BILIBILI_COOKIE`
+- **Bilibili** — `BILIBILI_FULL_COOKIE`、`BILIBILI_BILI_JCT`，成员专属 Cookie 需在 `config.json` 的成员项中配置 `bilibili_cookie` 对应的 `$ENV` 占位符
 - **账号凭证** — `ACCOUNT_{NOGIZAKA_MAIN,NOGIZAKA_SHARED,HINATA_SHARED,YODEL}_{TOKEN,COOKIE}`
 
 ## License

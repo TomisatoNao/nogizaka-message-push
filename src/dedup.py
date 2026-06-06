@@ -3,6 +3,7 @@
 # ============================================================
 import json
 import os
+import shutil
 
 from config.config import SENT_IDS_DIR, SENT_IDS_MAX
 from src.logger import log_all
@@ -29,6 +30,13 @@ def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
         trimmed = ids[-SENT_IDS_MAX:]
         return trimmed, set(trimmed)
     except Exception:
+        # 文件损坏时保留备份，避免静默丢弃全部去重历史
+        bak = path + ".bak"
+        try:
+            shutil.copy2(path, bak)
+            log_all(f"⚠️ 已发送 ID 文件损坏，已备份至 {bak}", is_error=True)
+        except OSError:
+            pass
         return [], set()
 
 

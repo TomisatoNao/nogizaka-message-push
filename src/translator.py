@@ -2,22 +2,15 @@
 # translator.py — Gemini 翻译（串行化速率控制）
 # ============================================================
 import asyncio
-import time
 
 import httpx
 
-from config.config import (
-    GEMINI_API_KEY,
-    GEMINI_MIN_INTERVAL,
-    GEMINI_MODELS,
-    TRANSLATE_MAX_LENGTH,
-    TRANSLATE_TIMEOUT,
-)
+import config.config as cfg
 from src.logger import log_all
+from src.utils import RateLimiter
 
 # ---- 模块级状态（由 initialize() 在事件循环内创建） ----
-_lock: asyncio.Lock   = None   # type: ignore
-_last_ts: float       = 0.0
+_limiter: RateLimiter = None   # type: ignore
 
 _PROMPT_TEMPLATE = (
     "你是坂道系偶像团体的日文翻译。将以下成员消息翻译成中文（简体）：\n"
@@ -28,15 +21,15 @@ _PROMPT_TEMPLATE = (
 )
 
 def initialize() -> None:
-    """在事件循环内调用，创建 asyncio.Lock。"""
-    global _lock
-    _lock = asyncio.Lock()
+    """在事件循环内调用，创建 RateLimiter（lambda 确保热重载后读取最新值）。"""
+    global _limiter
+    _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
 
 def _is_already_chinese(text: str) -> bool:
-    """\u68c0\u67e5\u6587\u672c\u662f\u5426\u4e0d\u9700\u8981\u7ffb\u8bd1\u3002
+    """检查文本是否不需要翻译。
 
-    \u5224\u65ad\u4f9d\u636e\uff1a\u5047\u540d\u662f\u65e5\u6587\u7684\u53ef\u9760\u4fe1\u53f7\u2014\u2014\u53ea\u8981\u51fa\u73b0\u5047\u540d\u5c31\u9700\u8981\u7ffb\u8bd1\uff1b
-    \u4e0d\u542b\u5047\u540d\u7684\u6587\u672c\uff08\u7eaf\u6c49\u5b57/\u82f1\u6587/emoji\uff09\u8df3\u8fc7\uff0c\u907f\u514d\u6d6a\u8d39 API \u914d\u989d\u3002
+    判断依据：假名是日文的可靠信号——只要出现假名就需要翻译；
+    不含假名的文本（纯汉字/英文/emoji）跳过，避免浪费 API 配额。
     """
     for c in text:
         if "\u3040" <= c <= "\u309f" or "\u30a0" <= c <= "\u30ff":
@@ -46,16 +39,15 @@ def _is_already_chinese(text: str) -> bool:
 async def translate_text(text: str) -> str:
     """
     将日文翻译为中文。
-    _lock 覆盖「等待间隔 + HTTP 请求」全程，彻底串行化，
+    RateLimiter 覆盖「等待间隔 + HTTP 请求」全程，彻底串行化，
     杜绝并发请求触发 Gemini RPM 限制。
     """
-    global _last_ts
 
     if not text or not text.strip():
         return text
     if _is_already_chinese(text):
         return text
-    if len(text) > TRANSLATE_MAX_LENGTH:
+    if len(text) > cfg.TRANSLATE_MAX_LENGTH:
         log_all(f"⚠️ 文本过长 ({len(text)} 字符)，跳过翻译", is_debug=True)
         return "[消息过长，暂不翻译]"
 
@@ -64,21 +56,16 @@ async def translate_text(text: str) -> str:
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
     }
 
-    async with _lock:
-        elapsed = time.monotonic() - _last_ts
-        if elapsed < GEMINI_MIN_INTERVAL:
-            await asyncio.sleep(GEMINI_MIN_INTERVAL - elapsed)
-
-        for model in GEMINI_MODELS:
-            url = f"{model['url']}?key={GEMINI_API_KEY}"
+    async with _limiter:
+        for model in cfg.GEMINI_MODELS:
+            url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
             for attempt in range(2):
                 try:
-                    async with httpx.AsyncClient(timeout=TRANSLATE_TIMEOUT) as client:
+                    async with httpx.AsyncClient(timeout=cfg.TRANSLATE_TIMEOUT) as client:
                         resp = await client.post(
                             url, json=payload,
                             headers={"Content-Type": "application/json"},
                         )
-                    _last_ts = time.monotonic()
 
                     if resp.status_code == 200:
                         data   = resp.json()
@@ -91,7 +78,5 @@ async def translate_text(text: str) -> str:
                         break   # 其他错误，换下一个模型
                 except Exception:
                     break
-
-        _last_ts = time.monotonic()   # 即使全部失败也更新时间戳
 
     return "[翻译失败]"
