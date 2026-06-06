@@ -147,6 +147,14 @@
       "m_name": "松田好花 Staff",
       "target_groups": [752269366],
       "post_to_bilibili": false
+    },
+    {
+      "account_id": "yodel_graduated",
+      "group_type": "hinatazaka46",
+      "m_id": "47",
+      "m_name": "丹生 明里",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
     }
   ],
 
