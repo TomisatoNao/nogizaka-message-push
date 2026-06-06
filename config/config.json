@@ -84,49 +84,62 @@
   // bilibili_cookie: 可选，成员专属 B 站 Cookie（$ENV 占位符）
   // ============================================================
   "monitor_list": [
-    // ======== 乃木坂46（35 人）========
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "17", "m_name": "伊藤 理々杏", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "18", "m_name": "岩本 蓮加", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "19", "m_name": "梅澤 美波", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "27", "m_name": "吉田 綾乃ｸﾘｽﾃｨｰ", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "29", "m_name": "遠藤 さくら", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "30", "m_name": "賀喜 遥香", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "32", "m_name": "金川 紗耶", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "34", "m_name": "黒見 明香", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "36", "m_name": "柴田 柚菜", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "38", "m_name": "田村 真佑", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "39", "m_name": "筒井 あやめ", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "41", "m_name": "林 瑠奈", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "44", "m_name": "弓木 奈於", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "46", "m_name": "五百城 茉央", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "47", "m_name": "池田 瑛紗", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "48", "m_name": "一ノ瀬 美空", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "49", "m_name": "井上 和", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "50", "m_name": "岡本 姫奈", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "51", "m_name": "小川 彩", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "52", "m_name": "奥田 いろは", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "53", "m_name": "川﨑 桜", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "54", "m_name": "菅原 咲月", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "55", "m_name": "冨里 奈央", "target_groups": [533072575], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "56", "m_name": "中西 アルノ", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "60", "m_name": "愛宕 心響", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "61", "m_name": "大越 ひなの", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "62", "m_name": "海邉 朱莉", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "63", "m_name": "川端 晃菜", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "64", "m_name": "鈴木 佑捺", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "65", "m_name": "瀬戸口 心月", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "66", "m_name": "長嶋 凛桜", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "67", "m_name": "増田 三莉音", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "68", "m_name": "森平 麗心", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_shared", "group_type": "nogizaka46", "m_id": "69", "m_name": "矢田 萌華", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "nogizaka_main", "group_type": "nogizaka46", "m_id": "74", "m_name": "小津 玲奈", "target_groups": [752269366], "post_to_bilibili": false},
-    // ======== 日向坂46（5 人）========
-    {"account_id": "hinata_shared", "group_type": "hinatazaka46", "m_id": "34", "m_name": "金村 美玖", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "hinata_shared", "group_type": "hinatazaka46", "m_id": "36", "m_name": "小坂 菜绪", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "hinata_shared", "group_type": "hinatazaka46", "m_id": "84", "m_name": "大野 愛実", "target_groups": [752269366], "post_to_bilibili": false},
-    {"account_id": "hinata_shared", "group_type": "hinatazaka46", "m_id": "88", "m_name": "佐藤 優羽", "target_groups": [752269366], "post_to_bilibili": false},
-    // ======== 毕业生（1 人）========
-    {"account_id": "yodel_graduated", "group_type": "hinatazaka46", "m_id": "77", "m_name": "松田 好花", "target_groups": [752269366], "post_to_bilibili": false}
+    {
+      "account_id": "nogizaka_main",
+      "group_type": "nogizaka46",
+      "m_id": "55",
+      "m_name": "冨里 奈央",
+      "target_groups": [533072575],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "nogizaka_shared",
+      "group_type": "nogizaka46",
+      "m_id": "30",
+      "m_name": "賀喜 遥香",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "34",
+      "m_name": "金村 美玖",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "36",
+      "m_name": "小坂 菜绪",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "84",
+      "m_name": "大野 愛実",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "88",
+      "m_name": "佐藤 優羽",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "yodel_graduated",
+      "group_type": "hinatazaka46",
+      "m_id": "77",
+      "m_name": "松田 好花",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    }
   ],
 
   // ============================================================
