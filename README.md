@@ -38,13 +38,7 @@ pip install -r requirements.txt
 
 ### 配置
 
-1. **安装依赖**（含 JSONC 解析和 Schema 校验）：
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **配置 `.env`** — 填入敏感信息（Token / Cookie / Key）：
+1. **配置 `.env`** — 填入敏感信息（Token / Cookie / Key）：
 
    ```bash
    cp .env.example .env
@@ -55,11 +49,11 @@ pip install -r requirements.txt
    | Gemini 翻译 | `GEMINI_API_KEY` |
    | Web 端账号凭证 | `ACCOUNT_{NOGIZAKA_MAIN,NOGIZAKA_SHARED,HINATA_SHARED,YODEL}_{TOKEN,COOKIE}` |
    | 移动端账号凭证 | `NOGIZAKA_REFRESH_TOKEN`, `HINATAZAKA_REFRESH_TOKEN` 等 |
-   | QQ 推送 | `ENABLE_NAPCAT_QQ`, `QQ_BOT_API` |
+   | QQ 推送 | `ENABLE_NAPCAT_QQ`, `ENABLE_QQ_OFFICIAL_BOT`, `QQ_BOT_API` |
    | QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` |
    | B 站 | `BILIBILI_FULL_COOKIE`, `BILIBILI_BILI_JCT` |
 
-3. **配置 `config.json`** — 成员列表、账号池、轮询参数等非敏感配置：
+2. **配置 `config.json`** — 成员列表、账号池、轮询参数等非敏感配置：
 
    直接编辑现有 `config/config.json`。关键配置项：
    - `accounts` — 账号池，每个账号可选 `auth_method: "web"`（默认）或 `"mobile"`
@@ -114,6 +108,7 @@ nogizaka-message-push/
 │   ├── translator.py        # Gemini 翻译（多模型容错、串行限速）
 │   ├── notifier.py          # 多通道推送路由
 │   ├── logger.py            # 日志系统（彩色终端 + 滚动文件）
+│   ├── utils.py             # 公共工具：JST 时间转换、时段判断、速率限制器
 │   └── platforms/
 │       ├── napcat.py        # NapCat/OneBot HTTP 推送
 │       ├── qq_official.py   # QQ 官方 Bot 单聊推送
@@ -237,6 +232,7 @@ Member Message API          Gemini API            NapCat/OneBot
 - **QQ 官方 Bot** — `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}`
 - **Bilibili** — `BILIBILI_FULL_COOKIE`、`BILIBILI_BILI_JCT`，成员专属 Cookie 需在 `config.json` 的成员项中配置 `bilibili_cookie` 对应的 `$ENV` 占位符
 - **账号凭证** — `ACCOUNT_{NOGIZAKA_MAIN,NOGIZAKA_SHARED,HINATA_SHARED,YODEL}_{TOKEN,COOKIE}`
+- **移动端凭证** — `NOGIZAKA_REFRESH_TOKEN`、`HINATAZAKA_REFRESH_TOKEN`（配合 `auth_method: "mobile"` 使用）
 
 ## License
 
