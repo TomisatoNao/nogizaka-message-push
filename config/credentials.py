@@ -20,6 +20,31 @@ _alert_last_sent:     dict[str, float]         = {}
 
 
 # ──────────────────────────────────────────────
+# 移动端 Group 配置（来源: colmsg src/http/client.rs）
+# ──────────────────────────────────────────────
+_MOBILE_GROUP_CONFIG: dict[str, dict[str, str]] = {
+    "nogizaka":     {"base_url": "https://api.n46.glastonr.net",
+                     "app_id":  "jp.co.sonymusic.communication.nogizaka 2.4"},
+    "hinatazaka":   {"base_url": "https://api.kh.glastonr.net",
+                     "app_id":  "jp.co.sonymusic.communication.keyakizaka 2.4"},
+    "sakurazaka":   {"base_url": "https://api.s46.glastonr.net",
+                     "app_id":  "jp.co.sonymusic.communication.sakurazaka 2.4"},
+    "asuka":        {"base_url": "https://api.asukasaito.glastonr.net",
+                     "app_id":  "jp.co.sonymusic.communication.asukasaito 2.4"},
+    "maishiraishi": {"base_url": "https://api.maishiraishi.glastonr.net",
+                     "app_id":  "jp.co.sonymusicsolutions.maishiraishi 2.4"},
+    "yodel":        {"base_url": "https://api.ydl.glastonr.net",
+                     "app_id":  "jp.co.sonymusic.communication.yodel 2.4"},
+}
+
+# group_type → mobile_group key 映射
+_GROUP_TYPE_TO_MOBILE: dict[str, str] = {
+    "nogizaka46":   "nogizaka",
+    "hinatazaka46": "hinatazaka",
+}
+
+
+# ──────────────────────────────────────────────
 # 内部工具
 # ──────────────────────────────────────────────
 def _clean_cookie_string(raw: str) -> dict[str, str]:
@@ -49,8 +74,155 @@ def _save_cred(account_id: str, token: str, cookies: dict) -> None:
 
 
 # ──────────────────────────────────────────────
-# 公开 API
+# 移动端内部工具
 # ──────────────────────────────────────────────
+def _resolve_mobile_group(acc_cfg: dict) -> str:
+    """解析账号的 mobile group key，优先使用显式配置，否则从 group_type 推导。"""
+    explicit = acc_cfg.get("mobile_group")
+    if explicit and explicit in _MOBILE_GROUP_CONFIG:
+        return explicit
+    derived = _GROUP_TYPE_TO_MOBILE.get(acc_cfg.get("group_type", ""))
+    if derived:
+        return derived
+    raise ValueError(
+        f"无法解析 mobile group（group_type={acc_cfg.get('group_type')}），"
+        "请在 config.json 中为该账号设置 mobile_group 字段"
+    )
+
+
+def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) -> None:
+    """保存移动端凭证：{access_token, refresh_token}。"""
+    os.makedirs(CRED_DIR, exist_ok=True)
+    path = os.path.join(CRED_DIR, f"{account_id}.json")
+    tmp  = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"access_token": access_token, "refresh_token": refresh_token}, f)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+# ──────────────────────────────────────────────
+# 公开 API — 移动端
+# ──────────────────────────────────────────────
+def get_mobile_headers(account_id: str) -> dict[str, str]:
+    """构建 iOS 端请求头（无 Cookie，仅 Bearer Token + X-Talk-App-ID）。"""
+    acc_cfg = ACCOUNTS.get(account_id, {})
+    mg_key = _resolve_mobile_group(acc_cfg)
+    mg = _MOBILE_GROUP_CONFIG[mg_key]
+    headers = {
+        "Accept":          "application/json",
+        "Content-Type":    "application/json",
+        "X-Talk-App-ID":   mg["app_id"],
+        "Accept-Language": "ja-JP;q=1, en;q=0.9",
+        "User-Agent":      "nogizaka46/1.8.01.169 (iPhone; iOS 16.0; Scale/3.00)",
+        "Accept-Encoding": "gzip, deflate, br",
+    }
+    cred = ACCOUNT_CREDS.get(account_id)
+    if cred and cred.get("token"):
+        headers["Authorization"] = f"Bearer {cred['token']}"
+    return headers
+
+
+def get_mobile_api_base(account_id: str) -> str:
+    """获取移动端 API 基础 URL（优先使用显式 api_base 配置，否则用 glastonr.net）。"""
+    acc_cfg = ACCOUNTS.get(account_id, {})
+    if acc_cfg.get("api_base"):
+        return acc_cfg["api_base"]
+    mg_key = _resolve_mobile_group(acc_cfg)
+    return _MOBILE_GROUP_CONFIG[mg_key]["base_url"]
+
+
+async def refresh_mobile_token(account_id: str, target_group: int,
+                               old_token: str | None = None) -> bool:
+    """
+    刷新移动端账号的 Token（使用 refresh_token 交换新 access_token）。
+    与 web 端关键区别：
+      - 请求体为 {"refresh_token": "<uuid>"}，非空
+      - 请求头不含 Authorization（仅凭 refresh_token 本身认证）
+      - 响应中同时返回新的 access_token 和 refresh_token
+    """
+    from src.notifier import send_alert_message
+
+    lock = _token_refresh_locks.setdefault(account_id, asyncio.Lock())
+    async with lock:
+        cred = ACCOUNT_CREDS.get(account_id)
+        if not cred:
+            log_all(f"🚨 账号 {account_id} 无凭据", is_error=True)
+            return False
+
+        if old_token and cred.get("token") != old_token:
+            log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
+            return True
+
+        acc_cfg = ACCOUNTS[account_id]
+        rt = cred.get("refresh_token") or acc_cfg.get("init_refresh_token", "")
+        if not rt:
+            log_all(f"🚨 账号 {account_id} 无 refresh_token", is_error=True)
+            return False
+
+        url = f"{get_mobile_api_base(account_id)}/v2/update_token"
+        headers = get_mobile_headers(account_id)
+        headers.pop("Authorization", None)  # 移动端刷新时不含旧 Auth
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(url, headers=headers, json={"refresh_token": rt})
+            log_response(r.text)
+
+            if r.status_code == 200:
+                try:
+                    data = r.json()
+                    new_access = data.get("access_token")
+                    new_refresh = data.get("refresh_token") or rt
+                except ValueError:
+                    log_all(f"🚨 账号 {account_id} 移动端续期响应不是合法 JSON", is_error=True)
+                    new_access = None
+
+                if new_access:
+                    cred["token"] = new_access
+                    cred["refresh_token"] = new_refresh
+                    _save_mobile_cred(account_id, new_access, new_refresh)
+                    log_all(f"✅ 账号 {account_id} 移动端续期成功")
+                    return True
+                else:
+                    log_all(f"🚨 账号 {account_id} 移动端续期响应无 access_token", is_error=True)
+            else:
+                body_snippet = r.text[:300] if r.text else "(空响应)"
+                log_all(
+                    f"🚨 账号 {account_id} 移动端续期被拒: HTTP {r.status_code} | {body_snippet}",
+                    is_error=True,
+                )
+
+        except Exception as e:
+            err_detail = str(e) if str(e) else type(e).__name__
+            if hasattr(e, 'request') and e.request is not None:
+                err_detail += f" | URL: {e.request.url}"
+            if getattr(e, '__cause__', None) is not None:
+                cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
+                err_detail += f" | 原因: {cause_msg}"
+            log_all(f"🔥 账号 {account_id} 移动端续期网络异常: {err_detail}", is_error=True)
+
+    # ---- 续期失败，触发报警 ----
+    log_all(f"🚨 致命错误：账号 {account_id} 移动端续期失败，refresh_token 可能已失效", is_error=True)
+    now  = datetime.now().timestamp()
+    last = _alert_last_sent.get(account_id, 0)
+    if now - last > ALERT_COOLDOWN_SECONDS:
+        _alert_last_sent[account_id] = now
+        try:
+            await send_alert_message(
+                target_group,
+                f"📢 警报：账号 {account_id} 移动端续期失败！请更新 refresh_token！",
+            )
+        except Exception:
+            pass
+    else:
+        remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
+        log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
+
+    return False
 def get_web_headers(
     group_type: str,
     token: str | None = None,
@@ -70,7 +242,8 @@ def get_web_headers(
 
     headers = {
         "accept":               "application/json",
-        "accept-language":      "zh-CN;q=1,en;q=0.9",
+        "accept-encoding":      "gzip, deflate, br",
+        "accept-language":      "ja-JP;q=1,en;q=0.9",
         "content-type":         "application/json",
         "sec-ch-ua":            '"Chromium";v="147", "Google Chrome";v="147", "Not.A/Brand";v="99"',
         "sec-ch-ua-mobile":     "?0",
@@ -114,16 +287,34 @@ async def write_time_record(time_file: str, file_lock: asyncio.Lock, updated: st
 
 
 def load_all_accounts() -> None:
-    """从磁盘加载所有账号凭证，不存在时用初始凭证创建。"""
+    """从磁盘加载所有账号凭证，不存在时用初始凭证创建。
+    自动识别凭证格式：磁盘文件含 refresh_token → 移动端，否则 → Web 端。"""
     os.makedirs(CRED_DIR, exist_ok=True)
     for acc_id, acc_cfg in ACCOUNTS.items():
         if acc_id in ACCOUNT_CREDS:
             continue
+        is_mobile = acc_cfg.get("auth_method") == "mobile"
         path = os.path.join(CRED_DIR, f"{acc_id}.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
-                ACCOUNT_CREDS[acc_id] = json.load(f)
-            log_all(f"📂 读取账号凭证: {acc_id}")
+                data = json.load(f)
+            # 自动识别格式：含 refresh_token → 移动端
+            if "refresh_token" in data:
+                ACCOUNT_CREDS[acc_id] = {
+                    "token": data.get("access_token", ""),
+                    "refresh_token": data["refresh_token"],
+                }
+                log_all(f"📂 读取移动端凭证: {acc_id}")
+            else:
+                ACCOUNT_CREDS[acc_id] = data
+                log_all(f"📂 读取账号凭证: {acc_id}")
+        elif is_mobile:
+            rt = acc_cfg.get("init_refresh_token", "")
+            init_token = acc_cfg.get("init_token", "")
+            ACCOUNT_CREDS[acc_id] = {"token": init_token, "refresh_token": rt}
+            if rt or init_token:
+                _save_mobile_cred(acc_id, init_token, rt)
+            log_all(f"📝 初始化移动端凭证: {acc_id}")
         else:
             cookies = _clean_cookie_string(acc_cfg["init_cookie"])
             ACCOUNT_CREDS[acc_id] = {"token": acc_cfg["init_token"], "cookies": cookies}
@@ -195,7 +386,13 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                 log_all(f"🚨 账号 {account_id} 续期被拒: HTTP {r.status_code}", is_error=True)
 
         except Exception as e:
-            log_all(f"🔥 账号 {account_id} 续期网络异常: {e}", is_error=True)
+            err_detail = str(e) if str(e) else type(e).__name__
+            if hasattr(e, 'request') and e.request is not None:
+                err_detail += f" | URL: {e.request.url}"
+            if getattr(e, '__cause__', None) is not None:
+                cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
+                err_detail += f" | 原因: {cause_msg}"
+            log_all(f"🔥 账号 {account_id} 续期网络异常: {err_detail}", is_error=True)
 
     # ---- 续期失败，触发报警 ----
     log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)
@@ -256,17 +453,22 @@ async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> N
     每轮巡查前调用。
     若 Token 剩余时间 <= TOKEN_REFRESH_BEFORE_SECONDS，主动刷新，
     避免在实际 API 请求时才触发 401 浪费一轮。
+    按 auth_method 自动派发到 Web 或移动端刷新。
     """
     remaining = get_token_remaining_seconds(account_id)
     if remaining is None:
         log_all(f"⚠️ 无法解析 {account_id} 的 Token 过期时间，跳过主动刷新", is_debug=True)
         return
     if remaining <= TOKEN_REFRESH_BEFORE_SECONDS:
+        acc_cfg = ACCOUNTS.get(account_id, {})
         log_all(
             f"🔄 {account_id} Token 剩余 {int(remaining)}s"
             f"（阈值 {TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新...",
         )
-        await refresh_token(account_id, target_group)
+        if acc_cfg.get("auth_method") == "mobile":
+            await refresh_mobile_token(account_id, target_group)
+        else:
+            await refresh_token(account_id, target_group)
     else:
         log_all(
             f"✅ {account_id} Token 剩余 {int(remaining // 60)}min，无需刷新",

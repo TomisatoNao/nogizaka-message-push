@@ -1,0 +1,264 @@
+{
+  // ============================================================
+  // config.json — 纯数据配置（JSONC 格式，支持 // 注释）
+  // 敏感信息（token / cookie / key）使用 $ENV:变量名 占位符，
+  // 启动时自动从环境变量读取。
+  // 修改此文件后调用 config.reload() 或等待 watchdog 自动热重载。
+  // ============================================================
+
+  // ============================================================
+  // QQ 推送通道
+  // 可被同名环境变量覆盖（例如 ENABLE_NAPCAT_QQ=0）
+  // ============================================================
+  "enable_napcat_qq": true,
+  "enable_qq_official_bot": false,
+
+  // ============================================================
+  // NapCat / OneBot HTTP
+  // ============================================================
+  "qq_bot_api": "http://127.0.0.1:3000/send_group_msg",
+  "qq_user_agent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1",
+
+  // ============================================================
+  // QQ 开放平台官方 Bot（支持多个）
+  // app_id / client_secret / target_openid 从环境变量注入
+  // ============================================================
+  "qq_official_token_url": "https://bots.qq.com/app/getAppAccessToken",
+  "qq_official_api_base": "https://api.sgroup.qq.com",
+  "qq_official_min_interval": 1.2,
+  "qq_official_timeout": 15,
+  "qq_official_media_max_bytes": 26214400,
+  "qq_official_bots": [
+    {
+      "name": "bot_1",
+      "app_id": "$ENV:QQ_OFFICIAL_BOT1_APP_ID",
+      "client_secret": "$ENV:QQ_OFFICIAL_BOT1_CLIENT_SECRET",
+      "target_openid": "$ENV:QQ_OFFICIAL_BOT1_TARGET_OPENID"
+    },
+    {
+      "name": "bot_2",
+      "app_id": "$ENV:QQ_OFFICIAL_BOT2_APP_ID",
+      "client_secret": "$ENV:QQ_OFFICIAL_BOT2_CLIENT_SECRET",
+      "target_openid": "$ENV:QQ_OFFICIAL_BOT2_TARGET_OPENID"
+    }
+  ],
+
+  // ============================================================
+  // 账号池
+  // 每个账号的 token 和 cookie 从环境变量注入
+  // 结构字段（group_type / app_tag / api_base / web_origin）在此定义
+  // ============================================================
+  "accounts": {
+    "nogizaka_main": {
+      "group_type": "nogizaka46",
+      "init_token": "$ENV:ACCOUNT_NOGIZAKA_MAIN_TOKEN",
+      "init_cookie": "$ENV:ACCOUNT_NOGIZAKA_MAIN_COOKIE"
+    },
+    "nogizaka_shared": {
+      "group_type": "nogizaka46",
+      "init_token": "$ENV:ACCOUNT_NOGIZAKA_SHARED_TOKEN",
+      "init_cookie": "$ENV:ACCOUNT_NOGIZAKA_SHARED_COOKIE"
+    },
+    "hinata_shared": {
+      "group_type": "hinatazaka46",
+      "init_token": "$ENV:ACCOUNT_HINATA_SHARED_TOKEN",
+      "init_cookie": "$ENV:ACCOUNT_HINATA_SHARED_COOKIE"
+    },
+    "yodel_graduated": {
+      "group_type": "hinatazaka46",
+      "init_token": "$ENV:ACCOUNT_YODEL_TOKEN",
+      "init_cookie": "$ENV:ACCOUNT_YODEL_COOKIE",
+      "app_tag": "yodel",
+      "api_base": "https://api.service.yodel-app.com",
+      "web_origin": "https://service.yodel-app.com"
+    }
+  },
+
+  // ============================================================
+  // 监控列表 — 需要监控消息推送的成员
+  // account_id: 关联上方 accounts 中的账号
+  // m_id:       成员在消息平台中的 ID
+  // m_name:     成员名称（用于日志和推送显示）
+  // target_groups: 推送目标 QQ 群号列表
+  // post_to_bilibili: 是否同步发布到 B 站动态
+  // bilibili_cookie: 可选，成员专属 B 站 Cookie（$ENV 占位符）
+  // ============================================================
+  "monitor_list": [
+    {
+      "account_id": "nogizaka_main",
+      "group_type": "nogizaka46",
+      "m_id": "55",
+      "m_name": "冨里 奈央",
+      "target_groups": [533072575],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "nogizaka_shared",
+      "group_type": "nogizaka46",
+      "m_id": "30",
+      "m_name": "賀喜 遥香",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "34",
+      "m_name": "金村 美玖",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "36",
+      "m_name": "小坂 菜绪",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "84",
+      "m_name": "大野 愛実",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "hinata_shared",
+      "group_type": "hinatazaka46",
+      "m_id": "88",
+      "m_name": "佐藤 優羽",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    },
+    {
+      "account_id": "yodel_graduated",
+      "group_type": "hinatazaka46",
+      "m_id": "77",
+      "m_name": "松田 好花",
+      "target_groups": [752269366],
+      "post_to_bilibili": false
+    }
+  ],
+
+  // ============================================================
+  // 功能开关
+  // ============================================================
+  "enable_translation": true,
+
+  // ============================================================
+  // 消息过滤
+  // skip_publish_types: 跳过这些 publish_type 的消息（如生日祝福）
+  // media_type_map:     消息媒体类型映射
+  // ============================================================
+  "skip_publish_types": ["birthday"],
+  "media_type_map": {
+    "video": "video",
+    "voice": "record",
+    "image": "image",
+    "picture": "image"
+  },
+
+  // ============================================================
+  // 轮询间隔（秒）
+  // day_start_hour:     日间模式开始的小时（JST）
+  // night_start_hour:   夜间模式开始的小时（JST）
+  // day_interval:       日间轮询间隔范围 [min, max]
+  // night_interval:     夜间轮询间隔范围 [min, max]
+  // backtrack_hours:    首次启动回溯消息的小时数
+  // ============================================================
+  "day_start_hour": 7,
+  "night_start_hour": 0,
+  "sleep_start_hour": 2,
+  "sleep_end_hour": 7,
+  "day_interval": [120, 180],
+  "night_interval": [1500, 1800],
+  "backtrack_hours": 24,
+
+  // ============================================================
+  // 报警冷却（秒）
+  // 同类型警报在此时间内不会重复发送
+  // ============================================================
+  "alert_cooldown_seconds": 300,
+
+  // ============================================================
+  // 并发控制
+  // http_semaphore_limit:       同时发起的 HTTP 请求上限
+  // qq_send_interval:           同一成员多条消息间发送间隔（秒）
+  // token_refresh_before_seconds: Token 剩余时间低于此值时提前刷新
+  // ============================================================
+  "http_semaphore_limit": 3,
+  "qq_send_interval": 1.5,
+  "token_refresh_before_seconds": 300,
+
+  // ============================================================
+  // 文件路径 — 相对于项目根目录，启动时自动拼接为绝对路径
+  // ============================================================
+  "cred_dir": "data/web_credentials",
+  "time_record_dir": "data/time_records",
+  "sent_ids_dir": "data/sent_ids",
+  "error_log_file": "logs/error_debug.log",
+  "response_log_file": "logs/response_debug.log",
+  "sent_ids_max": 500,
+
+  // ============================================================
+  // 调试
+  // ============================================================
+  "debug_log_response": true,
+  "debug_log_qq_payload": false,
+
+  // ============================================================
+  // Gemini 翻译
+  // gemini_api_key:      从环境变量 GEMINI_API_KEY 读取
+  // gemini_models:       模型池，按 rpm（每分钟请求数）降序排列
+  // gemini_min_interval: 两次翻译请求最小间隔（秒）
+  // translate_max_length: 超过此长度的消息不翻译
+  // translate_timeout:   翻译请求超时（秒）
+  // ============================================================
+  "gemini_api_key": "$ENV:GEMINI_API_KEY",
+  "gemini_models": [
+    {
+      "name": "gemini-3.5-flash",
+      "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
+      "rpm": 10
+    },
+    {
+      "name": "gemini-3.1-flash-lite",
+      "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+      "rpm": 15
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+      "rpm": 5
+    },
+    {
+      "name": "gemini-2.5-flash",
+      "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      "rpm": 10
+    },
+    {
+      "name": "gemini-2.5-flash-lite",
+      "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
+      "rpm": 15
+    },
+    {
+      "name": "gemini-2.0-flash",
+      "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      "rpm": 10
+    }
+  ],
+  "gemini_min_interval": 7.0,
+  "translate_max_length": 2500,
+  "translate_timeout": 30,
+
+  // ============================================================
+  // B 站动态发布
+  // bilibili_full_cookie / bilibili_bili_jct 从环境变量注入
+  // ============================================================
+  "bilibili_full_cookie": "$ENV:BILIBILI_FULL_COOKIE",
+  "bilibili_bili_jct": "$ENV:BILIBILI_BILI_JCT",
+  "bilibili_post_api": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create",
+  "bilibili_min_interval": 3.0
+}

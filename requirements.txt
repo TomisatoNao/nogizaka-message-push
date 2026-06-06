@@ -1,3 +1,6 @@
 httpx
 python-dotenv
 websockets
+json5
+jsonschema
+# watchdog  # 可选：取消注释以启用 config.json 自动热重载

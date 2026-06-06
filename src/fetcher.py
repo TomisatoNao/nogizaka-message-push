@@ -1,8 +1,9 @@
-# ============================================================
+﻿# ============================================================
 # fetcher.py — 核心抓取逻辑：拉取成员消息并分发推送
 # ============================================================
 import asyncio
 import os
+import random
 import traceback
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -11,7 +12,10 @@ import httpx
 
 from config.config import ACCOUNTS, BACKTRACK_HOURS, ENABLE_TRANSLATION, SKIP_PUBLISH_TYPES, TIME_RECORD_DIR
 from src.logger import error_logger, log_all, log_response
-from config.credentials import ACCOUNT_CREDS, get_file_lock, get_web_headers, refresh_token, write_time_record
+from config.credentials import (
+    ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
+    get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
+)
 from src.dedup import load_sent_ids, save_sent_id
 from src.translator import translate_text
 from src.platforms.bilibili import post_dynamic, resolve_cookie
@@ -23,6 +27,7 @@ _http_client: httpx.AsyncClient  = None   # type: ignore
 _semaphore:   asyncio.Semaphore  = None   # type: ignore
 
 MAX_FETCH_ATTEMPTS = 2
+RETRY_BASE_DELAY = 2.0   # 基础退避秒数，实际延迟 = base * 2^(attempt-1) + jitter
 
 
 def initialize(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> None:
@@ -60,6 +65,8 @@ async def _handle_message(member: dict, msg: dict,
         raw = await translate_text(original_text)
         if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
             log_all(f"⚠️ {m_name} 翻译失败，仅推送原文 ({raw})", is_error=True)
+        elif raw.strip() == original_text.strip():
+            log_all(f"ℹ️ {m_name} 翻译结果与原文一致，跳过翻译推送")
         else:
             translated = raw
             if error_logger:
@@ -87,7 +94,8 @@ async def _handle_message(member: dict, msg: dict,
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
     l_time_ref[0] = updated
-    await asyncio.sleep(1.5)
+    delay = 1.5 + random.uniform(-0.3, 0.5)  # 1.2~2.0s 随机微调
+    await asyncio.sleep(delay)
     return True
 
 
@@ -129,10 +137,18 @@ async def _fetch_member_messages(member: dict):
     for attempt in range(1, MAX_FETCH_ATTEMPTS + 1):
         try:
             acc_cfg = ACCOUNTS.get(account_id, {})
-            api_base = acc_cfg.get("api_base")
-            if api_base:
+            is_mobile = acc_cfg.get("auth_method") == "mobile"
+
+            # ── URL 构建 ──
+            if is_mobile:
+                base = acc_cfg.get("api_base") or get_mobile_api_base(account_id)
                 url = (
-                    f"{api_base}/v2/groups/{m_id}/timeline"
+                    f"{base}/v2/groups/{m_id}/timeline"
+                    f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
+                )
+            elif acc_cfg.get("api_base"):
+                url = (
+                    f"{acc_cfg['api_base']}/v2/groups/{m_id}/timeline"
                     f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
                 )
             else:
@@ -140,14 +156,19 @@ async def _fetch_member_messages(member: dict):
                     f"https://api.message.{group_type}.com/v2/groups/{m_id}/timeline"
                     f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
                 )
-            cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
-            headers = get_web_headers(
-                group_type, cred["token"],
-                app_tag=acc_cfg.get("app_tag"),
-                api_base=api_base,
-                web_origin=acc_cfg.get("web_origin"),
-            )
-            headers["cookie"] = cookie_str
+
+            # ── Header 构建 ──
+            if is_mobile:
+                headers = get_mobile_headers(account_id)
+            else:
+                cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
+                headers = get_web_headers(
+                    group_type, cred["token"],
+                    app_tag=acc_cfg.get("app_tag"),
+                    api_base=acc_cfg.get("api_base"),
+                    web_origin=acc_cfg.get("web_origin"),
+                )
+                headers["cookie"] = cookie_str
 
             async with _semaphore:
                 resp = await _http_client.get(url, headers=headers)
@@ -178,28 +199,44 @@ async def _fetch_member_messages(member: dict):
 
             elif resp.status_code == 401:
                 log_response(resp.text)
+                body_snippet = resp.text[:300] if resp.text else "(空响应)"
                 if attempt >= MAX_FETCH_ATTEMPTS:
-                    log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询", is_error=True)
+                    log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询 | {body_snippet}", is_error=True)
                     return None
                 log_all(
                     f"⚠️ {m_name} 触发 401，刷新账号 {account_id} token "
-                    f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})...",
+                    f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})... | {body_snippet}",
                     is_error=True,
                 )
-                if not await refresh_token(account_id, target_group, old_token=cred["token"]):
-                    log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
-                    return None
+                if is_mobile:
+                    if not await refresh_mobile_token(account_id, target_group, old_token=cred.get("token")):
+                        log_all(f"🔥 {m_name} 账号移动端刷新失败，放弃本次轮询", is_error=True)
+                        return None
+                else:
+                    if not await refresh_token(account_id, target_group, old_token=cred["token"]):
+                        log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
+                        return None
                 continue
 
             else:
                 log_response(resp.text)
-                log_all(f"🚨 {m_name} 异常状态码 HTTP {resp.status_code}", is_error=True)
+                body_snippet = resp.text[:300] if resp.text else "(空响应)"
+                log_all(f"🚨 {m_name} 异常状态码 HTTP {resp.status_code} | {body_snippet}", is_error=True)
                 return None
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
-            log_all(f"🔥 {m_name} 网络错误 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {e}", is_error=True)
+            # 构造详细错误信息：httpx 异常 str(e) 常为空，需要拆解 request URL / __cause__
+            err_detail = str(e) if str(e) else type(e).__name__
+            if hasattr(e, 'request') and e.request is not None:
+                err_detail += f" | URL: {e.request.url}"
+            if e.__cause__ is not None:
+                cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
+                err_detail += f" | 原因: {cause_msg}"
+            log_all(f"🔥 {m_name} 网络错误 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {err_detail}", is_error=True)
             if attempt < MAX_FETCH_ATTEMPTS:
-                await asyncio.sleep(2)
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)
+                log_all(f"⏳ {m_name} {delay:.1f}s 后重试...", is_debug=True)
+                await asyncio.sleep(delay)
             else:
                 log_all(f"🚨 {m_name} 达到最大重试次数，放弃", is_error=True)
 

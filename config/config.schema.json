@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "坂道联合监控系统配置",
+  "description": "config.json 的结构定义，启动时自动校验。",
+  "type": "object",
+  "required": [
+    "accounts",
+    "monitor_list",
+    "enable_napcat_qq",
+    "enable_qq_official_bot",
+    "day_start_hour",
+    "night_start_hour",
+    "day_interval",
+    "night_interval",
+    "sleep_start_hour",
+    "sleep_end_hour"
+  ],
+  "properties": {
+    "enable_napcat_qq": {
+      "type": "boolean",
+      "description": "是否启用 NapCat QQ 推送通道"
+    },
+    "enable_qq_official_bot": {
+      "type": "boolean",
+      "description": "是否启用 QQ 开放平台官方 Bot 推送通道"
+    },
+    "qq_bot_api": {
+      "type": "string",
+      "format": "uri",
+      "description": "NapCat / OneBot HTTP API 地址"
+    },
+    "qq_user_agent": {
+      "type": "string",
+      "description": "NapCat 请求使用的 User-Agent"
+    },
+    "qq_official_token_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "qq_official_api_base": {
+      "type": "string",
+      "format": "uri"
+    },
+    "qq_official_min_interval": {
+      "type": "number",
+      "minimum": 0,
+      "description": "官方 Bot 两次请求最小间隔（秒）"
+    },
+    "qq_official_timeout": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "qq_official_media_max_bytes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "qq_official_bots": {
+      "type": "array",
+      "description": "官方 Bot 列表。app_id / client_secret / target_openid 使用 $ENV: 占位符",
+      "items": {
+        "type": "object",
+        "required": ["name", "app_id", "client_secret", "target_openid"],
+        "properties": {
+          "name": { "type": "string" },
+          "app_id": { "type": "string" },
+          "client_secret": { "type": "string" },
+          "target_openid": { "type": "string" }
+        }
+      }
+    },
+    "accounts": {
+      "type": "object",
+      "description": "账号池，key 为账号 ID",
+      "additionalProperties": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": ["group_type"],
+            "properties": {
+              "group_type": {
+                "type": "string",
+                "enum": ["nogizaka46", "hinatazaka46"]
+              },
+              "auth_method": {
+                "type": "string",
+                "enum": ["web", "mobile"],
+                "default": "web",
+                "description": "认证方式：web=网页Cookie认证, mobile=手机refresh_token认证"
+              },
+              "init_token": {
+                "type": "string",
+                "description": "初始 JWT Token（web 必填，mobile 可选，可用 $ENV:VAR 占位符）"
+              },
+              "init_cookie": {
+                "type": "string",
+                "description": "初始 Cookie（仅 web 方式使用，可用 $ENV:VAR 占位符）"
+              },
+              "init_refresh_token": {
+                "type": "string",
+                "description": "初始 refresh_token UUID（仅 mobile 方式使用，可用 $ENV:VAR 占位符）"
+              },
+              "mobile_group": {
+                "type": "string",
+                "description": "mobile 方式的组标识（如 nogizaka / hinatazaka），默认从 group_type 推导"
+              },
+              "app_tag": {
+                "type": "string",
+                "description": "x-talk-app-id 中使用的应用标签（仅 web 方式）"
+              },
+              "api_base": {
+                "type": "string",
+                "format": "uri",
+                "description": "自定义 API 基础 URL（web 默认 api.message.{group}.com，mobile 默认 glastonr.net）"
+              },
+              "web_origin": {
+                "type": "string",
+                "format": "uri",
+                "description": "自定义 Web 页面 Origin（仅 web 方式）"
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "auth_method": { "const": "mobile" } },
+              "required": ["auth_method"]
+            },
+            "then": {
+              "required": ["init_refresh_token"]
+            },
+            "else": {
+              "required": ["init_token", "init_cookie"]
+            }
+          }
+        ]
+      }
+    },
+    "monitor_list": {
+      "type": "array",
+      "description": "监控成员列表",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["account_id", "group_type", "m_id", "m_name", "target_groups"],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "description": "关联 accounts 中的账号 ID"
+          },
+          "group_type": {
+            "type": "string",
+            "enum": ["nogizaka46", "hinatazaka46"]
+          },
+          "m_id": {
+            "type": "string",
+            "description": "成员在消息平台中的 ID"
+          },
+          "m_name": {
+            "type": "string",
+            "description": "成员名称（用于日志和推送显示）"
+          },
+          "target_groups": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "integer" },
+            "description": "推送目标 QQ 群号列表"
+          },
+          "post_to_bilibili": {
+            "type": "boolean",
+            "default": false,
+            "description": "是否同步发布到 B 站动态"
+          },
+          "bilibili_cookie": {
+            "type": "string",
+            "description": "可选，成员专属 B 站 Cookie（$ENV 占位符或明文）"
+          }
+        }
+      }
+    },
+    "enable_translation": {
+      "type": "boolean",
+      "description": "是否启用消息翻译"
+    },
+    "skip_publish_types": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "跳过这些 publish_type 类型的消息"
+    },
+    "media_type_map": {
+      "type": "object",
+      "description": "消息媒体类型映射",
+      "additionalProperties": { "type": "string" }
+    },
+    "day_start_hour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23,
+      "description": "日间模式开始的小时（JST）"
+    },
+    "night_start_hour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23,
+      "description": "夜间模式开始的小时（JST）"
+    },
+    "sleep_start_hour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23,
+      "description": "休眠时段开始的小时（JST），此期间暂停轮询"
+    },
+    "sleep_end_hour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23,
+      "description": "休眠时段结束的小时（JST），此时间后恢复轮询"
+    },
+    "day_interval": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "integer", "minimum": 1 },
+      "description": "日间轮询间隔范围 [min, max]（秒）"
+    },
+    "night_interval": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "integer", "minimum": 1 },
+      "description": "夜间轮询间隔范围 [min, max]（秒）"
+    },
+    "backtrack_hours": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "首次启动回溯消息的小时数"
+    },
+    "alert_cooldown_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "同类型警报冷却时间（秒）"
+    },
+    "http_semaphore_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "同时发起的 HTTP 请求上限"
+    },
+    "qq_send_interval": {
+      "type": "number",
+      "minimum": 0,
+      "description": "同一成员多条消息间发送间隔（秒）"
+    },
+    "token_refresh_before_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Token 剩余时间低于此值时提前刷新（秒）"
+    },
+    "cred_dir": {
+      "type": "string",
+      "description": "账号凭证存储目录（相对于项目根目录）"
+    },
+    "time_record_dir": {
+      "type": "string",
+      "description": "时间戳记录目录（相对于项目根目录）"
+    },
+    "sent_ids_dir": {
+      "type": "string",
+      "description": "已发送消息 ID 记录目录（相对于项目根目录）"
+    },
+    "error_log_file": {
+      "type": "string",
+      "description": "错误日志文件路径（相对于项目根目录）"
+    },
+    "response_log_file": {
+      "type": "string",
+      "description": "响应日志文件路径（相对于项目根目录）"
+    },
+    "sent_ids_max": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "已发送 ID 列表最大保留数量"
+    },
+    "debug_log_response": {
+      "type": "boolean",
+      "description": "是否将 API 响应写入日志文件"
+    },
+    "debug_log_qq_payload": {
+      "type": "boolean",
+      "description": "是否将 QQ 推送 payload 写入日志"
+    },
+    "gemini_api_key": {
+      "type": "string",
+      "description": "Gemini API Key，可用 $ENV:GEMINI_API_KEY 占位符"
+    },
+    "gemini_models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "url", "rpm"],
+        "properties": {
+          "name": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "rpm": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "description": "Gemini 模型池"
+    },
+    "gemini_min_interval": {
+      "type": "number",
+      "minimum": 0,
+      "description": "两次翻译请求最小间隔（秒）"
+    },
+    "translate_max_length": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "超过此长度的消息不翻译"
+    },
+    "translate_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "翻译请求超时（秒）"
+    },
+    "bilibili_full_cookie": {
+      "type": "string",
+      "description": "B 站完整 Cookie，可用 $ENV 占位符"
+    },
+    "bilibili_bili_jct": {
+      "type": "string",
+      "description": "B 站 bili_jct token，可用 $ENV 占位符"
+    },
+    "bilibili_post_api": {
+      "type": "string",
+      "format": "uri",
+      "description": "B 站动态发布 API 地址"
+    },
+    "bilibili_min_interval": {
+      "type": "number",
+      "minimum": 0,
+      "description": "两次 B 站发帖最小间隔（秒）"
+    }
+  }
+}

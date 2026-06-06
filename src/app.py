@@ -26,9 +26,14 @@ from config.config import (
     NIGHT_START_HOUR,
     QQ_BOT_API,
     SENT_IDS_DIR,
+    SLEEP_END_HOUR,
+    SLEEP_START_HOUR,
     TIME_RECORD_DIR,
 )
-from config.credentials import load_all_accounts, proactive_refresh_if_expiring
+from config.credentials import (
+    load_all_accounts, proactive_refresh_if_expiring,
+    refresh_mobile_token, get_token_remaining_seconds,
+)
 from src.logger import init_loggers, log_all
 
 
@@ -89,11 +94,28 @@ def _get_jst_now() -> datetime:
     return datetime.now(timezone(timedelta(hours=9)))
 
 
+def _calc_sleep_seconds() -> int:
+    """若当前在休眠时段内，返回距离休眠结束的秒数；否则返回 0。"""
+    jst = _get_jst_now()
+    if SLEEP_START_HOUR <= jst.hour < SLEEP_END_HOUR:
+        wake = jst.replace(hour=SLEEP_END_HOUR, minute=0, second=0, microsecond=0)
+        if wake <= jst:
+            wake += timedelta(days=1)
+        return int((wake - jst).total_seconds())
+    return 0
+
+
 def _next_interval() -> tuple[int, str]:
     jst = _get_jst_now()
     if NIGHT_START_HOUR <= jst.hour < DAY_START_HOUR:
-        return random.randint(*NIGHT_INTERVAL), "🌙 深夜低速"
-    return random.randint(*DAY_INTERVAL), "☀️ 日间巡查"
+        base = random.randint(*NIGHT_INTERVAL)
+        tag = "🌙 深夜低速"
+    else:
+        base = random.randint(*DAY_INTERVAL)
+        tag = "☀️ 日间巡查"
+    # ±10% 抖动，最低不低于 1s
+    jitter = int(base * random.uniform(-0.1, 0.1))
+    return max(1, base + jitter), tag
 
 
 async def _run_loop(http_client: httpx.AsyncClient) -> None:
@@ -106,22 +128,38 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
             account_target_groups[m["account_id"]] = m["target_groups"][0]
 
     while True:
+        # ── 改进 3：休眠时段暂停轮询 ──
+        sleep_sec = _calc_sleep_seconds()
+        if sleep_sec > 0:
+            jst = _get_jst_now()
+            log_all(
+                f"😴 休眠时段（{SLEEP_START_HOUR}:00-{SLEEP_END_HOUR}:00 JST），"
+                f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
+                is_debug=True,
+            )
+            await asyncio.sleep(sleep_sec)
+            continue
+
         # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
         await asyncio.gather(*[
             proactive_refresh_if_expiring(acc_id, grp)
             for acc_id, grp in account_target_groups.items()
         ])
 
+        # ── 改进 4：随机打乱成员轮询顺序 ──
+        shuffled = list(MONITOR_LIST)
+        random.shuffle(shuffled)
+
         # Phase 1: 并发抓取所有成员的消息
         fetch_results = await asyncio.gather(
-            *[fetcher._fetch_member_messages(m) for m in MONITOR_LIST],
+            *[fetcher._fetch_member_messages(m) for m in shuffled],
             return_exceptions=True,
         )
 
-        # Phase 2: 按 MONITOR_LIST 顺序逐个成员串行推送
+        # Phase 2: 按 shuffled 顺序逐个成员串行推送
         error_members = []
         for i, result in enumerate(fetch_results):
-            member = MONITOR_LIST[i]
+            member = shuffled[i]
             name = member['m_name'].replace(" ", "")
 
             if isinstance(result, Exception):
@@ -150,6 +188,27 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
         await asyncio.sleep(wait_time)
 
 
+async def _init_mobile_accounts() -> None:
+    """启动时为所有 mobile 账号做初始 Token 刷新（仿照 nogizaka-monitor 的 init_tokens）。
+    若已有有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
+    now_ts = datetime.now(timezone.utc).timestamp()
+    for acc_id, acc_cfg in ACCOUNTS.items():
+        if acc_cfg.get("auth_method") != "mobile":
+            continue
+        remaining = get_token_remaining_seconds(acc_id)
+        if remaining is not None and remaining > 60:
+            log_all(f"🔑 移动端账号 {acc_id} Token 有效（剩余 {int(remaining)}s），跳过初始化")
+            continue
+        # 找到该账号关联的第一个成员的目标群（用于报警）
+        target_group = 0
+        for m in MONITOR_LIST:
+            if m["account_id"] == acc_id:
+                target_group = m["target_groups"][0]
+                break
+        log_all(f"🔑 移动端账号 {acc_id} 执行初始 Token 刷新...")
+        await refresh_mobile_token(acc_id, target_group)
+
+
 async def main() -> None:
     print("=== 坂道联合监控系统 ===")
     os.makedirs(TIME_RECORD_DIR, exist_ok=True)
@@ -158,6 +217,7 @@ async def main() -> None:
     # 1. 基础设施
     init_loggers()
     load_all_accounts()
+    await _init_mobile_accounts()
 
     # 2. 在事件循环内创建需要 asyncio 的锁（translator / bilibili）
     translator.initialize()
