@@ -183,7 +183,6 @@ Member Message API          Gemini API            NapCat/OneBot
 
 > 以下为通过手机端 API 拉取的全部现役成员（`state=open`），方便快速添加到 `monitor_list`。
 > 成员 ID 可能随运营调整变化，以实际 API 返回为准。
-> 获取方式：`cd ../nogizaka-monitor && python list_members.py nogizaka`
 
 | m_id | 成员 | 期别 |
 |------|------|------|
