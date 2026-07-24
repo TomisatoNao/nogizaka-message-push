@@ -276,5 +276,15 @@
   "bilibili_full_cookie": "$ENV:BILIBILI_FULL_COOKIE",
   "bilibili_bili_jct": "$ENV:BILIBILI_BILI_JCT",
   "bilibili_post_api": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create",
-  "bilibili_min_interval": 3.0
+  "bilibili_min_interval": 3.0,
+
+  // ============================================================
+  // 健康状态追踪
+  // health_summary_interval:    每隔多少轮输出一次状态摘要
+  // health_error_buffer:        环形 buffer 保留最近错误数
+  // health_token_warn_seconds:  Token 剩余时间低于此值时显示警告
+  // ============================================================
+  "health_summary_interval": 10,
+  "health_error_buffer": 50,
+  "health_token_warn_seconds": 600
 }

@@ -336,6 +336,21 @@
       "type": "number",
       "minimum": 0,
       "description": "两次 B 站发帖最小间隔（秒）"
+    },
+    "health_summary_interval": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "每隔多少轮输出一次状态摘要"
+    },
+    "health_error_buffer": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "环形 buffer 保留最近错误数"
+    },
+    "health_token_warn_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Token 剩余时间低于此值时显示警告（秒）"
     }
   }
 }

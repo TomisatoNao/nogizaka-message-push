@@ -106,6 +106,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "bilibili_bili_jct":            "BILIBILI_BILI_JCT",
     "bilibili_post_api":            "BILIBILI_POST_API",
     "bilibili_min_interval":        "BILIBILI_MIN_INTERVAL",
+    "health_summary_interval":      "HEALTH_SUMMARY_INTERVAL",
+    "health_error_buffer":          "HEALTH_ERROR_BUFFER",
+    "health_token_warn_seconds":    "HEALTH_TOKEN_WARN_SECONDS",
 }
 
 # 可在热重载时通过 in-place mutation 更新的容器类型 key
@@ -270,10 +273,15 @@ def reload() -> bool:
         _apply_config(new_cfg)
 
         # 重新应用环境变量覆盖
-        global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD
+        global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD, \
+               ENABLE_TG_BOT, TG_BOT_TOKEN
         ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)
         ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT)
         DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)
+
+        # 补回 TG Bot 热重载环境变量覆盖
+        ENABLE_TG_BOT  = _env_bool("ENABLE_TG_BOT", ENABLE_TG_BOT)
+        TG_BOT_TOKEN   = _env("TG_BOT_TOKEN", TG_BOT_TOKEN)
 
         return True
     except SystemExit:
