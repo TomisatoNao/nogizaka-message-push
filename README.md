@@ -138,6 +138,34 @@ python main.py
 
 **调轮询频率：** 修改 `config.json` 中 `day_interval` / `night_interval`（秒）。`sleep_hours` 控制休眠时段。
 
+**添加一个新账号：** 在 `config.json` 的 `accounts` 中添加一项，然后在 `.env` 里按命名约定填入凭证：
+
+```json5
+// config.json
+"accounts": {
+    "my_new_account": { "group": "nogizaka46" }
+}
+```
+
+```bash
+# .env
+MY_NEW_ACCOUNT_TOKEN=eyJ...
+MY_NEW_ACCOUNT_COOKIE=session=xxx
+```
+
+如果是 mobile 账号（`"auth": "mobile"`），只需要 `MY_NEW_ACCOUNT_REFRESH_TOKEN`（或使用全局 `NOGIZAKA_REFRESH_TOKEN` fallback）。
+
+**启用 QQ 官方 Bot：** 三步：
+
+1. `config.json` 的 `channels` 中加 `"qq_official": true`
+2. `.env` 中填 Bot 凭证：
+   ```bash
+   QQ_OFFICIAL_BOT1_APP_ID=你的AppID
+   QQ_OFFICIAL_BOT1_CLIENT_SECRET=你的Secret
+   QQ_OFFICIAL_BOT1_TARGET_OPENID=目标用户OpenID
+   ```
+3. 获取目标用户 OpenID（见下方「获取 QQ 用户 OpenID」）
+
 ### 获取 QQ 用户 OpenID
 
 如果使用 QQ 官方 Bot 推送，需要先获取目标用户的 OpenID：
