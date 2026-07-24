@@ -21,6 +21,7 @@ from src.utils import utc_to_jst
 from src.translator import translate_text
 from src.platforms.bilibili import post_dynamic, resolve_cookie
 from src.notifier import send_member_message
+from src.health import ErrorTier, get_tracker as _health_tracker
 from src.platforms.napcat import build_message_chain
 
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
@@ -127,6 +128,7 @@ async def _fetch_member_messages(member: dict):
     cred = ACCOUNT_CREDS.get(account_id)
     if not cred:
         log_all(f"🚨 {m_name} 账号 {account_id} 无可用凭据", is_error=True)
+        _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, f"账号 {account_id} 无可用凭据")
         return None
 
     os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
@@ -189,6 +191,7 @@ async def _fetch_member_messages(member: dict):
                     msgs = resp.json().get("messages", [])
                 except Exception:
                     log_all(f"🚨 {m_name} API 响应不是合法 JSON", is_error=True)
+                    _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "API 响应非 JSON")
                     return None
 
                 new_msgs = sorted(
@@ -206,6 +209,7 @@ async def _fetch_member_messages(member: dict):
                 ):
                     log_response(resp.text)
 
+                _health_tracker().record_member_fetch(m_name, True)
                 return (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock)
 
             elif resp.status_code == 401:
@@ -213,6 +217,7 @@ async def _fetch_member_messages(member: dict):
                 body_snippet = resp.text[:300] if resp.text else "(空响应)"
                 if attempt >= MAX_FETCH_ATTEMPTS:
                     log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询 | {body_snippet}", is_error=True)
+                    _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, f"401 认证失败 (已重试{MAX_FETCH_ATTEMPTS}次)")
                     return None
                 log_all(
                     f"⚠️ {m_name} 触发 401，刷新账号 {account_id} token "
@@ -222,10 +227,12 @@ async def _fetch_member_messages(member: dict):
                 if is_mobile:
                     if not await refresh_mobile_token(account_id, target_group, old_token=cred.get("token")):
                         log_all(f"🔥 {m_name} 账号移动端刷新失败，放弃本次轮询", is_error=True)
+                        _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, "移动端 Token 刷新失败")
                         return None
                 else:
                     if not await refresh_token(account_id, target_group, old_token=cred["token"]):
                         log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
+                        _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, "Web Token 刷新失败")
                         return None
                 continue
 
@@ -233,6 +240,7 @@ async def _fetch_member_messages(member: dict):
                 log_response(resp.text)
                 body_snippet = resp.text[:300] if resp.text else "(空响应)"
                 log_all(f"🚨 {m_name} 异常状态码 HTTP {resp.status_code} | {body_snippet}", is_error=True)
+                _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"HTTP {resp.status_code}")
                 return None
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
@@ -246,9 +254,12 @@ async def _fetch_member_messages(member: dict):
                 await asyncio.sleep(delay)
             else:
                 log_all(f"🚨 {m_name} 达到最大重试次数，放弃", is_error=True)
+                _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"网络错误: {format_httpx_error(e)}")
+                return None
 
-        except Exception:
+        except Exception as e:
             log_all(f"🔥 {m_name} 未预料的错误:\n{traceback.format_exc()}", is_error=True)
+            _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"未预料错误: {type(e).__name__}")
             return None
 
     return None
@@ -270,6 +281,7 @@ async def _push_member_messages(member: dict, new_msgs: list,
         ok = await _handle_message(member, msg, id_list, id_set, l_time_ref)
         if not ok:
             await write_time_record(time_file, file_lock, l_time_ref[0])
+            _health_tracker().record_member_push(m_name, False)
             return False
 
     await write_time_record(time_file, file_lock, l_time_ref[0])
@@ -279,4 +291,5 @@ async def _push_member_messages(member: dict, new_msgs: list,
         log_all(f"✅ {m_name} 推送 {new_count} 条新消息")
     else:
         log_all(f"✅ {m_name} 无新消息", is_debug=True)
+    _health_tracker().record_member_push(m_name, True)
     return True
