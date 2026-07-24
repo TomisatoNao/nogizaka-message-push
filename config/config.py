@@ -322,7 +322,13 @@ def _load_config() -> dict:
     except Exception as e:
         _sys.exit(f"❌ config.json 解析失败: {e}")
 
-    # 3. 校验 Schema
+    # 3. 规范化配置（检测旧格式 → 新格式内部表示）
+    #    必须在 Schema 校验之前执行：新格式 config.json 使用 channels/monitor
+    #    等键名，但现有 schema 只认识旧格式键名（enable_napcat_qq/monitor_list）。
+    #    先规范化再校验，避免新格式被 schema 误拒。
+    normalized = _normalize_config(raw)
+
+    # 4. 校验 Schema（对规范化后的配置进行校验）
     try:
         import jsonschema as _jsonschema
     except ImportError:
@@ -334,7 +340,7 @@ def _load_config() -> dict:
     try:
         with open(_SCHEMA_PATH, "r", encoding="utf-8") as f:
             schema = _json.load(f)
-        _jsonschema.validate(raw, schema)
+        _jsonschema.validate(normalized, schema)
     except FileNotFoundError:
         _sys.exit(f"❌ 找不到 Schema 文件: {_SCHEMA_PATH}")
     except _jsonschema.ValidationError as e:
@@ -344,9 +350,6 @@ def _load_config() -> dict:
             f"   位置: {' → '.join(str(p) for p in e.absolute_path) if e.absolute_path else '(根)'}\n"
             f"   请对照 config.schema.json 修正后重试。"
         )
-
-    # 4. 规范化配置（检测旧格式 → 新格式内部表示）
-    normalized = _normalize_config(raw)
 
     # 5. 用户配置覆盖默认值
     _deep_merge(cfg, normalized)
@@ -442,6 +445,7 @@ if _old_app_id and not any(b.get("app_id") for b in QQ_OFFICIAL_BOTS):  # type: 
 # 可通过同名环境变量覆盖 JSON 中的值
 ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)       # type: ignore[has-type]
 ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT) # type: ignore[has-type]
+ENABLE_TG_BOT          = _env_bool("ENABLE_TG_BOT",          ENABLE_TG_BOT)          # type: ignore[has-type]
 DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)   # type: ignore[has-type]
 
 
