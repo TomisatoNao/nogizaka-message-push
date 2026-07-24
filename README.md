@@ -12,14 +12,15 @@
 - **多成员并行轮询** — 成员并发拉取，日间 2~3 分钟/次，夜间 25~30 分钟/次自适应间隔，带 ±10% 随机抖动
 - **消息去重** — 基于消息 ID 的滑动窗口去重（每成员最多 500 条），O(1) 集合 + 有序列表
 - **Gemini 翻译** — 日文消息自动翻译为中文，多模型级联容错，串行化限速
-- **多通道 QQ 推送** — NapCat/OneBot HTTP 群聊推送 + QQ 开放平台官方 Bot 单聊推送，可独立开关
+- **多通道推送** — NapCat/OneBot QQ 群聊 + QQ 官方 Bot 单聊 + Telegram Bot，可独立开关；系统警报（Token 失效等）通过所有已启用通道发送
 - **Bilibili 同步** — 可选将消息发布为 B 站文字动态，支持成员独立 Cookie
 - **多媒体支持** — 图片、视频、语音消息完整转发（官方 Bot 支持媒体文件下载重传）
 - **JST 时间显示** — 推送和 B 站动态中的消息时间统一使用日本標準時 (UTC+9)
 - **自定义 API 域名** — 支持毕业生成员独立 API 域名（如 yodel），账号级配置 app_tag / api_base / web_origin
 - **反反爬虫** — Header 仿真（Web Chrome / 移动 iOS）、随机间隔抖动、指数退避重试、成员随机轮询顺序
 - **配置热重载（可选）** — 已提供 `config/watcher.py`，安装并接入 watchdog 后可自动重载；当前默认入口以启动时加载为主
-- **启动健康检查** — 启动时校验 NapCat 连接、QQ Bot access_token、账号凭证状态
+- **启动健康检查** — 启动时校验 NapCat/TG Bot 连接、QQ Bot access_token、账号凭证状态
+- **运行时状态摘要** — 每隔 N 轮自动输出通道成功率、Token 剩余时间、成员拉取/推送状态、分级错误报告，终端一眼判断系统健康度
 
 ## 快速开始
 
@@ -105,13 +106,15 @@ nogizaka-message-push/
 │   ├── app.py               # 主循环：健康检查、依赖注入、轮询编排
 │   ├── fetcher.py           # 核心拉取：API 轮询、消息过滤、分发调度
 │   ├── dedup.py             # 消息 ID 去重（滑动窗口）
+│   ├── health.py            # 运行时健康追踪：通道/Token/成员状态、定期摘要
 │   ├── translator.py        # Gemini 翻译（多模型容错、串行限速）
-│   ├── notifier.py          # 多通道推送路由
+│   ├── notifier.py          # 多通道推送路由 + 系统警报
 │   ├── logger.py            # 日志系统（彩色终端 + 滚动文件）
 │   ├── utils.py             # 公共工具：JST 时间转换、时段判断、速率限制器
 │   └── platforms/
 │       ├── napcat.py        # NapCat/OneBot HTTP 推送
 │       ├── qq_official.py   # QQ 官方 Bot 单聊推送
+│       ├── tgbot.py         # Telegram Bot 推送
 │       └── bilibili.py      # B 站动态发布
 ├── tools/
 │   └── get_qq_openid.py     # QQ Bot WebSocket 获取用户 OpenID
@@ -151,7 +154,9 @@ Member Message API          Gemini API            NapCat/OneBot
 - **Token 生命周期** — 启动时为移动端账号执行初始刷新；每轮轮询前解码 JWT 检查 `exp`，不足 300 秒则主动刷新；API 返回 401 时触发被动刷新后重试
 - **反爬虫** — 轮询间隔 ±10% 随机抖动；消息发送间隔 1.2~2.0s 随机；网络错误指数退避重试（base × 2^attempt + jitter）；成员处理顺序每轮 shuffle
 - **NapCat 视频/语音分离** — 部分 NapCat 版本在混排图文消息时会吞掉文字，代码将视频/语音拆分为独立消息批次
-- **容错语义** — NapCat 推送失败会阻止该成员的时间戳推进（下一轮重试），QQ 官方 Bot 失败仅记录日志（避免因限频导致群聊重复推送）
+- **容错语义** — NapCat 推送失败会阻止该成员的时间戳推进（下一轮重试），QQ 官方 Bot 和 TG Bot 失败仅记录日志（避免因限频导致群聊重复推送）
+- **系统警报多通道覆盖** — Token 刷新失败时通过所有已启用通道（NapCat + QQ 官方 Bot + TG）发送告警，带冷却保护防止刷屏
+- **健康状态追踪** — `health.py` 纯内存追踪每轮通道成功率、Token 剩余时间、成员拉取/推送状态；每 N 轮自动输出分级摘要（TRANSIENT 临时错误 vs PERSISTENT 需人工介入）
 
 ## 依赖
 
@@ -228,10 +233,12 @@ Member Message API          Gemini API            NapCat/OneBot
 
 - **Gemini** — `GEMINI_API_KEY`
 - **QQ 推送通道** — `ENABLE_NAPCAT_QQ`、`ENABLE_QQ_OFFICIAL_BOT`、`QQ_BOT_API`
+- **TG Bot** — `ENABLE_TG_BOT`、`TG_BOT_TOKEN`
 - **QQ 官方 Bot** — `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}`
 - **Bilibili** — `BILIBILI_FULL_COOKIE`、`BILIBILI_BILI_JCT`，成员专属 Cookie 需在 `config.json` 的成员项中配置 `bilibili_cookie` 对应的 `$ENV` 占位符
 - **账号凭证** — `ACCOUNT_{NOGIZAKA_MAIN,NOGIZAKA_SHARED,HINATA_SHARED,YODEL}_{TOKEN,COOKIE}`
 - **移动端凭证** — `NOGIZAKA_REFRESH_TOKEN`、`HINATAZAKA_REFRESH_TOKEN`（配合 `auth_method: "mobile"` 使用）
+- **健康追踪** — `health_summary_interval`（默认 10 轮）、`health_token_warn_seconds`（默认 600s）、`alert_cooldown_seconds`（默认 3600s，防止告警刷屏）
 
 ## License
 
