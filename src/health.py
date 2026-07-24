@@ -100,10 +100,11 @@ class HealthTracker:
             self.record_error(f"{name} 推送失败", ErrorTier.TRANSIENT)
 
     def record_token(self, acc_id: str, remaining: float) -> None:
+        was_healthy = self._tokens[acc_id].is_healthy if acc_id in self._tokens else True
         self._tokens[acc_id] = TokenInfo(
             account_id=acc_id, remaining=remaining, is_healthy=remaining > 0
         )
-        if remaining <= 0:
+        if remaining <= 0 and was_healthy:
             self.record_error(f"{acc_id} Token 刷新失败", ErrorTier.PERSISTENT)
 
     def record_alert_cooldown(self, acc_id: str, remaining: float) -> None:
