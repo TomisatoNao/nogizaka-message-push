@@ -14,6 +14,8 @@ from src import translator
 from src.platforms import bilibili
 from src.platforms import napcat
 from src.platforms import qq_official
+from src.platforms import tgbot
+from src import health
 from src.platforms.qq_official import health_check as qq_official_health_check
 import config.config as cfg
 from config.credentials import (
@@ -39,8 +41,8 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     """
     all_ok = True
 
-    if not cfg.ENABLE_NAPCAT_QQ and not cfg.ENABLE_QQ_OFFICIAL_BOT:
-        log_all("🟡 QQ 推送通道均未启用：成员消息会被抓取并记录，但不会推送到 QQ", is_error=True)
+    if not cfg.ENABLE_NAPCAT_QQ and not cfg.ENABLE_QQ_OFFICIAL_BOT and not cfg.ENABLE_TG_BOT:
+        log_all("🟡 所有推送通道均未启用：成员消息会被抓取并记录，但不会推送", is_error=True)
 
     # ── 检查 NapCat 连通性 ────────────────────────────────
     if cfg.ENABLE_NAPCAT_QQ:
@@ -49,11 +51,14 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
             resp = await qq_client.get(status_url)
             if resp.status_code == 200:
                 log_all("🟢 NapCat QQ 连通正常")
+                health.get_tracker().record_channel("napcat", True)
             else:
                 log_all(f"🟡 NapCat QQ 返回 HTTP {resp.status_code}，可能运行异常", is_error=True)
+                health.get_tracker().record_channel("napcat", False, f"HTTP {resp.status_code}")
                 all_ok = False
         except Exception as e:
             log_all(f"🔴 NapCat QQ 无法连接 ({type(e).__name__})，请确认 napcat/lagrange 已启动", is_error=True)
+            health.get_tracker().record_channel("napcat", False, "无法连接")
             all_ok = False
     else:
         log_all("⏸️ NapCat QQ 推送未启用")
@@ -64,6 +69,16 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
             all_ok = False
     else:
         log_all("⏸️ 官方 QQ Bot 推送未启用")
+
+    # ── 检查 TG Bot 连通性 ──────────────────────────────────
+    if cfg.ENABLE_TG_BOT:
+        if await tgbot.health_check():
+            health.get_tracker().record_channel("tg", True)
+        else:
+            health.get_tracker().record_channel("tg", False, "无法连接")
+            all_ok = False
+    else:
+        log_all("⏸️ TG Bot 推送未启用")
 
     # ── 检查所有账号凭证已加载且内容完整 ────────────────────
     from config.credentials import ACCOUNT_CREDS, validate_account_cred
@@ -84,6 +99,10 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
         all_ok = False
     elif not missing:
         log_all(f"🟢 账号凭证完整（{len(needed)} 个账号）")
+        for acc_id in sorted(needed):
+            remaining = get_token_remaining_seconds(acc_id)
+            if remaining is not None:
+                health.get_tracker().record_token(acc_id, max(0, remaining))
 
     return all_ok
 
@@ -183,6 +202,10 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
         else:
             log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
 
+        summary = health.get_tracker().cycle_complete()
+        if summary:
+            log_all(summary)
+
         wait_time, tag = _next_interval()
         log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
         await asyncio.sleep(wait_time)
@@ -218,9 +241,16 @@ async def main() -> None:
     load_all_accounts()
     await _init_mobile_accounts()
 
-    # 2. 在事件循环内创建需要 asyncio 的锁（translator / bilibili）
+    # 2. 在事件循环内创建需要 asyncio 的锁（translator / bilibili / tgbot）
     translator.initialize()
     bilibili.initialize()
+    tgbot.initialize()
+
+    health.initialize(
+        summary_interval=cfg.HEALTH_SUMMARY_INTERVAL,
+        error_buffer=cfg.HEALTH_ERROR_BUFFER,
+        token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
+    )
 
     # 3. 创建共享 HTTP 客户端
     http_client = httpx.AsyncClient(
