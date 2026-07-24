@@ -67,7 +67,7 @@ cp .env.example .env
 | Gemini | `GEMINI_API_KEY` | 翻译 API Key |
 | Telegram Bot | `TG_BOT_TOKEN` | Bot Token（`@BotFather` 获取） |
 | Web 账号 | `{KEY}_TOKEN`, `{KEY}_COOKIE` | JWT + 浏览器 Cookie |
-| Mobile 账号 | `{KEY}_REFRESH_TOKEN` | refresh_token UUID（需配合 `"auth": "mobile"`） |
+| Mobile 账号 | `{KEY}_REFRESH_TOKEN`（必填）, `{KEY}_TOKEN`（可选） | refresh_token UUID + JWT（TOKEN 可为空，系统自动获取） |
 | QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` | 可选，不启用则留空 |
 | B 站 | `BILIBILI_COOKIE` | 包含 `SESSDATA=xxx; bili_jct=yyy` |
 
@@ -153,7 +153,7 @@ MY_NEW_ACCOUNT_TOKEN=eyJ...
 MY_NEW_ACCOUNT_COOKIE=session=xxx
 ```
 
-如果是 mobile 账号（`"auth": "mobile"`），只需要 `MY_NEW_ACCOUNT_REFRESH_TOKEN`（或使用全局 `NOGIZAKA_REFRESH_TOKEN` fallback）。
+如果是 mobile 账号（`"auth": "mobile"`）：`{KEY}_REFRESH_TOKEN` 必填，`{KEY}_TOKEN` 可选（留空则首次运行时自动通过 refresh_token 获取）。也可不配 `{KEY}_REFRESH_TOKEN`，使用全局 `NOGIZAKA_REFRESH_TOKEN` 作为 fallback。
 
 **启用 QQ 官方 Bot：** 三步：
 
