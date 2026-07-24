@@ -6,9 +6,6 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from src.logger import log_all
-
-
 # ── 错误分级 ──────────────────────────────────────────
 class ErrorTier(Enum):
     TRANSIENT  = auto()   # 网络超时、429/5xx、临时连接失败
