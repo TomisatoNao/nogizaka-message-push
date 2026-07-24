@@ -52,15 +52,24 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-| 类别 | 环境变量 |
-|---|---|
-| Gemini 翻译 | `GEMINI_API_KEY` |
-| Telegram Bot | `TG_BOT_TOKEN` |
-| 账号凭证 | `{ACCOUNT_KEY大写}_TOKEN`, `{ACCOUNT_KEY大写}_COOKIE`, `{ACCOUNT_KEY大写}_REFRESH_TOKEN` |
-| QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` |
-| B 站 | `BILIBILI_COOKIE`（含 SESSDATA 和 bili_jct） |
+凭证通过命名约定自动匹配，**不再需要 `$ENV:VAR` 占位符**。你只需把值填到 `.env`：
 
-> 命名约定：`config.json` 中账号 key `nogizaka_main` → 大写 `NOGIZAKA_MAIN` → 找 `.env` 中 `NOGIZAKA_MAIN_TOKEN` / `NOGIZAKA_MAIN_COOKIE` / `NOGIZAKA_MAIN_REFRESH_TOKEN`。不再使用 `$ENV:VAR` 占位符。
+```bash
+# 对照 config.json 中 accounts 的 key：
+#   "nogizaka_main"   → NOGIZAKA_MAIN_TOKEN + NOGIZAKA_MAIN_REFRESH_TOKEN
+#   "nogizaka_shared" → NOGIZAKA_SHARED_TOKEN + NOGIZAKA_SHARED_COOKIE
+#   "hinata_shared"   → HINATA_SHARED_TOKEN + HINATA_SHARED_COOKIE
+#   "yodel_grad"      → YODEL_GRAD_TOKEN + YODEL_GRAD_COOKIE
+```
+
+| 类别 | 变量 | 说明 |
+|---|---|---|
+| Gemini | `GEMINI_API_KEY` | 翻译 API Key |
+| Telegram Bot | `TG_BOT_TOKEN` | Bot Token（`@BotFather` 获取） |
+| Web 账号 | `{KEY}_TOKEN`, `{KEY}_COOKIE` | JWT + 浏览器 Cookie |
+| Mobile 账号 | `{KEY}_REFRESH_TOKEN` | refresh_token UUID（需配合 `"auth": "mobile"`） |
+| QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` | 可选，不启用则留空 |
+| B 站 | `BILIBILI_COOKIE` | 包含 `SESSDATA=xxx; bili_jct=yyy` |
 
 #### 2. `config/config.json` — 用户配置
 
@@ -76,20 +85,58 @@ cp .env.example .env
 
 ### 获取成员 ID
 
-使用隔壁 `nogizaka-monitor` 项目的 `list_members.py`，通过手机端 API 查询：
+使用 [nogizaka-monitor](https://github.com/TomisatoNao/nogizaka-monitor) 项目的 `list_members.py`，通过手机端 API 查询：
 
 ```bash
+git clone https://github.com/TomisatoNao/nogizaka-monitor.git ../nogizaka-monitor
 cd ../nogizaka-monitor
 python list_members.py nogizaka    # 乃木坂46
 python list_members.py hinatazaka  # 日向坂46
 python list_members.py yodel       # yodel（毕业生）
 ```
 
+也可以直接查阅下方速查表，手动填入 `m_id`。
+
+### 前置条件
+
+运行前确保至少一个推送通道已在本地启动：
+
+- **NapCat** — [NapCat](https://github.com/NapNeko/NapCatQQ) 或 [Lagrange](https://github.com/LagrangeDev/Lagrange.Core) 连接 QQ 并开启 HTTP API（默认 `http://127.0.0.1:3000`）
+- **TG Bot** — 通过 `@BotFather` 创建 Bot，把 Token 填入 `.env`
+
+启动时会自动检查所有已启用通道的连通性。
+
 ### 运行
 
 ```bash
 python main.py
 ```
+
+启动后会先输出健康检查结果，然后进入轮询循环。终端输出示例：
+
+```
+22:00:03  [INFO] 🟢 NapCat QQ 连通正常
+22:00:03  [INFO] 🟢 TG Bot 连通正常 (@nogizaka_push_bot)
+22:00:05  [INFO] ✅ 冨里奈央 推送 2 条新消息
+22:00:05  [INFO] 🔍 巡查完毕 [冨里奈央 · 賀喜遥香 · ...]
+22:22:25  [INFO] 📊 [状态摘要 #10 · 运行 22m]
+22:22:25  [INFO]   通道: napcat ✅ 10/10 | tg ✅ 10/10
+22:22:25  [INFO]   Token: nogizaka_main 38min · yodel_grad 失效 🔴
+```
+
+### 常见操作
+
+**加一个成员：** 在 `config.json` 的 `monitor` 数组末尾添加一项：
+```json5
+{ "id": "39", "name": "筒井 あやめ", "account": "nogizaka_shared", "groups": [752269366] }
+```
+热重载 (`config.reload()`) 或重启后生效。成员 ID 见下方速查表。
+
+**换一个 Token：** 编辑 `.env` 中对应账号的 `{KEY}_TOKEN`，然后触发热重载或重启。
+
+**只开 TG 不开 NapCat：** 在 `config.json` 中 `channels` 里设 `"napcat": false`，`"tg": true`。
+
+**调轮询频率：** 修改 `config.json` 中 `day_interval` / `night_interval`（秒）。`sleep_hours` 控制休眠时段。
 
 ### 获取 QQ 用户 OpenID
 
@@ -179,11 +226,12 @@ Member Message API          Gemini API            NapCat/OneBot
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | `.env` 环境变量加载 |
 | [json5](https://github.com/dpranke/pyjson5) | 解析 `config.json` 的 JSONC 格式（支持注释） |
 | [jsonschema](https://github.com/python-jsonschema/jsonschema) | `config.json` 结构校验 |
+| [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) | Telegram Bot SDK（仅启用 TG 推送时需要） |
 | [websockets](https://websockets.readthedocs.io/) | QQ Bot WebSocket 连接（仅 `tools/get_qq_openid.py`） |
 
 ## 监控成员
 
-> 当前激活的监控列表（`config.json` 中的 `monitor_list`）
+> 当前激活的监控列表（`config.json` 中的 `monitor`）
 
 | 成员 | 所属团体 | m_id | 使用账号 |
 |---|---|---|---|
@@ -199,7 +247,7 @@ Member Message API          Gemini API            NapCat/OneBot
 
 ### 乃木坂46 现役成员 ID 速查
 
-> 以下为通过手机端 API 拉取的全部现役成员（`state=open`），方便快速添加到 `monitor_list`。
+> 以下为通过手机端 API 拉取的全部现役成员（`state=open`），方便快速添加到 `monitor`。
 > 成员 ID 可能随运营调整变化，以实际 API 返回为准。
 
 | m_id | 成员 | 期别 |
