@@ -322,13 +322,9 @@ def _load_config() -> dict:
     except Exception as e:
         _sys.exit(f"❌ config.json 解析失败: {e}")
 
-    # 3. 规范化配置（检测旧格式 → 新格式内部表示）
-    #    必须在 Schema 校验之前执行：新格式 config.json 使用 channels/monitor
-    #    等键名，但现有 schema 只认识旧格式键名（enable_napcat_qq/monitor_list）。
-    #    先规范化再校验，避免新格式被 schema 误拒。
-    normalized = _normalize_config(raw)
-
-    # 4. 校验 Schema（对规范化后的配置进行校验）
+    # 3. 校验 Schema（对新格式配置进行校验）
+    #    Schema 现在定义新格式键名（channels / monitor / sleep_hours 等），
+    #    因此在校验之后再做规范化（新格式 → 旧格式内部表示）。
     try:
         import jsonschema as _jsonschema
     except ImportError:
@@ -340,7 +336,7 @@ def _load_config() -> dict:
     try:
         with open(_SCHEMA_PATH, "r", encoding="utf-8") as f:
             schema = _json.load(f)
-        _jsonschema.validate(normalized, schema)
+        _jsonschema.validate(raw, schema)
     except FileNotFoundError:
         _sys.exit(f"❌ 找不到 Schema 文件: {_SCHEMA_PATH}")
     except _jsonschema.ValidationError as e:
@@ -351,7 +347,8 @@ def _load_config() -> dict:
             f"   请对照 config.schema.json 修正后重试。"
         )
 
-    # 5. 用户配置覆盖默认值
+    # 5. 标准化（新格式 → 旧格式内部表示）并覆盖默认值
+    normalized = _normalize_config(raw)
     _deep_merge(cfg, normalized)
 
     # 6. 构建绝对路径
