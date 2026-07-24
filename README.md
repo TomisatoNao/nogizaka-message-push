@@ -83,6 +83,27 @@ cp .env.example .env
 
 未写在 config.json 中的配置项（文件路径、超时、速率限制、调试开关等）使用内置默认值。完整默认值见 `config/config.py` 的 `_DEFAULTS` 字典。
 
+#### 3. 从哪获取凭证？
+
+| 凭证 | 来源 |
+|---|---|
+| `TOKEN`（JWT） | 浏览器 DevTools → Network → 任意 API 请求 → Request Headers 中 `Authorization: Bearer eyJ...` |
+| `COOKIE`（Web 端） | 浏览器 DevTools → Application → Cookies → 复制 `session` 等关键字段 |
+| `REFRESH_TOKEN`（Mobile） | 手机抓包（如 Charles / Proxyman）→ 拦截 `update_token` 请求 → Body 中的 `refresh_token` UUID |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `TG_BOT_TOKEN` | Telegram 找 `@BotFather` → `/newbot` |
+| `BILIBILI_COOKIE` | 浏览器登录 B 站 → DevTools → Cookies → `SESSDATA` + `bili_jct` |
+
+**monitor 字段说明：**
+
+| 字段 | 含义 | 示例 |
+|---|---|---|
+| `id` | 成员 ID（`m_id`），见下方速查表 | `"55"` |
+| `name` | 成员名称（推送显示用） | `"冨里奈央"` |
+| `account` | 使用哪个账号轮询（对应 `accounts` 的 key） | `"nogizaka_main"` |
+| `groups` | 推送到哪些 QQ 群（NapCat 群号） | `[533072575]` |
+| `tg` | 可选的 TG 频道/群 chat_id（Bot 需是管理员） | `"-1004219007326"` |
+
 ### 获取成员 ID
 
 使用 [nogizaka-monitor](https://github.com/TomisatoNao/nogizaka-monitor) 项目的 `list_members.py`，通过手机端 API 查询：
