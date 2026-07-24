@@ -185,6 +185,8 @@ def _match_account_credentials(cfg: dict) -> dict:
 
         if "auth" in acc:
             acc["auth_method"] = acc.pop("auth")
+        else:
+            acc.setdefault("auth_method", "web")
         if "group" in acc:
             acc["group_type"] = acc.pop("group")
 
