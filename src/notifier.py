@@ -2,9 +2,12 @@
 # notifier.py — QQ 多通道推送调度
 # ============================================================
 import config.config as cfg
-from src.logger import log_all
+from src.logger import error_logger, log_all
 from src.platforms.napcat import send_qq_message
 from src.platforms.qq_official import get_configured_bots, has_bots
+from src.platforms import tgbot
+from src import health
+from src.health import ErrorTier
 
 
 def enabled_channels() -> list[str]:
@@ -13,6 +16,8 @@ def enabled_channels() -> list[str]:
         channels.append("napcat")
     if cfg.ENABLE_QQ_OFFICIAL_BOT and has_bots():
         channels.append("official")
+    if cfg.ENABLE_TG_BOT:
+        channels.append("tg")
     return channels
 
 
@@ -32,6 +37,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     if cfg.ENABLE_NAPCAT_QQ:
         for gid in member["target_groups"]:
             ok = await send_qq_message(gid, message_chain)
+            health.get_tracker().record_channel(f"napcat:{gid}", ok)
             if not ok:
                 napcat_ok = False
                 log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
@@ -40,8 +46,16 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         bots = get_configured_bots()
         for bot in bots:
             ok = await bot.send_message_chain(member, message_chain)
+            health.get_tracker().record_channel(f"official:{bot.name}", ok)
             if not ok:
                 log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 推送失败", is_error=True)
+
+    # TG Bot 作为旁路推送，失败不影响 QQ 状态
+    if cfg.ENABLE_TG_BOT:
+        tg_ok = await tgbot.send_member_message(member, message_chain)
+        health.get_tracker().record_channel("tg", tg_ok)
+        if not tg_ok:
+            log_all(f"⚠️ TG Bot 推送失败 [{member.get('m_name', '?')}]", is_error=True)
 
     if cfg.ENABLE_NAPCAT_QQ:
         return napcat_ok
@@ -49,18 +63,62 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
 
 async def send_alert_message(target_group: int, text: str) -> bool:
-    """发送系统警报。NapCat 发到原群，官方 Bot 发到配置的个人 openid。"""
+    """向所有已启用的推送通道发送系统警报。"""
     channels = enabled_channels()
     if not channels:
-        log_all(f"⏸️ QQ 推送通道均未启用，警报未发送: {text}", is_error=True)
+        log_all(f"⏸️ 没有可用的推送通道，警报未发送: {text}", is_error=True)
         return False
 
-    ok = True
+    any_ok = False
+
+    # NapCat 群告警
     if cfg.ENABLE_NAPCAT_QQ:
-        ok = await send_qq_message(target_group, [{"type": "text", "data": {"text": text}}]) and ok
+        from src.platforms.napcat import send_qq_message
+        alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
+        ok = await send_qq_message(target_group, alert_chain)
+        if ok:
+            any_ok = True
+        else:
+            health.get_tracker().record_error(
+                f"NapCat 告警发送失败 (群 {target_group})", ErrorTier.TRANSIENT
+            )
+            if error_logger:
+                error_logger.error(f"NapCat 告警发送失败: {text}")
+
+    # QQ 官方 Bot 告警 — 发给所有已配置的 Bot
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
+        from src.platforms.qq_official import get_configured_bots
         bots = get_configured_bots()
-        for bot in bots:
-            if not await bot.send_text(text):
-                ok = False
-    return ok
+        if not bots:
+            log_all(f"⏸️ 没有已配置的 QQ 官方 Bot，警报未发送: {text}", is_error=True)
+        else:
+            for bot in bots:
+                ok = await bot.send_text(f"📢 系统警报\n{text}")
+                if ok:
+                    any_ok = True
+                else:
+                    health.get_tracker().record_error(
+                        f"官方Bot [{bot.name}] 告警发送失败", ErrorTier.TRANSIENT
+                    )
+
+    # TG Bot 告警
+    if cfg.ENABLE_TG_BOT:
+        tg_chat_id = ""
+        for m in cfg.MONITOR_LIST:
+            if target_group in m["target_groups"]:
+                cid = (m.get("tg_chat_id") or "").strip()
+                if cid:
+                    tg_chat_id = cid
+                    break
+        if tg_chat_id:
+            ok = await tgbot.send_alert(tg_chat_id, text)
+            if ok:
+                any_ok = True
+            else:
+                health.get_tracker().record_error(
+                    f"TG Bot 告警发送失败", ErrorTier.TRANSIENT
+                )
+        else:
+            log_all(f"⏸️ 群 {target_group} 无关联 TG 频道，TG 警报跳过", is_debug=True)
+
+    return any_ok
