@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import httpx
 
 from config.config import ACCOUNTS, ALERT_COOLDOWN_SECONDS, CRED_DIR, TOKEN_REFRESH_BEFORE_SECONDS
+from src.health import get_tracker as _health_tracker
 from src.logger import format_httpx_error, log_all, log_response
 
 # ---- 运行时状态 ----
@@ -188,6 +189,10 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                     cred["refresh_token"] = new_refresh
                     _save_mobile_cred(account_id, new_access, new_refresh)
                     log_all(f"✅ 账号 {account_id} 移动端续期成功")
+                    # 记录 Token 状态
+                    remaining = get_token_remaining_seconds(account_id)
+                    if remaining is not None:
+                        _health_tracker().record_token(account_id, max(0, remaining))
                     return True
                 else:
                     log_all(f"🚨 账号 {account_id} 移动端续期响应无 access_token", is_error=True)
@@ -219,9 +224,12 @@ async def refresh_mobile_token(account_id: str, target_group: int,
             pass
     else:
         remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
+        _health_tracker().record_alert_cooldown(account_id, float(remaining))
         log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
 
     return False
+
+
 def get_web_headers(
     group_type: str,
     token: str | None = None,
@@ -424,6 +432,10 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                             cred["cookies"][k] = v
                     _save_cred(account_id, cred["token"], cred["cookies"])
                     log_all(f"✅ 账号 {account_id} 续期成功")
+                    # 记录 Token 状态
+                    remaining = get_token_remaining_seconds(account_id)
+                    if remaining is not None:
+                        _health_tracker().record_token(account_id, max(0, remaining))
                     return True
                 else:
                     log_all(f"🚨 账号 {account_id} 续期响应无 access_token", is_error=True)
@@ -451,6 +463,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
             pass
     else:
         remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
+        _health_tracker().record_alert_cooldown(account_id, float(remaining))
         log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
 
     return False
