@@ -39,27 +39,40 @@ pip install -r requirements.txt
 
 ### 配置
 
-1. **配置 `.env`** — 填入敏感信息（Token / Cookie / Key）：
+项目使用两个配置文件，职责分明：
 
-   ```bash
-   cp .env.example .env
-   ```
+| 文件 | 内容 |
+|---|---|
+| `.env` | **密钥和凭证**（敏感，不提交 Git）|
+| `config/config.json` | **用户配置**（非敏感，可提交 Git）|
 
-   | 类别 | 环境变量 |
-   |------|----------|
-   | Gemini 翻译 | `GEMINI_API_KEY` |
-   | Web 端账号凭证 | `ACCOUNT_{NOGIZAKA_MAIN,NOGIZAKA_SHARED,HINATA_SHARED,YODEL}_{TOKEN,COOKIE}` |
-   | 移动端账号凭证 | `NOGIZAKA_REFRESH_TOKEN`, `HINATAZAKA_REFRESH_TOKEN` 等 |
-   | QQ 推送 | `ENABLE_NAPCAT_QQ`, `ENABLE_QQ_OFFICIAL_BOT`, `QQ_BOT_API` |
-   | QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` |
-   | B 站 | `BILIBILI_FULL_COOKIE`, `BILIBILI_BILI_JCT` |
+#### 1. `.env` — 密钥和凭证
 
-2. **配置 `config.json`** — 成员列表、账号池、轮询参数等非敏感配置：
+```bash
+cp .env.example .env
+```
 
-   直接编辑现有 `config/config.json`。关键配置项：
-   - `accounts` — 账号池，每个账号可选 `auth_method: "web"`（默认）或 `"mobile"`
-   - `monitor_list` — 监控的成员列表（ID 可通过 `python list_members.py` 查询）
-   - `day_interval` / `night_interval` — 日间/夜间轮询间隔范围 [min, max]
+| 类别 | 环境变量 |
+|---|---|
+| Gemini 翻译 | `GEMINI_API_KEY` |
+| Telegram Bot | `TG_BOT_TOKEN` |
+| 账号凭证 | `{ACCOUNT_KEY大写}_TOKEN`, `{ACCOUNT_KEY大写}_COOKIE`, `{ACCOUNT_KEY大写}_REFRESH_TOKEN` |
+| QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` |
+| B 站 | `BILIBILI_COOKIE`（含 SESSDATA 和 bili_jct） |
+
+> 命名约定：`config.json` 中账号 key `nogizaka_main` → 大写 `NOGIZAKA_MAIN` → 找 `.env` 中 `NOGIZAKA_MAIN_TOKEN` / `NOGIZAKA_MAIN_COOKIE` / `NOGIZAKA_MAIN_REFRESH_TOKEN`。不再使用 `$ENV:VAR` 占位符。
+
+#### 2. `config/config.json` — 用户配置
+
+精简后 ~50 行，只包含你手动改的项：
+
+- **channels** — 推送通道开关（`napcat` / `tg` / `qq_official`）
+- **accounts** — 账号池，只需定义 `group` 和 `auth`（`"web"` 或 `"mobile"`），密钥自动从 `.env` 匹配
+- **monitor** — 监控成员列表（`id` / `name` / `account` / `groups` / `tg`）
+- **推送参数** — `day_interval`、`night_interval`、`sleep_hours`、`alert_cooldown`
+- **可选覆盖** — `gemini_models`、`translate`、`qq_send_interval` 等
+
+未写在 config.json 中的配置项（文件路径、超时、速率限制、调试开关等）使用内置默认值。完整默认值见 `config/config.py` 的 `_DEFAULTS` 字典。
 
 ### 获取成员 ID
 
@@ -229,16 +242,16 @@ Member Message API          Gemini API            NapCat/OneBot
 
 ## 配置参考
 
-敏感环境变量见 `.env.example`，完整配置结构见 `config/config.schema.json`，主要分类：
+| 文件 | 职责 |
+|---|---|
+| `.env` | 密钥和凭证（模板见 `.env.example`，~24 行） |
+| `config/config.json` | 用户配置（schema 见 `config/config.schema.json`，~50 行） |
+| `config/config.py` `_DEFAULTS` | 内置默认值（文件路径、超时、速率限制、调试开关等，一般无需修改） |
 
-- **Gemini** — `GEMINI_API_KEY`
-- **QQ 推送通道** — `ENABLE_NAPCAT_QQ`、`ENABLE_QQ_OFFICIAL_BOT`、`QQ_BOT_API`
-- **TG Bot** — `ENABLE_TG_BOT`、`TG_BOT_TOKEN`
-- **QQ 官方 Bot** — `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}`
-- **Bilibili** — `BILIBILI_FULL_COOKIE`、`BILIBILI_BILI_JCT`，成员专属 Cookie 需在 `config.json` 的成员项中配置 `bilibili_cookie` 对应的 `$ENV` 占位符
-- **账号凭证** — `ACCOUNT_{NOGIZAKA_MAIN,NOGIZAKA_SHARED,HINATA_SHARED,YODEL}_{TOKEN,COOKIE}`
-- **移动端凭证** — `NOGIZAKA_REFRESH_TOKEN`、`HINATAZAKA_REFRESH_TOKEN`（配合 `auth_method: "mobile"` 使用）
-- **健康追踪** — `health_summary_interval`（默认 10 轮）、`health_token_warn_seconds`（默认 600s）、`alert_cooldown_seconds`（默认 3600s，防止告警刷屏）
+加载顺序：内置默认值 → `config.json` 覆盖 → `.env` 补充密钥。账号凭证通过命名约定自动从 `.env` 匹配（`foo_bar` → `FOO_BAR_TOKEN` / `FOO_BAR_COOKIE`），无需在 config.json 中写 `$ENV:VAR` 占位符。
+
+- `health_summary_interval` — 默认 10 轮输出一次状态摘要
+- `alert_cooldown` — 默认 3600s，防止 Token 告警刷屏
 
 ## License
 
