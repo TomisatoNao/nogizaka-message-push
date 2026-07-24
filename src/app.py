@@ -239,18 +239,17 @@ async def main() -> None:
     # 1. 基础设施
     init_loggers()
     load_all_accounts()
+    health.initialize(
+        summary_interval=cfg.HEALTH_SUMMARY_INTERVAL,
+        error_buffer=cfg.HEALTH_ERROR_BUFFER,
+        token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
+    )
     await _init_mobile_accounts()
 
     # 2. 在事件循环内创建需要 asyncio 的锁（translator / bilibili / tgbot）
     translator.initialize()
     bilibili.initialize()
     tgbot.initialize()
-
-    health.initialize(
-        summary_interval=cfg.HEALTH_SUMMARY_INTERVAL,
-        error_buffer=cfg.HEALTH_ERROR_BUFFER,
-        token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
-    )
 
     # 3. 创建共享 HTTP 客户端
     http_client = httpx.AsyncClient(
