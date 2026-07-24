@@ -1,11 +1,13 @@
 # ============================================================
-# config.py — 配置 facade：加载 config.json → 校验 → 暴露变量
+# config.py — 配置 facade：三层加载（内置默认 → config.json → .env）
 # ============================================================
 # 所有现有 import（from config.config import X）无需任何修改。
-# 敏感值在 config.json 中用 $ENV:VAR_NAME 占位符，启动时替换。
+# 敏感值不再使用 $ENV:VAR 占位符 — 账号凭证按命名约定自动从 .env 匹配。
 # ============================================================
+import copy as _copy
 import json as _json
 import os as _os
+import re as _re
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -20,6 +22,64 @@ except ImportError:
 _BASE_DIR = _Path(__file__).resolve().parent.parent
 _CONFIG_PATH = _Path(__file__).resolve().parent / "config.json"
 _SCHEMA_PATH = _Path(__file__).resolve().parent / "config.schema.json"
+
+
+# ── 内置默认值（config.json 可覆盖，.env 可覆盖布尔开关）─────────
+_DEFAULTS: dict = {
+    # QQ 官方 Bot
+    "qq_official_token_url":    "https://bots.qq.com/app/getAppAccessToken",
+    "qq_official_api_base":     "https://api.sgroup.qq.com",
+    "qq_official_min_interval": 1.2,
+    "qq_official_timeout":      15,
+    "qq_official_media_max_bytes": 26214400,
+    "qq_official_bots":         [],
+    # Gemini
+    "gemini_api_key":           "",
+    "gemini_models": [
+        {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",       "rpm": 10},
+        {"name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",       "rpm": 10},
+        {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",  "rpm": 15},
+        {"name": "gemini-3.1-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",  "rpm": 15},
+    ],
+    "gemini_min_interval":      7.0,
+    "translate_max_length":     2500,
+    "translate_timeout":        30,
+    # B站
+    "bilibili_post_api":        "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create",
+    "bilibili_min_interval":    3.0,
+    # 文件路径
+    "cred_dir":                 "data/web_credentials",
+    "time_record_dir":          "data/time_records",
+    "sent_ids_dir":             "data/sent_ids",
+    "error_log_file":           "logs/error_debug.log",
+    "response_log_file":        "logs/response_debug.log",
+    "sent_ids_max":             500,
+    # 并发 / 反爬
+    "http_semaphore_limit":     3,
+    "qq_send_interval":         1.5,
+    "token_refresh_before_seconds": 300,
+    "backtrack_hours":          24,
+    "day_start_hour":           7,
+    "night_start_hour":         0,
+    # 消息过滤
+    "skip_publish_types":       ["birthday"],
+    "media_type_map":           {"video": "video", "voice": "record", "image": "image", "picture": "image"},
+    # 调试
+    "debug_log_response":       True,
+    "debug_log_qq_payload":     False,
+    "qq_user_agent":            "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1",
+    # 健康追踪
+    "health_summary_interval":  10,
+    "health_error_buffer":      50,
+    "health_token_warn_seconds": 600,
+    # 告警
+    "alert_cooldown_seconds":   3600,
+    # 通道（默认值，config.json 的 channels 可覆盖）
+    "enable_napcat_qq":         True,
+    "enable_qq_official_bot":   False,
+    "enable_tg_bot":            False,
+    "tg_bot_token":             "",
+}
 
 
 # ================================================================
@@ -37,16 +97,120 @@ def _env_bool(key: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "y", "on"}
 
 
-def _resolve_env(value):
-    """递归遍历 dict/list/str，把 "$ENV:KEY" 替换为 os.getenv("KEY", "")。
-       非字符串值原样返回。"""
-    if isinstance(value, str) and value.startswith("$ENV:"):
-        return _os.getenv(value[5:], "")
-    if isinstance(value, dict):
-        return {k: _resolve_env(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_resolve_env(v) for v in value]
-    return value
+def _deep_merge(base: dict, override: dict) -> None:
+    """深度合并 override 到 base（in-place）。"""
+    for key, val in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(val, dict):
+            _deep_merge(base[key], val)
+        else:
+            base[key] = val
+
+
+def _normalize_config(raw: dict) -> dict:
+    """检测旧格式 config.json，转换为新格式内部表示。"""
+    is_old = "enable_napcat_qq" in raw or "monitor_list" in raw
+
+    if not is_old:
+        cfg = dict(raw)
+        channels = cfg.pop("channels", {})
+        cfg["enable_napcat_qq"]       = channels.get("napcat", True)
+        cfg["enable_qq_official_bot"] = channels.get("qq_official", False)
+        cfg["enable_tg_bot"]          = channels.get("tg", False)
+        cfg["tg_bot_token"]           = _env("TG_BOT_TOKEN", "")
+
+        if "napcat_api" in cfg:
+            cfg["qq_bot_api"] = cfg.pop("napcat_api")
+
+        if "sleep_hours" in cfg:
+            sh = cfg.pop("sleep_hours")
+            cfg["sleep_start_hour"] = sh[0]
+            cfg["sleep_end_hour"]   = sh[1]
+
+        if "alert_cooldown" in cfg:
+            cfg["alert_cooldown_seconds"] = cfg.pop("alert_cooldown")
+
+        if "translate" in cfg:
+            cfg["enable_translation"] = cfg.pop("translate")
+
+        if "monitor" in cfg:
+            accounts = cfg.get("accounts", {})
+            normalized = []
+            for m in cfg["monitor"]:
+                acc = accounts.get(m["account"], {})
+                normalized.append({
+                    "account_id":    m["account"],
+                    "group_type":    acc.get("group", ""),
+                    "m_id":          str(m["id"]),
+                    "m_name":        m["name"],
+                    "target_groups": m.get("groups", []),
+                    "tg_chat_id":    m.get("tg", ""),
+                    "post_to_bilibili": m.get("post_to_bilibili", False),
+                })
+            cfg["monitor_list"] = normalized
+            del cfg["monitor"]
+
+        return cfg
+
+    # 旧格式：打印迁移提示，原样返回
+    print(
+        "⚠️  检测到旧格式 config.json。\n"
+        "   系统将以兼容模式运行，建议迁移到新格式。\n"
+        "   新格式示例见: docs/superpowers/specs/2026-07-25-config-simplification-design.md"
+    )
+    return dict(raw)
+
+
+def _match_account_credentials(cfg: dict) -> dict:
+    """为每个账号自动从 .env 匹配凭证。"""
+    accounts = cfg.get("accounts", {})
+    for acc_id, acc in accounts.items():
+        prefix = acc_id.upper()
+        # 新命名: {PREFIX}_TOKEN, 旧命名兼容: ACCOUNT_{PREFIX}_TOKEN
+        token = _env(f"{prefix}_TOKEN", "") or _env(f"ACCOUNT_{prefix}_TOKEN", "")
+        cookie = _env(f"{prefix}_COOKIE", "") or _env(f"ACCOUNT_{prefix}_COOKIE", "")
+        refresh = _env(f"{prefix}_REFRESH_TOKEN", "") or _env(f"ACCOUNT_{prefix}_REFRESH_TOKEN", "")
+
+        if token:
+            acc["init_token"] = token
+        if cookie:
+            acc["init_cookie"] = cookie
+
+        if acc.get("auth") == "mobile":
+            if refresh:
+                acc["init_refresh_token"] = refresh
+            else:
+                global_refresh = _env("NOGIZAKA_REFRESH_TOKEN", "")
+                if global_refresh:
+                    acc["init_refresh_token"] = global_refresh
+
+        if "auth" in acc:
+            acc["auth_method"] = acc.pop("auth")
+        if "group" in acc:
+            acc["group_type"] = acc.pop("group")
+
+    return cfg
+
+
+def _build_qq_official_bots(cfg: dict) -> dict:
+    """从 .env 构建 QQ 官方 Bot 列表。"""
+    if not cfg.get("enable_qq_official_bot"):
+        cfg["qq_official_bots"] = []
+        return cfg
+
+    bots = []
+    for i in (1, 2):
+        app_id = _env(f"QQ_OFFICIAL_BOT{i}_APP_ID", "")
+        if not app_id:
+            continue
+        bots.append({
+            "name":          f"bot_{i}",
+            "app_id":        app_id,
+            "client_secret": _env(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET", ""),
+            "target_openid": _env(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID", ""),
+        })
+
+    cfg["qq_official_bots"] = bots
+    return cfg
 
 
 def _build_paths(cfg: dict) -> dict:
@@ -65,6 +229,8 @@ def _build_paths(cfg: dict) -> dict:
 _KEY_TO_VAR: dict[str, str] = {
     "enable_napcat_qq":             "ENABLE_NAPCAT_QQ",
     "enable_qq_official_bot":       "ENABLE_QQ_OFFICIAL_BOT",
+    "enable_tg_bot":               "ENABLE_TG_BOT",
+    "tg_bot_token":                "TG_BOT_TOKEN",
     "qq_bot_api":                   "QQ_BOT_API",
     "qq_user_agent":                "QQ_USER_AGENT",
     "qq_official_token_url":        "QQ_OFFICIAL_TOKEN_URL",
@@ -127,13 +293,19 @@ _TYPE_CONVERTERS = {
 
 
 # ================================================================
-# 核心加载
+# 核心加载：三层合并
+#   1. 内置默认值 (_DEFAULTS)
+#   2. config.json 覆盖
+#   3. .env 补充（密钥、凭证自动匹配）
 # ================================================================
 
 def _load_config() -> dict:
-    """读取 config.json → 校验 Schema → 解析 $ENV → 构建路径。
+    """三层加载配置：默认 → config.json → .env。
        任何失败都抛异常，由调用方决定是否 exit。"""
-    # 1. 读 JSONC
+    # 1. 从内置默认值开始（深拷贝，避免污染 _DEFAULTS）
+    cfg = _copy.deepcopy(_DEFAULTS)
+
+    # 2. 读 JSONC
     try:
         import json5 as _json5
     except ImportError:
@@ -150,7 +322,7 @@ def _load_config() -> dict:
     except Exception as e:
         _sys.exit(f"❌ config.json 解析失败: {e}")
 
-    # 2. 校验 Schema
+    # 3. 校验 Schema
     try:
         import jsonschema as _jsonschema
     except ImportError:
@@ -173,13 +345,31 @@ def _load_config() -> dict:
             f"   请对照 config.schema.json 修正后重试。"
         )
 
-    # 3. 解析 $ENV 占位符
-    resolved = _resolve_env(raw)
+    # 4. 规范化配置（检测旧格式 → 新格式内部表示）
+    normalized = _normalize_config(raw)
 
-    # 4. 构建绝对路径
-    resolved = _build_paths(resolved)
+    # 5. 用户配置覆盖默认值
+    _deep_merge(cfg, normalized)
 
-    return resolved
+    # 6. 构建绝对路径
+    cfg = _build_paths(cfg)
+
+    # 7. 从 .env 补充密钥（覆盖 config.json 中的 $ENV: 占位符）
+    cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
+    cfg["tg_bot_token"]   = _env("TG_BOT_TOKEN", "")
+
+    # B站：合并 Cookie，自动提取 bili_jct
+    cfg["bilibili_full_cookie"] = _env("BILIBILI_COOKIE", "")
+    _jct_match = _re.search(r"bili_jct=([^;]+)", cfg["bilibili_full_cookie"])
+    cfg["bilibili_bili_jct"] = _jct_match.group(1) if _jct_match else _env("BILIBILI_BILI_JCT", "")
+
+    # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
+    cfg = _match_account_credentials(cfg)
+
+    # 9. QQ 官方 Bot 构建（从 .env 读取）
+    cfg = _build_qq_official_bots(cfg)
+
+    return cfg
 
 
 def _mutate_container(old, new):

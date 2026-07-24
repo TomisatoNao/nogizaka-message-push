@@ -83,27 +83,12 @@ else:
     print("  当前 monitor_list 未配置成员专属 bilibili_cookie，跳过专项检查")
 print("✅ Test 4 通过\n")
 
-# Test 5: $ENV resolution
-print("=== Test 5: $ENV 占位符解析 ===")
-os.environ["TEST_DUMMY"] = "hello_world"
-from config.config import _resolve_env
-result = _resolve_env({"a": "$ENV:TEST_DUMMY", "b": [1, "$ENV:TEST_DUMMY"], "c": "plain"})
-assert result["a"] == "hello_world", f"$ENV resolution failed: {result['a']}"
-assert result["b"] == [1, "hello_world"], f"nested $ENV failed: {result['b']}"
-assert result["c"] == "plain", f"non-$ENV string modified: {result['c']}"
-del os.environ["TEST_DUMMY"]
-
-# 未设置的环境变量 → 空字符串
-result2 = _resolve_env({"x": "$ENV:NONEXISTENT_VAR_12345"})
-assert result2["x"] == "", f"unset env should be empty: {result2['x']!r}"
-print("✅ Test 5 通过\n")
-
-# Test 6: reload() works
-print("=== Test 6: 热重载 ===")
+# Test 5: reload() works
+print("=== Test 5: 热重载 ===")
 from config.config import reload, get
 ok = reload()
 assert ok, "reload() should succeed with unchanged config"
-print("✅ Test 6 通过\n")
+print("✅ Test 5 通过\n")
 
 print("=" * 50)
 print("🎉 全部测试通过！config.py facade 工作正常")
