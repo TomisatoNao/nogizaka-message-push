@@ -71,6 +71,8 @@
   button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.btn.danger { color: var(--err); }
   button.btn.danger:hover { background: var(--danger-soft); border-color: var(--err); }
+  button.btn.danger-solid { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+  button.btn.danger-solid:hover { border-color: var(--err); opacity: .88; }
   button.btn.small { padding: 4px 10px; font-size: 12.5px; }
   .cred { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
   .cred.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
@@ -342,6 +344,17 @@
   <span class="msg" id="saveMsg"></span>
 </footer>
 
+<!-- 通用确认 / 提示对话框（替代原生 confirm/alert） -->
+<dialog id="confirmDialog">
+  <h3 id="confirmTitle">确认操作</h3>
+  <div id="confirmBody" style="white-space:pre-wrap; font-size:13.5px; line-height:1.75;
+       max-width:min(440px, 88vw); color:var(--text)"></div>
+  <div class="actions">
+    <button class="btn" id="confirmNo">取消</button>
+    <button class="btn primary" id="confirmYes">确定</button>
+  </div>
+</dialog>
+
 <!-- 历史快照查看对话框 -->
 <dialog id="historyViewDialog">
   <h3 id="historyViewTitle">历史快照</h3>
@@ -447,6 +460,30 @@ function markDirty() {
   collectGeneral();
   setDirty(JSON.stringify(config) !== baseline);
 }
+
+// ── 页面内确认 / 提示（替代原生 confirm/alert）────
+let _confirmResolve = null;
+function _openConfirm(message, { title, yesText, danger, alertOnly } = {}) {
+  return new Promise((resolve) => {
+    _confirmResolve = resolve;
+    $("confirmTitle").textContent = title || (alertOnly ? "提示" : "确认操作");
+    $("confirmBody").textContent = message;
+    $("confirmNo").hidden = !!alertOnly;
+    const yes = $("confirmYes");
+    yes.textContent = yesText || (alertOnly ? "知道了" : "确定");
+    yes.className = "btn " + (danger ? "danger-solid" : "primary");
+    $("confirmDialog").showModal();
+    yes.focus();
+  });
+}
+function uiConfirm(message, opts) { return _openConfirm(message, opts || {}); }
+function uiAlert(message, title) { return _openConfirm(message, { title: title, alertOnly: true }); }
+function _settleConfirm(v) {
+  if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(v); }
+}
+$("confirmYes").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(true); });
+$("confirmNo").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(false); });
+$("confirmDialog").addEventListener("close", () => _settleConfirm(false));  // Esc 等价取消
 function msg(text, cls) { const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); }
 
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
@@ -499,7 +536,7 @@ async function saveConfig() {
     let rawParsed = null;
     try { rawParsed = JSON.stringify(JSON.parse($("rawJson").value)); } catch (e) { /* 解析失败也视为有改动 */ }
     if (rawParsed !== JSON.stringify(config) &&
-        !confirm("高级页的 JSON 有未「应用到表单」的修改，保存将忽略这些修改。继续？")) return;
+        !(await uiConfirm("高级页的 JSON 有未「应用到表单」的修改，保存将忽略这些修改。继续？"))) return;
   }
   try {
     msg("保存中…", "");
@@ -666,7 +703,7 @@ $("btnTestPush").addEventListener("click", () => {
   const enabled = [];
   if (ch.tg) enabled.push(["tg", "Telegram"]);
   if (ch.napcat) enabled.push(["napcat", "NapCat QQ"]);
-  if (!enabled.length) { alert("没有已启用的可测试通道（TG / NapCat）"); return; }
+  if (!enabled.length) { uiAlert("没有已启用的可测试通道（TG / NapCat），先在「基本设置」打开通道开关。"); return; }
   chipGroup("testPushChannel", enabled, enabled[0][0]);
   // chip 切换时联动预填目标
   $("testPushChannel").querySelectorAll(".chip").forEach((c, i) => {
@@ -679,7 +716,7 @@ $("testPushCancel").addEventListener("click", () => $("testPushDialog").close())
 $("testPushSend").addEventListener("click", async () => {
   const channel = $("testPushChannel").dataset.value;
   const target = $("testPushTarget").value.trim();
-  if (!target) { alert("请填写推送目标"); return; }
+  if (!target) { uiAlert("请填写推送目标"); return; }
   const btn = $("testPushSend");
   btn.disabled = true; btn.textContent = "发送中…";
   try {
@@ -827,8 +864,9 @@ function renderQqBots() {
       else tdState.innerHTML = '<span class="cred" style="color:var(--muted)">未保存</span>';
 
       const tdOps = document.createElement("td");
-      tdOps.appendChild(mkBtn("删除", () => {
-        if (!confirm("删除官方 Bot " + (bot.name || "#" + idx) + "？")) return;
+      tdOps.appendChild(mkBtn("删除", async () => {
+        if (!(await uiConfirm("删除官方 Bot " + (bot.name || "#" + idx) + "？",
+                              { yesText: "删除", danger: true }))) return;
         config.qq_official_bots.splice(idx, 1);
         markDirty(); renderQqBots();
       }, "danger"));
@@ -860,14 +898,14 @@ function renderQqBots() {
     }
   }
 }
-$("btnAddQqBot").addEventListener("click", () => {
+$("btnAddQqBot").addEventListener("click", async () => {
   config.qq_official_bots = config.qq_official_bots || [];
   if (config.qq_official_bots.length === 0) {
     const legacyUsed = qqBotStatus.some((s) => !s.declared && (s.app_id || s.client_secret || s.target_openid));
-    if (legacyUsed && !confirm(
+    if (legacyUsed && !(await uiConfirm(
       "检测到 .env 里已有编号槽位（QQ_OFFICIAL_BOT1_* 等）。\n" +
       "在这里添加 Bot 后将改为以本列表为准，.env 槽位不再自动扫描。\n" +
-      "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？")) return;
+      "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？"))) return;
   }
   config.qq_official_bots.push({ name: "qq_official_bot" + (config.qq_official_bots.length + 1) });
   markDirty(); renderQqBots();
@@ -986,8 +1024,8 @@ $("secretSave").addEventListener("click", async () => {
     if (v) values[input.dataset.env] = v;
     else if (f && f.required && !missing) missing = f.label;
   }
-  if (missing) { alert("请填写：" + missing); return; }
-  if (!Object.keys(values).length) { alert("没有填写任何值"); return; }
+  if (missing) { uiAlert("请填写：" + missing); return; }
+  if (!Object.keys(values).length) { uiAlert("没有填写任何值"); return; }
   const saveBtn = $("secretSave");
   saveBtn.disabled = true;
   const origText = saveBtn.textContent;
@@ -1019,7 +1057,7 @@ $("secretSave").addEventListener("click", async () => {
 
 function openAccountCredDialog(accId) {
   if (!credStatus[accId]) {
-    alert("请先「保存并热重载」把该账号写进 config.json，再填凭证。");
+    uiAlert("请先「保存并热重载」把该账号写进 config.json，再填凭证。");
     return;
   }
   const acc = (config.accounts || {})[accId] || {};
@@ -1080,15 +1118,18 @@ function renderAccounts() {
     const tdOps = document.createElement("td");
     const btnCred = mkBtn("填凭证", () => openAccountCredDialog(id));
     const btnEdit = mkBtn("编辑", () => openAccountDialog(id));
-    const btnDel = mkBtn("删除", () => {
+    const btnDel = mkBtn("删除", async () => {
       const used = (config.monitor || []).filter((m) => m.account === id);
       if (used.length > 0) {
         const names = used.map((m) => m.name || m.id).join("、");
-        if (!confirm("账号 " + id + " 下还有 " + used.length + " 个监控成员：\n" + names +
-                     "\n\n将连同这些成员一起删除，确定？")) return;
+        if (!(await uiConfirm(
+          "账号 " + id + " 下还有 " + used.length + " 个监控成员：\n" + names +
+          "\n\n将连同这些成员一起删除。",
+          { title: "删除账号", yesText: "连同成员一起删除", danger: true }))) return;
         config.monitor = config.monitor.filter((m) => m.account !== id);
       } else {
-        if (!confirm("删除账号 " + id + "？")) return;
+        if (!(await uiConfirm("删除账号 " + id + "？",
+                              { title: "删除账号", yesText: "删除", danger: true }))) return;
       }
       delete config.accounts[id];
       markDirty(); renderAccounts(); renderMembers();
@@ -1141,8 +1182,8 @@ $("btnAddAccount").addEventListener("click", () => openAccountDialog(null));
 $("accCancel").addEventListener("click", () => $("accountDialog").close());
 $("accSave").addEventListener("click", () => {
   const id = $("accId").value.trim();
-  if (!/^[a-z0-9_]+$/.test(id)) { alert("账号 ID 只能用小写字母、数字、下划线"); return; }
-  if (!editingAccountId && config.accounts && config.accounts[id]) { alert("账号 ID 已存在"); return; }
+  if (!/^[a-z0-9_]+$/.test(id)) { uiAlert("账号 ID 只能用小写字母、数字、下划线"); return; }
+  if (!editingAccountId && config.accounts && config.accounts[id]) { uiAlert("账号 ID 已存在"); return; }
   const acc = { group: $("accGroupChips").dataset.value };
   if ($("accAuthChips").dataset.value === "mobile") acc.auth = "mobile";
   if ($("accAppTag").value.trim()) acc.app_tag = $("accAppTag").value.trim();
@@ -1200,8 +1241,9 @@ function renderMembers() {
     }, "-1001234567890", "width:140px"));
 
     const tdOps = document.createElement("td");
-    tdOps.appendChild(mkBtn("删除", () => {
-      if (!confirm("删除成员 " + (m.name || m.id) + "？")) return;
+    tdOps.appendChild(mkBtn("删除", async () => {
+      if (!(await uiConfirm("删除成员 " + (m.name || m.id) + "？",
+                            { title: "删除成员", yesText: "删除", danger: true }))) return;
       config.monitor.splice(idx, 1);
       markDirty(); renderMembers();
     }, "danger"));
@@ -1213,7 +1255,7 @@ function renderMembers() {
 // ── 成员选择器 ───────────────────────────────────
 $("btnPickMember").addEventListener("click", () => {
   const ids = Object.keys(config.accounts || {});
-  if (!ids.length) { alert("先在账号池添加账号"); return; }
+  if (!ids.length) { uiAlert("先在账号池添加账号"); return; }
   chipGroup("pickAccountChips", ids.map((id) => [id, id]), ids[0]);
   $("memberPickList").innerHTML = "";
   $("memberPickHint").textContent = "选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。";
@@ -1379,7 +1421,8 @@ function stopLogPolling() {
 
 // ── 配置历史 ─────────────────────────────────────
 async function restoreHistory(name, when) {
-  if (!confirm("恢复到 " + when + " 的配置？当前版本会先快照，之后可再撤销。")) return;
+  if (!(await uiConfirm("恢复到 " + when + " 的配置？\n当前版本会先快照，之后可再撤销。",
+                        { title: "恢复历史版本", yesText: "恢复" }))) return;
   try {
     const res = await api("/api/config/restore", {
       method: "POST",
@@ -1469,13 +1512,17 @@ function renderAll() { renderGeneral(); renderAccounts(); renderMembers(); refre
 
 // ── 入口 ─────────────────────────────────────────
 $("btnSave").addEventListener("click", saveConfig);
-$("btnReloadFile").addEventListener("click", () => {
-  if (dirty && !confirm("有未保存的修改，确定放弃并重新读取？")) return;
+$("btnReloadFile").addEventListener("click", async () => {
+  if (dirty && !(await uiConfirm("有未保存的修改，确定放弃并重新读取？",
+                                 { yesText: "放弃修改", danger: true }))) return;
   loadConfig();
 });
 $("btnRestart").addEventListener("click", async () => {
-  if (dirty && !confirm("有未保存的修改，重启前要先保存吗？点「取消」回去保存，点「确定」放弃修改直接重启。")) return;
-  if (!confirm("确定重启主程序？推送轮询会中断几秒，重启后 .env 里的新凭证会生效。")) return;
+  if (dirty && !(await uiConfirm(
+    "有未保存的修改，重启将放弃它们。\n要先保存的话请点「取消」回去保存。",
+    { title: "重启主程序", yesText: "放弃修改并继续", danger: true }))) return;
+  if (!(await uiConfirm("确定重启主程序？\n推送轮询会中断几秒，重启后 .env 里的新凭证会生效。",
+                        { title: "重启主程序", yesText: "重启" }))) return;
   try {
     const data = await api("/api/restart", { method: "POST" });
     if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
