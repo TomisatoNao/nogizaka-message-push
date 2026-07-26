@@ -159,6 +159,26 @@ def main() -> None:
     assert webui._tail_file(tail_src / "missing", 3) == []
     print("✅ Test 2.6 通过\n")
 
+    # ── Test 2.7: health 快照 ────────────────────────
+    print("=== Test 2.7: health.snapshot ===")
+    from src import health
+    tracker = health.get_tracker()
+    tracker.record_channel("napcat", True)
+    tracker.record_channel("napcat", False, "HTTP 500")
+    tracker.record_token("nogizaka_main", 1800.0)
+    tracker.record_member_fetch("测试成员", False, health.ErrorTier.PERSISTENT, "401")
+    tracker.record_next_cycle(1234567890.0, "☀️ 日间巡查")
+    snap = tracker.snapshot()
+    assert snap["channels"]["napcat"]["success"] == 1 and snap["channels"]["napcat"]["total"] == 2
+    assert snap["channels"]["napcat"]["last_error"] == "HTTP 500"
+    assert snap["tokens"]["nogizaka_main"]["remaining"] == 1800.0
+    assert snap["members"][0]["name"] == "测试成员" and not snap["members"][0]["fetch_ok"]
+    assert snap["next_cycle"] == {"at_epoch": 1234567890.0, "tag": "☀️ 日间巡查"}
+    assert any(e["tier"] == "PERSISTENT" for e in snap["errors"]), f"应有 PERSISTENT 错误: {snap['errors']}"
+    import json as _json
+    _json.dumps(snap)   # 必须可 JSON 序列化
+    print("✅ Test 2.7 通过\n")
+
     # ── Test 3: HTTP 端点 ────────────────────────────
     print("=== Test 3: HTTP 端点 ===")
     tmpdir = tempfile.mkdtemp(prefix="webui_test_")
@@ -244,6 +264,21 @@ def main() -> None:
         assert code == 400 and any("未知账号" in e for e in data["errors"]), f"未知账号应 400: {data}"
         assert "GHOST_TOKEN" not in webui.ENV_PATH.read_text(encoding="utf-8"), "校验失败不应写 .env"
 
+        # GET /api/status：健康快照可通过 HTTP 获取
+        code, data = _http("GET", base + "/api/status")
+        assert code == 200 and data["ok"], f"状态接口应可用: {code}"
+        assert data["channels"]["napcat"]["total"] == 2, "应包含 Test 2.7 记录的通道数据"
+        assert not data["embedded"], "独立模式 embedded 应为 false"
+
+        # POST /api/poll：独立模式 → 400；注入回调后 → 触发
+        code, data = _http("POST", base + "/api/poll")
+        assert code == 400, "无巡查回调时应 400"
+        poll_calls = []
+        webui._on_poll_cb = lambda: poll_calls.append(1)
+        code, data = _http("POST", base + "/api/poll")
+        assert code == 200 and data["ok"] and poll_calls == [1], f"应触发巡查回调: {data}"
+        webui._on_poll_cb = None
+
         # POST /api/restart：独立模式（无回调）→ 400；注入回调后 → 触发重启
         code, data = _http("POST", base + "/api/restart")
         assert code == 400 and not data["ok"], "无重启回调时应 400"
@@ -286,6 +321,7 @@ def main() -> None:
         server.shutdown()
         server.server_close()
         webui._on_restart_cb = None
+        webui._on_poll_cb = None
         webui.CONFIG_PATH = orig_config_path
         webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger

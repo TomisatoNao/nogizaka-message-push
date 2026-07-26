@@ -112,15 +112,54 @@
 
 <main>
   <nav class="tabs">
-    <button data-tab="general" class="active">基本设置</button>
+    <button data-tab="status" class="active">状态</button>
+    <button data-tab="general">基本设置</button>
     <button data-tab="accounts">账号池</button>
     <button data-tab="members">监控成员</button>
     <button data-tab="logs">日志</button>
     <button data-tab="advanced">高级（JSON）</button>
   </nav>
 
+  <!-- ── 状态 ─────────────────────────────── -->
+  <section class="tab active" id="tab-status">
+    <div class="card">
+      <h2>巡查</h2>
+      <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+        <span id="stCycle">—</span>
+        <span id="stNext" style="color:var(--muted)">—</span>
+        <button class="btn" id="btnPollNow" hidden>⏩ 立即巡查</button>
+      </div>
+      <p class="hint" id="stHint"></p>
+    </div>
+    <div class="card">
+      <h2>账号 Token</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>账号</th><th>剩余时间</th><th>状态</th></tr></thead>
+        <tbody id="stTokens"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>推送通道（自上次状态摘要以来）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
+        <tbody id="stChannels"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>成员</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>成员</th><th>拉取</th><th>推送</th><th>最近错误</th></tr></thead>
+        <tbody id="stMembers"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>近期错误（最多 20 条）</h2>
+      <div id="stErrors" class="empty">（无）</div>
+    </div>
+  </section>
+
   <!-- ── 基本设置 ─────────────────────────────── -->
-  <section class="tab active" id="tab-general">
+  <section class="tab" id="tab-general">
     <div class="card">
       <h2>推送通道</h2>
       <div class="grid" id="channelSwitches"></div>
@@ -339,6 +378,7 @@ async function loadConfig() {
     qqBotStatus = data.qq_bot_status || [];
     envStatus = data.env_status || {};
     $("btnRestart").hidden = !data.can_restart;
+    $("btnPollNow").hidden = !data.can_poll;
     setDirty(false);
     renderAll();
     msg("已载入 " + data.config_path, "ok");
@@ -384,7 +424,117 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
     document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
     if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
+    if (btn.dataset.tab === "status") startStatusPolling(); else stopStatusPolling();
   });
+});
+
+// ── 状态页 ───────────────────────────────────────
+let statusTimer = null, countdownTimer = null;
+let stNextCycle = null, stClockDelta = 0;
+
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h > 0) return h + "h " + m + "m";
+  if (m > 0) return m + "m " + s + "s";
+  return s + "s";
+}
+
+async function fetchStatus() {
+  if (document.hidden) return;
+  let data;
+  try { data = await api("/api/status"); } catch (e) { return; }
+  if (!data.ok) return;
+  stClockDelta = data.now_epoch - Date.now() / 1000;
+  stNextCycle = data.next_cycle;
+  $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
+  $("stHint").textContent = data.embedded ? "" :
+    "独立模式：主程序未在本进程运行，以下仅为可见信息；Token 剩余时间不可用。";
+  updateCountdown();
+
+  const okBadge = (v, okText, badText) => v
+    ? '<span class="cred ok">' + okText + "</span>"
+    : '<span class="cred miss">' + badText + "</span>";
+
+  const tokens = $("stTokens");
+  tokens.innerHTML = "";
+  const names = Object.keys(data.tokens || {});
+  if (!names.length) tokens.innerHTML = '<tr><td colspan="3" class="empty">（无数据）</td></tr>';
+  for (const acc of names) {
+    const t = data.tokens[acc];
+    let badge;
+    if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效</span>';
+    else if (t.remaining < (data.token_warn_seconds || 600)) badge = '<span class="cred miss">⚠️ 即将过期</span>';
+    else badge = '<span class="cred ok">✓ 正常</span>';
+    tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
+      (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
+  }
+
+  const channels = $("stChannels");
+  channels.innerHTML = "";
+  const chNames = Object.keys(data.channels || {});
+  if (!chNames.length) channels.innerHTML = '<tr><td colspan="4" class="empty">（本周期还没有发送记录）</td></tr>';
+  for (const name of chNames) {
+    const c = data.channels[name];
+    channels.innerHTML += "<tr><td><b>" + esc(name) + "</b></td><td>" + c.success + " / " + c.total +
+      "</td><td>" + okBadge(c.healthy, "✓ 正常", "⚠️ 有失败") +
+      "</td><td>" + esc(c.last_error || "—") + "</td></tr>";
+  }
+
+  const members = $("stMembers");
+  members.innerHTML = "";
+  if (!(data.members || []).length) members.innerHTML = '<tr><td colspan="4" class="empty">（无数据）</td></tr>';
+  for (const m of data.members || []) {
+    members.innerHTML += "<tr><td><b>" + esc(m.name) + "</b></td>" +
+      "<td>" + okBadge(m.fetch_ok, "✓", "✗") + "</td>" +
+      "<td>" + okBadge(m.push_ok, "✓", "✗") + "</td>" +
+      "<td>" + esc((m.last_error || "—").slice(0, 120)) + "</td></tr>";
+  }
+
+  const errBox = $("stErrors");
+  if (!(data.errors || []).length) {
+    errBox.className = "empty";
+    errBox.textContent = "（无）";
+  } else {
+    errBox.className = "";
+    errBox.innerHTML = "";
+    for (const e of data.errors.slice().reverse()) {
+      const div = document.createElement("div");
+      div.style.cssText = "padding:3px 0; font-size:13px;" +
+        (e.tier === "PERSISTENT" ? "color:var(--err)" : "color:var(--muted)");
+      div.textContent = "[" + (e.tier === "PERSISTENT" ? "需处理" : "临时") + "] " + e.msg +
+        "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + "）";
+      errBox.appendChild(div);
+    }
+  }
+}
+
+function updateCountdown() {
+  if (!stNextCycle) { $("stNext").textContent = ""; return; }
+  const remain = stNextCycle.at_epoch - Date.now() / 1000 - stClockDelta;
+  $("stNext").textContent = (stNextCycle.tag || "") + " · 下次巡查: " +
+    (remain > 0 ? fmtDur(remain) + " 后" : "即将开始…");
+}
+
+function startStatusPolling() {
+  fetchStatus();
+  if (statusTimer === null) statusTimer = setInterval(fetchStatus, 3000);
+  if (countdownTimer === null) countdownTimer = setInterval(updateCountdown, 1000);
+}
+function stopStatusPolling() {
+  if (statusTimer !== null) { clearInterval(statusTimer); statusTimer = null; }
+  if (countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
+}
+
+$("btnPollNow").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/poll", { method: "POST" });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
+    msg("⏩ 已触发巡查，稍候查看日志 / 状态", "ok");
+    setTimeout(fetchStatus, 2000);
+  } catch (e) {
+    msg("触发失败：" + e.message, "err");
+  }
 });
 
 // ── 基本设置 ─────────────────────────────────────
@@ -934,6 +1084,7 @@ $("btnRestart").addEventListener("click", async () => {
   msg("⚠️ 等待超时（60s）：请到终端检查主程序是否成功重启", "err");
 });
 loadConfig();
+startStatusPolling();   // 状态页是默认标签页
 </script>
 </body>
 </html>

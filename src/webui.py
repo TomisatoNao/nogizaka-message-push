@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import threading
+import time as _time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -37,6 +38,9 @@ _on_reload_cb = None
 
 # 重启回调（由主程序注入；触发优雅停机 + 进程自替换。独立模式下为 None）
 _on_restart_cb = None
+
+# 立即巡查回调（由主程序注入；唤醒主循环跳过等待。独立模式下为 None）
+_on_poll_cb = None
 
 # 串行化所有写操作（config.json / .env 都是 read-modify-write，
 # ThreadingHTTPServer 的并发请求不加锁会互相丢更新）
@@ -471,6 +475,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "config_path": str(CONFIG_PATH),
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
                 "can_restart": _on_restart_cb is not None,
+                "can_poll": _on_poll_cb is not None,
             })
             return
 
@@ -480,7 +485,36 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_logs()
             return
 
+        if path == "/api/status":
+            if not self._check_auth():
+                return
+            self._handle_status()
+            return
+
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _handle_status(self) -> None:
+        """运行状态快照：健康追踪数据 + 各账号实时 Token 剩余时间。"""
+        from src.health import get_tracker
+        snap = get_tracker().snapshot()
+
+        # Token 实时剩余：health 里的值只在续期时点更新，这里现算最新值。
+        # 仅在 credentials 模块已加载时计算（独立模式不引入副作用）。
+        creds_mod = sys.modules.get("config.credentials")
+        if creds_mod is not None:
+            import config.config as cfg
+            live = {}
+            for acc_id in cfg.ACCOUNTS:
+                remaining = creds_mod.get_token_remaining_seconds(acc_id)
+                if remaining is not None:
+                    live[acc_id] = {"remaining": max(0.0, remaining), "healthy": remaining > 0}
+            if live:
+                snap["tokens"] = live
+
+        snap["ok"] = True
+        snap["now_epoch"] = _time.time()
+        snap["embedded"] = _on_poll_cb is not None
+        self._send_json(snap)
 
     def _handle_logs(self) -> None:
         """查看日志。source=live（内存环，增量）| error | response（文件尾部）。
@@ -551,6 +585,19 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/secrets":
             self._handle_secrets()
+            return
+        if path == "/api/poll":
+            if not self._check_auth():
+                return
+            if _on_poll_cb is None:
+                self._send_json({"ok": False, "errors": ["独立模式下无法触发巡查（主程序未运行在本进程）"]}, 400)
+                return
+            try:
+                _on_poll_cb()
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"触发巡查失败: {e}"]}, 500)
+                return
+            self._send_json({"ok": True})
             return
         if path == "/api/restart":
             if not self._check_auth():
@@ -624,17 +671,19 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def start_webui(host: str | None = None, port: int | None = None,
-                on_reload=None, on_restart=None):
+                on_reload=None, on_restart=None, on_poll=None):
     """启动网页管理端（后台守护线程）。
 
     参数缺省时从 config.config 读取 WEB_ADMIN_HOST / WEB_ADMIN_PORT。
-    on_restart: 主程序注入的重启回调（触发优雅停机 + 进程自替换），
-                不传则网页上不显示重启按钮（独立模式）。
+    on_restart: 主程序注入的重启回调（触发优雅停机 + 进程自替换）。
+    on_poll:    主程序注入的立即巡查回调（唤醒主循环）。
+    二者不传则网页上不显示对应按钮（独立模式）。
     返回 ThreadingHTTPServer 实例（用于 shutdown() 清理），失败时返回 None。
     """
-    global _on_reload_cb, _on_restart_cb, _enforce_host_check
+    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _enforce_host_check
     _on_reload_cb = on_reload
     _on_restart_cb = on_restart
+    _on_poll_cb = on_poll
 
     if host is None or port is None:
         import config.config as cfg

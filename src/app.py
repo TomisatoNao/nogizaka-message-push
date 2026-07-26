@@ -6,6 +6,7 @@ import os
 import random
 import signal
 import sys
+import time
 import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -229,10 +230,20 @@ async def _run_cycle() -> None:
         log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
 
 
-async def _run_loop(http_client: httpx.AsyncClient) -> None:
+async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
+    """等待 timeout 秒；期间事件被置位（网页「立即巡查」）则提前返回 True。"""
+    try:
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+        event.clear()
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event) -> None:
     while True:
         try:
-            # ── 改进 3：休眠时段暂停轮询 ──
+            # ── 改进 3：休眠时段暂停轮询（手动触发可唤醒）──
             sleep_sec = _calc_sleep_seconds()
             if sleep_sec > 0:
                 jst = _get_jst_now()
@@ -241,8 +252,10 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
                     f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
                     is_debug=True,
                 )
-                await asyncio.sleep(sleep_sec)
-                continue
+                health.get_tracker().record_next_cycle(time.time() + sleep_sec, "😴 休眠")
+                if not await _wait_or_trigger(poll_event, sleep_sec):
+                    continue
+                log_all("⏩ 休眠时段手动触发巡查", is_debug=True)
 
             await _run_cycle()
         except asyncio.CancelledError:
@@ -257,8 +270,10 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
             log_all(summary)
 
         wait_time, tag = _next_interval()
+        health.get_tracker().record_next_cycle(time.time() + wait_time, tag)
         log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
-        await asyncio.sleep(wait_time)
+        if await _wait_or_trigger(poll_event, wait_time):
+            log_all("⏩ 手动触发巡查", is_debug=True)
 
 
 def _install_stop_handlers(stop_event: asyncio.Event) -> None:
@@ -363,19 +378,24 @@ async def main() -> None:
     #    重启回调运行在 HTTP 处理线程：走优雅停机流程，清理完毕后 execv 自替换
     loop = asyncio.get_running_loop()
     restart_requested = False
+    poll_event = asyncio.Event()
 
     def _request_restart() -> None:
         nonlocal restart_requested
         restart_requested = True
         loop.call_soon_threadsafe(stop_event.set)
 
+    def _request_poll() -> None:
+        loop.call_soon_threadsafe(poll_event.set)
+
     webui_server = (
-        start_webui(on_reload=_on_config_reload, on_restart=_request_restart)
+        start_webui(on_reload=_on_config_reload, on_restart=_request_restart,
+                    on_poll=_request_poll)
         if cfg.WEB_ADMIN_ENABLED else None
     )
 
     try:
-        loop_task = asyncio.create_task(_run_loop(http_client))
+        loop_task = asyncio.create_task(_run_loop(http_client, poll_event))
         stop_task = asyncio.create_task(stop_event.wait())
         done, _ = await asyncio.wait(
             {loop_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,

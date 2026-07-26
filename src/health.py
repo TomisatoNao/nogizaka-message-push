@@ -65,6 +65,7 @@ class HealthTracker:
         self._summary_interval: int = 10
         self._error_buffer: int = 50
         self._token_warn_seconds: int = 600
+        self._next_cycle: dict | None = None   # {"at_epoch": float, "tag": str}
 
     def initialize(self, summary_interval: int = 10, error_buffer: int = 50,
                    token_warn_seconds: int = 600) -> None:
@@ -114,6 +115,39 @@ class HealthTracker:
         while len(self._errors) >= self._error_buffer:
             self._errors.popleft()
         self._errors.append((msg, tier, self._cycle_count))
+
+    def record_next_cycle(self, at_epoch: float, tag: str) -> None:
+        """记录下一轮巡查的预计时间（供网页状态页显示倒计时）。"""
+        self._next_cycle = {"at_epoch": at_epoch, "tag": tag}
+
+    # ── 结构化快照（网页状态页用）───────────────────────
+
+    def snapshot(self) -> dict:
+        """当前健康状态的 JSON 可序列化快照。"""
+        return {
+            "cycle_count": self._cycle_count,
+            "uptime_seconds": (time.monotonic() - self._start_time) if self._start_time else 0,
+            "next_cycle": self._next_cycle,
+            "token_warn_seconds": self._token_warn_seconds,
+            "channels": {
+                name: {"success": s.success, "total": s.total,
+                       "healthy": s.is_healthy, "last_error": s.last_error}
+                for name, s in self._channels.items()
+            },
+            "tokens": {
+                acc: {"remaining": info.remaining, "healthy": info.is_healthy}
+                for acc, info in self._tokens.items()
+            },
+            "members": [
+                {"name": m.name, "fetch_ok": m.fetch_ok, "push_ok": m.push_ok,
+                 "last_error": m.last_error}
+                for m in self._members.values()
+            ],
+            "errors": [
+                {"msg": msg, "tier": tier.name, "cycles_ago": self._cycle_count - cyc}
+                for msg, tier, cyc in list(self._errors)[-20:]
+            ],
+        }
 
     # ── 摘要生成 ──────────────────────────────────────
 

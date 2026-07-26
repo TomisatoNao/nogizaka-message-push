@@ -1,9 +1,9 @@
 {
   // ── 推送通道 ──
   "channels": {
-    "napcat": true,
-    "tg": true,
-    "qq_official": true
+    "napcat": false,
+    "tg": false,
+    "qq_official": false
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
   "qq_official_bots": [],
