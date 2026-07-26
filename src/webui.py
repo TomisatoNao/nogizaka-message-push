@@ -360,6 +360,24 @@ def _env_status() -> dict:
     }
 
 
+_TAIL_READ_BYTES = 262144   # 只读文件末尾 256KB，滚动日志单文件 10MB，够看不卡
+
+
+def _tail_file(path: Path, max_lines: int) -> list[str]:
+    """读取文件末尾 max_lines 行（长行截断到 2000 字符）。"""
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - _TAIL_READ_BYTES))
+        data = f.read()
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if size > _TAIL_READ_BYTES and lines:
+        lines = lines[1:]   # 首行可能被截断，丢弃
+    return [ln[:2000] for ln in lines[-max_lines:]]
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "SakamichiWebUI/1.0"
 
@@ -456,7 +474,44 @@ class _Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == "/api/logs":
+            if not self._check_auth():
+                return
+            self._handle_logs()
+            return
+
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _handle_logs(self) -> None:
+        """查看日志。source=live（内存环，增量）| error | response（文件尾部）。
+           所有日志在写入时已经过 redact_sensitive 脱敏。"""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.partition("?")[2])
+
+        def qs_int(key: str, default: int) -> int:
+            try:
+                return int((qs.get(key) or [str(default)])[0])
+            except ValueError:
+                return default
+
+        source = (qs.get("source") or ["live"])[0]
+        if source == "live":
+            from src.logger import get_recent
+            entries, seq = get_recent(qs_int("after", 0))
+            self._send_json({"ok": True, "source": "live", "entries": entries, "seq": seq})
+            return
+        if source in ("error", "response"):
+            import config.config as cfg
+            fp = Path(cfg.ERROR_LOG_FILE if source == "error" else cfg.RESPONSE_LOG_FILE)
+            tail = max(1, min(qs_int("tail", 200), 1000))
+            try:
+                lines = _tail_file(fp, tail)
+            except OSError as e:
+                self._send_json({"ok": False, "errors": [f"读取日志文件失败: {e}"]}, 500)
+                return
+            self._send_json({"ok": True, "source": source, "lines": lines, "file": str(fp)})
+            return
+        self._send_json({"ok": False, "errors": [f"未知日志源: {source!r}"]}, 400)
 
     def do_PUT(self) -> None:  # noqa: N802
         if not self._check_host():

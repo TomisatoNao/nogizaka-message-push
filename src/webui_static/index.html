@@ -89,6 +89,12 @@
   .chip { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
           background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
   .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  #logView { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+             padding: 10px 12px; height: 62vh; overflow-y: auto;
+             font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.55; }
+  #logView div { white-space: pre-wrap; word-break: break-all; }
+  #logView .lg-ERROR { color: var(--err); }
+  #logView .lg-DEBUG { color: var(--muted); }
   dialog .grid { grid-template-columns: 1fr 1fr; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
@@ -109,6 +115,7 @@
     <button data-tab="general" class="active">基本设置</button>
     <button data-tab="accounts">账号池</button>
     <button data-tab="members">监控成员</button>
+    <button data-tab="logs">日志</button>
     <button data-tab="advanced">高级（JSON）</button>
   </nav>
 
@@ -217,6 +224,19 @@
       <div class="empty" id="memberEmpty" hidden>还没有监控成员。</div>
       <div style="margin-top:12px"><button class="btn" id="btnAddMember">＋ 添加成员</button></div>
       <p class="hint">成员 ID 可用 <code>python tools/list_members.py &lt;账号ID&gt;</code> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。</p>
+    </div>
+  </section>
+
+  <!-- ── 日志 ─────────────────────────────── -->
+  <section class="tab" id="tab-logs">
+    <div class="card">
+      <h2>运行日志（已自动脱敏；打开本页时每 2 秒刷新）</h2>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
+        <div class="chips" id="logSourceChips"></div>
+        <label class="switch" style="margin-left:auto"><input type="checkbox" id="logFollow" checked><span class="track"></span>自动滚动到底部</label>
+      </div>
+      <div id="logView"></div>
+      <p class="hint" id="logHint"></p>
     </div>
   </section>
 
@@ -360,11 +380,10 @@ async function saveConfig() {
 // ── Tab 切换 ─────────────────────────────────────
 document.querySelectorAll("nav.tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (btn.dataset.tab !== "advanced") {
-      // 离开高级页前不自动应用；进入前从表单刷新
-    } else { collectGeneral(); refreshRawJson(); }
+    if (btn.dataset.tab === "advanced") { collectGeneral(); refreshRawJson(); }
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
     document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
+    if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
   });
 });
 
@@ -766,6 +785,82 @@ $("btnAddMember").addEventListener("click", () => {
   config.monitor.push({ id: "", name: "", account: firstAccount, groups: [] });
   setDirty(true); renderMembers();
 });
+
+// ── 日志 ─────────────────────────────────────────
+const LOG_SOURCES = [["live", "实时"], ["error", "错误日志文件"], ["response", "响应日志文件"]];
+let logSource = "live";
+let logSeq = 0;
+let logTimer = null;
+
+function setLogSource(src) {
+  logSource = src;
+  logSeq = 0;
+  $("logView").innerHTML = "";
+  $("logSourceChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.src === src));
+  fetchLogs();
+}
+
+function initLogChips() {
+  const box = $("logSourceChips");
+  if (box.childElementCount) return;
+  for (const [src, label] of LOG_SOURCES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (src === logSource ? " active" : "");
+    b.dataset.src = src;
+    b.textContent = label;
+    b.addEventListener("click", () => setLogSource(src));
+    box.appendChild(b);
+  }
+}
+
+async function fetchLogs() {
+  if (document.hidden) return;   // 页面在后台时不白拉
+  let data;
+  try {
+    const url = logSource === "live"
+      ? "/api/logs?source=live&after=" + logSeq
+      : "/api/logs?source=" + logSource + "&tail=300";
+    data = await api(url);
+  } catch (e) { return; }        // 主程序重启间隙等场景，静默跳过这轮
+  if (!data.ok) return;
+  const view = $("logView");
+  if (logSource === "live") {
+    if (logSeq === 0 && !data.entries.length) {
+      $("logHint").textContent = "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「错误日志文件」。）";
+    } else if (data.entries.length) {
+      $("logHint").textContent = "";
+    }
+    for (const e of data.entries) {
+      const div = document.createElement("div");
+      div.className = "lg-" + e.level;
+      div.textContent = e.ts + " [" + e.level + "] " + e.text;
+      view.appendChild(div);
+    }
+    while (view.childElementCount > 600) view.removeChild(view.firstChild);  // 防 DOM 无限膨胀
+    logSeq = data.seq;
+  } else {
+    $("logHint").textContent = data.file ? "文件: " + data.file + "（末尾 300 行）" : "";
+    view.innerHTML = "";
+    for (const line of data.lines) {
+      const div = document.createElement("div");
+      if (line.includes("ERROR")) div.className = "lg-ERROR";
+      div.textContent = line;
+      view.appendChild(div);
+    }
+    if (!data.lines.length) $("logHint").textContent = "（日志文件为空或不存在）";
+  }
+  if ($("logFollow").checked) view.scrollTop = view.scrollHeight;
+}
+
+function startLogPolling() {
+  initLogChips();
+  fetchLogs();
+  if (logTimer === null) logTimer = setInterval(fetchLogs, 2000);
+}
+function stopLogPolling() {
+  if (logTimer !== null) { clearInterval(logTimer); logTimer = null; }
+}
 
 // ── 高级 JSON ────────────────────────────────────
 function refreshRawJson() { $("rawJson").value = JSON.stringify(config, null, 2); }

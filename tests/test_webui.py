@@ -140,6 +140,25 @@ def main() -> None:
     assert parsed["BAR_COOKIE"] == "session=a; b=c", "dotenv 应能解析写入的值"
     print("✅ Test 2.5 通过\n")
 
+    # ── Test 2.6: 内存日志环 + 文件尾读取 ────────────
+    print("=== Test 2.6: 日志查看 ===")
+    from src.logger import get_recent, log_all
+    _, seq0 = get_recent()
+    log_all("webui 日志测试普通行")
+    log_all("webui 日志测试错误行", is_error=True)
+    log_all("webui 日志测试调试行", is_debug=True)
+    entries, seq = get_recent(seq0)
+    assert [e["level"] for e in entries] == ["INFO", "ERROR", "DEBUG"], f"级别应齐全: {entries}"
+    assert seq == seq0 + 3 and entries[0]["text"] == "webui 日志测试普通行"
+    inc, _ = get_recent(seq - 1)
+    assert len(inc) == 1 and inc[0]["level"] == "DEBUG", "增量拉取应只返回新条目"
+
+    tail_src = Path(tempfile.mkdtemp(prefix="webui_log_")) / "t.log"
+    tail_src.write_text("\n".join(f"line{i}" for i in range(50)) + "\n", encoding="utf-8")
+    assert webui._tail_file(tail_src, 3) == ["line47", "line48", "line49"]
+    assert webui._tail_file(tail_src / "missing", 3) == []
+    print("✅ Test 2.6 通过\n")
+
     # ── Test 3: HTTP 端点 ────────────────────────────
     print("=== Test 3: HTTP 端点 ===")
     tmpdir = tempfile.mkdtemp(prefix="webui_test_")
@@ -234,6 +253,18 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config")
         assert data["can_restart"], "注入回调后 can_restart 应为 true"
         webui._on_restart_cb = None
+
+        # GET /api/logs：实时环 / 文件尾 / 非法源
+        code, data = _http("GET", base + "/api/logs?source=live")
+        assert code == 200 and data["ok"] and data["seq"] >= 3, f"实时日志应可用: {code}"
+        assert any("webui 日志测试错误行" in e["text"] for e in data["entries"]), "应包含刚写入的日志"
+        after = data["seq"]
+        code, data = _http("GET", base + f"/api/logs?source=live&after={after}")
+        assert code == 200 and data["entries"] == [], "after=最大 seq 时应返回空增量"
+        code, data = _http("GET", base + "/api/logs?source=error&tail=5")
+        assert code == 200 and data["ok"] and isinstance(data["lines"], list), "错误日志文件源应可用"
+        code, data = _http("GET", base + "/api/logs?source=bogus")
+        assert code == 400, "非法日志源应 400"
 
         # Host 校验：伪造外部域名的 Host 头 → 403（DNS rebinding 防护）
         code, data = _http("GET", base + "/api/config", headers={"Host": "evil.example.com"})
