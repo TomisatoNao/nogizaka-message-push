@@ -239,6 +239,19 @@
       <b>目标 OpenID 有两种拿法</b>：已知的话直接填；不知道就点「🎯 自动获取」——
       系统会连上 Bot 网关等待，让目标用户给 Bot 发一条私聊消息即可自动捕获并回填。
       官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用 Bot，所有成员都有推送目标。</p>
+      <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border-soft)">
+        <h3 style="margin:0 0 12px; font-size:14.5px">Bot 指令响应</h3>
+        <div class="grid">
+          <label class="switch"><input type="checkbox" id="cmdOn"><span class="track"></span>允许私聊 Bot 查询信息</label>
+          <label class="field">授权 OpenID（逗号分隔）
+            <input type="text" id="cmdAllow" placeholder="留空＝仅上表已填的目标 OpenID">
+          </label>
+        </div>
+        <p class="hint">开启后，白名单用户私聊 Bot 发 <code>/help</code> 即可看到全部指令：
+        <code>/status</code> 运行状态、<code>/members</code> 监控成员、<code>/latest [成员] [条数]</code> 最近消息、
+        <code>/search 关键词</code> 归档搜索、<code>/stats</code> 归档统计。
+        指令全部只读，<b>无法改配置、无法重启</b>；白名单之外的人发什么都不会有响应。修改后点右上角「⟳ 重启主程序」生效。</p>
+      </div>
     </div>
     <div class="card">
       <h2>轮询节奏（秒 / JST 小时）</h2>
@@ -985,6 +998,9 @@ function renderGeneral() {
   const ds = config.daily_summary || {};
   $("summaryOn").checked = !!ds.enabled;
   $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
+  const qc = config.qq_commands || {};
+  $("cmdOn").checked = !!qc.enabled;
+  $("cmdAllow").value = (qc.allow_openids || []).join(", ");
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
@@ -1251,6 +1267,10 @@ function collectGeneral() {
   config.daily_summary = {
     enabled: $("summaryOn").checked,
     hour: Math.min(23, Math.max(0, num("summaryHour", 23))),
+  };
+  config.qq_commands = {
+    enabled: $("cmdOn").checked,
+    allow_openids: $("cmdAllow").value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
   };
 }
 document.querySelectorAll("#tab-general input").forEach(() => {});

@@ -44,3 +44,6 @@ jobs:
 
       - name: Auth test
         run: python tests/test_auth.py
+
+      - name: Bot commands test
+        run: python tests/test_qq_commands.py

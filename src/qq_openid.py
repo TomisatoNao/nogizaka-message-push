@@ -160,6 +160,88 @@ async def listen_once(app_id: str, client_secret: str,
             hb.cancel()
 
 
+async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
+    """长期监听 Bot 网关的私聊消息（指令功能用），断线自动重连。
+
+    on_message(text, sender_openid) -> str | None，返回非空则作为回复发送。
+    """
+    from src.logger import log_all
+    try:
+        import websockets
+    except ImportError:
+        log_all("⚠️ 缺少 websockets 依赖，官方 Bot 指令功能不可用", is_error=True)
+        return
+
+    backoff = 5
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                token = await get_access_token(client, app_id, client_secret)
+                gateway = await get_gateway_url(client, token)
+
+            seq_ref: dict = {"seq": None}
+            async with websockets.connect(gateway) as ws:
+                hello = json.loads(await ws.recv())
+                hb = asyncio.create_task(
+                    _heartbeat(ws, hello.get("d", {}).get("heartbeat_interval", 45000), seq_ref))
+                try:
+                    await ws.send(json.dumps({
+                        "op": 2,
+                        "d": {
+                            "token": f"QQBot {token}",
+                            "intents": GROUP_AND_C2C_EVENT_INTENT,
+                            "shard": [0, 1],
+                            "properties": {"$os": "linux", "$browser": "sakamichi",
+                                           "$device": "sakamichi"},
+                        },
+                    }))
+                    log_all("🤖 官方 Bot 指令监听已连接")
+                    backoff = 5
+                    while True:
+                        event = json.loads(await ws.recv())
+                        if event.get("s") is not None:
+                            seq_ref["seq"] = event["s"]
+                        if event.get("op") == 11 or event.get("t") != "C2C_MESSAGE_CREATE":
+                            continue
+                        data = event.get("d") or {}
+                        author = data.get("author") or {}
+                        sender = author.get("user_openid", "")
+                        reply = on_message(data.get("content", ""), sender)
+                        if reply:
+                            await _reply(data, sender, reply, app_id, client_secret)
+                finally:
+                    hb.cancel()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log_all(f"⚠️ 官方 Bot 指令监听断开（{type(e).__name__}: {e}），{backoff}s 后重连",
+                    is_error=True)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+
+
+async def _reply(data: dict, sender_openid: str, text: str,
+                 app_id: str, client_secret: str) -> None:
+    """回复用户私聊。带 msg_id 才算被动回复，不消耗主动推送额度。"""
+    from src.logger import log_all
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            token = await get_access_token(client, app_id, client_secret)
+            payload = {"content": text, "msg_type": 0}
+            if data.get("id"):
+                payload["msg_id"] = data["id"]
+            resp = await client.post(
+                f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{sender_openid}/messages",
+                headers={"Authorization": f"QQBot {token}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                log_all(f"⚠️ Bot 指令回复失败: HTTP {resp.status_code} {resp.text[:150]}",
+                        is_error=True)
+    except Exception as e:
+        log_all(f"⚠️ Bot 指令回复异常: {type(e).__name__}: {e}", is_error=True)
+
+
 async def _run_session(app_id: str, client_secret: str) -> None:
     from src.logger import log_all
     try:

@@ -97,6 +97,10 @@ _DEFAULTS: dict = {
     "auth_enabled":             False,
     "auth_archive_public":      False,   # true = 归档页无需登录即可访问
     "auth_session_hours":       12,
+    # 官方 Bot 指令（私聊 Bot 查状态/归档）；allow 为空则默认只允许各 Bot 的
+    # target_openid，即"只有你自己能用"
+    "qq_commands_enabled":      False,
+    "qq_commands_allow":        [],
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
     "enable_napcat_qq":         True,
@@ -177,6 +181,13 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["daily_summary_enabled"] = ds["enabled"]
             if "hour" in ds:
                 cfg["daily_summary_hour"] = ds["hour"]
+
+        if "qq_commands" in cfg:
+            qc = cfg.pop("qq_commands")
+            if "enabled" in qc:
+                cfg["qq_commands_enabled"] = qc["enabled"]
+            if "allow_openids" in qc:
+                cfg["qq_commands_allow"] = qc["allow_openids"]
 
         if "auth" in cfg:
             au = cfg.pop("auth")
@@ -338,6 +349,8 @@ _KEY_TO_VAR: dict[str, str] = {
     "archive_media":                "ARCHIVE_MEDIA",
     "daily_summary_enabled":        "DAILY_SUMMARY_ENABLED",
     "daily_summary_hour":           "DAILY_SUMMARY_HOUR",
+    "qq_commands_enabled":          "QQ_COMMANDS_ENABLED",
+    "qq_commands_allow":            "QQ_COMMANDS_ALLOW",
     "auth_enabled":                 "AUTH_ENABLED",
     "auth_archive_public":          "AUTH_ARCHIVE_PUBLIC",
     "auth_session_hours":           "AUTH_SESSION_HOURS",

@@ -6,7 +6,9 @@
     "qq_official": false
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
-  "qq_official_bots": [],
+  "qq_official_bots": [
+    {"name": "official_bot1", "app_id": "1905290933", "target_openid": "5CADF347E2C67F2CF0B207F84D239EF6"}
+  ],
 
   // ── 网页管理 ──
   "web_admin": {
@@ -26,6 +28,12 @@
   "daily_summary": {
     "enabled": true,
     "hour": 23
+  },
+
+  // ── Bot 指令 ──
+  "qq_commands": {
+    "enabled": true,
+    "allow_openids": []
   },
 
   // ── 账号系统 ──

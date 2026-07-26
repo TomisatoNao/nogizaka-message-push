@@ -205,11 +205,30 @@ Bot 数量不限。三步：
 
 > 旧配置兼容：`config.json` 未声明 `qq_official_bots` 时，自动扫描 `.env` 的 `QQ_OFFICIAL_BOT{1..20}_*` 编号槽位。
 
-### 3.7 验证推送是否正常
+### 3.7 用私聊指令查信息（可选）
+
+官方 Bot 除了推送，还能反过来回答你的提问。在「基本设置」→「QQ 官方 Bot」卡片底部打开「允许私聊 Bot 查询信息」，重启主程序后，私聊 Bot 发以下指令即可：
+
+| 指令 | 作用 |
+|---|---|
+| `/help` | 指令列表 |
+| `/status` | 巡查轮次、运行时长、各账号 Token 剩余、异常成员 |
+| `/members` | 监控成员及各自的推送目标 |
+| `/latest [成员] [条数]` | 最近消息（默认第一个成员、5 条） |
+| `/search 关键词` | 全归档搜索（原文和译文都搜），返回最近 5 条 |
+| `/stats` | 各成员归档条数与月份数 |
+
+**谁能用**：默认只有各 Bot 的目标 OpenID——也就是你自己。想放开给别人，在「授权 OpenID」里逗号分隔填写；**一旦填了，这份名单就完全取代默认值**。名单之外的人发什么都不会得到任何响应（日志里会记一条拒绝）。
+
+指令全部只读：查得到状态和归档，**改不了配置、重启不了程序、拿不到任何凭证**。聊天窗口不是可信入口，所以有副作用的操作一律不开放，要改配置请走管理端。
+
+回复走**被动消息**（带原消息 id），不消耗官方接口的主动推送额度；超过 900 字会截断。
+
+### 3.8 验证推送是否正常
 
 「状态」页 →「📨 测试推送」→ 选通道和目标 → 发送。会往目标发一条测试消息，用来确认群号 / chat_id 配置正确，不必等真实消息。
 
-### 3.8 立即巡查一次
+### 3.9 立即巡查一次
 
 「状态」页 →「⏩ 立即巡查」。跳过等待立刻跑一轮（休眠时段也能唤醒），按钮会等到这一轮真正跑完再给结果。适合刚改完凭证想立刻验证。
 
@@ -420,6 +439,7 @@ bash tools/install_systemd.sh --uninstall
 | `web_admin` | 管理端 `enabled` / `host` / `port` |
 | `archive` | 归档 `enabled` / `dir` / `media` |
 | `daily_summary` | 每日摘要 `enabled` / `hour`（JST） |
+| `qq_commands` | Bot 私聊指令 `enabled` / `allow_openids`（留空＝仅 Bot 的 `target_openid`） |
 | `auth` | 账号系统 `enabled` / `archive_public` / `session_hours` |
 | `accounts` | 账号池：`group`（团体）/ `auth`（web·mobile）/ `app_tag` / `api_base` / `web_origin` |
 | `monitor` | 成员列表：`id` / `name` / `account` / `groups` / `tg` |

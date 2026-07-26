@@ -125,6 +125,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 消息归档 ──",  ["archive"]),
     ("── 每日摘要 ──",  ["daily_summary"]),
+    ("── Bot 指令 ──",  ["qq_commands"]),
     ("── 账号系统 ──",  ["auth"]),
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
@@ -147,7 +148,7 @@ def _render_value(key: str, val) -> str:
     if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin", "archive", "daily_summary", "auth") \
+    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands") \
             and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"

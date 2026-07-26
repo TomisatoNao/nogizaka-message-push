@@ -48,6 +48,13 @@
         "hour":    { "type": "integer", "minimum": 0, "maximum": 23 }
       }
     },
+    "qq_commands": {
+      "type": "object",
+      "properties": {
+        "enabled":       { "type": "boolean", "default": false },
+        "allow_openids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "auth": {
       "type": "object",
       "properties": {

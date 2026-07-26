@@ -599,6 +599,26 @@ async def main() -> None:
         asyncio.create_task(_daily_summary_loop()) if cfg.DAILY_SUMMARY_ENABLED else None
     )
 
+    # 官方 Bot 指令监听（私聊 Bot 查状态 / 归档）。
+    # 不依赖 qq_official 推送通道：只想用 Bot 查信息、不想让它推消息也是合理配置，
+    # 监听只需要 Bot 自己的 app_id + client_secret。
+    command_tasks: list[asyncio.Task] = []
+    if getattr(cfg, "QQ_COMMANDS_ENABLED", False):
+        from src import qq_commands
+        from src.qq_openid import listen_forever
+        for bot_cfg in cfg.QQ_OFFICIAL_BOTS:
+            if bot_cfg.get("app_id") and bot_cfg.get("client_secret"):
+                command_tasks.append(asyncio.create_task(listen_forever(
+                    bot_cfg["app_id"], bot_cfg["client_secret"], qq_commands.handle)))
+        if not command_tasks:
+            log_all("⚠️ Bot 指令已启用，但没有任何填好 App ID + Client Secret 的官方 Bot，"
+                    "指令监听未启动", is_error=True)
+        elif not qq_commands.allowed_senders():
+            log_all("⚠️ Bot 指令已启用，但白名单为空（既无 target_openid 也无 "
+                    "qq_commands.allow_openids），将不响应任何人的指令", is_error=True)
+        else:
+            log_all(f"🤖 官方 Bot 指令监听已启动（{len(command_tasks)} 个 Bot）")
+
     try:
         loop_task = asyncio.create_task(_run_loop(http_client, poll_event, stop_event))
         stop_task = asyncio.create_task(stop_event.wait())
@@ -618,6 +638,10 @@ async def main() -> None:
         if summary_task is not None:
             summary_task.cancel()
             await asyncio.gather(summary_task, return_exceptions=True)
+        for task in command_tasks:
+            task.cancel()
+        if command_tasks:
+            await asyncio.gather(*command_tasks, return_exceptions=True)
         if webui_server is not None:
             webui_server.shutdown()
             webui_server.server_close()
