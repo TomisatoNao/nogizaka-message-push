@@ -1,7 +1,7 @@
-httpx
-python-dotenv
-websockets
-json5
-jsonschema
-python-telegram-bot>=21.0
-# watchdog  # 可选：取消注释以启用 config.json 自动热重载
+httpx>=0.27,<1.0
+python-dotenv>=1.0,<2.0
+json5>=0.9,<1.0
+jsonschema>=4.18,<5.0
+python-telegram-bot>=21.0,<23.0
+websockets>=12.0,<16.0     # 仅 tools/get_qq_openid.py 需要
+# watchdog>=4.0,<7.0       # 可选：取消注释以启用 config.json 自动热重载

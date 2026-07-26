@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from src.constants import ROLE_KEY, ROLE_TRANSLATION, TRANSLATION_SEPARATOR
+from src.constants import ROLE_KEY, TRANSLATION_SEPARATOR
 
 
 def test_utc_to_jst() -> None:

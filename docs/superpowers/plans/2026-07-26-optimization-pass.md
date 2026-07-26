@@ -88,6 +88,21 @@
 - [ ] workflow：Python 3.10 + 3.12 矩阵，`pip install -r requirements.txt` → `ruff check .` → `compileall` → 两个测试脚本
 - [ ] ruff 先本地跑通再进 CI，规则从默认集起步
 
+## 执行记录（2026-07-26）
+
+| Commit | 内容 | 验证 |
+|---|---|---|
+| A `perf: reuse shared HTTP clients...` | A1–A7 全部 | compileall + 双测试 + import 冒烟 |
+| B `fix: graceful SIGTERM shutdown...` | B1–B3 | 同上 + reload 失败输出实测 + 新增 2 个单测 |
+| C `chore: add CI...` | C1–C2 | 本地 `ruff check .` 全绿（0.16.0）+ 双测试 |
+
+补充说明：
+
+- ruff 首跑发现 3 个真问题并已修：`health.py` 死导入 `field`、`notifier.py` 无占位符 f-string、`test_units.py` 死导入 `ROLE_TRANSLATION`。`config.py` 的 7 个 F821 是 `_apply_config` 动态 `setattr` 的误报，`test_config_load.py` 的 F401 是「导入即测试」的设计——均入 `ruff.toml` 的 per-file-ignores。
+- SIGTERM 路径在 Windows 上只能验证注册不抛异常；容器内 `docker stop` 的完整优雅退出**未实测**，属遗留验证项。
+- 官方 Bot 媒体去重的真实收益需双 Bot + 真实媒体消息验证，同样遗留。
+- 依赖上界按 2026-05 已知版本设定（PTB <23、websockets <16、httpx <1.0），若 pip 解析冲突可放宽。
+
 ## 明确不做（第三层，留待加新通道时）
 
 - 通道抽象（Channel 协议）与中立 Message 结构 —— 一次重构，动 notifier/所有 platform

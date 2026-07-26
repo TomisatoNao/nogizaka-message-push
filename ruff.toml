@@ -1,0 +1,12 @@
+# ruff 配置 —— 规则集从 pyflakes + pycodestyle 错误级起步，够抓死导入/未定义名
+target-version = "py310"
+line-length = 120
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# config.py 的模块级变量由 _apply_config 动态 setattr 生成，F821 为误报
+"config/config.py" = ["F821"]
+# 该测试的目的就是验证这些名字可从 config.config 导入
+"tests/test_config_load.py" = ["F401"]

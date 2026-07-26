@@ -121,7 +121,7 @@ async def send_alert_message(target_group: int, text: str) -> bool:
                 any_ok = True
             else:
                 health.get_tracker().record_error(
-                    f"TG Bot 告警发送失败", ErrorTier.TRANSIENT
+                    "TG Bot 告警发送失败", ErrorTier.TRANSIENT
                 )
         else:
             log_all(f"⏸️ 群 {target_group} 无关联 TG 频道，TG 警报跳过", is_debug=True)
