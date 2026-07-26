@@ -53,6 +53,9 @@ _on_poll_cb = None
 # 测试推送回调（由主程序注入；签名 (channel, target, text) -> (ok, err)）
 _on_test_push_cb = None
 
+# openid 监听回调（由主程序注入；把协程调度到主事件循环执行）
+_on_openid_cb = None
+
 # 串行化所有写操作（config.json / .env 都是 read-modify-write，
 # ThreadingHTTPServer 的并发请求不加锁会互相丢更新）
 _mutation_lock = threading.Lock()
@@ -721,6 +724,16 @@ class _Handler(BaseHTTPRequestHandler):
                              "min_password_len": _auth.MIN_PASSWORD_LEN})
             return
 
+        if path == "/api/qq_openid/status":
+            if not self._check_auth():
+                return
+            from src import qq_openid
+            state = qq_openid.get_state()
+            state["ok"] = True
+            state["available"] = _on_openid_cb is not None
+            self._send_json(state)
+            return
+
         if path == "/api/config/history":
             if not self._check_auth():
                 return
@@ -862,6 +875,40 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Clear-Site-Data", '"cache", "cookies"')
         self.end_headers()
         self.wfile.write(body_out)
+
+    def _handle_openid(self, action: str) -> None:
+        """openid 捕获会话：start 需要 app_id + client_secret，
+        secret 只用于本次连接，不落盘、不回显。"""
+        if _on_openid_cb is None:
+            self._send_json({"ok": False, "errors": [
+                "独立模式下不可用（需要主程序的事件循环来跑 WebSocket 监听）"]}, 400)
+            return
+
+        if action == "stop":
+            ok, msg = _on_openid_cb("stop", "", "")
+            self._send_json({"ok": ok, "message": msg})
+            return
+
+        body = self._read_body_json()
+        if body is None:
+            return
+        app_id = str(body.get("app_id", "")).strip()
+        secret = str(body.get("client_secret", "")).strip()
+        # secret 允许留空 → 用 .env 里该 Bot 已配置的值
+        if not app_id:
+            self._send_json({"ok": False, "errors": ["缺少 App ID"]}, 400)
+            return
+        if not secret:
+            bot_name = str(body.get("bot_name", "")).strip().upper()
+            secret = os.getenv(f"{bot_name}_CLIENT_SECRET", "") if bot_name else ""
+            if not secret:
+                self._send_json({"ok": False, "errors": [
+                    "缺少 Client Secret（.env 里也没有该 Bot 的密钥）"]}, 400)
+                return
+
+        ok, msg = _on_openid_cb("start", app_id, secret)
+        self._send_json({"ok": ok, "message": msg} if ok
+                        else {"ok": False, "errors": [msg]}, 200 if ok else 409)
 
     def _handle_users_write(self) -> None:
         """用户管理（仅 admin）：add / passwd / role / delete。
@@ -1224,6 +1271,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._handle_users_write()
             return
+        if path in ("/api/qq_openid/start", "/api/qq_openid/stop"):
+            if not self._check_auth():
+                return
+            self._handle_openid(path.rsplit("/", 1)[1])
+            return
         if path == "/api/reload":
             if not self._check_auth():
                 return
@@ -1381,7 +1433,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def start_webui(host: str | None = None, port: int | None = None,
-                on_reload=None, on_restart=None, on_poll=None, on_test_push=None):
+                on_reload=None, on_restart=None, on_poll=None, on_test_push=None,
+                on_openid=None):
     """启动网页管理端（后台守护线程）。
 
     参数缺省时从 config.config 读取 WEB_ADMIN_HOST / WEB_ADMIN_PORT。
@@ -1391,11 +1444,13 @@ def start_webui(host: str | None = None, port: int | None = None,
     不传则网页上不显示对应按钮（独立模式）。
     返回 ThreadingHTTPServer 实例（用于 shutdown() 清理），失败时返回 None。
     """
-    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _enforce_host_check
+    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _on_openid_cb, \
+        _enforce_host_check
     _on_reload_cb = on_reload
     _on_restart_cb = on_restart
     _on_poll_cb = on_poll
     _on_test_push_cb = on_test_push
+    _on_openid_cb = on_openid
 
     if host is None or port is None:
         import config.config as cfg

@@ -235,8 +235,9 @@
         <tbody id="qqBotRows"></tbody>
       </table></div>
       <div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
-      <p class="hint" id="qqBotHint">App ID 和目标 OpenID 直接在表格里填；Client Secret 是密钥，须在 <code>.env</code> 里配置
-      <code>Bot名称大写_CLIENT_SECRET</code>（改 <code>.env</code> 后需重启）。目标 OpenID 用 <code>python tools/get_qq_openid.py</code> 获取。
+      <p class="hint" id="qqBotHint">App ID 直接在表格里填；Client Secret 点该行「填写」存入 <code>.env</code>。
+      <b>目标 OpenID 有两种拿法</b>：已知的话直接填；不知道就点「🎯 自动获取」——
+      系统会连上 Bot 网关等待，让目标用户给 Bot 发一条私聊消息即可自动捕获并回填。
       官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用 Bot，所有成员都有推送目标。</p>
     </div>
     <div class="card">
@@ -440,6 +441,36 @@
   </div>
 </dialog>
 
+<!-- QQ openid 捕获对话框 -->
+<dialog id="openidDialog">
+  <h3>自动获取目标 OpenID</h3>
+  <div class="dialog-note">
+    官方 Bot 只能从「用户主动私聊 Bot」的事件里拿到 OpenID。点开始后，
+    <b>让目标用户给 Bot 发一条私聊消息</b>，捕获成功会自动填回表格。
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">Bot</span>
+      <span class="fenv" id="openidBotName">—</span></div>
+    <div class="fhelp" id="openidAppId">App ID: —</div>
+  </div>
+  <div class="secret-field" id="openidSecretField" hidden>
+    <div class="flabel"><span class="fname">Client Secret<span class="req">*</span></span>
+      <span class="fenv">仅本次连接使用，不落盘</span></div>
+    <div class="input-group">
+      <input type="text" id="openidSecret" class="masked" autocomplete="off"
+             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
+             data-form-type="other">
+      <button type="button" class="eye" id="openidSecretEye">👁</button>
+    </div>
+  </div>
+  <div id="openidStatus" style="margin:14px 0; font-size:13.5px; line-height:1.7; min-height:44px"></div>
+  <div class="actions">
+    <button class="btn" id="openidClose">关闭</button>
+    <button class="btn" id="openidStop" hidden>停止监听</button>
+    <button class="btn primary" id="openidStart">开始监听</button>
+  </div>
+</dialog>
+
 <!-- 添加用户对话框 -->
 <dialog id="userDialog">
   <h3>添加用户</h3>
@@ -612,6 +643,7 @@ async function loadConfig() {
     $("btnRestart").hidden = !data.can_restart;
     $("btnPollNow").hidden = !data.can_poll;
     $("btnTestPush").hidden = !data.can_test_push;
+    canCaptureOpenid = !!data.can_test_push;   // 与测试推送同为"内嵌模式"能力
     setDirty(false);
     renderAll();
     msg("已载入 " + data.config_path, "ok");
@@ -915,6 +947,8 @@ function renderGeneral() {
   renderQqBots();
 }
 
+let canCaptureOpenid = false;   // 独立模式下没有事件循环跑 WebSocket 监听
+
 function renderQqBots() {
   const tbody = $("qqBotRows");
   tbody.innerHTML = "";
@@ -935,9 +969,14 @@ function renderQqBots() {
         const t = v.trim(); if (t) bot.app_id = t; else delete bot.app_id;
       }, "102012345", "width:110px"));
       const tdOpenid = document.createElement("td");
-      tdOpenid.appendChild(mkInput(bot.target_openid || "", (v) => {
+      const openidInput = mkInput(bot.target_openid || "", (v) => {
         const t = v.trim(); if (t) bot.target_openid = t; else delete bot.target_openid;
-      }, "ABCDEF0123...", "width:150px"));
+      }, "ABCDEF0123...", "width:150px");
+      tdOpenid.appendChild(openidInput);
+      if (canCaptureOpenid) {
+        tdOpenid.appendChild(document.createTextNode(" "));
+        tdOpenid.appendChild(mkBtn("🎯 自动获取", () => openOpenidDialog(bot, openidInput)));
+      }
 
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
@@ -1538,6 +1577,108 @@ function startLogPolling() {
 }
 function stopLogPolling() {
   if (logTimer !== null) { clearInterval(logTimer); logTimer = null; }
+}
+
+// ── QQ openid 自动捕获 ───────────────────────────
+let openidCtx = null;      // {bot, input}
+let openidTimer = null;
+
+async function openOpenidDialog(bot, input) {
+  openidCtx = { bot: bot, input: input };
+  $("openidBotName").textContent = bot.name || "(未命名)";
+  $("openidAppId").textContent = "App ID: " + (bot.app_id || "（未填，请先在表格里填写）");
+  $("openidSecret").value = "";
+  $("openidSecret").classList.add("masked");
+  $("openidSecretEye").textContent = "👁";
+  // .env 里已有该 Bot 的 secret 就不必再输
+  const st = (qqBotStatus || []).find((s) => s.name === bot.name);
+  $("openidSecretField").hidden = !!(st && st.client_secret);
+  $("openidStatus").innerHTML = (st && st.client_secret)
+    ? '<span style="color:var(--muted)">将使用 .env 里已配置的 Client Secret。</span>'
+    : "";
+  $("openidStart").hidden = false;
+  $("openidStop").hidden = true;
+  $("openidDialog").showModal();
+}
+
+$("openidSecretEye").addEventListener("click", () => {
+  const el = $("openidSecret");
+  $("openidSecretEye").textContent = el.classList.toggle("masked") ? "👁" : "🚫";
+});
+$("openidClose").addEventListener("click", () => {
+  stopOpenidPolling();
+  $("openidDialog").close();
+});
+
+function setOpenidStatus(html, color) {
+  $("openidStatus").innerHTML = '<span style="color:' + (color || "var(--text)") + '">' + html + "</span>";
+}
+
+$("openidStart").addEventListener("click", async () => {
+  const bot = openidCtx.bot;
+  if (!bot.app_id) { uiAlert("请先在表格里填写该 Bot 的 App ID"); return; }
+  const btn = $("openidStart");
+  btn.disabled = true; btn.textContent = "连接中…";
+  try {
+    const data = await api("/api/qq_openid/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        app_id: bot.app_id,
+        client_secret: $("openidSecret").value,
+        bot_name: bot.name || "",
+      }),
+    });
+    if (!data.ok) { setOpenidStatus("❌ " + (data.errors || []).join("；"), "var(--err)"); return; }
+    $("openidStart").hidden = true;
+    $("openidStop").hidden = false;
+    setOpenidStatus("⏳ 正在监听… <b>请让目标用户现在给 Bot 发一条私聊消息</b>", "var(--accent)");
+    startOpenidPolling();
+  } catch (e) {
+    setOpenidStatus("请求失败：" + e.message, "var(--err)");
+  } finally {
+    btn.disabled = false; btn.textContent = "开始监听";
+  }
+});
+
+$("openidStop").addEventListener("click", async () => {
+  stopOpenidPolling();
+  try { await api("/api/qq_openid/stop", { method: "POST" }); } catch (e) { /* 忽略 */ }
+  $("openidStart").hidden = false;
+  $("openidStop").hidden = true;
+  setOpenidStatus("已停止监听。", "var(--muted)");
+});
+
+function startOpenidPolling() {
+  stopOpenidPolling();
+  openidTimer = setInterval(async () => {
+    let st;
+    try { st = await api("/api/qq_openid/status"); } catch (e) { return; }
+    if (!st.ok) return;
+    if (st.state === "captured") {
+      stopOpenidPolling();
+      openidCtx.bot.target_openid = st.openid;
+      openidCtx.input.value = st.openid;
+      markDirty();
+      $("openidStart").hidden = false;
+      $("openidStop").hidden = true;
+      setOpenidStatus("✅ 已捕获" + (st.sender ? "（来自 " + esc(st.sender) + "）" : "") +
+        "<br><code>" + esc(st.openid) + "</code><br>已填入表格，别忘了点底部「保存并热重载」。", "var(--ok)");
+      msg("✅ 已获取 OpenID 并填入表格，记得保存", "ok");
+    } else if (st.state === "error") {
+      stopOpenidPolling();
+      $("openidStart").hidden = false;
+      $("openidStop").hidden = true;
+      setOpenidStatus("❌ " + esc(st.error || "监听失败"), "var(--err)");
+    } else if (st.state === "waiting" || st.state === "connecting") {
+      setOpenidStatus("⏳ 正在监听… <b>请让目标用户现在给 Bot 发一条私聊消息</b>" +
+        (st.seconds_left ? "<br><span style='color:var(--muted)'>剩余 " + st.seconds_left + " 秒</span>" : ""),
+        "var(--accent)");
+    }
+  }, 2000);
+}
+function stopOpenidPolling() {
+  if (openidTimer !== null) { clearInterval(openidTimer); openidTimer = null; }
 }
 
 // ── 用户管理 ─────────────────────────────────────

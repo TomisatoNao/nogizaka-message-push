@@ -28,7 +28,7 @@
     "hour": 23
   },
 
-  // ── 账号系统 ──（用户由 tools/manage_users.py 管理）
+  // ── 账号系统 ──
   "auth": {
     "enabled": true,
     "archive_public": false,

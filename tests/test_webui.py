@@ -321,6 +321,39 @@ def main() -> None:
         assert code == 502 and "模拟失败" in data["errors"][0], f"回调失败应 502: {data}"
         webui._on_test_push_cb = None
 
+        # openid 捕获：解析事件体、独立模式拒绝、参数校验、回调转发
+        from src import qq_openid
+        evt = {"t": "C2C_MESSAGE_CREATE", "d": {
+            "author": {"user_openid": "ABC123OPENID", "username": "someone"},
+            "content": "hi", "nested": [{"group_openid": "GRP999"}]}}
+        hits = dict(qq_openid.find_openid_values(evt))
+        assert hits.get("d.author.user_openid") == "ABC123OPENID", f"应提取 openid: {hits}"
+        assert "d.nested[0].group_openid" in hits, "嵌套结构也应遍历到"
+        assert qq_openid.find_openid_values({"a": 1, "b": "x"}) == []
+
+        code, data = _http("GET", base + "/api/qq_openid/status")
+        assert code == 200 and data["state"] == "idle" and not data["available"], \
+            f"独立模式应报告不可用: {data}"
+        code, data = _http("POST", base + "/api/qq_openid/start",
+                           body={"app_id": "1", "client_secret": "s"})
+        assert code == 400 and "独立模式" in data["errors"][0], f"独立模式应 400: {data}"
+
+        openid_calls = []
+        webui._on_openid_cb = lambda act, aid, sec: (
+            openid_calls.append((act, aid, bool(sec))), (True, "ok"))[1]
+        code, data = _http("POST", base + "/api/qq_openid/start",
+                           body={"app_id": "102000001", "client_secret": "secret1"})
+        assert code == 200 and data["ok"] and openid_calls == [("start", "102000001", True)], \
+            f"应转发到回调: {data} {openid_calls}"
+        code, data = _http("POST", base + "/api/qq_openid/start", body={"client_secret": "s"})
+        assert code == 400 and "App ID" in data["errors"][0], "缺 app_id 应 400"
+        code, data = _http("POST", base + "/api/qq_openid/start",
+                           body={"app_id": "1", "bot_name": "no_such_bot"})
+        assert code == 400 and "Secret" in data["errors"][0], "无 secret 且 .env 也没有时应 400"
+        code, data = _http("POST", base + "/api/qq_openid/stop")
+        assert code == 200 and openid_calls[-1][0] == "stop"
+        webui._on_openid_cb = None
+
         # POST /api/restart：独立模式（无回调）→ 400；注入回调后 → 触发重启
         code, data = _http("POST", base + "/api/restart")
         assert code == 400 and not data["ok"], "无重启回调时应 400"
@@ -383,6 +416,7 @@ def main() -> None:
         webui._on_restart_cb = None
         webui._on_poll_cb = None
         webui._on_test_push_cb = None
+        webui._on_openid_cb = None
         webui.CONFIG_PATH = orig_config_path
         webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger

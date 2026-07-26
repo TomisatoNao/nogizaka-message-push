@@ -541,9 +541,25 @@ async def main() -> None:
         health.get_tracker().record_channel(channel, ok, err or None)
         return ok, err
 
+    def _openid_action(action: str, app_id: str, secret: str) -> tuple[bool, str]:
+        """网页端的 openid 监听控制（HTTP 线程调用，调度到主事件循环）。"""
+        from src import qq_openid
+
+        async def _do():
+            if action == "stop":
+                qq_openid.stop_session()
+                return True, "已停止监听"
+            return qq_openid.start_session(app_id, secret)
+
+        try:
+            return asyncio.run_coroutine_threadsafe(_do(), loop).result(timeout=20)
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+
     webui_server = (
         start_webui(on_reload=_on_config_reload, on_restart=_request_restart,
-                    on_poll=_request_poll, on_test_push=_request_test_push)
+                    on_poll=_request_poll, on_test_push=_request_test_push,
+                    on_openid=_openid_action)
         if cfg.WEB_ADMIN_ENABLED else None
     )
 

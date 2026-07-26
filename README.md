@@ -194,13 +194,14 @@ Token 会自动续期，续期后的**新值写在 `data/web_credentials/`**（�
 
 Bot 数量不限。三步：
 
-1. 「基本设置」→ 打开「QQ 官方 Bot」通道 →「＋ 添加 Bot」→ 填名称、App ID、目标 OpenID
-2. `.env` 里填密钥（变量名 = **Bot 名称大写** + `_CLIENT_SECRET`），或在网页该行点「填写」
-3. 目标 OpenID 用工具获取：
-   ```bash
-   python tools/get_qq_openid.py
-   ```
-   按提示填 App ID 和 Secret，然后让目标用户给 Bot 发一条私聊消息，脚本会打印出 OpenID。
+1. 「基本设置」→ 打开「QQ 官方 Bot」通道 →「＋ 添加 Bot」→ 填名称和 App ID
+2. Client Secret 点该行「填写」（存入 `.env`，变量名 = **Bot 名称大写** + `_CLIENT_SECRET`）
+3. 目标 OpenID —— **知道就直接填**；不知道就点该行的「🎯 自动获取」：
+
+   系统会连上 Bot 网关等待，**让目标用户给 Bot 发一条私聊消息**，捕获成功后自动填回表格（5 分钟超时，可随时停止）。最后点「保存并热重载」即生效。
+
+   > OpenID 只能从「用户主动私聊 Bot」的事件里拿到，这是官方接口的限制，所以必须有人发一条消息。
+   > 命令行等价工具：`python tools/get_qq_openid.py [APP_ID] [SECRET]`
 
 > 旧配置兼容：`config.json` 未声明 `qq_official_bots` 时，自动扫描 `.env` 的 `QQ_OFFICIAL_BOT{1..20}_*` 编号槽位。
 
@@ -447,7 +448,7 @@ bash tools/install_systemd.sh --uninstall
 | `python tools/list_members.py [账号ID]` | 列出账号可见的成员及 ID |
 | `python tools/backfill_archive.py [成员] [--from 日期]` | 回填历史消息 |
 | `python tools/manage_users.py add/list/passwd/role/del` | 网页账号管理 |
-| `python tools/get_qq_openid.py` | 获取 QQ 用户 OpenID |
+| `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 获取 QQ 用户 OpenID（网页端也有「🎯 自动获取」） |
 | `python tools/test_models.py` | Gemini 模型连通性诊断 |
 | `python tests/test_*.py` | 运行测试（CI 同款） |
 
