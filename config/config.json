@@ -6,6 +6,7 @@
     "qq_official": true
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
+  "qq_official_bots": [],
 
   // ── 网页管理 ──
   "web_admin": {

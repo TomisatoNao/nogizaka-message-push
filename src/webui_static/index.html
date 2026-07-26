@@ -115,6 +115,12 @@
           <input type="text" id="napcatApi" placeholder="http://127.0.0.1:3000/send_group_msg">
         </label>
       </div>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+        <span style="font-size:12.5px; color:var(--muted)">TG Bot Token (.env)</span>
+        <span id="tgTokenStatus"></span>
+        <button class="btn small" id="btnFillTgToken">填写</button>
+        <span class="hint" style="margin:0">（TG Token 修改后需重启生效）</span>
+      </div>
     </div>
     <div class="card">
       <h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
@@ -158,7 +164,12 @@
           <input type="number" id="translateTimeout" min="1">
         </label>
       </div>
-      <p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑；API Key 在 <code>.env</code> 的 <code>GEMINI_API_KEY</code>。</p>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+        <span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
+        <span id="geminiKeyStatus"></span>
+        <button class="btn small" id="btnFillGeminiKey">填写</button>
+      </div>
+      <p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
     </div>
     <div class="card">
       <h2>网页管理端</h2>
@@ -181,9 +192,10 @@
       </table></div>
       <div class="empty" id="accountEmpty" hidden>还没有账号，点下面添加一个。</div>
       <div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
-      <p class="hint">新增账号后，请在 <code>.env</code> 里补充对应凭证并<b>重启主程序</b>（.env 只在启动时读取一次）：<br>
+      <p class="hint">凭证可以点每行的「填凭证」直接填写（存入 <code>.env</code> 并立即轮换生效），也可以手动编辑 <code>.env</code>（手动改需重启）：<br>
         · web 账号 → <code>账号ID大写_TOKEN</code> + <code>账号ID大写_COOKIE</code><br>
-        · mobile 账号 → <code>账号ID大写_REFRESH_TOKEN</code></p>
+        · mobile 账号 → <code>账号ID大写_REFRESH_TOKEN</code><br>
+        ⚠️ 新账号要先「保存并热重载」把账号写进 config.json，然后才能填凭证。</p>
     </div>
   </section>
 
@@ -220,6 +232,17 @@
   <span class="msg" id="saveMsg"></span>
 </footer>
 
+<!-- 凭证填写对话框 -->
+<dialog id="secretDialog">
+  <h3 id="secretDialogTitle">填写凭证</h3>
+  <p class="hint" id="secretDialogHint" style="margin-top:-6px"></p>
+  <div id="secretFields" style="display:flex; flex-direction:column; gap:10px; min-width:420px"></div>
+  <div class="actions">
+    <button class="btn" id="secretCancel">取消</button>
+    <button class="btn primary" id="secretSave">保存到 .env</button>
+  </div>
+</dialog>
+
 <!-- 账号编辑对话框 -->
 <dialog id="accountDialog">
   <h3 id="accountDialogTitle">添加账号</h3>
@@ -252,6 +275,7 @@
 let config = null;        // 当前编辑中的配置对象（新格式）
 let credStatus = {};      // 账号凭证状态
 let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
+let envStatus = {};       // GEMINI_API_KEY / TG_BOT_TOKEN 是否已配置
 let dirty = false;
 let authToken = localStorage.getItem("webAdminToken") || "";
 
@@ -291,6 +315,7 @@ async function loadConfig() {
     config = data.config;
     credStatus = data.cred_status || {};
     qqBotStatus = data.qq_bot_status || [];
+    envStatus = data.env_status || {};
     setDirty(false);
     renderAll();
     msg("已载入 " + data.config_path, "ok");
@@ -369,6 +394,9 @@ function renderGeneral() {
   $("webAdminOn").checked = wa.enabled !== false;
   $("webAdminHost").value = wa.host || "127.0.0.1";
   $("webAdminPort").value = wa.port || 8787;
+  const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
+  $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
+  $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   renderQqBots();
 }
 
@@ -405,6 +433,12 @@ function renderQqBots() {
       } else {
         tdSecret.innerHTML = '<span class="cred" style="color:var(--muted)">' + esc(secretVar) + "（保存后刷新）</span>";
       }
+      if (st && st.secret_env === secretVar) {
+        tdSecret.appendChild(document.createTextNode(" "));
+        tdSecret.appendChild(mkBtn("填写", () => openSecretDialog(
+          "填写 " + secretVar, "写入 <code>.env</code>，热重载后立即生效。",
+          [{ env: secretVar, label: "Client Secret", required: true }], null)));
+      }
 
       const tdState = document.createElement("td");
       if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
@@ -435,8 +469,11 @@ function renderQqBots() {
       tr.innerHTML = "<td><b>" + esc(bot.name) + "</b> <span style='color:var(--muted);font-size:11px'>(.env 槽位)</span></td>" +
         "<td>" + badge(bot.app_id) + "</td>" +
         "<td>" + badge(bot.target_openid) + "</td>" +
-        "<td>" + badge(bot.client_secret) + "</td>" +
+        "<td>" + badge(bot.client_secret) + " </td>" +
         "<td>" + state + "</td><td></td>";
+      tr.cells[3].appendChild(mkBtn("填写", () => openSecretDialog(
+        "填写 " + bot.secret_env, "写入 <code>.env</code>，热重载后立即生效。",
+        [{ env: bot.secret_env, label: "Client Secret", required: true }], null)));
       tbody.appendChild(tr);
     }
   }
@@ -480,6 +517,85 @@ function collectGeneral() {
 document.querySelectorAll("#tab-general input").forEach(() => {});
 $("tab-general").addEventListener("input", () => setDirty(true));
 
+// ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
+let secretCtx = null;
+function openSecretDialog(title, hint, fields, account) {
+  secretCtx = { fields, account };
+  $("secretDialogTitle").textContent = title;
+  $("secretDialogHint").innerHTML = hint || "";
+  const box = $("secretFields");
+  box.innerHTML = "";
+  for (const f of fields) {
+    const lab = document.createElement("label");
+    lab.className = "field";
+    lab.textContent = f.label + (f.required ? "" : "（可选）");
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "new-password";  // 阻止浏览器把保存的密码自动填进来
+    input.placeholder = f.placeholder || "";
+    input.dataset.env = f.env;
+    lab.appendChild(input);
+    box.appendChild(lab);
+  }
+  $("secretDialog").showModal();
+}
+$("secretCancel").addEventListener("click", () => $("secretDialog").close());
+$("secretSave").addEventListener("click", async () => {
+  const values = {};
+  let missing = null;
+  for (const input of $("secretFields").querySelectorAll("input")) {
+    const f = secretCtx.fields.find((x) => x.env === input.dataset.env);
+    const v = input.value.trim();
+    if (v) values[input.dataset.env] = v;
+    else if (f && f.required && !missing) missing = f.label;
+  }
+  if (missing) { alert("请填写：" + missing); return; }
+  if (!Object.keys(values).length) { alert("没有填写任何值"); return; }
+  try {
+    msg("写入 .env 中…", "");
+    const data = await api("/api/secrets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: values, account: secretCtx.account || undefined }),
+    });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
+    if (data.cred_status) credStatus = data.cred_status;
+    if (data.qq_bot_status) qqBotStatus = data.qq_bot_status;
+    if (data.env_status) envStatus = data.env_status;
+    $("secretDialog").close();
+    renderGeneral(); renderAccounts();
+    msg("✅ 已写入 .env（" + (data.updated || []).join(", ") + "）" +
+        (secretCtx.account ? "，账号凭证已轮换" : "") +
+        (data.reloaded ? "" : "；⚠️ 热重载失败，详见主程序日志"),
+        data.reloaded ? "ok" : "err");
+  } catch (e) {
+    msg("写入失败：" + e.message, "err");
+  }
+});
+
+function openAccountCredDialog(accId) {
+  if (!credStatus[accId]) {
+    alert("请先「保存并热重载」把该账号写进 config.json，再填凭证。");
+    return;
+  }
+  const acc = (config.accounts || {})[accId] || {};
+  const prefix = accId.toUpperCase();
+  const fields = acc.auth === "mobile"
+    ? [{ env: prefix + "_REFRESH_TOKEN", label: "Refresh Token（UUID）", required: true, placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+       { env: prefix + "_TOKEN", label: "Access Token（JWT）", required: false, placeholder: "eyJ...（留空自动获取）" }]
+    : [{ env: prefix + "_TOKEN", label: "Token（JWT）", required: true, placeholder: "eyJ..." },
+       { env: prefix + "_COOKIE", label: "Cookie", required: true, placeholder: "session=xxx; other=yyy" }];
+  openSecretDialog("填写账号凭证：" + accId,
+    "保存后写入 <code>.env</code>，同时删除旧的磁盘凭证并热重载 —— 新凭证立即生效，无需重启。",
+    fields, accId);
+}
+$("btnFillTgToken").addEventListener("click", () => openSecretDialog(
+  "填写 TG Bot Token", "写入 <code>.env</code> 的 <code>TG_BOT_TOKEN</code>；⚠️ 需重启主程序生效。",
+  [{ env: "TG_BOT_TOKEN", label: "Bot Token", required: true, placeholder: "123456:ABC-DEF" }], null));
+$("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
+  "填写 Gemini API Key", "写入 <code>.env</code> 的 <code>GEMINI_API_KEY</code>，热重载后立即生效。",
+  [{ env: "GEMINI_API_KEY", label: "API Key", required: true, placeholder: "AIza..." }], null));
+
 // ── 账号池 ───────────────────────────────────────
 function credBadge(accId) {
   const st = credStatus[accId];
@@ -509,6 +625,7 @@ function renderAccounts() {
       "<td>" + esc(acc.app_tag || "—") + "</td>" +
       "<td>" + credBadge(id) + "</td>";
     const tdOps = document.createElement("td");
+    const btnCred = mkBtn("填凭证", () => openAccountCredDialog(id));
     const btnEdit = mkBtn("编辑", () => openAccountDialog(id));
     const btnDel = mkBtn("删除", () => {
       if (usedBy > 0) { alert("该账号还有 " + usedBy + " 个成员在使用，请先改掉成员的账号。"); return; }
@@ -516,7 +633,7 @@ function renderAccounts() {
       delete config.accounts[id];
       setDirty(true); renderAccounts();
     }, "danger");
-    tdOps.append(btnEdit, document.createTextNode(" "), btnDel);
+    tdOps.append(btnCred, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
     tr.appendChild(tdOps);
     tbody.appendChild(tr);
   }

@@ -20,6 +20,8 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import re
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,6 +29,7 @@ from pathlib import Path
 _BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = _BASE_DIR / "config" / "config.json"
 SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
+ENV_PATH = _BASE_DIR / ".env"
 _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
 
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
@@ -172,6 +175,87 @@ def _trigger_reload() -> bool:
         except Exception as e:
             print(f"🚨 网页管理端 on_reload 回调异常: {e}")
     return ok
+
+
+# ================================================================
+# 凭证写入：网页填写的密钥落到 .env（与手动编辑同一存放处）
+# ================================================================
+
+# 允许通过网页写入的 .env 变量名（白名单）。
+# WEB_ADMIN_TOKEN 故意排除：管理端令牌只能手动设置，防止误操作把自己锁在门外。
+_SECRET_KEY_RE = re.compile(
+    r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID)"
+    r"|GEMINI_API_KEY)$"
+)
+_FORBIDDEN_ENV_KEYS = {"WEB_ADMIN_TOKEN"}
+
+
+def _quote_env(val: str) -> str:
+    """给 .env 值加引号（python-dotenv 兼容），Cookie 里的空格/分号才能存活。"""
+    if "'" not in val:
+        return f"'{val}'"
+    return '"' + val.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def validate_secret_values(values: dict) -> list[str]:
+    """校验待写入的 .env 键值对，返回错误列表。"""
+    errors = []
+    if not values:
+        errors.append("没有要写入的键值")
+    for key, val in values.items():
+        if not isinstance(key, str) or not isinstance(val, str):
+            errors.append(f"键值必须是字符串: {key!r}")
+            continue
+        if key in _FORBIDDEN_ENV_KEYS or not _SECRET_KEY_RE.match(key):
+            errors.append(f"不允许通过网页写入的变量: {key}")
+        if not val.strip():
+            errors.append(f"{key} 的值为空")
+        if any(c in val for c in "\r\n\x00"):
+            errors.append(f"{key} 的值包含换行等非法字符")
+        if len(val) > 16384:
+            errors.append(f"{key} 的值过长")
+    return errors
+
+
+def update_env_file(values: dict[str, str], path: Path | None = None) -> None:
+    """更新 .env：已有的键原地替换，新键追加到末尾；其余行（注释等）原样保留。"""
+    path = path or ENV_PATH
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else [
+        "# .env — 密钥和凭证（由网页管理端创建，参考 .env.example）",
+    ]
+    remaining = dict(values)
+    for i, line in enumerate(lines):
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
+        if m and m.group(1) in remaining:
+            key = m.group(1)
+            lines[i] = f"{key}={_quote_env(remaining.pop(key))}"
+    for key, val in remaining.items():
+        lines.append(f"{key}={_quote_env(val)}")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _rotate_account_creds(account_id: str) -> None:
+    """轮换账号凭证：删除磁盘持久化凭证 + 清除内存态。
+
+    磁盘凭证优先级高于 .env（Token 续期后磁盘才是最新值），所以换新凭证时必须
+    删掉旧文件，热重载后 load_all_accounts 才会用 .env 的新值重新初始化。
+    （测试中可 monkeypatch 掉。）
+    """
+    import config.config as cfg
+    cred_file = Path(cfg.CRED_DIR) / f"{account_id}.json"
+    try:
+        cred_file.unlink(missing_ok=True)
+    except OSError as e:
+        print(f"⚠️ 删除旧凭证文件失败 {cred_file}: {e}")
+    creds_mod = sys.modules.get("config.credentials")
+    if creds_mod is not None:
+        creds_mod.ACCOUNT_CREDS.pop(account_id, None)
 
 
 # ================================================================
@@ -324,6 +408,10 @@ class _Handler(BaseHTTPRequestHandler):
                 "config": raw,
                 "cred_status": _cred_status(raw),
                 "qq_bot_status": _qq_bot_status(raw),
+                "env_status": {
+                    "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
+                    "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
+                },
                 "config_path": str(CONFIG_PATH),
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
             })
@@ -356,12 +444,68 @@ class _Handler(BaseHTTPRequestHandler):
         })
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.split("?", 1)[0] != "/api/reload":
-            self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+        path = self.path.split("?", 1)[0]
+        if path == "/api/reload":
+            if not self._check_auth():
+                return
+            self._send_json({"ok": True, "reloaded": _trigger_reload()})
             return
+        if path == "/api/secrets":
+            self._handle_secrets()
+            return
+        self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _handle_secrets(self) -> None:
+        """写入凭证到 .env（值只进不出）。body:
+           { "values": {"HINATA_SHARED_TOKEN": "...", ...}, "account": "hinata_shared"? }
+           带 account 时执行凭证轮换（删除磁盘旧凭证，热重载后用新值重建）。"""
         if not self._check_auth():
             return
-        self._send_json({"ok": True, "reloaded": _trigger_reload()})
+        body = self._read_body_json()
+        if body is None:
+            return
+        values = body.get("values")
+        if not isinstance(values, dict):
+            self._send_json({"ok": False, "errors": ["缺少 values 对象"]}, 400)
+            return
+        errors = validate_secret_values(values)
+        account = body.get("account")
+        if account is not None:
+            try:
+                raw = _load_raw_config()
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {e}"]}, 500)
+                return
+            if account not in raw.get("accounts", {}):
+                errors.append(f"未知账号: {account!r}")
+        if errors:
+            self._send_json({"ok": False, "errors": errors}, 400)
+            return
+
+        try:
+            update_env_file(values)
+        except Exception as e:
+            self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
+            return
+        for key, val in values.items():
+            os.environ[key] = val
+        if account is not None:
+            _rotate_account_creds(account)
+        reloaded = _trigger_reload()
+
+        try:
+            raw = _load_raw_config()
+            status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
+        except Exception:
+            status = {}
+        self._send_json({
+            "ok": True, "reloaded": reloaded, "updated": sorted(values),
+            "env_status": {
+                "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
+                "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
+            },
+            **status,
+        })
 
     def log_message(self, fmt: str, *args) -> None:
         # 静默常规访问日志，避免刷屏主程序输出；错误仍由异常路径打印

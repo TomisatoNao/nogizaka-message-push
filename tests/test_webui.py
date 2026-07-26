@@ -103,6 +103,36 @@ def main() -> None:
     assert errs and "结构校验失败" in errs[0], f"Bot 名不合法应被 schema 拒绝: {errs}"
     print("✅ Test 2 通过\n")
 
+    # ── Test 2.5: .env 写入 ──────────────────────────
+    print("=== Test 2.5: 凭证键校验 + .env 更新 ===")
+    assert webui.validate_secret_values({"HINATA_SHARED_TOKEN": "eyJx"}) == []
+    assert webui.validate_secret_values({"GEMINI_API_KEY": "AIza1"}) == []
+    for bad_vals in (
+        {"WEB_ADMIN_TOKEN": "x"},          # 明确禁止
+        {"RANDOM_KEY": "x"},               # 不在白名单
+        {"lowercase_token": "x"},          # 小写
+        {"HINATA_SHARED_TOKEN": "a\nb"},   # 换行注入
+        {"HINATA_SHARED_TOKEN": "  "},     # 空值
+        {},                                # 无键
+    ):
+        assert webui.validate_secret_values(bad_vals), f"应拒绝: {bad_vals}"
+
+    env_file = Path(tempfile.mkdtemp(prefix="webui_env_")) / ".env"
+    env_file.write_text("# 注释保留\nFOO_TOKEN='old'\nGEMINI_API_KEY=\n", encoding="utf-8")
+    webui.update_env_file(
+        {"FOO_TOKEN": "new", "GEMINI_API_KEY": "AIza9", "BAR_COOKIE": "session=a; b=c"},
+        path=env_file,
+    )
+    text = env_file.read_text(encoding="utf-8")
+    assert "# 注释保留" in text, "注释应保留"
+    assert "FOO_TOKEN='new'" in text and "old" not in text, "已有键应原地替换"
+    assert "GEMINI_API_KEY='AIza9'" in text
+    assert "BAR_COOKIE='session=a; b=c'" in text, "新键应追加且带引号"
+    from dotenv import dotenv_values
+    parsed = dotenv_values(env_file)
+    assert parsed["BAR_COOKIE"] == "session=a; b=c", "dotenv 应能解析写入的值"
+    print("✅ Test 2.5 通过\n")
+
     # ── Test 3: HTTP 端点 ────────────────────────────
     print("=== Test 3: HTTP 端点 ===")
     tmpdir = tempfile.mkdtemp(prefix="webui_test_")
@@ -110,10 +140,15 @@ def main() -> None:
     tmp_config.write_text(webui.serialize_config(SAMPLE), encoding="utf-8")
 
     orig_config_path = webui.CONFIG_PATH
+    orig_env_path = webui.ENV_PATH
     orig_trigger = webui._trigger_reload
+    orig_rotate = webui._rotate_account_creds
     reload_calls = []
+    rotate_calls = []
     webui.CONFIG_PATH = tmp_config
+    webui.ENV_PATH = Path(tmpdir) / ".env"
     webui._trigger_reload = lambda: (reload_calls.append(1), True)[1]
+    webui._rotate_account_creds = lambda acc: rotate_calls.append(acc)
     os.environ.pop("WEB_ADMIN_TOKEN", None)
 
     server = webui.start_webui(host="127.0.0.1", port=0)
@@ -161,6 +196,27 @@ def main() -> None:
         code, data = _http("POST", base + "/api/reload")
         assert code == 200 and data["ok"]
 
+        # POST /api/secrets：写账号凭证并轮换
+        code, data = _http("POST", base + "/api/secrets", body={
+            "values": {"HINATA_SHARED_TOKEN": "eyJtest", "HINATA_SHARED_COOKIE": "session=abc; x=y"},
+            "account": "hinata_shared",
+        })
+        assert code == 200 and data["ok"], f"写凭证应成功: {data}"
+        assert data["updated"] == ["HINATA_SHARED_COOKIE", "HINATA_SHARED_TOKEN"]
+        assert rotate_calls == ["hinata_shared"], "带 account 应触发凭证轮换"
+        assert os.environ["HINATA_SHARED_TOKEN"] == "eyJtest", "应同步进程环境变量"
+        env_text = webui.ENV_PATH.read_text(encoding="utf-8")
+        assert "HINATA_SHARED_COOKIE='session=abc; x=y'" in env_text, ".env 应写入带引号的值"
+        assert data["cred_status"]["hinata_shared"]["ok"], "写入后凭证状态应变为已配置"
+
+        # POST /api/secrets：非法键 / 未知账号 → 400 且不写文件
+        code, data = _http("POST", base + "/api/secrets", body={"values": {"WEB_ADMIN_TOKEN": "x"}})
+        assert code == 400 and not data["ok"], "WEB_ADMIN_TOKEN 应被拒绝"
+        code, data = _http("POST", base + "/api/secrets", body={
+            "values": {"GHOST_TOKEN": "x"}, "account": "ghost"})
+        assert code == 400 and any("未知账号" in e for e in data["errors"]), f"未知账号应 400: {data}"
+        assert "GHOST_TOKEN" not in webui.ENV_PATH.read_text(encoding="utf-8"), "校验失败不应写 .env"
+
         # 鉴权：设置 token 后无头 → 401，带头 → 200
         os.environ["WEB_ADMIN_TOKEN"] = "s3cret"
         code, data = _http("GET", base + "/api/config")
@@ -170,10 +226,13 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config", headers={"Authorization": "Bearer s3cret"})
         assert code == 200 and data["ok"], "Bearer 也应通过"
     finally:
-        os.environ.pop("WEB_ADMIN_TOKEN", None)
+        for key in ("WEB_ADMIN_TOKEN", "HINATA_SHARED_TOKEN", "HINATA_SHARED_COOKIE"):
+            os.environ.pop(key, None)
         server.shutdown()
         webui.CONFIG_PATH = orig_config_path
+        webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger
+        webui._rotate_account_creds = orig_rotate
 
     print("✅ Test 3 通过\n")
 
