@@ -1819,6 +1819,7 @@ document.addEventListener("visibilitychange", () => {
 $("btnLogout").addEventListener("click", async () => {
   if (dirty && !(await uiConfirm("有未保存的修改，确定登出？", { yesText: "登出", danger: true }))) return;
   try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) { /* 忽略 */ }
+  try { localStorage.removeItem("webAdminToken"); } catch (e) { /* 主题偏好保留 */ }
   setDirty(false);
   location.href = "/login";
 });

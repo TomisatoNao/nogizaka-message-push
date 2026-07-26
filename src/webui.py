@@ -856,8 +856,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body_out)))
         self.send_header("Set-Cookie",
                          f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
-        # 让浏览器丢弃已缓存的归档媒体副本（localhost 视为安全上下文，该头生效）
-        self.send_header("Clear-Site-Data", '"cache", "cookies", "storage"')
+        # 让浏览器丢弃已缓存的归档媒体副本（localhost 视为安全上下文，该头生效）。
+        # 刻意不含 "storage"：那会把 localStorage 里的主题偏好一并清掉；
+        # 其中真正敏感的 webAdminToken 由前端登出逻辑单独删除。
+        self.send_header("Clear-Site-Data", '"cache", "cookies"')
         self.end_headers()
         self.wfile.write(body_out)
 

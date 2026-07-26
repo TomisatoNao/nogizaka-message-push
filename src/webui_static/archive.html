@@ -534,6 +534,7 @@ $("loadMore").addEventListener("click", () => { page++; loadPage(); });
 $("logoutLink").addEventListener("click", async (e) => {
   e.preventDefault();
   try { await fetch("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
+  try { localStorage.removeItem("webAdminToken"); } catch (err) { /* 主题偏好保留 */ }
   location.href = "/login";
 });
 

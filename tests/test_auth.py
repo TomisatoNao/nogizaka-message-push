@@ -275,8 +275,10 @@ def main() -> None:
             # 登出后 cookie 失效，且指示浏览器清理已缓存的私密媒体
             code, _, h = _http("POST", base + "/api/auth/logout", headers=ck)
             assert code == 200
-            assert "cache" in h.get("Clear-Site-Data", ""), \
-                f"登出应带 Clear-Site-Data: {h.get('Clear-Site-Data')!r}"
+            csd = h.get("Clear-Site-Data", "")
+            assert "cache" in csd and "cookies" in csd, f"登出应清缓存和 cookie: {csd!r}"
+            assert "storage" not in csd, \
+                f"不得清 storage —— 会把主题偏好一起清掉: {csd!r}"
             code, _, _ = _http("GET", base + "/api/config", headers=ck)
             assert code == 401, "登出后应 401"
             code, _, _ = _http("GET", base + "/api/archive/members", headers=ck)
