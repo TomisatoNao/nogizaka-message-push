@@ -84,6 +84,10 @@
            color: var(--text); padding: 20px 22px; min-width: 320px; max-width: 92vw; }
   dialog::backdrop { background: rgba(0,0,0,.45); }
   dialog h3 { margin: 0 0 14px; font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+          background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
+  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
   dialog .grid { grid-template-columns: 1fr 1fr; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
@@ -249,15 +253,10 @@
   <div class="grid">
     <label class="field">账号 ID（小写下划线）<input type="text" id="accId" placeholder="nogizaka_main"></label>
     <label class="field">团体
-      <select id="accGroup">
-        <option value="nogizaka46">nogizaka46</option>
-        <option value="hinatazaka46">hinatazaka46</option>
-        <option value="sakurazaka46">sakurazaka46</option>
-        <option value="yodel">yodel</option>
-      </select>
+      <div class="chips" id="accGroupChips"></div>
     </label>
     <label class="field">登录方式
-      <select id="accAuth"><option value="web">web（token+cookie）</option><option value="mobile">mobile（refresh_token）</option></select>
+      <div class="chips" id="accAuthChips"></div>
     </label>
     <label class="field">App 标签（可选）<input type="text" id="accAppTag" placeholder="yodel"></label>
     <label class="field">API Base（可选）<input type="text" id="accApiBase" placeholder="https://api.service.yodel-app.com"></label>
@@ -639,6 +638,25 @@ function renderAccounts() {
   }
 }
 
+// 单选按钮组（替代 <dialog> 里的原生 <select> —— 其弹出层在部分 Chrome 版本点不开）
+function chipGroup(containerId, options, value) {
+  const box = $(containerId);
+  box.innerHTML = "";
+  box.dataset.value = value;
+  for (const [val, label] of options) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (val === value ? " active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      box.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+      b.classList.add("active");
+      box.dataset.value = val;
+    });
+    box.appendChild(b);
+  }
+}
+
 let editingAccountId = null;
 function openAccountDialog(id) {
   editingAccountId = id;
@@ -646,8 +664,13 @@ function openAccountDialog(id) {
   $("accountDialogTitle").textContent = id ? "编辑账号 " + id : "添加账号";
   $("accId").value = id || "";
   $("accId").disabled = !!id;
-  $("accGroup").value = acc.group || "nogizaka46";
-  $("accAuth").value = acc.auth || "web";
+  chipGroup("accGroupChips", [
+    ["nogizaka46", "nogizaka46"], ["hinatazaka46", "hinatazaka46"],
+    ["sakurazaka46", "sakurazaka46"], ["yodel", "yodel"],
+  ], acc.group || "nogizaka46");
+  chipGroup("accAuthChips", [
+    ["web", "web（token+cookie）"], ["mobile", "mobile（refresh_token）"],
+  ], acc.auth || "web");
   $("accAppTag").value = acc.app_tag || "";
   $("accApiBase").value = acc.api_base || "";
   $("accWebOrigin").value = acc.web_origin || "";
@@ -659,8 +682,8 @@ $("accSave").addEventListener("click", () => {
   const id = $("accId").value.trim();
   if (!/^[a-z0-9_]+$/.test(id)) { alert("账号 ID 只能用小写字母、数字、下划线"); return; }
   if (!editingAccountId && config.accounts && config.accounts[id]) { alert("账号 ID 已存在"); return; }
-  const acc = { group: $("accGroup").value };
-  if ($("accAuth").value === "mobile") acc.auth = "mobile";
+  const acc = { group: $("accGroupChips").dataset.value };
+  if ($("accAuthChips").dataset.value === "mobile") acc.auth = "mobile";
   if ($("accAppTag").value.trim()) acc.app_tag = $("accAppTag").value.trim();
   if ($("accApiBase").value.trim()) acc.api_base = $("accApiBase").value.trim();
   if ($("accWebOrigin").value.trim()) acc.web_origin = $("accWebOrigin").value.trim();
