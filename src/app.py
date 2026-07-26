@@ -146,6 +146,9 @@ def _get_jst_now() -> datetime:
 # ──────────────────────────────────────────────
 # 每日运行摘要（同时是"死人开关"：哪天没收到摘要 = 系统挂了）
 # ──────────────────────────────────────────────
+DISK_WARN_BYTES = 10 * 1024 ** 3   # 磁盘剩余低于此值在摘要里标红
+SUMMARY_MAX_ATTEMPTS = 3
+SUMMARY_RETRY_SECONDS = 1800       # 失败后 30 分钟补发
 def _build_daily_summary() -> str:
     from config.credentials import get_token_remaining_seconds
 
@@ -188,8 +191,39 @@ def _build_daily_summary() -> str:
     else:
         lines.append("无待处理错误")
 
+    storage = _storage_line()
+    if storage:
+        lines.append(storage)
+
     lines.append("（收到本摘要即代表系统在正常运行）")
     return "\n".join(lines)
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _storage_line() -> str:
+    """归档占用 + 磁盘剩余。归档只增不减，磁盘满会导致归档静默失败。"""
+    if not cfg.ARCHIVE_ENABLED:
+        return ""
+    import shutil
+    archive_dir = Path(cfg.ARCHIVE_DIR)
+    try:
+        used = _dir_size(archive_dir) if archive_dir.is_dir() else 0
+        free = shutil.disk_usage(archive_dir if archive_dir.is_dir() else Path.cwd()).free
+    except OSError:
+        return ""
+    gb = 1024 ** 3
+    warn = " ⚠️ 磁盘空间不足" if free < DISK_WARN_BYTES else ""
+    return f"存储: 归档 {used / gb:.2f} GB · 磁盘剩余 {free / gb:.0f} GB{warn}"
 
 
 def _to_jst_date(utc_str: str) -> str:
@@ -200,24 +234,41 @@ def _to_jst_date(utc_str: str) -> str:
         return ""
 
 
-async def _daily_summary_loop() -> None:
+async def _send_summary_with_retry() -> None:
+    """发送每日摘要，失败后重试 —— 摘要本身是死人开关，
+    它自己静默失败的话，就等于监控失灵了。"""
     from src.notifier import send_report_message
 
+    for attempt in range(1, SUMMARY_MAX_ATTEMPTS + 1):
+        try:
+            if await send_report_message(_build_daily_summary()):
+                log_all("📅 每日摘要已发送" if attempt == 1
+                        else f"📅 每日摘要已发送（第 {attempt} 次尝试）")
+                return
+            reason = "所有通道均未成功"
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            reason = "异常"
+            log_all(f"⚠️ 每日摘要异常:\n{traceback.format_exc()}", is_error=True)
+
+        if attempt < SUMMARY_MAX_ATTEMPTS:
+            log_all(f"⚠️ 每日摘要发送失败（{reason}），{SUMMARY_RETRY_SECONDS // 60} 分钟后重试"
+                    f"（{attempt}/{SUMMARY_MAX_ATTEMPTS}）", is_error=True)
+            await asyncio.sleep(SUMMARY_RETRY_SECONDS)
+        else:
+            log_all(f"🚨 每日摘要连续 {SUMMARY_MAX_ATTEMPTS} 次发送失败，本次放弃", is_error=True)
+            health.get_tracker().record_error("每日摘要发送失败", health.ErrorTier.PERSISTENT)
+
+
+async def _daily_summary_loop() -> None:
     while True:
         jst = _get_jst_now()
         target = jst.replace(hour=cfg.DAILY_SUMMARY_HOUR, minute=0, second=0, microsecond=0)
         if target <= jst:
             target += timedelta(days=1)
         await asyncio.sleep((target - jst).total_seconds())
-        try:
-            text = _build_daily_summary()
-            ok = await send_report_message(text)
-            log_all("📅 每日摘要已发送" if ok else "⚠️ 每日摘要发送失败（所有通道均未成功）",
-                    is_error=not ok)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log_all(f"⚠️ 每日摘要异常:\n{traceback.format_exc()}", is_error=True)
+        await _send_summary_with_retry()
 
 
 def _calc_sleep_seconds() -> int:

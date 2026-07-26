@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+
+
 from src.constants import ROLE_KEY, TRANSLATION_SEPARATOR
 
 
@@ -182,6 +184,27 @@ def test_time_record_skip() -> None:
     print("  ✅ 相同值跳过、新值正常落盘")
 
 
+def test_powershell_scripts_have_bom() -> None:
+    """含中文的 .ps1 必须带 UTF-8 BOM。
+
+    Windows PowerShell 5.1 用系统 ANSI 代码页读取无 BOM 的脚本，
+    中文会变乱码并导致语法错误——脚本直接跑不起来。
+    """
+    print("=== .ps1 编码（UTF-8 BOM）===")
+    root = Path(__file__).resolve().parent.parent
+    checked = 0
+    for ps1 in sorted(root.glob("tools/*.ps1")):
+        raw = ps1.read_bytes()
+        if not any(b > 0x7F for b in raw):
+            continue                      # 纯 ASCII 脚本无所谓
+        assert raw[:3] == b"\xef\xbb\xbf", (
+            f"{ps1.name} 含非 ASCII 字符但缺少 UTF-8 BOM，"
+            f"PowerShell 5.1 会解析失败"
+        )
+        checked += 1
+    print(f"  ✅ {checked} 个含中文的 .ps1 均带 BOM")
+
+
 def main() -> None:
     test_utc_to_jst()
     test_log_truncation()
@@ -189,6 +212,7 @@ def main() -> None:
     test_chain_extract()
     test_health_rolling()
     test_time_record_skip()
+    test_powershell_scripts_have_bom()
     print("\n" + "=" * 50)
     print("🎉 全部单元断言通过")
 

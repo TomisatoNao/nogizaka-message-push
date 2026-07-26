@@ -7,8 +7,11 @@
     python tools/backfill_archive.py                          # 回填所有监控成员
     python tools/backfill_archive.py 冨里奈央                  # 只回填指定成员（名字或 id 均可，可多个）
     python tools/backfill_archive.py --from 2023-01-01        # 指定起始日期（默认 2013-01-01）
+    python tools/backfill_archive.py --force                  # 跳过"主程序正在运行"检查（不建议）
 
 说明:
+    - ⚠️ 请先停止主程序：两个进程同时刷新同一账号的 Token 会让先刷的那个凭证作废。
+      工具会自动检测主程序是否在跑（探测网页管理端端口），在跑就拒绝启动。
     - 复用项目的账号池与凭证（web / mobile 都支持），与主程序同一套续期逻辑。
     - 断点续传：进度存 data/archive_progress.json，中断后重跑从上次位置继续。
     - 已归档的消息自动跳过（除非其媒体下载失败）。
@@ -59,6 +62,24 @@ class AdaptivePacer:
 
     async def wait(self) -> None:
         await asyncio.sleep(self.delay)
+
+
+def main_program_running() -> bool:
+    """探测主程序是否在跑（网页管理端端口被监听即视为在跑）。
+
+    两个进程同时用同一账号刷新 Token 时，后刷的会让先刷的 Token 失效，
+    导致主程序推送中断——这类事故靠人自觉很难避免，这里做成硬检查。
+    """
+    import socket
+    if not getattr(cfg, "WEB_ADMIN_ENABLED", False):
+        return False
+    host = getattr(cfg, "WEB_ADMIN_HOST", "127.0.0.1")
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    try:
+        with socket.create_connection((probe_host, int(cfg.WEB_ADMIN_PORT)), timeout=1.5):
+            return True
+    except OSError:
+        return False
 
 
 def _load_progress() -> dict:
@@ -170,11 +191,20 @@ async def main() -> None:
         print(__doc__)
         return
 
+    force = "--force" in args
+    args = [a for a in args if a != "--force"]
+
     start_from = DEFAULT_START
     if "--from" in args:
         i = args.index("--from")
         start_from = f"{args[i + 1]}T00:00:00Z"
         args = args[:i] + args[i + 2:]
+
+    if main_program_running() and not force:
+        print("🚫 检测到主程序正在运行（网页管理端端口已被监听）。")
+        print("   两个进程同时刷新同一账号的 Token 会让其中一个凭证作废，导致推送中断。")
+        print("   请先停止主程序再回填；确认无冲突可加 --force 跳过此检查。")
+        return
 
     init_loggers()
     load_all_accounts()

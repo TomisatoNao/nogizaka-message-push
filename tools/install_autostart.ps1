@@ -1,5 +1,9 @@
-# ============================================================
+﻿# ============================================================
 # install_autostart.ps1 — 注册 Windows 计划任务：开机自启 + 崩溃自拉起
+# ============================================================
+# ⚠️ 本文件必须保存为 【UTF-8 with BOM】：
+#    Windows PowerShell 5.1 会用系统 ANSI 代码页读取无 BOM 的 .ps1，
+#    中文注释会变成乱码并导致语法错误。修改本文件后请确认 BOM 仍在。
 # ============================================================
 # 用法（在仓库任意位置的 PowerShell 中执行）:
 #   powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1            # 安装
@@ -15,7 +19,8 @@
 # ============================================================
 param(
     [switch]$Uninstall,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$Start      # 安装后立即启动，不做交互询问（自动化 / 非交互终端用）
 )
 
 $TaskName = "NogizakaMessagePush"
@@ -56,7 +61,17 @@ if (-not (Test-Path (Join-Path $RepoDir "main.py"))) {
     exit 1
 }
 
-$action = New-ScheduledTaskAction -Execute $python -Argument "main.py" -WorkingDirectory $RepoDir
+# 调用守护脚本 run_service.ps1：崩溃自拉起由它负责，不依赖 Task Scheduler
+# 的"失败后重启"策略（那个策略捕捉不到"子进程被杀但包装器正常退出"）。
+# 用 PowerShell 包装还解决了两个问题：直接跑 python.exe 会弹控制台窗口，
+# 而 pythonw.exe 下 sys.stdout 为 None 会让程序的 print 抛异常。
+$runner = Join-Path $RepoDir "tools\run_service.ps1"
+if (-not (Test-Path $runner)) {
+    Write-Error "缺少守护脚本: $runner"
+    exit 1
+}
+$wrapper = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runner`""
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wrapper -WorkingDirectory $RepoDir
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 10 `
@@ -64,23 +79,53 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -StartWhenAvailable `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-# S4U：后台运行、不弹控制台窗口、无需保存密码
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 
-try {
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Settings $settings -Principal $principal -Force | Out-Null
-} catch {
-    Write-Error ("注册失败: $_`n如提示权限不足，请用管理员 PowerShell 重试。")
-    exit 1
+# S4U 可在未登录时也运行，但需要管理员权限授予"作为批处理作业登录"；
+# 失败时降级为 Interactive（仅当前用户登录后运行，普通权限即可注册）
+$registered = $false
+foreach ($logon in @("S4U", "Interactive")) {
+    try {
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType $logon -RunLevel Limited
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+            -Settings $settings -Principal $principal -Force -ErrorAction Stop | Out-Null
+        $registered = $true
+        if ($logon -eq "Interactive") {
+            Write-Host "ℹ️ 以 Interactive 方式注册（普通权限）：登录后自动运行。"
+            Write-Host "   若想未登录也保持运行，请用管理员 PowerShell 重新执行本脚本。"
+        }
+        break
+    } catch {
+        if ($logon -eq "Interactive") {
+            Write-Error "注册失败: $($_.Exception.Message)`n请尝试用管理员身份运行 PowerShell 后重试。"
+            exit 1
+        }
+    }
 }
+if (-not $registered) { exit 1 }
 
 Write-Host "✅ 已注册计划任务 $TaskName"
-Write-Host "   - 登录时自动启动，崩溃后 1 分钟自动重启（最多连续 10 次）"
-Write-Host "   - 后台运行无窗口；管理入口: http://127.0.0.1:8787/"
+Write-Host "   - 登录时自动启动，崩溃后 60s 自动拉起（由 tools\run_service.ps1 守护）"
+Write-Host "   - 后台运行无窗口；守护日志: logs\service.log"
+Write-Host "   - 管理入口: http://127.0.0.1:8787/"
 Write-Host ""
-$reply = Read-Host "现在就启动一次吗？(y/N)"
+
+# 非交互环境（管道 / 自动化）下不询问，避免卡住
+$interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+if ($Start) {
+    $reply = "y"
+} elseif ($interactive) {
+    $reply = Read-Host "现在就启动一次吗？(y/N)"
+} else {
+    $reply = "n"
+    Write-Host "（非交互模式：未自动启动，加 -Start 可在安装后立即启动）"
+}
+
 if ($reply -eq "y") {
-    Start-ScheduledTask -TaskName $TaskName
-    Write-Host "已启动。稍候可访问 http://127.0.0.1:8787/ 查看状态"
+    $inUse = Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue
+    if ($inUse) {
+        Write-Warning "8787 端口已被占用（可能已有一个实例在跑）。请先结束它，再执行：Start-ScheduledTask -TaskName $TaskName"
+    } else {
+        Start-ScheduledTask -TaskName $TaskName
+        Write-Host "已启动。稍候可访问 http://127.0.0.1:8787/ 查看状态"
+    }
 }
