@@ -1055,19 +1055,25 @@ function renderQqBots() {
 
       const tdOps = document.createElement("td");
       tdOps.appendChild(mkBtn("删除", async () => {
-        const hasSecret = st && st.client_secret;
+        const upper = (bot.name || "").toUpperCase();
         if (!(await uiConfirm(
-          "删除官方 Bot " + (bot.name || "#" + idx) + "？" +
-          (hasSecret ? "\n同时会清除 .env 里的 " + (bot.name || "").toUpperCase() + "_CLIENT_SECRET。" : ""),
+          "删除官方 Bot " + (bot.name || "#" + idx) + "？\n" +
+          "同时会清除 .env 里该 Bot 的密钥，不留残余。",
           { title: "删除官方 Bot", yesText: "删除", danger: true }))) return;
-        if (hasSecret) {
+        // 无条件清理 .env：新建但尚未保存的 Bot 在服务端状态里查不到，
+        // 早先据此跳过清理，结果删完还剩一个 .env 遗留槽位
+        if (upper) {
           try {
-            await api("/api/secrets", {
+            const res = await api("/api/secrets", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ remove: [(bot.name || "").toUpperCase() + "_CLIENT_SECRET"] }),
+              body: JSON.stringify({ remove: [
+                upper + "_CLIENT_SECRET", upper + "_APP_ID", upper + "_TARGET_OPENID",
+              ] }),
             });
+            if (res.ok && res.qq_bot_status) qqBotStatus = res.qq_bot_status;
           } catch (e) { /* 密钥清理失败不阻断配置删除 */ }
+          secretsWritten.delete(bot.name);
         }
         config.qq_official_bots.splice(idx, 1);
         markDirty(); renderQqBots();
@@ -1142,8 +1148,10 @@ $("btnAddQqBot").addEventListener("click", async () => {
       "在这里添加 Bot 后将改为以本列表为准，.env 槽位不再自动扫描。\n" +
       "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？"))) return;
   }
+  // 默认名刻意避开 qq_official_botN —— 那样密钥变量会叫
+  // QQ_OFFICIAL_BOT1_CLIENT_SECRET，与旧版 .env 编号槽位撞名
   const n = config.qq_official_bots.length + 1;
-  $("qqBotName").value = "qq_official_bot" + n;
+  $("qqBotName").value = "official_bot" + n;
   $("qqBotAppId").value = "";
   $("qqBotSecret").value = "";
   $("qqBotSecret").classList.add("masked");
@@ -1173,6 +1181,11 @@ $("qqBotSave").addEventListener("click", async () => {
 
   if (!/^[a-z0-9_]+$/.test(name)) { uiAlert("Bot 名称只能用小写字母、数字、下划线"); return; }
   if ((config.qq_official_bots || []).some((b) => b.name === name)) { uiAlert("该名称已存在"); return; }
+  if (/^qq_official_bot\d+$/.test(name)) {
+    uiAlert("这个名称会与旧版 .env 编号槽位（QQ_OFFICIAL_BOT1_* 等）的变量名冲突，\n" +
+            "删除时容易留下残余。请换一个，例如 official_bot1 或 main_bot。");
+    return;
+  }
   if (!appId) { uiAlert("请填写 App ID"); return; }
   if (!secret) { uiAlert("请填写 Client Secret"); return; }
 
@@ -1187,6 +1200,7 @@ $("qqBotSave").addEventListener("click", async () => {
     });
     if (!res.ok) { msg("❌ 密钥写入失败：" + (res.errors || []).join("；"), "err"); return; }
     if (res.qq_bot_status) qqBotStatus = res.qq_bot_status;
+    secretsWritten.add(name);   // 保存前 status 里查不到，前端自己记住
 
     const bot = { name: name, app_id: appId };
     if (openid) bot.target_openid = openid;
@@ -1737,6 +1751,9 @@ function stopLogPolling() {
 // ── QQ openid 自动捕获 ───────────────────────────
 let openidCtx = null;      // {bot, input}
 let openidTimer = null;
+// 本次会话里已写入 .env 的 Bot 密钥。新加的 Bot 还没保存进 config.json，
+// 服务端返回的 qq_bot_status 里查不到它，只能前端自己记着。
+const secretsWritten = new Set();
 
 async function openOpenidDialog(bot, input) {
   openidCtx = { bot: bot, input: input };
@@ -1745,10 +1762,11 @@ async function openOpenidDialog(bot, input) {
   $("openidSecret").value = "";
   $("openidSecret").classList.add("masked");
   $("openidSecretEye").textContent = "👁";
-  // .env 里已有该 Bot 的 secret 就不必再输
+  // .env 里已有该 Bot 的 secret 就不必再输（含本次会话刚写入的）
   const st = (qqBotStatus || []).find((s) => s.name === bot.name);
-  $("openidSecretField").hidden = !!(st && st.client_secret);
-  $("openidStatus").innerHTML = (st && st.client_secret)
+  const hasSecret = (st && st.client_secret) || secretsWritten.has(bot.name);
+  $("openidSecretField").hidden = hasSecret;
+  $("openidStatus").innerHTML = hasSecret
     ? '<span style="color:var(--muted)">将使用 .env 里已配置的 Client Secret。</span>'
     : "";
   $("openidStart").hidden = false;

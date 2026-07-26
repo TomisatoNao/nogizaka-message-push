@@ -246,10 +246,18 @@ def main() -> None:
             code, probe = _http("GET", base + "/api/config")
             assert probe["qq_bot_status"] == [], \
                 f"无任何配置时不应有槽位: {probe['qq_bot_status']}"
+            # 只剩 SECRET（删除 Bot 后的残留）不该被当成槽位
+            os.environ["QQ_OFFICIAL_BOT1_CLIENT_SECRET"] = "leftover"
+            code, probe = _http("GET", base + "/api/config")
+            assert probe["qq_bot_status"] == [], \
+                f"只有残留密钥时不应显示槽位: {probe['qq_bot_status']}"
+            os.environ.pop("QQ_OFFICIAL_BOT1_CLIENT_SECRET", None)
+
+            # 有 APP_ID 才是真正的旧配置
             os.environ["QQ_OFFICIAL_BOT1_APP_ID"] = "102000009"
             code, probe = _http("GET", base + "/api/config")
             names = [b["name"] for b in probe["qq_bot_status"]]
-            assert names == ["BOT1"], f".env 里配过的槽位才应出现: {names}"
+            assert names == ["BOT1"], f"有 APP_ID 的槽位才应出现: {names}"
         finally:
             os.environ.pop("QQ_OFFICIAL_BOT1_APP_ID", None)
             os.environ.update(saved_env)

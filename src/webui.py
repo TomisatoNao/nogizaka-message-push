@@ -409,7 +409,9 @@ def _qq_bot_status(raw: dict) -> list[dict]:
             "secret_env": f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET",
         }
         entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
-        if entry["app_id"] or entry["client_secret"] or entry["target_openid"]:
+        # 必须有 APP_ID 才算一个真实的旧槽位：app_id 才是 Bot 的身份，
+        # 只剩 SECRET 的多半是删除 Bot 后的残留，不该再显示成槽位
+        if entry["app_id"]:
             bots.append(entry)
     return bots
 
