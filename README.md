@@ -101,8 +101,10 @@ cp .env.example .env
 | `id` | 成员 ID（`m_id`），见下方速查表 | `"55"` |
 | `name` | 成员名称（推送显示用） | `"冨里奈央"` |
 | `account` | 使用哪个账号轮询（对应 `accounts` 的 key） | `"nogizaka_main"` |
-| `groups` | 推送到哪些 QQ 群（NapCat 群号） | `[533072575]` |
+| `groups` | 推送到哪些 QQ 群（NapCat 群号）。只推 TG 时可省略 | `[533072575]` |
 | `tg` | 可选的 TG 频道/群 chat_id（Bot 需是管理员） | `"-1004219007326"` |
+
+`groups`、`tg`、**已启用的 QQ 官方 Bot** 三者至少要有一个能覆盖该成员，否则启动健康检查会报「没有任何可用推送目标」。官方 Bot 推的是全局 `TARGET_OPENID`、不区分成员，所以只要它可用，成员就不需要再配 `groups` 或 `tg`。
 
 ### 获取成员 ID
 
@@ -141,9 +143,12 @@ python main.py
 22:00:05  [INFO] ✅ 冨里奈央 推送 2 条新消息
 22:00:05  [INFO] 🔍 巡查完毕 [冨里奈央 · 賀喜遥香 · ...]
 22:22:25  [INFO] 📊 [状态摘要 #10 · 运行 22m]
-22:22:25  [INFO]   通道: napcat ✅ 10/10 | tg ✅ 10/10
+22:22:25  [INFO]   通道: napcat ✅ 14/14 | tg ✅ 14/14
+22:22:25  [INFO]   成员: 9/9 拉取正常 ✅ · 9/9 推送正常 ✅
 22:22:25  [INFO]   Token: nogizaka_main 38min · yodel_grad 失效 🔴
 ```
+
+通道计数是**累计发送次数**（成功/总数），不是轮次数 —— 一轮里推送多条消息就会累加多次。
 
 ### 常见操作
 
@@ -153,9 +158,19 @@ python main.py
 ```
 热重载 (`config.reload()`) 或重启后生效。成员 ID 见下方速查表。
 
-**换一个 Token：** 编辑 `.env` 中对应账号的 `{KEY}_TOKEN`，然后触发热重载或重启。
+**换一个 Token / Cookie：** 磁盘凭证的优先级**高于** `.env`（Token 会自动续期，磁盘上的值才是最新的），所以光改 `.env` 不会生效。正确步骤：
 
-**只开 TG 不开 NapCat：** 在 `config.json` 中 `channels` 里设 `"napcat": false`，`"tg": true`。
+1. 编辑 `.env` 中对应账号的 `{KEY}_TOKEN` / `{KEY}_COOKIE` / `{KEY}_REFRESH_TOKEN`
+2. 删除该账号的持久化凭证：`data/web_credentials/{account}.json`
+3. 重启（`.env` 只在进程启动时读取一次，热重载读不到新值）
+
+如果只做了第 1 步，下次启动会看到「⚠️ xxx 的 .env 凭证已修改，但磁盘凭证优先」的提醒。
+
+**只开 TG 不开 NapCat：** 在 `config.json` 中 `channels` 里设 `"napcat": false`，`"tg": true`。此时成员可以只配 `tg` 而不写 `groups`：
+
+```json5
+{ "id": "39", "name": "筒井 あやめ", "account": "nogizaka_shared", "tg": "-1004219007326" }
+```
 
 **调轮询频率：** 修改 `config.json` 中 `day_interval` / `night_interval`（秒）。`sleep_hours` 控制休眠时段。
 
@@ -175,6 +190,8 @@ MY_NEW_ACCOUNT_COOKIE=session=xxx
 ```
 
 如果是 mobile 账号（`"auth": "mobile"`）：`{KEY}_REFRESH_TOKEN` 必填，`{KEY}_TOKEN` 可选（留空则首次运行时自动通过 refresh_token 获取）。也可不配 `{KEY}_REFRESH_TOKEN`，使用全局 `NOGIZAKA_REFRESH_TOKEN` 作为 fallback。
+
+⚠️ **新增账号必须重启**：`.env` 只在进程启动时加载一次，热重载读不到新增的凭证变量。（热重载只能识别 `config.json` 里新增的、且磁盘上已有凭证文件的账号。）
 
 **启用 QQ 官方 Bot：** 三步：
 
@@ -214,6 +231,7 @@ nogizaka-message-push/
 ├── src/
 │   ├── app.py               # 主循环：健康检查、依赖注入、轮询编排
 │   ├── fetcher.py           # 核心拉取：API 轮询、消息过滤、分发调度
+│   ├── constants.py         # 跨模块消息结构常量（翻译分隔线、消息段角色标记）
 │   ├── dedup.py             # 消息 ID 去重（滑动窗口）
 │   ├── health.py            # 运行时健康追踪：通道/Token/成员状态、定期摘要
 │   ├── translator.py        # Gemini 翻译（多模型容错、串行限速）
@@ -226,7 +244,11 @@ nogizaka-message-push/
 │       ├── tgbot.py         # Telegram Bot 推送
 │       └── bilibili.py      # B 站动态发布
 ├── tools/
-│   └── get_qq_openid.py     # QQ Bot WebSocket 获取用户 OpenID
+│   ├── get_qq_openid.py     # QQ Bot WebSocket 获取用户 OpenID
+│   └── test_models.py       # Gemini 模型序列连通性 + 响应结构诊断
+├── tests/
+│   ├── test_config_load.py  # config.json → config.py 加载校验
+│   └── test_units.py        # 时间解析 / 日志截断 / HTML 转义 / 消息链提取
 ├── data/                    # 运行时数据（git-ignored）
 │   ├── web_credentials/     # 持久化 Token + Cookie / refresh_token
 │   ├── sent_ids/            # 已发送消息 ID 去重记录
@@ -275,7 +297,7 @@ Member Message API          Gemini API            NapCat/OneBot
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | `.env` 环境变量加载 |
 | [json5](https://github.com/dpranke/pyjson5) | 解析 `config.json` 的 JSONC 格式（支持注释） |
 | [jsonschema](https://github.com/python-jsonschema/jsonschema) | `config.json` 结构校验 |
-| [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) | Telegram Bot SDK（仅启用 TG 推送时需要） |
+| [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) | Telegram Bot SDK（已在 `requirements.txt` 中；不用 TG 推送可以不装，缺失时只会禁用该通道） |
 | [websockets](https://websockets.readthedocs.io/) | QQ Bot WebSocket 连接（仅 `tools/get_qq_openid.py`） |
 
 ## 监控成员
@@ -290,9 +312,9 @@ Member Message API          Gemini API            NapCat/OneBot
 | 小坂 菜绪 | 日向坂46 | 36 | hinata_shared |
 | 大野 愛実 | 日向坂46 | 84 | hinata_shared |
 | 佐藤 優羽 | 日向坂46 | 88 | hinata_shared |
-| 松田 好花 | 日向坂46（毕业） | 77 | yodel_graduated |
-| 松田好花 Staff | 日向坂46（毕业） | 81 | yodel_graduated |
-| 丹生 明里 | 日向坂46（毕业） | 47 | yodel_graduated |
+| 松田 好花 | 日向坂46（毕业） | 77 | yodel_grad |
+| 松田好花 Staff | 日向坂46（毕业） | 81 | yodel_grad |
+| 丹生 明里 | 日向坂46（毕业） | 47 | yodel_grad |
 
 ### 乃木坂46 现役成员 ID 速查
 

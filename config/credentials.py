@@ -3,6 +3,7 @@
 # ============================================================
 import asyncio
 import base64
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -61,6 +62,47 @@ def _clean_cookie_string(raw: str) -> dict[str, str]:
         if k.strip().lower() not in ignore:
             result[k.strip()] = v.strip()
     return result
+
+
+# 记录「上次从 .env 消费过的凭证指纹」。
+# 磁盘凭证优先于 .env，而 Token 正常续期后磁盘值必然与 .env 不同 ——
+# 只有 .env 本身发生变化时才应该提醒用户「改了 .env 但不会生效」。
+_ENV_SEEN_FILE = "_env_seen.json"
+
+
+def _env_fingerprint(acc_cfg: dict) -> str:
+    """对 .env 提供的初始凭证取指纹；未提供任何凭证时返回空字符串。"""
+    raw = "|".join((
+        acc_cfg.get("init_token", ""),
+        acc_cfg.get("init_cookie", ""),
+        acc_cfg.get("init_refresh_token", ""),
+    ))
+    if not raw.strip("|"):
+        return ""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_env_seen() -> dict[str, str]:
+    path = os.path.join(CRED_DIR, _ENV_SEEN_FILE)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_env_seen(seen: dict[str, str]) -> None:
+    path = os.path.join(CRED_DIR, _ENV_SEEN_FILE)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(seen, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        log_all(f"⚠️ 写入 {_ENV_SEEN_FILE} 失败: {e}", is_debug=True)
 
 
 def _save_cred(account_id: str, token: str, cookies: dict) -> None:
@@ -319,12 +361,20 @@ async def write_time_record(time_file: str, file_lock: asyncio.Lock, updated: st
 
 def load_all_accounts() -> None:
     """从磁盘加载所有账号凭证，不存在时用初始凭证创建。
-    自动识别凭证格式：磁盘文件含 refresh_token → 移动端，否则 → Web 端。"""
+    自动识别凭证格式：磁盘文件含 refresh_token → 移动端，否则 → Web 端。
+
+    幂等：已加载的账号会跳过，因此热重载后可安全重复调用以加载新增账号。
+    优先级：磁盘凭证 > `.env`。若 `.env` 相比上次启动发生变化，会打告警提示
+    正确的轮换方式（删除磁盘凭证文件），而不会自动采用 `.env` 的值。"""
     os.makedirs(CRED_DIR, exist_ok=True)
+    env_seen = _load_env_seen()
+    seen_dirty = False
+
     for acc_id, acc_cfg in ACCOUNTS.items():
         if acc_id in ACCOUNT_CREDS:
             continue
         is_mobile = acc_cfg.get("auth_method") == "mobile"
+        fingerprint = _env_fingerprint(acc_cfg)
         path = os.path.join(CRED_DIR, f"{acc_id}.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -339,6 +389,17 @@ def load_all_accounts() -> None:
             else:
                 ACCOUNT_CREDS[acc_id] = data
                 log_all(f"📂 读取账号凭证: {acc_id}")
+
+            if fingerprint and acc_id not in env_seen:
+                # 首次记录（老用户升级）：无从判断 .env 是否变过，静默记下即可
+                env_seen[acc_id] = fingerprint
+                seen_dirty = True
+            elif fingerprint and env_seen[acc_id] != fingerprint:
+                log_all(
+                    f"⚠️ {acc_id} 的 .env 凭证已修改，但磁盘凭证优先，本次修改不会生效；"
+                    f"如需强制轮换请删除 {path} 后重启",
+                    is_error=True,
+                )
         elif is_mobile:
             rt = acc_cfg.get("init_refresh_token", "")
             init_token = acc_cfg.get("init_token", "")
@@ -346,11 +407,23 @@ def load_all_accounts() -> None:
             if rt or init_token:
                 _save_mobile_cred(acc_id, init_token, rt)
             log_all(f"📝 初始化移动端凭证: {acc_id}")
+            if fingerprint:
+                env_seen[acc_id] = fingerprint
+                seen_dirty = True
         else:
-            cookies = _clean_cookie_string(acc_cfg["init_cookie"])
-            ACCOUNT_CREDS[acc_id] = {"token": acc_cfg["init_token"], "cookies": cookies}
-            _save_cred(acc_id, acc_cfg["init_token"], cookies)
+            # 缺失时留空而非 KeyError —— 由 validate_account_cred 在健康检查里统一报告
+            init_token = acc_cfg.get("init_token", "")
+            cookies = _clean_cookie_string(acc_cfg.get("init_cookie", ""))
+            ACCOUNT_CREDS[acc_id] = {"token": init_token, "cookies": cookies}
+            if init_token or cookies:
+                _save_cred(acc_id, init_token, cookies)
             log_all(f"📝 初始化账号凭证: {acc_id}")
+            if fingerprint:
+                env_seen[acc_id] = fingerprint
+                seen_dirty = True
+
+    if seen_dirty:
+        _save_env_seen(env_seen)
 
 
 def validate_account_cred(account_id: str) -> tuple[bool, str]:

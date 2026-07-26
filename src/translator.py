@@ -46,6 +46,39 @@ def _is_already_chinese(text: str) -> bool:
             return False
     return True
 
+def _extract_text(data: dict, model_name: str) -> str:
+    """从 Gemini 响应中取出译文，取不到时返回空字符串（由调用方降级下一个模型）。
+
+    只取第一个**非思考**段：带思考的模型会把推理过程也放进 parts 并标记
+    `thought: true`，直接取 `parts[0]` 可能拿到推理内容而不是译文。
+    `MAX_TOKENS` 截断时宁可换模型，也不推送半句译文。
+    """
+    candidates = data.get("candidates") or []
+    if not candidates:
+        log_all(f"⚠️ 翻译模型 {model_name} 响应无 candidates", is_error=True)
+        return ""
+
+    candidate = candidates[0]
+    finish = candidate.get("finishReason", "")
+    parts = (candidate.get("content") or {}).get("parts") or []
+
+    if finish == "MAX_TOKENS":
+        log_all(f"⚠️ 翻译模型 {model_name} 输出被 MAX_TOKENS 截断，改用下一个模型", is_error=True)
+        return ""
+
+    for part in parts:
+        part_text = part.get("text", "")
+        if part_text and not part.get("thought"):
+            return part_text.strip()
+
+    log_all(
+        f"⚠️ 翻译模型 {model_name} 未返回可用文本段 "
+        f"(finishReason={finish or '?'}, parts={len(parts)})，改用下一个模型",
+        is_error=True,
+    )
+    return ""
+
+
 async def translate_text(text: str, member_name: str = "", group_type: str = "") -> str:
     """
     将日文翻译为中文。
@@ -70,6 +103,9 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
         text=text,
     )
 
+    # 注：这里没有显式设置 thinkingConfig —— 并非所有模型端点都接受该字段，
+    # 传错会让整条链路 400。是否需要关闭/限制思考预算，请先用
+    # `python tools/test_models.py` 实测 finishReason 与 thoughtsTokenCount 再决定。
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
@@ -87,15 +123,24 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
                         )
 
                     if resp.status_code == 200:
-                        data   = resp.json()
-                        result = data["candidates"][0]["content"]["parts"][0]["text"]
-                        return result.strip()
+                        result = _extract_text(resp.json(), model["name"])
+                        if result:
+                            return result
+                        break   # 响应结构异常，换下一个模型
                     elif resp.status_code == 429:
                         await asyncio.sleep((attempt + 1) * 3)
                         continue
                     else:
-                        break   # 其他错误，换下一个模型
-                except Exception:
+                        log_all(
+                            f"⚠️ 翻译模型 {model['name']} 返回 HTTP {resp.status_code}，改用下一个模型",
+                            is_debug=True,
+                        )
+                        break
+                except Exception as e:
+                    log_all(
+                        f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}",
+                        is_debug=True,
+                    )
                     break
 
     return "[翻译失败]"
