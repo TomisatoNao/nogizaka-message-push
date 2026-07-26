@@ -213,7 +213,7 @@ http://127.0.0.1:8787/
 
 **调轮询频率：** 修改 `config.json` 中 `day_interval` / `night_interval`（秒）。`sleep_hours` 控制休眠时段。
 
-**添加一个新账号：** 在 `config.json` 的 `accounts` 中添加一项，然后在 `.env` 里按命名约定填入凭证：
+**添加一个新账号：** 最简单的方式是网页管理端：「账号池」→「添加账号」→「保存并热重载」→「填凭证」，全程无需重启。手动操作的话：在 `config.json` 的 `accounts` 中添加一项，然后在 `.env` 里按命名约定填入凭证：
 
 ```json5
 // config.json
@@ -230,7 +230,7 @@ MY_NEW_ACCOUNT_COOKIE=session=xxx
 
 如果是 mobile 账号（`"auth": "mobile"`）：`{KEY}_REFRESH_TOKEN` 必填，`{KEY}_TOKEN` 可选（留空则首次运行时自动通过 refresh_token 获取）。也可不配 `{KEY}_REFRESH_TOKEN`，使用全局 `NOGIZAKA_REFRESH_TOKEN` 作为 fallback。
 
-⚠️ **新增账号必须重启**：`.env` 只在进程启动时加载一次，热重载读不到新增的凭证变量。（热重载只能识别 `config.json` 里新增的、且磁盘上已有凭证文件的账号。）
+⚠️ **手动改 `.env` 新增账号必须重启**：`.env` 只在进程启动时加载一次，热重载读不到新增的凭证变量。（热重载只能识别 `config.json` 里新增的、且磁盘上已有凭证文件的账号。）通过网页「填凭证」则没有这个限制——它会同步进程环境变量并立即轮换。
 
 **启用 QQ 官方 Bot：** 三步（Bot 数量不限）：
 
@@ -411,7 +411,7 @@ Member Message API          Gemini API            NapCat/OneBot
 
 | 文件 | 职责 |
 |---|---|
-| `.env` | 密钥和凭证（模板见 `.env.example`，~24 行） |
+| `.env` | 密钥和凭证（模板见 `.env.example`；也可通过网页管理端「填凭证」写入） |
 | `config/config.json` | 用户配置（schema 见 `config/config.schema.json`，~50 行） |
 | `config/config.py` `_DEFAULTS` | 内置默认值（文件路径、超时、速率限制、调试开关等，一般无需修改） |
 
