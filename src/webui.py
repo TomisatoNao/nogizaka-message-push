@@ -26,14 +26,20 @@ import sys
 import threading
 import time as _time
 from datetime import datetime
+from html import escape as html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = _BASE_DIR / "config" / "config.json"
 SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 ENV_PATH = _BASE_DIR / ".env"
 _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
+_ARCHIVE_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "archive.html"
+_LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.html"
+
+_SESSION_COOKIE = "sakamichi_session"
 
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
@@ -114,6 +120,9 @@ def validate_config(raw: dict) -> list[str]:
 _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 推送通道 ──",  ["channels", "napcat_api", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
+    ("── 消息归档 ──",  ["archive"]),
+    ("── 每日摘要 ──",  ["daily_summary"]),
+    ("── 账号系统 ──",  ["auth"]),
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
@@ -135,7 +144,8 @@ def _render_value(key: str, val) -> str:
     if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin") and isinstance(val, dict) and val:
+    if key in ("channels", "web_admin", "archive", "daily_summary", "auth") \
+            and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
     return _dump(val)
@@ -453,19 +463,129 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "errors": [f"拒绝非本机 Host: {host!r}"]}, 403)
         return False
 
-    def _check_auth(self) -> bool:
+    # ── 认证与授权 ─────────────────────────────────
+    def _api_token_ok(self) -> bool:
+        """WEB_ADMIN_TOKEN 校验（脚本 / 无会话访问用，等价 admin 身份）。"""
         token = os.getenv("WEB_ADMIN_TOKEN", "")
         if not token:
-            return True
+            return False
         supplied = self.headers.get("X-Auth-Token", "")
         if not supplied:
-            auth = self.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                supplied = auth[7:]
-        if hmac.compare_digest(supplied, token):
+            authz = self.headers.get("Authorization", "")
+            if authz.startswith("Bearer "):
+                supplied = authz[7:]
+        if not supplied:
+            # <img>/<video> 标签无法带自定义头，归档媒体通过 query 传 token
+            from urllib.parse import parse_qs
+            supplied = (parse_qs(self.path.partition("?")[2]).get("token") or [""])[0]
+        return bool(supplied) and hmac.compare_digest(supplied, token)
+
+    def _cookie_token(self) -> str:
+        raw = self.headers.get("Cookie", "")
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == _SESSION_COOKIE:
+                return value
+        return ""
+
+    def _current_user(self) -> dict | None:
+        """解析当前身份：会话 cookie 优先，其次 API token（视为 admin）。"""
+        import config.config as cfg
+        from src import auth as _auth
+        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 12))) * 3600
+        sess = _auth.get_session(self._cookie_token(), ttl_seconds=ttl)
+        if sess:
+            return {"username": sess["username"], "role": sess["role"], "via": "session"}
+        if self._api_token_ok():
+            return {"username": "(api-token)", "role": "admin", "via": "token"}
+        return None
+
+    def _check_origin(self) -> bool:
+        """非 GET 请求校验 Origin（配合 SameSite=Strict cookie 防 CSRF）。
+        无 Origin 头的请求（curl / 脚本）放行——它们不携带浏览器 cookie 语义。"""
+        origin = self.headers.get("Origin", "")
+        if not origin:
             return True
-        self._send_json({"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
+        from urllib.parse import urlparse
+        host = (urlparse(origin).hostname or "")
+        if host in _LOOPBACK_HOSTS or host == (self.headers.get("Host", "").rsplit(":", 1)[0]):
+            return True
+        self._send_json({"ok": False, "errors": [f"拒绝跨站请求 Origin: {origin!r}"]}, 403)
         return False
+
+    def _guard(self, need_admin: bool = True, is_page: bool = False) -> bool:
+        """路由守卫。通过返回 True；否则已发送响应（页面 302 / API 401·403）返回 False。"""
+        import config.config as cfg
+        from src import auth as _auth
+
+        if not getattr(cfg, "AUTH_ENABLED", False):
+            # 账号系统未启用：沿用 WEB_ADMIN_TOKEN 语义（未设 token 则全放行）
+            if not os.getenv("WEB_ADMIN_TOKEN", ""):
+                return True
+            if self._api_token_ok():
+                return True
+            self._send_json({"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
+            return False
+
+        # 归档在 archive_public 下免登录
+        if not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
+            return True
+
+        if not _auth.has_users():
+            msg = ("账号系统已启用但还没有任何用户。请在服务器上执行："
+                   "python tools/manage_users.py add <用户名>")
+            if is_page:
+                self._send_html_text("尚未创建账号", msg, 503)
+            else:
+                self._send_json({"ok": False, "errors": [msg]}, 503)
+            return False
+
+        user = self._current_user()
+        if user is None:
+            if is_page:
+                self._redirect("/login?next=" + quote(self.path, safe=""))
+            else:
+                self._send_json({"ok": False, "errors": ["未登录"]}, 401)
+            return False
+        if need_admin and user["role"] != "admin":
+            if is_page:
+                self._send_html_text(
+                    "权限不足",
+                    f"当前账号 {user['username']}（{user['role']}）只能访问归档。",
+                    403, link=("/archive", "前往消息归档"))
+            else:
+                self._send_json({"ok": False, "errors": ["需要管理员权限"]}, 403)
+            return False
+        return True
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_html_text(self, title: str, message: str, code: int = 200,
+                        link: tuple[str, str] | None = None) -> None:
+        """极简提示页（未登录 / 权限不足 / 未初始化）。"""
+        extra = (f'<p><a href="{link[0]}">{html_escape(link[1])}</a></p>') if link else ""
+        body = (
+            "<style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#1c2333;"
+            "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
+            "div{background:#fff;padding:32px 38px;border-radius:14px;max-width:520px;"
+            "box-shadow:0 2px 12px rgba(0,0,0,.06);line-height:1.8}"
+            "code{background:#f0f1f4;padding:2px 6px;border-radius:4px}"
+            "a{color:#6d5bd0}</style>"
+            f"<div><h2>{html_escape(title)}</h2><p>{html_escape(message)}</p>{extra}</div>"
+        ).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _check_auth(self) -> bool:
+        """管理端 API 守卫（需要 admin）。"""
+        return self._guard(need_admin=True)
 
     def _read_body_json(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -484,22 +604,66 @@ class _Handler(BaseHTTPRequestHandler):
         return obj
 
     # ── 路由 ─────────────────────────────────────────────
+    def _send_static(self, name: str) -> None:
+        """主题 CSS / JS —— 白名单文件名，不接受任意路径。"""
+        allowed = {"theme.css": "text/css", "theme.js": "application/javascript"}
+        ctype = allowed.get(name)
+        if ctype is None:
+            self._send_json({"ok": False, "errors": ["未知静态资源"]}, 404)
+            return
+        try:
+            body = (_STATIC_PATH.parent / name).read_bytes()
+        except OSError:
+            self._send_json({"ok": False, "errors": ["静态资源缺失"]}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")   # 改版即时生效
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, file_path: Path) -> None:
+        try:
+            body = file_path.read_bytes()
+        except OSError:
+            self._send_json({"ok": False, "errors": ["页面文件缺失"]}, 500)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # noqa: N802 - http.server 约定命名
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
+        # 共享静态资源（主题 token / 切换脚本）：登录页也要用，故不设鉴权
+        if path in ("/static/theme.css", "/static/theme.js"):
+            self._send_static(path.rsplit("/", 1)[1])
+            return
+        if path == "/login":
+            self._send_html(_LOGIN_HTML_PATH)
+            return
+        if path == "/api/auth/me":
+            self._handle_auth_me()
+            return
         if path in ("/", "/index.html"):
-            try:
-                body = _STATIC_PATH.read_bytes()
-            except OSError:
-                self._send_json({"ok": False, "errors": ["管理页面文件缺失"]}, 500)
+            if not self._guard(need_admin=True, is_page=True):
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html(_STATIC_PATH)
+            return
+        if path == "/archive":
+            if not self._guard(need_admin=False, is_page=True):
+                return
+            self._send_html(_ARCHIVE_HTML_PATH)
+            return
+        if path.startswith("/api/archive/"):
+            if not self._guard(need_admin=False):
+                return
+            self._handle_archive(path[len("/api/archive/"):])
             return
 
         if path == "/api/config":
@@ -540,6 +704,21 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 return
             self._handle_members()
+            return
+
+        if path == "/api/users":
+            if not self._check_auth():
+                return
+            from src import auth as _auth
+            me = self._current_user() or {}
+            users = [{
+                "username": name,
+                "role": u.get("role", "viewer"),
+                "created_at": u.get("created_at", 0),
+                "is_me": name == me.get("username"),
+            } for name, u in sorted(_auth.load_users().items())]
+            self._send_json({"ok": True, "users": users,
+                             "min_password_len": _auth.MIN_PASSWORD_LEN})
             return
 
         if path == "/api/config/history":
@@ -609,6 +788,342 @@ class _Handler(BaseHTTPRequestHandler):
         } for m in members]
         self._send_json({"ok": True, "account": account, "members": slim})
 
+    # ── 消息归档查看器 ─────────────────────────────
+    _ARCHIVE_TYPES = ("text", "picture", "image", "video", "voice")
+
+    # ── 登录 / 登出 / 身份 ─────────────────────────
+    def _handle_auth_me(self) -> None:
+        import config.config as cfg
+        from src import auth as _auth
+        user = self._current_user() if getattr(cfg, "AUTH_ENABLED", False) else None
+        self._send_json({
+            "ok": True,
+            "auth_enabled": bool(getattr(cfg, "AUTH_ENABLED", False)),
+            "archive_public": bool(getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False)),
+            "has_users": _auth.has_users(),
+            "user": {"username": user["username"], "role": user["role"]} if user else None,
+        })
+
+    def _handle_login(self) -> None:
+        import config.config as cfg
+        from src import auth as _auth
+        from src.logger import log_all
+        if not getattr(cfg, "AUTH_ENABLED", False):
+            self._send_json({"ok": False, "errors": ["账号系统未启用"]}, 400)
+            return
+        body = self._read_body_json()
+        if body is None:
+            return
+        ip = self.client_address[0] if self.client_address else "?"
+        locked = _auth.is_locked_out(ip)
+        if locked > 0:
+            self._send_json({"ok": False, "errors": [
+                f"登录失败次数过多，请 {int(locked // 60) + 1} 分钟后再试"]}, 429)
+            return
+
+        username = str(body.get("username", ""))[:64]
+        password = str(body.get("password", ""))[:256]
+        user = _auth.authenticate(username, password)
+        if user is None:
+            _auth.record_failure(ip)
+            log_all(f"🔒 网页登录失败: {username!r} 来自 {ip}", is_error=True)
+            self._send_json({"ok": False, "errors": ["用户名或密码错误"]}, 401)
+            return
+
+        _auth.clear_failures(ip)
+        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 12))) * 3600
+        token = _auth.create_session(user["username"], user["role"], ttl)
+        log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
+
+        body_out = json.dumps({"ok": True, "user": user}, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_out)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Set-Cookie",
+            f"{_SESSION_COOKIE}={token}; Path=/; Max-Age={ttl}; HttpOnly; SameSite=Strict",
+        )
+        self.end_headers()
+        self.wfile.write(body_out)
+
+    def _handle_logout(self) -> None:
+        from src import auth as _auth
+        _auth.destroy_session(self._cookie_token())
+        body_out = json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_out)))
+        self.send_header("Set-Cookie",
+                         f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+        # 让浏览器丢弃已缓存的归档媒体副本（localhost 视为安全上下文，该头生效）。
+        # 刻意不含 "storage"：那会把 localStorage 里的主题偏好一并清掉；
+        # 其中真正敏感的 webAdminToken 由前端登出逻辑单独删除。
+        self.send_header("Clear-Site-Data", '"cache", "cookies"')
+        self.end_headers()
+        self.wfile.write(body_out)
+
+    def _handle_users_write(self) -> None:
+        """用户管理（仅 admin）：add / passwd / role / delete。
+        密码只接收不回显；关键防误锁规则在 auth 模块内统一保证。"""
+        from src import auth as _auth
+        from src.logger import log_all
+
+        body = self._read_body_json()
+        if body is None:
+            return
+        action = str(body.get("action", ""))
+        username = str(body.get("username", ""))[:64]
+        password = str(body.get("password", ""))[:256]
+        role = str(body.get("role", "viewer"))
+        me = (self._current_user() or {}).get("username", "?")
+
+        if action == "add":
+            ok, msg = _auth.add_user(username, password, role)
+        elif action == "passwd":
+            ok, msg = _auth.set_password(username, password)
+        elif action == "role":
+            ok, msg = _auth.set_role(username, role)
+        elif action == "delete":
+            if username == me:
+                ok, msg = False, "不能删除当前登录的账号"
+            else:
+                ok, msg = _auth.delete_user(username)
+        else:
+            self._send_json({"ok": False, "errors": [f"未知操作: {action!r}"]}, 400)
+            return
+
+        if ok:
+            log_all(f"👤 用户管理[{me}]: {action} {username} — {msg}")
+            self._send_json({"ok": True, "message": msg})
+        else:
+            self._send_json({"ok": False, "errors": [msg]}, 400)
+
+    def _handle_archive(self, sub: str) -> None:
+        from urllib.parse import parse_qs, unquote
+
+        from src import archive as _archive
+        qs = parse_qs(self.path.partition("?")[2])
+
+        def qp(key: str, default: str = "") -> str:
+            return (qs.get(key) or [default])[0]
+
+        if sub == "members":
+            members = []
+            for name in _archive.list_members():
+                months = _archive.list_months(name)
+                members.append({
+                    "name": name,
+                    "display": name.replace("_", " "),
+                    "months": len(months),
+                    "total": sum(m["count"] for m in months),
+                })
+            self._send_json({"ok": True, "members": members})
+            return
+
+        if sub == "months":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            self._send_json({"ok": True, "member": member, "months": _archive.list_months(member)})
+            return
+
+        if sub == "messages":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            try:
+                year, month = int(qp("year")), int(qp("month"))
+                page = max(1, int(qp("page", "1")))
+                per_page = min(200, max(1, int(qp("per_page", "50"))))
+            except ValueError:
+                self._send_json({"ok": False, "errors": ["year/month/page 必须是数字"]}, 400)
+                return
+            type_filter = qp("type")
+            msgs = _archive.load_month(member, year, month)
+            if type_filter:
+                if type_filter not in self._ARCHIVE_TYPES:
+                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                    return
+                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+                msgs = [m for m in msgs if m.get("type") in wanted]
+            total = len(msgs)
+            start = (page - 1) * per_page
+            slim = [{
+                "id": m.get("id"),
+                "type": m.get("type"),
+                "text": m.get("text", ""),
+                "translation": m.get("_translation", ""),
+                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
+                              if m.get("_local_file") else None),
+                "download_failed": bool(m.get("_download_failed")),
+                "w": m.get("thumbnail_width"),
+                "h": m.get("thumbnail_height"),
+            } for m in msgs[start:start + per_page]]
+            self._send_json({
+                "ok": True, "member": member, "year": year, "month": month,
+                "total": total, "page": page,
+                "total_pages": max(1, -(-total // per_page)), "messages": slim,
+            })
+            return
+
+        if sub == "calendar":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            type_filter = qp("type")
+            wanted = None
+            if type_filter:
+                if type_filter not in self._ARCHIVE_TYPES:
+                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                    return
+                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+            self._send_json({"ok": True, "member": member,
+                             "days": _archive.day_counts(member, type_filter=wanted)})
+            return
+
+        if sub == "search":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            query = qp("q").strip()
+            if not query:
+                self._send_json({"ok": False, "errors": ["缺少搜索关键词 q"]}, 400)
+                return
+            try:
+                page = max(1, int(qp("page", "1")))
+                per_page = min(200, max(1, int(qp("per_page", "50"))))
+            except ValueError:
+                self._send_json({"ok": False, "errors": ["page 必须是数字"]}, 400)
+                return
+            type_filter = qp("type")
+            wanted = None
+            if type_filter:
+                if type_filter not in self._ARCHIVE_TYPES:
+                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                    return
+                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+            hits = _archive.search(member, query, type_filter=wanted)
+            total = len(hits)
+            start = (page - 1) * per_page
+            slim = [{
+                "id": m.get("id"),
+                "type": m.get("type"),
+                "text": m.get("text", ""),
+                "translation": m.get("_translation", ""),
+                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
+                              if m.get("_local_file") else None),
+                "download_failed": bool(m.get("_download_failed")),
+                "w": m.get("thumbnail_width"),
+                "h": m.get("thumbnail_height"),
+                "year": m.get("_year"),
+                "month": m.get("_month"),
+            } for m in hits[start:start + per_page]]
+            self._send_json({
+                "ok": True, "member": member, "q": query, "total": total,
+                "page": page, "total_pages": max(1, -(-total // per_page)),
+                "capped": total >= 500, "messages": slim,
+            })
+            return
+
+        if sub.startswith("media/"):
+            rest = unquote(sub[len("media/"):])
+            member, _, rel = rest.partition("/")
+            if member not in _archive.list_members() or not rel:
+                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
+                return
+            member_root = (_archive.archive_root() / member).resolve()
+            full = (member_root / rel).resolve()
+            if member_root not in full.parents:
+                self._send_json({"ok": False, "errors": ["非法路径"]}, 403)
+                return
+            if not full.is_file():
+                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
+                return
+            self._serve_file_range(full)
+            return
+
+        self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _serve_file_range(self, path: Path) -> None:
+        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。
+
+        缓存策略用 private + no-cache：浏览器可以存副本，但每次使用前必须回源
+        验证（带 ETag 命中则 304，几乎零流量）。绝不能用 max-age —— 那会让
+        登出后的浏览器直接从本地缓存渲染私密图片，绕过鉴权。
+        """
+        import mimetypes
+        from email.utils import formatdate, parsedate_to_datetime
+        st = path.stat()
+        size = st.st_size
+        etag = f'"{int(st.st_mtime)}-{size:x}"'
+        last_modified = formatdate(st.st_mtime, usegmt=True)
+        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+        # 条件请求（无 Range 时才处理 304）
+        if not self.headers.get("Range"):
+            fresh = False
+            inm = self.headers.get("If-None-Match", "")
+            if inm:
+                fresh = any(t.strip().lstrip("W/") == etag for t in inm.split(","))
+            elif self.headers.get("If-Modified-Since"):
+                try:
+                    since = parsedate_to_datetime(self.headers["If-Modified-Since"]).timestamp()
+                    fresh = int(st.st_mtime) <= int(since)
+                except (TypeError, ValueError):
+                    fresh = False
+            if fresh:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "private, no-cache")
+                self.end_headers()
+                return
+
+        start, end, status = 0, size - 1, 200
+        m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", "").strip())
+        if m and (m.group(1) or m.group(2)):
+            if m.group(1):
+                start = int(m.group(1))
+                if m.group(2):
+                    end = min(int(m.group(2)), size - 1)
+            else:
+                start = max(0, size - int(m.group(2)))
+            if start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            status = 206
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", last_modified)
+        # private: 禁止中间代理缓存；no-cache: 每次使用前必须回源鉴权
+        self.send_header("Cache-Control", "private, no-cache")
+        self.end_headers()
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = f.read(min(1 << 16, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (ConnectionError, OSError):
+            pass   # 播放器中断连接是常态
+
     def _handle_status(self) -> None:
         """运行状态快照：健康追踪数据 + 各账号实时 Token 剩余时间。"""
         from src.health import get_tracker
@@ -666,6 +1181,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:  # noqa: N802
         if not self._check_host():
             return
+        if not self._check_origin():
+            return
         if self.path.split("?", 1)[0] != "/api/config":
             self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
             return
@@ -693,7 +1210,20 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if not self._check_host():
             return
+        if not self._check_origin():
+            return
         path = self.path.split("?", 1)[0]
+        if path == "/api/auth/login":
+            self._handle_login()
+            return
+        if path == "/api/auth/logout":
+            self._handle_logout()
+            return
+        if path == "/api/users":
+            if not self._check_auth():
+                return
+            self._handle_users_write()
+            return
         if path == "/api/reload":
             if not self._check_auth():
                 return
@@ -883,8 +1413,20 @@ def start_webui(host: str | None = None, port: int | None = None,
     thread = threading.Thread(target=server.serve_forever, name="webui", daemon=True)
     thread.start()
 
-    token_hint = "已启用 token 鉴权" if os.getenv("WEB_ADMIN_TOKEN") else "未设置 WEB_ADMIN_TOKEN（仅限本机访问时可接受）"
-    print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{token_hint}）")
+    import config.config as cfg
+    if getattr(cfg, "AUTH_ENABLED", False):
+        from src import auth as _auth
+        if _auth.has_users():
+            users = _auth.load_users()
+            admins = sum(1 for u in users.values() if u.get("role") == "admin")
+            hint = f"账号登录（{len(users)} 个用户 / {admins} 个管理员）"
+        else:
+            hint = "⚠️ 账号系统已启用但无用户，请执行 python tools/manage_users.py add <用户名>"
+    elif os.getenv("WEB_ADMIN_TOKEN"):
+        hint = "已启用 token 鉴权"
+    else:
+        hint = "无鉴权（仅限本机访问时可接受）"
+    print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
     return server
 
 

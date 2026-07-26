@@ -53,7 +53,13 @@ def _http(method: str, url: str, body: dict | None = None, headers: dict | None 
 def main() -> None:
     import json5
 
+    import config.config as cfg
     from src import webui
+
+    # 本套件测管理端功能本身；鉴权矩阵由 test_auth 覆盖，这里显式关掉
+    # 账号系统，避免测试结果随用户的 config.json 变化
+    orig_auth = cfg.AUTH_ENABLED
+    cfg.AUTH_ENABLED = False
 
     # ── Test 1: 序列化往返 ────────────────────────────
     print("=== Test 1: 序列化往返 ===")
@@ -138,6 +144,10 @@ def main() -> None:
     from dotenv import dotenv_values
     parsed = dotenv_values(env_file)
     assert parsed["BAR_COOKIE"] == "session=a; b=c", "dotenv 应能解析写入的值"
+
+    # 值含单引号 → 走双引号转义路径，dotenv 仍能还原
+    webui.update_env_file({"BAZ_TOKEN": "it's a 'quoted' value"}, path=env_file)
+    assert dotenv_values(env_file)["BAZ_TOKEN"] == "it's a 'quoted' value", "单引号值应经双引号转义往返"
     print("✅ Test 2.5 通过\n")
 
     # ── Test 2.6: 内存日志环 + 文件尾读取 ────────────
@@ -380,6 +390,7 @@ def main() -> None:
 
     print("✅ Test 3 通过\n")
 
+    cfg.AUTH_ENABLED = orig_auth
     print("=" * 50)
     print("🎉 全部测试通过！网页管理端工作正常")
 

@@ -67,6 +67,31 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     return True
 
 
+async def send_report_message(text: str) -> bool:
+    """向所有已启用通道发送运行报告（每日摘要等，非警报语义、无前缀）。
+    目标沿用告警路由：NapCat 取 monitor 里第一个 QQ 群，TG 取第一个频道。"""
+    any_ok = False
+
+    if cfg.ENABLE_NAPCAT_QQ:
+        gid = next((g for m in cfg.MONITOR_LIST for g in (m.get("target_groups") or [])), 0)
+        if gid:
+            ok = await send_qq_message(gid, [{"type": "text", "data": {"text": text}}])
+            any_ok = any_ok or ok
+
+    if cfg.ENABLE_QQ_OFFICIAL_BOT:
+        for bot in get_configured_bots():
+            if await bot.send_text(text):
+                any_ok = True
+
+    if cfg.ENABLE_TG_BOT:
+        cid = next(((m.get("tg_chat_id") or "").strip() for m in cfg.MONITOR_LIST
+                    if (m.get("tg_chat_id") or "").strip()), "")
+        if cid and await tgbot.send_text(cid, text):
+            any_ok = True
+
+    return any_ok
+
+
 async def send_alert_message(target_group: int, text: str) -> bool:
     """向所有已启用的推送通道发送系统警报。"""
     channels = enabled_channels()

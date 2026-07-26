@@ -5,46 +5,49 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>⚙️</text></svg>">
 <title>坂道监控 · 配置管理</title>
+<link rel="stylesheet" href="/static/theme.css">
+<script src="/static/theme.js"></script>
 <style>
-  :root {
-    --bg: #f5f6f8; --card: #ffffff; --text: #1c2333; --muted: #6b7280;
-    --border: #e3e6eb; --accent: #6d5bd0; --accent-soft: #ece9fa;
-    --ok: #1a9e5c; --warn: #c77700; --err: #d23f3f; --danger-soft: #fdecec;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14161c; --card: #1d2027; --text: #e8eaf0; --muted: #9aa1af;
-      --border: #2e323c; --accent: #9c8cf0; --accent-soft: #2a2740;
-      --ok: #3ecf8e; --warn: #e8a13c; --err: #ef6a6a; --danger-soft: #3a2426;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif;
-         background: var(--bg); color: var(--text); font-size: 14px; }
-  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px;
-           background: var(--card); border-bottom: 1px solid var(--border);
+  :root { --danger-soft: var(--err-soft); }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 24px;
+           background: color-mix(in srgb, var(--card) 82%, transparent);
+           backdrop-filter: blur(14px) saturate(1.3);
+           -webkit-backdrop-filter: blur(14px) saturate(1.3);
+           border-bottom: 1px solid var(--border);
            position: sticky; top: 0; z-index: 10; }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header h1 { font-size: 15.5px; margin: 0; font-weight: 650; color: var(--text-strong);
+              letter-spacing: .01em; }
   header .spacer { flex: 1; }
   .dirty-dot { color: var(--warn); font-size: 12px; display: none; }
-  main { max-width: 980px; margin: 0 auto; padding: 20px 24px 80px; }
-  nav.tabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
-  nav.tabs button { border: 1px solid var(--border); background: var(--card); color: var(--muted);
-    padding: 7px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  main { max-width: 1000px; margin: 0 auto; padding: 22px 24px 84px; }
+  nav.tabs { display: flex; gap: 5px; margin-bottom: 18px; flex-wrap: wrap; }
+  nav.tabs button { border: 1px solid transparent; background: transparent; color: var(--muted);
+    padding: 7px 15px; border-radius: 999px; cursor: pointer; font-size: 13.5px;
+    transition: color var(--tr), background var(--tr), border-color var(--tr); }
+  nav.tabs button:hover { color: var(--text); background: var(--card-soft); }
   nav.tabs button.active { background: var(--accent-soft); color: var(--accent);
-    border-color: var(--accent); font-weight: 600; }
+    border-color: color-mix(in srgb, var(--accent) 34%, transparent); font-weight: 650;
+    box-shadow: 0 1px 6px var(--accent-ring); }
   section.tab { display: none; }
-  section.tab.active { display: block; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-          padding: 18px 20px; margin-bottom: 16px; }
-  .card h2 { font-size: 14px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
-             text-transform: none; letter-spacing: .02em; }
+  section.tab.active { display: block; animation: fadeUp .22s ease both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+          padding: 20px 22px; margin-bottom: 16px; box-shadow: var(--shadow-sm);
+          transition: box-shadow var(--tr); }
+  .card:hover { box-shadow: var(--shadow-md); }
+  .card h2 { font-size: 13px; margin: 0 0 15px; color: var(--muted); font-weight: 650;
+             letter-spacing: .06em; text-transform: uppercase;
+             display: flex; align-items: center; gap: 8px; }
+  .card h2::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 18px; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
-  input[type=text], input[type=number], select, textarea {
-    padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit; width: 100%; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input[type=text], input[type=number], input[type=search], select, textarea {
+    padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--field); color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
+    transition: border-color var(--tr), box-shadow var(--tr), background var(--tr); }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--accent); background: var(--card);
+    box-shadow: 0 0 0 3px var(--accent-ring); }
   input.invalid { border-color: var(--err); outline: 1px solid var(--err); }
   .pair { display: flex; gap: 8px; align-items: center; }
   .pair input { width: 90px; }
@@ -58,17 +61,27 @@
   .switch input:checked + .track { background: var(--accent); }
   .switch input:checked + .track::after { left: 18px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border-soft);
+           vertical-align: middle; }
+  tbody tr { transition: background var(--tr); }
+  tbody tr:hover { background: var(--card-soft); }
+  tbody tr:last-child td { border-bottom: none; }
+  th { font-size: 11.5px; color: var(--muted); font-weight: 650; letter-spacing: .04em;
+       text-transform: uppercase; }
   td input, td select { min-width: 70px; }
   .table-wrap { overflow-x: auto; }
   button.btn { border: 1px solid var(--border); background: var(--card); color: var(--text);
-    padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px;
-    transition: transform .06s, border-color .12s, opacity .12s; }
-  button.btn:hover { border-color: var(--accent); }
+    padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
+    font-family: inherit;
+    transition: transform .06s, border-color var(--tr), background var(--tr), opacity var(--tr); }
+  button.btn:hover { border-color: var(--accent); background: var(--card-soft); }
   button.btn:active { transform: translateY(1px) scale(.97); }
   button.btn:disabled { opacity: .55; cursor: default; transform: none; }
-  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent; color: #fff; font-weight: 650;
+    box-shadow: 0 3px 10px var(--accent-ring); }
+  button.btn.primary:hover { background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    filter: brightness(1.06); }
   button.btn.danger { color: var(--err); }
   button.btn.danger:hover { background: var(--danger-soft); border-color: var(--err); }
   button.btn.danger-solid { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
@@ -79,17 +92,21 @@
   .cred.miss { color: var(--err); background: var(--danger-soft); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
   .hint code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-  footer.savebar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
-    border-top: 1px solid var(--border); padding: 10px 24px; display: flex; gap: 12px;
-    align-items: center; z-index: 10; }
+  footer.savebar { position: fixed; bottom: 0; left: 0; right: 0;
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
+    border-top: 1px solid var(--border); padding: 11px 24px; display: flex; gap: 12px;
+    align-items: center; z-index: 10; box-shadow: 0 -2px 14px rgba(0,0,0,.05); }
   footer.savebar .msg { flex: 1; font-size: 13px; white-space: pre-wrap; }
   footer.savebar .msg.ok { color: var(--ok); }
   footer.savebar .msg.err { color: var(--err); }
   textarea#rawJson { min-height: 420px; font-family: Consolas, Menlo, monospace; font-size: 13px;
                      white-space: pre; }
-  dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--card);
-           color: var(--text); padding: 20px 22px; min-width: 320px; max-width: 92vw; }
-  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card);
+           color: var(--text); padding: 22px 24px; min-width: 320px; max-width: 92vw;
+           box-shadow: var(--shadow-lg); animation: dlgIn .2s cubic-bezier(.2,.8,.3,1) both; }
+  @keyframes dlgIn { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+  dialog::backdrop { background: rgba(12, 14, 22, .5); backdrop-filter: blur(3px); }
   dialog h3 { margin: 0 0 14px; font-size: 15px; }
   #secretDialog { width: min(600px, 94vw); }
   .dialog-note { background: var(--accent-soft); color: var(--text); border-radius: 8px;
@@ -133,6 +150,10 @@
   <h1>⚙️ 坂道监控 · 配置管理</h1>
   <span class="dirty-dot" id="dirtyDot">● 有未保存的修改</span>
   <div class="spacer"></div>
+  <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
+  <span class="hint" id="whoami" style="margin:0" hidden></span>
+  <button class="btn" id="btnLogout" hidden>登出</button>
+  <a class="btn" href="/archive" style="text-decoration:none" title="浏览已归档的成员消息">📚 消息归档</a>
   <button class="btn" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
   <button class="btn danger" id="btnRestart" hidden
           title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
@@ -145,6 +166,7 @@
     <button data-tab="accounts">账号池</button>
     <button data-tab="members">监控成员</button>
     <button data-tab="logs">日志</button>
+    <button data-tab="users" id="tabUsers" hidden>用户</button>
     <button data-tab="advanced">高级（JSON）</button>
   </nav>
 
@@ -256,6 +278,19 @@
       <p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
     </div>
     <div class="card">
+      <h2>消息归档与每日摘要</h2>
+      <div class="grid">
+        <label class="switch"><input type="checkbox" id="archiveOn"><span class="track"></span>归档新消息（含媒体文件）</label>
+        <label class="switch"><input type="checkbox" id="archiveMedia"><span class="track"></span>下载媒体文件</label>
+        <label class="switch"><input type="checkbox" id="summaryOn"><span class="track"></span>每日运行摘要</label>
+        <label class="field">摘要时间（JST 整点）
+          <input type="number" id="summaryHour" min="0" max="23">
+        </label>
+      </div>
+      <p class="hint">归档内容在 <a href="/archive">📚 消息归档</a> 页浏览，历史消息用 <code>python tools/backfill_archive.py</code> 回填。
+      每日摘要通过已启用的推送通道发送——<b>哪天没收到摘要，就说明系统挂了</b>（反向监控）。</p>
+    </div>
+    <div class="card">
       <h2>网页管理端</h2>
       <div class="grid">
         <label class="switch"><input type="checkbox" id="webAdminOn"><span class="track"></span>启用（下次重启生效）</label>
@@ -313,6 +348,23 @@
       </div>
       <div id="logView"></div>
       <p class="hint" id="logHint"></p>
+    </div>
+  </section>
+
+  <!-- ── 用户 ─────────────────────────────── -->
+  <section class="tab" id="tab-users">
+    <div class="card">
+      <h2>账号管理</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th></th></tr></thead>
+        <tbody id="userRows"></tbody>
+      </table></div>
+      <div style="margin-top:12px"><button class="btn" id="btnAddUser">＋ 添加用户</button></div>
+      <p class="hint">
+        <b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br>
+        密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br>
+        为防止把自己锁在门外：不能删除或降级最后一个 admin，也不能删除当前登录的账号。
+      </p>
     </div>
   </section>
 
@@ -385,6 +437,45 @@
   <div class="actions">
     <button class="btn" id="testPushCancel">取消</button>
     <button class="btn primary" id="testPushSend">发送</button>
+  </div>
+</dialog>
+
+<!-- 添加用户对话框 -->
+<dialog id="userDialog">
+  <h3>添加用户</h3>
+  <div class="dialog-note">密码仅上传、不回显；创建后可随时改密或改角色。</div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">用户名<span class="req">*</span></span>
+      <span class="fenv">字母 / 数字 / _ / -</span></div>
+    <input type="text" id="newUserName" placeholder="friend" autocomplete="off"
+           data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
+           data-form-type="other">
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">角色</span></div>
+    <div class="chips" id="newUserRole"></div>
+    <div class="fhelp" id="newUserRoleHelp"></div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">密码<span class="req">*</span></span>
+      <span class="fenv" id="pwLenHint">至少 8 位</span></div>
+    <div class="input-group">
+      <!-- autocomplete=off 而非 new-password：后者会触发密码管理器的
+           「生成密码」悬浮层，它会盖住输入框导致无法输入 -->
+      <input type="text" id="newUserPw" class="masked" autocomplete="off"
+             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
+             data-form-type="other">
+      <button type="button" class="eye" id="newUserPwEye">👁</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap">
+      <button type="button" class="btn small" id="btnGenPw">🎲 生成随机密码</button>
+      <button type="button" class="btn small" id="btnCopyPw" hidden>📋 复制</button>
+      <span class="fhelp" id="genPwHint" style="margin:0"></span>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="userCancel">取消</button>
+    <button class="btn primary" id="userSave">创建</button>
   </div>
 </dialog>
 
@@ -568,6 +659,7 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
     document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
     if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
     if (btn.dataset.tab === "status") startStatusPolling(); else stopStatusPolling();
+    if (btn.dataset.tab === "users") refreshUsers();
   });
 });
 
@@ -811,6 +903,12 @@ function renderGeneral() {
   $("webAdminOn").checked = wa.enabled !== false;
   $("webAdminHost").value = wa.host || "127.0.0.1";
   $("webAdminPort").value = wa.port || 8787;
+  const ar = config.archive || {};
+  $("archiveOn").checked = !!ar.enabled;
+  $("archiveMedia").checked = ar.media !== false;
+  const ds = config.daily_summary || {};
+  $("summaryOn").checked = !!ds.enabled;
+  $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
@@ -933,14 +1031,23 @@ function collectGeneral() {
     host: $("webAdminHost").value.trim() || "127.0.0.1",
     port: num("webAdminPort", 8787),
   };
+  config.archive = {
+    enabled: $("archiveOn").checked,
+    dir: (config.archive || {}).dir || "data/archive",
+    media: $("archiveMedia").checked,
+  };
+  config.daily_summary = {
+    enabled: $("summaryOn").checked,
+    hour: Math.min(23, Math.max(0, num("summaryHour", 23))),
+  };
 }
 document.querySelectorAll("#tab-general input").forEach(() => {});
 $("tab-general").addEventListener("input", () => markDirty());
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
-function openSecretDialog(title, hint, fields, account) {
-  secretCtx = { fields, account };
+function openSecretDialog(title, hint, fields, account, opts) {
+  secretCtx = { fields, account, userAction: (opts || {}).userAction || null };
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
   $("secretDialogHint").hidden = !hint;
@@ -956,10 +1063,13 @@ function openSecretDialog(title, hint, fields, account) {
     name.className = "fname";
     name.innerHTML = esc(f.label) + (f.required ? '<span class="req">*</span>'
                                                 : ' <span style="color:var(--muted);font-weight:400">（可选）</span>');
-    const envChip = document.createElement("span");
-    envChip.className = "fenv";
-    envChip.textContent = ".env · " + f.env;
-    labelRow.append(name, envChip);
+    labelRow.appendChild(name);
+    if (f.env !== "__password__") {   // 账号密码不涉及 .env，不显示变量名标签
+      const envChip = document.createElement("span");
+      envChip.className = "fenv";
+      envChip.textContent = ".env · " + f.env;
+      labelRow.appendChild(envChip);
+    }
 
     const group = document.createElement("div");
     group.className = "input-group";
@@ -977,6 +1087,7 @@ function openSecretDialog(title, hint, fields, account) {
     input.setAttribute("data-bwignore", "true");   // Bitwarden
     input.setAttribute("data-1p-ignore", "true");  // 1Password
     input.setAttribute("data-lpignore", "true");   // LastPass
+    input.setAttribute("data-form-type", "other"); // Dashlane
     input.placeholder = f.placeholder || "";
     input.dataset.env = f.env;
     // 粘贴自动清理：去掉换行和 Bearer 前缀（从 DevTools 复制常带这些）
@@ -1026,6 +1137,16 @@ $("secretSave").addEventListener("click", async () => {
   }
   if (missing) { uiAlert("请填写：" + missing); return; }
   if (!Object.keys(values).length) { uiAlert("没有填写任何值"); return; }
+
+  // 账号密码走用户管理接口（不写 .env）
+  if (secretCtx.userAction) {
+    const pw = values["__password__"] || "";
+    if (pw.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
+    const ok = await userAction({ ...secretCtx.userAction, password: pw });
+    if (ok) $("secretDialog").close();
+    return;
+  }
+
   const saveBtn = $("secretSave");
   saveBtn.disabled = true;
   const origText = saveBtn.textContent;
@@ -1419,6 +1540,133 @@ function stopLogPolling() {
   if (logTimer !== null) { clearInterval(logTimer); logTimer = null; }
 }
 
+// ── 用户管理 ─────────────────────────────────────
+let minPwLen = 8;
+
+async function refreshUsers() {
+  let data;
+  try { data = await api("/api/users"); } catch (e) { return; }
+  if (!data.ok) return;
+  minPwLen = data.min_password_len || 8;
+  const tbody = $("userRows");
+  tbody.innerHTML = "";
+  const adminCount = data.users.filter((u) => u.role === "admin").length;
+  for (const u of data.users) {
+    const tr = document.createElement("tr");
+    const when = u.created_at ? new Date(u.created_at * 1000).toLocaleString() : "—";
+    tr.innerHTML = "<td><b>" + esc(u.username) + "</b>" +
+      (u.is_me ? ' <span class="cred ok">当前登录</span>' : "") + "</td>" +
+      "<td>" + (u.role === "admin" ? '<span class="cred ok">admin</span>'
+                                   : '<span class="cred" style="color:var(--muted)">viewer</span>') +
+      "</td><td>" + esc(when) + "</td>";
+    const td = document.createElement("td");
+    td.appendChild(mkBtn("改密码", () => openSecretDialog(
+      "重置密码：" + u.username,
+      "保存后该用户所有已登录会话立即失效，需用新密码重新登录。",
+      [{ env: "__password__", label: "新密码", required: true,
+         help: "至少 " + minPwLen + " 位。" }],
+      null, { userAction: { action: "passwd", username: u.username } })));
+    td.appendChild(document.createTextNode(" "));
+    // 最后一个 admin 不给降级入口；其余可切换角色
+    const canToggle = !(u.role === "admin" && adminCount <= 1);
+    if (canToggle) {
+      const target = u.role === "admin" ? "viewer" : "admin";
+      td.appendChild(mkBtn("改为 " + target, async () => {
+        if (!(await uiConfirm("把 " + u.username + " 的角色改为 " + target + "？",
+                              { title: "修改角色", yesText: "确定" }))) return;
+        await userAction({ action: "role", username: u.username, role: target });
+      }));
+      td.appendChild(document.createTextNode(" "));
+    }
+    if (!u.is_me && canToggle) {
+      td.appendChild(mkBtn("删除", async () => {
+        if (!(await uiConfirm("删除用户 " + u.username + "？该账号将立即失去访问权限。",
+                              { title: "删除用户", yesText: "删除", danger: true }))) return;
+        await userAction({ action: "delete", username: u.username });
+      }, "danger"));
+    }
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+async function userAction(payload) {
+  try {
+    const data = await api("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("；"), "err"); return false; }
+    msg("✅ " + (data.message || "已完成"), "ok");
+    refreshUsers();
+    return true;
+  } catch (e) {
+    msg("操作失败：" + e.message, "err");
+    return false;
+  }
+}
+
+$("btnAddUser").addEventListener("click", () => {
+  $("newUserName").value = "";
+  $("newUserPw").value = "";
+  $("newUserPw").classList.add("masked");
+  $("newUserPwEye").textContent = "👁";
+  $("btnCopyPw").hidden = true;
+  $("genPwHint").textContent = "";
+  $("pwLenHint").textContent = "至少 " + minPwLen + " 位";
+  chipGroup("newUserRole", [["viewer", "viewer（只看归档）"], ["admin", "admin（完整权限）"]], "viewer");
+  $("newUserRoleHelp").textContent = "访客选 viewer：他们只能打开消息归档，碰不到配置和凭证。";
+  $("userDialog").showModal();
+  $("newUserName").focus();
+});
+$("userCancel").addEventListener("click", () => $("userDialog").close());
+$("newUserPwEye").addEventListener("click", () => {
+  const el = $("newUserPw");
+  $("newUserPwEye").textContent = el.classList.toggle("masked") ? "👁" : "🚫";
+});
+
+// 一键生成强随机密码：不必在输入框里打字，绕开密码管理器浮层的干扰
+function randomPassword(len) {
+  // 去掉容易混淆的 0/O/1/l/I，方便口头或抄写转达
+  const set = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#%&*-_=+";
+  const buf = new Uint32Array(len);
+  crypto.getRandomValues(buf);
+  return [...buf].map((n) => set[n % set.length]).join("");
+}
+$("btnGenPw").addEventListener("click", () => {
+  const pw = randomPassword(16);
+  const el = $("newUserPw");
+  el.value = pw;
+  el.classList.remove("masked");          // 生成后直接显示，方便记录
+  $("newUserPwEye").textContent = "🚫";
+  $("btnCopyPw").hidden = false;
+  $("genPwHint").textContent = "已生成，请复制并转告对方（此后不再显示）";
+});
+$("btnCopyPw").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("newUserPw").value);
+    $("genPwHint").textContent = "✅ 已复制到剪贴板";
+  } catch (e) {
+    $("newUserPw").select();
+    $("genPwHint").textContent = "已选中，按 Ctrl+C 复制";
+  }
+});
+$("userSave").addEventListener("click", async () => {
+  const username = $("newUserName").value.trim();
+  const password = $("newUserPw").value;
+  if (!username) { uiAlert("请填写用户名"); return; }
+  if (password.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
+  const btn = $("userSave");
+  btn.disabled = true; btn.textContent = "创建中…";
+  const ok = await userAction({
+    action: "add", username: username, password: password,
+    role: $("newUserRole").dataset.value,
+  });
+  btn.disabled = false; btn.textContent = "创建";
+  if (ok) { $("newUserPw").value = ""; $("userDialog").close(); }
+});
+
 // ── 配置历史 ─────────────────────────────────────
 async function restoreHistory(name, when) {
   if (!(await uiConfirm("恢复到 " + when + " 的配置？\n当前版本会先快照，之后可再撤销。",
@@ -1554,6 +1802,26 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   if (statusTimer !== null) fetchStatus();
   if (logTimer !== null) fetchLogs();
+});
+
+// ── 登录状态 ─────────────────────────────────────
+(async function initAuth() {
+  try {
+    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    if (me.auth_enabled && me.user) {
+      $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
+      $("whoami").hidden = false;
+      $("btnLogout").hidden = false;
+      if (me.user.role === "admin") $("tabUsers").hidden = false;   // 用户管理仅 admin 可见
+    }
+  } catch (e) { /* 忽略 */ }
+})();
+$("btnLogout").addEventListener("click", async () => {
+  if (dirty && !(await uiConfirm("有未保存的修改，确定登出？", { yesText: "登出", danger: true }))) return;
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) { /* 忽略 */ }
+  try { localStorage.removeItem("webAdminToken"); } catch (e) { /* 主题偏好保留 */ }
+  setDirty(false);
+  location.href = "/login";
 });
 
 loadConfig();

@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📚</text></svg>">
+<title>坂道监控 · 消息归档</title>
+<link rel="stylesheet" href="/static/theme.css">
+<script src="/static/theme.js"></script>
+<style>
+  :root { --bubble: var(--card); --trans-bg: var(--ok-soft); --trans-text: var(--ok); }
+  header { display: flex; align-items: center; gap: 12px; padding: 11px 20px;
+           background: color-mix(in srgb, var(--card) 82%, transparent);
+           backdrop-filter: blur(14px) saturate(1.3);
+           -webkit-backdrop-filter: blur(14px) saturate(1.3);
+           border-bottom: 1px solid var(--border);
+           position: sticky; top: 0; z-index: 10; flex-wrap: wrap; }
+  header h1 { font-size: 15.5px; margin: 0; font-weight: 650; color: var(--text-strong); }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: 12px; }
+  header a:hover { color: var(--accent); }
+  .layout { display: flex; gap: 18px; max-width: 1060px; margin: 0 auto; padding: 16px 16px 60px; }
+  aside.side { width: 258px; flex: none; position: sticky; top: 64px; align-self: flex-start; }
+  main { flex: 1; min-width: 0; margin: 0; padding: 0; }
+  @media (max-width: 900px) { aside.side { display: none; } }
+  /* 日历 */
+  .cal { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .cal-head .title { font-weight: 600; font-size: 14px; }
+  .cal-head button { border: 1px solid var(--border); background: var(--bg); color: var(--text);
+                     border-radius: 6px; cursor: pointer; padding: 3px 9px; font-size: 13px; }
+  .cal-head button:hover { border-color: var(--accent); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-dow { text-align: center; font-size: 10.5px; color: var(--muted); padding: 3px 0; }
+  .cal-day { position: relative; aspect-ratio: 1; border-radius: 7px; display: flex;
+             flex-direction: column; align-items: center; justify-content: center;
+             font-size: 11.5px; color: var(--muted); }
+  .cal-day.has { cursor: pointer; color: var(--text); }
+  .cal-day.has:hover { outline: 2px solid var(--accent); }
+  .cal-day .n { font-size: 9.5px; color: var(--accent); font-weight: 600; line-height: 1; }
+  .cal-day.h1 { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .cal-day.h2 { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .cal-day.h3 { background: color-mix(in srgb, var(--accent) 38%, transparent); }
+  .cal-day.today { outline: 1px dashed var(--muted); }
+  .cal-foot { margin-top: 8px; font-size: 11px; color: var(--muted); text-align: center; }
+  .day-sep { scroll-margin-top: 120px; }
+  .day-sep.flash span { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 6px 13px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+          background: var(--card); color: var(--text); font-size: 13px; font-family: inherit;
+          transition: border-color var(--tr), background var(--tr), color var(--tr); }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
+                 font-weight: 650; box-shadow: 0 1px 6px var(--accent-ring); }
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+           background: var(--card); color: var(--text); font-size: 13.5px; font-family: inherit; }
+  button.nav { border: 1px solid var(--border); background: var(--card); color: var(--text);
+               padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+  button.nav:hover { border-color: var(--accent); }
+  button.nav:disabled { opacity: .4; cursor: default; }
+  .stats { font-size: 12.5px; color: var(--muted); margin-left: auto; }
+  .day-sep { text-align: center; margin: 18px 0 10px; color: var(--muted); font-size: 12px; }
+  .day-sep span { background: var(--card); border: 1px solid var(--border);
+                  border-radius: 999px; padding: 3px 14px; }
+  .bubble { background: var(--bubble); border: 1px solid var(--border);
+            border-radius: 16px 16px 16px 5px; padding: 12px 15px; margin: 9px 0; max-width: 92%;
+            box-shadow: var(--shadow-sm); overflow-wrap: break-word;
+            transition: box-shadow var(--tr); }
+  .bubble:hover { box-shadow: var(--shadow-md); }
+  .bubble .time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+  .bubble .text { white-space: pre-wrap; line-height: 1.7; }
+  .bubble .trans { margin-top: 8px; padding: 8px 11px; background: var(--trans-bg);
+                   color: var(--trans-text); border-radius: 9px; font-size: 13.5px;
+                   white-space: pre-wrap; line-height: 1.65; }
+  /* height:auto + width/height 属性 = 加载前按纵横比预留占位，消除布局位移（日历跳转定位依赖） */
+  .bubble img { max-width: 100%; height: auto; max-height: 420px; object-fit: contain;
+                object-position: left; border-radius: 10px; cursor: zoom-in; display: block; }
+  .bubble video { max-width: 100%; height: auto; max-height: 420px; border-radius: 10px; display: block; }
+  .bubble audio { max-width: 100%; display: block; }
+  .bubble .miss { color: var(--err); font-size: 12.5px; }
+  .center { text-align: center; padding: 28px 0; color: var(--muted); }
+  #loadMore { display: block; margin: 18px auto; }
+  #loadMore[hidden] { display: none; }
+  /* 灯箱 */
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none;
+              align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 94vw; max-height: 92vh; border-radius: 6px; }
+  #lightbox .nav-btn { position: absolute; top: 50%; transform: translateY(-50%);
+    background: rgba(255,255,255,.12); color: #fff; border: none; font-size: 26px;
+    padding: 14px 16px; cursor: pointer; border-radius: 10px; }
+  #lightbox .nav-btn:hover { background: rgba(255,255,255,.25); }
+  #lbPrev { left: 14px; } #lbNext { right: 14px; }
+  #lbCounter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+               color: #ddd; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 消息归档</h1>
+  <div class="chips" id="memberChips"></div>
+  <span id="whoami" style="margin-left:auto; font-size:12.5px; color:var(--muted)"></span>
+  <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
+  <a href="/" id="adminLink" hidden>⚙️ 管理端</a>
+  <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
+</header>
+
+<div class="layout">
+<aside class="side">
+  <div class="cal">
+    <div class="cal-head">
+      <button id="calPrev">◀</button>
+      <span class="title" id="calTitle">—</span>
+      <button id="calNext">▶</button>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-foot" id="calFoot"></div>
+  </div>
+</aside>
+<main>
+  <div class="toolbar">
+    <button class="nav" id="prevMonth">← 上月</button>
+    <select id="monthSelect"></select>
+    <button class="nav" id="nextMonth">下月 →</button>
+    <div class="chips" id="typeChips"></div>
+    <span class="stats" id="stats"></span>
+  </div>
+  <div class="toolbar">
+    <input type="search" id="searchBox" placeholder="🔍 搜索原文 / 译文（空格分词，回车搜索）"
+           style="flex:1; min-width:220px; padding:7px 12px; border:1px solid var(--border);
+                  border-radius:8px; background:var(--card); color:var(--text); font-size:13.5px">
+    <button class="nav" id="searchClear" hidden>✕ 清除搜索</button>
+  </div>
+  <div id="timeline"></div>
+  <button class="nav" id="loadMore" hidden>加载更多 ↓</button>
+  <div class="center" id="emptyHint" hidden></div>
+</main>
+</div>
+
+<div id="lightbox">
+  <span id="lbCounter"></span>
+  <button class="nav-btn" id="lbPrev">‹</button>
+  <img id="lbImg" alt="">
+  <button class="nav-btn" id="lbNext">›</button>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const authToken = localStorage.getItem("webAdminToken") || "";
+const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
+
+let members = [];        // [{name, display, total, months}]
+let curMember = "";
+let months = [];         // [{year, month, count}] 新的在前
+let curYM = null;        // {year, month}
+let curType = "";
+let page = 1, totalPages = 1;
+let images = [];         // 当月已渲染图片 [{url, caption}]，供灯箱翻页
+let lastDay = "";
+let searchQuery = "";    // 非空 = 搜索模式
+let dayCounts = {};      // "YYYY-MM-DD" -> 条数（日历用）
+let calYM = null;        // 日历当前显示的 {year, month}（可独立于时间线翻页）
+
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
+function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
+
+async function api(path) {
+  const resp = await fetch(path, { headers: authToken ? { "X-Auth-Token": authToken } : {} });
+  return resp.json();
+}
+
+// ── JST 时间 ─────────────────────────────────────
+function toJst(utc) { return new Date(new Date(utc).getTime() + 9 * 3600 * 1000); }
+function fmtDay(utc) {
+  const d = toJst(utc);
+  const w = "日一二三四五六"[d.getUTCDay()];
+  return d.getUTCFullYear() + "/" + (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + "（" + w + "）";
+}
+function fmtTime(utc) {
+  const d = toJst(utc);
+  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+}
+function fmtDateKey(utc) {
+  const d = toJst(utc);
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") +
+         "-" + String(d.getUTCDate()).padStart(2, "0");
+}
+
+// ── 日历 ─────────────────────────────────────────
+async function loadCalendar() {
+  try {
+    const data = await api("/api/archive/calendar?member=" + encodeURIComponent(curMember) +
+                           "&type=" + curType);
+    dayCounts = data.ok ? data.days : {};
+  } catch (e) { dayCounts = {}; }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  if (!calYM) return;
+  const { year, month } = calYM;
+  $("calTitle").textContent = year + " 年 " + month + " 月";
+  const grid = $("calGrid");
+  grid.innerHTML = "";
+  for (const w of ["日", "一", "二", "三", "四", "五", "六"]) {
+    const h = document.createElement("div");
+    h.className = "cal-dow";
+    h.textContent = w;
+    grid.appendChild(h);
+  }
+  const firstDow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  for (let i = 0; i < firstDow; i++) grid.appendChild(document.createElement("div"));
+  let monthTotal = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = year + "-" + String(month).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+    const n = dayCounts[key] || 0;
+    monthTotal += n;
+    const cell = document.createElement("div");
+    cell.className = "cal-day" + (n > 0 ? " has" : "") +
+      (n >= 6 ? " h3" : n >= 3 ? " h2" : n >= 1 ? " h1" : "");
+    cell.innerHTML = "<div>" + d + "</div>" + (n > 0 ? '<div class="n">' + n + "</div>" : "");
+    if (n > 0) {
+      cell.title = key + " · " + n + " 条";
+      cell.addEventListener("click", () => jumpToDay(key));
+    }
+    grid.appendChild(cell);
+  }
+  $("calFoot").textContent = monthTotal > 0 ? "本月 " + monthTotal + " 条 · 点日期跳转" : "本月无消息";
+}
+
+$("calPrev").addEventListener("click", () => {
+  calYM = calYM.month === 1 ? { year: calYM.year - 1, month: 12 }
+                            : { year: calYM.year, month: calYM.month - 1 };
+  renderCalendar();
+});
+$("calNext").addEventListener("click", () => {
+  calYM = calYM.month === 12 ? { year: calYM.year + 1, month: 1 }
+                             : { year: calYM.year, month: calYM.month + 1 };
+  renderCalendar();
+});
+
+async function jumpToDay(dateKey) {
+  const [y, m] = dateKey.split("-").map(Number);
+  searchQuery = "";
+  $("searchBox").value = "";
+  $("searchClear").hidden = true;
+  await selectMonth(y, m);
+  // 加载全月（最多几页），保证目标日期的分隔条已渲染
+  while (page < totalPages) { page++; await loadPage(); }
+  $("loadMore").hidden = true;
+  // 兜底：当前类型筛选下该日期没有消息（理论上日历已按类型过滤，防边角）
+  // → 自动切回「全部」重载，保证跳转永远有落点
+  if (!document.querySelector('.day-sep[data-date="' + dateKey + '"]') && curType) {
+    curType = "";
+    $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
+      c.classList.toggle("active", TYPES[i][0] === ""));
+    loadCalendar();
+    await selectMonth(y, m);
+    while (page < totalPages) { page++; await loadPage(); }
+    $("loadMore").hidden = true;
+  }
+  // 懒加载图片会持续撑高上方内容、把目标位置往下推，
+  // 因此瞬时定位后再校正几次，最后一次才闪烁提示
+  const pin = () => {
+    const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
+    if (sep) sep.scrollIntoView({ block: "start" });
+    return sep;
+  };
+  pin();
+  setTimeout(pin, 400);
+  setTimeout(pin, 1000);
+  setTimeout(() => {
+    const sep = pin();
+    if (sep) {
+      sep.classList.add("flash");
+      setTimeout(() => sep.classList.remove("flash"), 2500);
+    }
+  }, 2000);
+}
+
+// ── 数据加载 ─────────────────────────────────────
+async function loadMembers() {
+  const data = await api("/api/archive/members");
+  if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
+  members = data.members;
+  const box = $("memberChips");
+  box.innerHTML = "";
+  if (!members.length) {
+    showEmpty("还没有任何归档。确认 config.json 的 archive.enabled 已开启，" +
+              "新消息会自动归档；历史消息用 python tools/backfill_archive.py 回填。");
+    return;
+  }
+  for (const m of members) {
+    const b = document.createElement("button");
+    b.className = "chip" + (m.name === curMember ? " active" : "");
+    b.textContent = m.display + "（" + m.total + "）";
+    b.addEventListener("click", () => { selectMember(m.name); });
+    box.appendChild(b);
+  }
+  // 无论 hash 是否指定成员都要真正加载一次：
+  // 早先只在"成员缺失或无效"时才调用，导致带 member= 的深链打开后一片空白
+  const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
+  await selectMember(wanted, true);
+}
+
+async function selectMember(name, keepHash) {
+  curMember = name;
+  searchQuery = "";
+  $("searchBox").value = "";
+  $("searchClear").hidden = true;
+  $("memberChips").querySelectorAll(".chip").forEach((c, i) =>
+    c.classList.toggle("active", members[i] && members[i].name === name));
+  const data = await api("/api/archive/months?member=" + encodeURIComponent(name));
+  months = data.ok ? data.months : [];
+  const sel = $("monthSelect");
+  sel.innerHTML = "";
+  for (const m of months) {
+    const opt = document.createElement("option");
+    opt.value = m.year + "-" + m.month;
+    opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
+    sel.appendChild(opt);
+  }
+  if (!months.length) { showEmpty("该成员还没有归档内容"); return; }
+  loadCalendar();   // 后台拉全档按天计数，不阻塞时间线
+  const wanted = keepHash ? readHashYM() : null;
+  const pick = (wanted && months.find((m) => m.year === wanted.year && m.month === wanted.month)) || months[0];
+  await selectMonth(pick.year, pick.month);
+}
+
+function readHashYM() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const y = parseInt(p.get("y"), 10), m = parseInt(p.get("m"), 10);
+  return (y && m) ? { year: y, month: m } : null;
+}
+
+let selfHashUpdate = false;   // 区分"自己写的 hash"和"用户粘贴/前进后退"
+
+function syncHash() {
+  selfHashUpdate = true;
+  location.hash = "member=" + encodeURIComponent(curMember) +
+    "&y=" + curYM.year + "&m=" + curYM.month + (curType ? "&t=" + curType : "");
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+}
+
+// 同一标签页里粘贴另一个深链（或前进/后退）时，hash 变了但 SPA 不会重载，
+// 需要手动把新状态应用上
+window.addEventListener("hashchange", async () => {
+  if (selfHashUpdate) return;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const m = p.get("member") || "";
+  const y = parseInt(p.get("y"), 10), mo = parseInt(p.get("m"), 10);
+  const t = p.get("t") || "";
+  if (t !== curType) {
+    curType = t;
+    $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
+      c.classList.toggle("active", TYPES[i][0] === curType));
+    loadCalendar();
+  }
+  if (m && m !== curMember && members.some((x) => x.name === m)) {
+    await selectMember(m, true);
+  } else if (y && mo && curYM && (y !== curYM.year || mo !== curYM.month)) {
+    await selectMonth(y, mo);
+  } else if (t !== undefined && curYM) {
+    await selectMonth(curYM.year, curYM.month);
+  }
+});
+
+async function selectMonth(year, month) {
+  curYM = { year, month };
+  calYM = { year, month };
+  renderCalendar();
+  $("monthSelect").value = year + "-" + month;
+  const idx = months.findIndex((m) => m.year === year && m.month === month);
+  $("prevMonth").disabled = idx >= months.length - 1;   // months 新的在前
+  $("nextMonth").disabled = idx <= 0;
+  page = 1;
+  images = [];
+  lastDay = "";
+  $("timeline").innerHTML = "";
+  $("emptyHint").hidden = true;
+  syncHash();
+  await loadPage();
+}
+
+async function loadPage() {
+  const url = searchQuery
+    ? "/api/archive/search?member=" + encodeURIComponent(curMember) +
+      "&q=" + encodeURIComponent(searchQuery) +
+      "&type=" + curType + "&page=" + page + "&per_page=50"
+    : "/api/archive/messages?member=" + encodeURIComponent(curMember) +
+      "&year=" + curYM.year + "&month=" + curYM.month +
+      "&type=" + curType + "&page=" + page + "&per_page=50";
+  const data = await api(url);
+  if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
+  totalPages = data.total_pages;
+  if (searchQuery) {
+    $("stats").textContent = "搜索「" + searchQuery + "」· " + data.total + " 条" +
+      (data.capped ? "（已达上限，仅显示最新 500 条）" : "");
+    if (!data.messages.length && page === 1) showEmpty("没有匹配「" + searchQuery + "」的消息");
+  } else {
+    $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 条";
+    if (!data.messages.length && page === 1) {
+      showEmpty("本月没有" + (curType ? "该类型的" : "") + "消息");
+    }
+  }
+  for (const msg of data.messages) renderBubble(msg);
+  $("loadMore").hidden = page >= totalPages;
+}
+
+function startSearch(q) {
+  searchQuery = q;
+  $("searchClear").hidden = !q;
+  page = 1;
+  images = [];
+  lastDay = "";
+  $("timeline").innerHTML = "";
+  $("emptyHint").hidden = true;
+  loadPage();
+}
+$("searchBox").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && $("searchBox").value.trim()) startSearch($("searchBox").value.trim());
+  if (e.key === "Escape") { $("searchBox").value = ""; if (searchQuery) clearSearch(); }
+});
+function clearSearch() {
+  searchQuery = "";
+  $("searchBox").value = "";
+  $("searchClear").hidden = true;
+  if (curYM) selectMonth(curYM.year, curYM.month);
+}
+$("searchClear").addEventListener("click", clearSearch);
+
+function showEmpty(text) {
+  $("emptyHint").textContent = text;
+  $("emptyHint").hidden = false;
+  $("loadMore").hidden = true;
+  $("stats").textContent = "";
+}
+
+// ── 渲染 ─────────────────────────────────────────
+function renderBubble(msg) {
+  const tl = $("timeline");
+  const day = fmtDay(msg.published_at);
+  if (day !== lastDay) {
+    lastDay = day;
+    const sep = document.createElement("div");
+    sep.className = "day-sep";
+    sep.dataset.date = fmtDateKey(msg.published_at);   // 日历跳转定位锚点
+    sep.innerHTML = "<span>" + esc(day) + "</span>";
+    tl.appendChild(sep);
+  }
+  const b = document.createElement("div");
+  b.className = "bubble";
+  let html = '<div class="time">' + fmtTime(msg.published_at) + " · " + esc(msg.type);
+  if (searchQuery && msg.year) {
+    html += ' · <a href="#" class="jump" data-y="' + msg.year + '" data-m="' + msg.month +
+            '" style="color:var(--accent); text-decoration:none">查看当月 →</a>';
+  }
+  html += "</div>";
+  if (msg.media_url) {
+    const url = mediaUrl(msg.media_url);
+    // width/height 属性让浏览器在加载前按纵横比预留空间（防布局位移）
+    const dim = (msg.w && msg.h) ? ' width="' + msg.w + '" height="' + msg.h + '"' : "";
+    if (msg.type === "video") {
+      html += '<video controls preload="metadata"' + dim + ' src="' + esc(url) + '"></video>';
+    } else if (msg.type === "voice") {
+      html += '<audio controls preload="metadata" src="' + esc(url) + '"></audio>';
+    } else {
+      images.push({ url: url, caption: (msg.text || "").slice(0, 80) });
+      html += '<img loading="lazy"' + dim + ' data-lb="' + (images.length - 1) + '" src="' + esc(url) + '" alt="">';
+    }
+  } else if (msg.download_failed) {
+    html += '<div class="miss">⚠️ 媒体文件下载失败（可用回填工具重试）</div>';
+  }
+  if (msg.text) html += '<div class="text">' + esc(msg.text) + "</div>";
+  if (msg.translation) html += '<div class="trans">' + esc(msg.translation) + "</div>";
+  b.innerHTML = html;
+  const img = b.querySelector("img[data-lb]");
+  if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10)));
+  const jump = b.querySelector("a.jump");
+  if (jump) jump.addEventListener("click", (e) => {
+    e.preventDefault();
+    searchQuery = "";
+    $("searchBox").value = "";
+    $("searchClear").hidden = true;
+    selectMonth(parseInt(jump.dataset.y, 10), parseInt(jump.dataset.m, 10));
+  });
+  tl.appendChild(b);
+}
+
+// ── 灯箱 ─────────────────────────────────────────
+let lbIndex = 0;
+function openLightbox(i) {
+  lbIndex = i;
+  $("lbImg").src = images[i].url;
+  $("lbCounter").textContent = (i + 1) + " / " + images.length;
+  $("lightbox").classList.add("open");
+}
+function lbMove(delta) {
+  const next = lbIndex + delta;
+  if (next < 0 || next >= images.length) return;
+  openLightbox(next);
+}
+$("lightbox").addEventListener("click", (e) => {
+  if (e.target === $("lightbox") || e.target === $("lbImg")) $("lightbox").classList.remove("open");
+});
+$("lbPrev").addEventListener("click", (e) => { e.stopPropagation(); lbMove(-1); });
+$("lbNext").addEventListener("click", (e) => { e.stopPropagation(); lbMove(1); });
+document.addEventListener("keydown", (e) => {
+  if (!$("lightbox").classList.contains("open")) return;
+  if (e.key === "Escape") $("lightbox").classList.remove("open");
+  if (e.key === "ArrowLeft") lbMove(-1);
+  if (e.key === "ArrowRight") lbMove(1);
+});
+
+// ── 控件 ─────────────────────────────────────────
+function initTypeChips() {
+  const box = $("typeChips");
+  for (const [val, label] of TYPES) {
+    const b = document.createElement("button");
+    b.className = "chip" + (val === curType ? " active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      curType = val;
+      box.querySelectorAll(".chip").forEach((c, i) => c.classList.toggle("active", TYPES[i][0] === val));
+      loadCalendar();                                     // 日历计数跟随类型筛选
+      if (searchQuery) startSearch(searchQuery);          // 搜索模式下重搜（带新类型）
+      else if (curYM) selectMonth(curYM.year, curYM.month);
+    });
+    box.appendChild(b);
+  }
+}
+$("monthSelect").addEventListener("change", () => {
+  const [y, m] = $("monthSelect").value.split("-").map(Number);
+  selectMonth(y, m);
+});
+$("prevMonth").addEventListener("click", () => {
+  const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
+  if (idx < months.length - 1) selectMonth(months[idx + 1].year, months[idx + 1].month);
+});
+$("nextMonth").addEventListener("click", () => {
+  const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
+  if (idx > 0) selectMonth(months[idx - 1].year, months[idx - 1].month);
+});
+$("loadMore").addEventListener("click", () => { page++; loadPage(); });
+
+// ── 登录状态 ─────────────────────────────────────
+(async function initAuth() {
+  try {
+    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    if (!me.auth_enabled) { $("adminLink").hidden = false; return; }   // 未启用账号系统：照旧
+    if (me.user) {
+      $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
+      $("logoutLink").hidden = false;
+      if (me.user.role === "admin") $("adminLink").hidden = false;
+    } else if (me.archive_public) {
+      $("whoami").innerHTML = '<a href="/login">登录</a>';
+    }
+  } catch (e) { /* 忽略 */ }
+})();
+$("logoutLink").addEventListener("click", async (e) => {
+  e.preventDefault();
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
+  try { localStorage.removeItem("webAdminToken"); } catch (err) { /* 主题偏好保留 */ }
+  location.href = "/login";
+});
+
+// ── 入口（支持 #member=&y=&m=&t= 深链）────────────
+(function boot() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  curMember = p.get("member") || "";
+  curType = p.get("t") || "";
+  initTypeChips();
+  loadMembers();
+})();
+</script>
+</body>
+</html>

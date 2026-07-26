@@ -19,6 +19,7 @@
 - **反反爬虫** — Header 仿真（Web Chrome / 移动 iOS）、随机间隔抖动、指数退避重试、成员随机轮询顺序
 - **配置热重载（可选）** — 已提供 `config/watcher.py`，安装并接入 watchdog 后可自动重载；当前默认入口以启动时加载为主
 - **网页管理端** — 浏览器完成日常配置和运维：状态总览（Token 剩余 / 通道成功率 / 巡查倒计时）、通道 / 账号池 / 监控成员 / 官方 Bot 增删改、从 API 拉成员列表点选添加、凭证直接填写（写入 `.env` 并自动轮换）、实时日志、立即巡查、配置历史回滚、一键重启；保存即校验 + 热重载（详见下方「网页管理端」）
+- **消息归档** — 抓到的消息（含译文和图片/视频/语音文件）按 成员/年/月 自动落地本地归档，`/archive` 页面按聊天时间线浏览：月份导航、类型筛选、图片灯箱、视频拖进度；历史消息用回填工具补齐（详见下方「消息归档」）
 - **启动健康检查** — 启动时校验 NapCat/TG Bot 连接、QQ Bot access_token、账号凭证状态
 - **运行时状态摘要** — 每隔 N 轮自动输出通道成功率、Token 剩余时间、成员拉取/推送状态、分级错误报告，终端一眼判断系统健康度
 
@@ -193,6 +194,73 @@ http://127.0.0.1:8787/
 - **安全**：默认只监听 `127.0.0.1`，接口是明文 HTTP —— 如需局域网访问，先在 `.env` 设置 `WEB_ADMIN_TOKEN`（页面首次访问时会提示输入），再把 `web_admin.host` 改成 `0.0.0.0`，且仅建议在可信内网使用；`WEB_ADMIN_TOKEN` 本身不允许通过网页修改。
 - 主程序没跑时也可以单独起管理端：`python -m src.webui`（此时填写的凭证在主程序下次启动时生效）。
 
+### 消息归档
+
+开启后（`config.json` 的 `archive.enabled`，默认已开启），主程序每抓到一条新消息就自动归档到本地——**推送归推送，档案归档案**，退订了、App 关服了，消息还在你硬盘上：
+
+```
+data/archive/{成员名}/{YYYY}/{MM}/
+    messages.json     # 该月全部消息（原文 + _translation 译文 + 本地媒体路径）
+    images/ videos/ audio/
+```
+
+- **浏览**：管理端右上角「📚 消息归档」或直接开 http://127.0.0.1:8787/archive ——多成员切换、月份导航、类型筛选（文字/图片/视频/语音）、日文原文与中文译文对照、图片灯箱、视频/语音在线播放（支持拖进度）
+- **历史回填**：实时归档只覆盖开启之后的消息，历史用工具补：
+  ```bash
+  python tools/backfill_archive.py                   # 回填所有监控成员的全部历史
+  python tools/backfill_archive.py 冨里奈央 --from 2023-01-01
+  ```
+  断点续传（进度存 `data/archive_progress.json`），已归档自动跳过，媒体下载失败的会重试。
+- **写入语义**：按消息 id 幂等合并、原子写；先落 JSON 再补媒体文件，进程中断最多丢媒体不丢消息
+- 媒体文件较占空间（参考：单成员三年约 3-4 GB），`archive.media` 设为 `false` 可只存文字
+
+### 账号系统（登录与权限）
+
+默认关闭（本机访问无需登录）。开启后管理端需要登录，且分两种角色：
+
+| 角色 | 权限 |
+|---|---|
+| `admin` | 管理端全部功能（配置 / 凭证 / 日志 / 重启）+ 归档 |
+| `viewer` | 只能访问归档查看器 `/archive` |
+
+**启用步骤**：
+
+1. 创建第一个管理员（密码交互式输入，不进命令行历史，存储为 scrypt 加盐哈希）：
+   ```bash
+   python tools/manage_users.py add 你的用户名              # admin
+   python tools/manage_users.py add 朋友的用户名 --viewer    # 只能看归档
+   python tools/manage_users.py list / passwd / role / del
+   ```
+2. `config.json` 里打开：
+   ```json5
+   "auth": { "enabled": true, "archive_public": false, "session_hours": 12 }
+   ```
+   `archive_public: true` 时归档页对所有人开放（无需登录），管理端仍受保护。
+3. 重启主程序，访问时会跳转到 `/login`。
+
+**安全说明**：
+
+- 密码用 **scrypt 加盐哈希**存 `data/users.json`（文件权限 600，git-ignored），永不存明文、不可逆
+- 会话是随机 token + **HttpOnly / SameSite=Strict** cookie，仅存进程内存（重启即失效），支持滑动续期和登出；改密码会立即踢掉该用户所有会话
+- 登录失败按 IP 限流（10 分钟内 5 次 → 锁定 15 分钟），密码校验用常时比较，用户不存在时也走一次哈希（防时序探测）
+- 写请求校验 `Origin`（配合 SameSite cookie 防 CSRF），绑定回环地址时校验 `Host`（防 DNS rebinding）
+- `WEB_ADMIN_TOKEN` 继续可用，作为脚本 / 自动化的 API 通道（等价 admin 身份）
+- ⚠️ 服务仍是**明文 HTTP**：局域网使用请挂 TLS 反代（如 Caddy），否则密码和会话 cookie 在链路上是明文
+
+### 每日摘要与开机自启
+
+**每日运行摘要**（`config.json` 的 `daily_summary`，默认每天 JST 23:00）：通过已启用的推送通道发一条当日报告——各成员今日消息数、巡查轮次、Token 状态、待处理错误。它同时是**反向监控（死人开关）**：系统挂了不会有报错通知，但"今天没收到摘要"本身就是告警。
+
+**开机自启 / 崩溃自拉起**（Windows）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1            # 安装
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status    # 状态
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall # 卸载
+```
+
+注册一个计划任务：登录时自动启动 `python main.py`（后台无窗口运行），进程崩溃后 1 分钟自动重启（最多连续 10 次）。日志照常写 `logs/`，管理端照常在 http://127.0.0.1:8787/ 。
+
 ### 常见操作
 
 **加一个成员：** 在 `config.json` 的 `monitor` 数组末尾添加一项：
@@ -287,6 +355,7 @@ nogizaka-message-push/
 │   ├── logger.py            # 日志系统（彩色终端 + 滚动文件）
 │   ├── utils.py             # 公共工具：JST 时间转换、时段判断、速率限制器
 │   ├── webui.py             # 网页管理端：配置编辑 / 凭证写入 / 状态 / 日志 / 历史回滚 / 重启
+│   ├── auth.py              # 账号系统：scrypt 密码哈希、用户库、会话、登录限流
 │   ├── member_directory.py  # 成员目录拉取（/v2/groups），list_members 工具与网页端共用
 │   ├── webui_static/
 │   │   └── index.html       # 管理页面（零依赖单页应用）

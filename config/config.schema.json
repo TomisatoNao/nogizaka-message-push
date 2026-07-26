@@ -33,6 +33,29 @@
         "port":    { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },
+    "archive": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "dir":     { "type": "string" },
+        "media":   { "type": "boolean", "default": true }
+      }
+    },
+    "daily_summary": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "hour":    { "type": "integer", "minimum": 0, "maximum": 23 }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "enabled":        { "type": "boolean", "default": false },
+        "archive_public": { "type": "boolean", "default": false },
+        "session_hours":  { "type": "integer", "minimum": 1, "maximum": 720 }
+      }
+    },
     "accounts": {
       "type": "object",
       "additionalProperties": {
