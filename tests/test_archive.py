@@ -160,6 +160,152 @@ def main() -> None:
         assert "正常运行" in text
         print("✅ Test 4 通过\n")
 
+        # ── Test 5: 并发合并写（无丢失、无损坏）─────────
+        print("=== Test 5: 并发写入 ===")
+        member3 = dict(member, m_name="并发 测试")
+
+        async def _concurrent_writes():
+            tasks = []
+            for i in range(30):
+                mid = 300 + (i % 10)   # 10 个 id 各写 3 次（含重复更新）
+                tasks.append(archive.archive_message(member3, {
+                    "id": mid, "type": "text", "text": f"v{i}",
+                    "published_at": "2026-06-01T10:00:00Z",
+                    "updated_at": f"2026-06-01T10:{i % 10:02d}:00Z"}))
+            await asyncio.gather(*tasks)
+
+        asyncio.run(_concurrent_writes())
+        saved = archive.load_month(archive.member_dir_name("并发 测试"), 2026, 6)
+        assert len(saved) == 10, f"30 次并发写 10 个 id 应得 10 条: {len(saved)}"
+        json.loads((tmpdir / "并发_测试" / "2026" / "06" / "messages.json").read_text(encoding="utf-8"))
+        print("✅ Test 5 通过\n")
+
+        # ── Test 6: 边角情况 ─────────────────────────────
+        print("=== Test 6: 边角情况 ===")
+        # 非法字符成员名 → 目录名净化
+        weird = dict(member, m_name='冨里/奈央?')
+        asyncio.run(archive.archive_message(weird, {
+            "id": 401, "type": "text", "text": "x",
+            "published_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z"}))
+        assert (tmpdir / "冨里_奈央_").is_dir(), "非法字符应替换为下划线"
+
+        # 跨月消息 → 分月文件
+        asyncio.run(archive.archive_message(weird, {
+            "id": 402, "type": "text", "text": "y",
+            "published_at": "2026-06-15T00:00:00Z", "updated_at": "2026-06-15T00:00:00Z"}))
+        assert archive.load_month("冨里_奈央_", 2026, 5) and archive.load_month("冨里_奈央_", 2026, 6)
+
+        # 同 id 再归档（内容更新）→ 覆盖不重复
+        asyncio.run(archive.archive_message(weird, {
+            "id": 401, "type": "text", "text": "x-edited",
+            "published_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z"}))
+        may = archive.load_month("冨里_奈央_", 2026, 5)
+        assert len(may) == 1 and may[0]["text"] == "x-edited", "同 id 应覆盖更新"
+
+        # 失败标记清除：先失败，重试成功（带 _local_file 的增量）后标记应消失
+        fail_member = dict(member, m_name="失败 重试")
+        asyncio.run(archive._merge_write(fail_member["m_name"],
+                    archive._parse_utc("2026-05-02T00:00:00Z"),
+                    {"id": 500, "updated_at": "2026-05-02T00:00:00Z", "_download_failed": True}))
+        asyncio.run(archive._merge_write(fail_member["m_name"],
+                    archive._parse_utc("2026-05-02T00:00:00Z"),
+                    {"id": 500, "updated_at": "2026-05-02T00:00:00Z", "_local_file": "a.jpg"}))
+        rec = archive.load_month(archive.member_dir_name("失败 重试"), 2026, 5)[0]
+        assert rec.get("_local_file") == "a.jpg" and not rec.get("_download_failed"), \
+            f"重试成功应清除失败标记: {rec}"
+
+        # 坏时间戳 → 安静跳过不抛
+        asyncio.run(archive.archive_message(weird, {"id": 403, "updated_at": "not-a-date"}))
+        # 开关关闭 → schedule 为 no-op（在无事件循环环境调用不应报错）
+        cfg.ARCHIVE_ENABLED = False
+        archive.schedule_archive(weird, {"id": 404, "updated_at": "2026-05-01T00:00:00Z"})
+        cfg.ARCHIVE_ENABLED = True
+
+        # 损坏的 messages.json → 读取返回空、原文件改名保留现场（不静默丢数据）
+        bad_json = tmpdir / "冨里_奈央_" / "2026" / "06" / "messages.json"
+        bad_json.write_text("{corrupted", encoding="utf-8")
+        assert archive.load_month("冨里_奈央_", 2026, 6) == []
+        rescued = list((tmpdir / "冨里_奈央_" / "2026" / "06").glob("messages.corrupt-*.json"))
+        assert rescued, "损坏文件应被改名保留"
+
+        # 月度计数缓存：mtime 不变走缓存，文件更新后缓存失效
+        cache_json = tmpdir / "测试_成员" / "2026" / "07" / "messages.json"
+        c1 = archive.list_months("测试_成员")[0]["count"]
+        data = json.loads(cache_json.read_text(encoding="utf-8"))
+        data.append({"id": 999, "type": "text", "updated_at": "2026-07-09T00:00:00Z"})
+        cache_json.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.utime(cache_json, (1e9, 1e9))   # 强制改 mtime，避免同秒分辨率下缓存不失效
+        c2 = archive.list_months("测试_成员")[0]["count"]
+        assert c2 == c1 + 1, f"文件更新后计数缓存应失效: {c1} → {c2}"
+        print("✅ Test 6 通过\n")
+
+        # ── Test 7: 回填工具单元 ─────────────────────────
+        print("=== Test 7: AdaptivePacer / 进度文件 ===")
+        from tools.backfill_archive import AdaptivePacer, _load_progress, _save_progress
+        import tools.backfill_archive as bf
+        p = AdaptivePacer(base=1.5, floor=0.8, ceil=90.0)
+        for _ in range(20):
+            p.on_success()
+        assert abs(p.delay - 0.8) < 1e-9, f"连续成功应降到地板值: {p.delay}"
+        p.on_error()
+        assert p.delay == 3.0, f"错误应翻倍(自 1.5 起): {p.delay}"
+        p.on_error(rate_limited=True)
+        assert p.delay == 9.0, f"限流应三倍: {p.delay}"
+        for _ in range(10):
+            p.on_error(rate_limited=True)
+        assert p.delay == 90.0, "退避应封顶"
+
+        orig_pp = bf.PROGRESS_PATH
+        bf.PROGRESS_PATH = tmpdir / "progress.json"
+        try:
+            _save_progress({"nogizaka46_55": "2026-01-01T00:00:00Z"})
+            assert _load_progress() == {"nogizaka46_55": "2026-01-01T00:00:00Z"}
+            bf.PROGRESS_PATH.write_text("{bad", encoding="utf-8")
+            assert _load_progress() == {}, "损坏的进度文件应回退为空"
+        finally:
+            bf.PROGRESS_PATH = orig_pp
+        print("✅ Test 7 通过\n")
+
+        # ── Test 8: 查看器 API 边界 ──────────────────────
+        print("=== Test 8: API 边界 ===")
+        server = webui.start_webui(host="127.0.0.1", port=0)
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        m_enc = "%E6%B5%8B%E8%AF%95_%E6%88%90%E5%91%98"
+        try:
+            # 分页越界 → 空列表但 total 正确
+            code, body, _ = _http("GET", base + f"/api/archive/messages?member={m_enc}&year=2026&month=7&page=99")
+            j = json.loads(body)
+            assert code == 200 and j["messages"] == [] and j["total"] == 3, \
+                f"越界页应空且 total 正确: {j['total']}"
+
+            # per_page 超限 → 被压到 200
+            code, body, _ = _http("GET", base + f"/api/archive/messages?member={m_enc}&year=2026&month=7&per_page=9999")
+            assert code == 200, "超大 per_page 应被钳制而不是报错"
+
+            # type=image 与 picture 等价
+            code, body, _ = _http("GET", base + f"/api/archive/messages?member={m_enc}&year=2026&month=7&type=image")
+            assert json.loads(body)["total"] == 1, "image 应命中 picture 类型"
+
+            # 非数字参数 → 400
+            code, body, _ = _http("GET", base + f"/api/archive/messages?member={m_enc}&year=abc&month=7")
+            assert code == 400
+
+            # Range 形态：后缀 / 开区间 / 非法 / 越界（文件内容 b"JPEGDATA-0123456789"，19 字节）
+            from urllib.parse import quote as _q
+            murl = base + _q("/api/archive/media/测试_成员/2026/07/images/20260706_110000_102.jpg")
+            code, body, h = _http("GET", murl, headers={"Range": "bytes=-4"})
+            assert code == 206 and body == b"6789", f"后缀 Range: {code} {body}"
+            code, body, h = _http("GET", murl, headers={"Range": "bytes=15-"})
+            assert code == 206 and body == b"6789" and h.get("Content-Range") == "bytes 15-18/19"
+            code, body, h = _http("GET", murl, headers={"Range": "bytes=abc"})
+            assert code == 200 and len(body) == 19, "非法 Range 应回退全量 200"
+            code, body, h = _http("GET", murl, headers={"Range": "bytes=99-"})
+            assert code == 416, f"越界 Range 应 416: {code}"
+        finally:
+            server.shutdown()
+            server.server_close()
+        print("✅ Test 8 通过\n")
+
     finally:
         cfg.ARCHIVE_DIR = orig_dir
         cfg.ARCHIVE_ENABLED = orig_enabled

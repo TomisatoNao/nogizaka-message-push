@@ -138,6 +138,10 @@ def main() -> None:
     from dotenv import dotenv_values
     parsed = dotenv_values(env_file)
     assert parsed["BAR_COOKIE"] == "session=a; b=c", "dotenv 应能解析写入的值"
+
+    # 值含单引号 → 走双引号转义路径，dotenv 仍能还原
+    webui.update_env_file({"BAZ_TOKEN": "it's a 'quoted' value"}, path=env_file)
+    assert dotenv_values(env_file)["BAZ_TOKEN"] == "it's a 'quoted' value", "单引号值应经双引号转义往返"
     print("✅ Test 2.5 通过\n")
 
     # ── Test 2.6: 内存日志环 + 文件尾读取 ────────────

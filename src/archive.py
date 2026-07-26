@@ -133,7 +133,16 @@ def load_month(m_name: str, year: int, month: int) -> list[dict]:
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, ValueError) as e:
+    except ValueError as e:
+        # 文件损坏：改名保留现场再返回空，后续写入重建新文件——绝不静默丢弃旧数据
+        rescue = json_path.with_name(f"messages.corrupt-{datetime.now():%Y%m%d%H%M%S}.json")
+        try:
+            os.replace(json_path, rescue)
+            log_all(f"⚠️ 归档文件损坏，已改名保留: {rescue}（{e}）", is_error=True)
+        except OSError:
+            log_all(f"⚠️ 归档读取失败 {json_path}: {e}", is_error=True)
+        return []
+    except OSError as e:
         log_all(f"⚠️ 归档读取失败 {json_path}: {e}", is_error=True)
         return []
 
@@ -264,8 +273,31 @@ def list_members() -> list[str]:
     return sorted(d.name for d in root.iterdir() if d.is_dir())
 
 
+# 月度计数缓存：{json_path: (mtime, count)} —— members/months 接口每次请求
+# 都要数全部月份，无缓存时随成员和月份数线性膨胀
+_count_cache: dict[str, tuple[float, int]] = {}
+
+
+def _month_count(json_path: Path) -> int:
+    try:
+        mtime = json_path.stat().st_mtime
+    except OSError:
+        return 0
+    key = str(json_path)
+    cached = _count_cache.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            count = len(json.load(f))
+    except (OSError, ValueError):
+        count = 0
+    _count_cache[key] = (mtime, count)
+    return count
+
+
 def list_months(member_dir: str) -> list[dict]:
-    """返回 [{year, month, count}]，新的在前。count 来自 messages.json 长度。"""
+    """返回 [{year, month, count}]，新的在前。count 带 mtime 缓存。"""
     root = archive_root() / member_dir
     if not root.is_dir():
         return []
@@ -275,12 +307,8 @@ def list_months(member_dir: str) -> list[dict]:
             json_path = month_dir / "messages.json"
             if not json_path.is_file():
                 continue
-            try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    count = len(json.load(f))
-            except (OSError, ValueError):
-                count = 0
-            out.append({"year": int(year_dir.name), "month": int(month_dir.name), "count": count})
+            out.append({"year": int(year_dir.name), "month": int(month_dir.name),
+                        "count": _month_count(json_path)})
     return out
 
 
