@@ -699,6 +699,50 @@ class _Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if sub == "search":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            query = qp("q").strip()
+            if not query:
+                self._send_json({"ok": False, "errors": ["缺少搜索关键词 q"]}, 400)
+                return
+            try:
+                page = max(1, int(qp("page", "1")))
+                per_page = min(200, max(1, int(qp("per_page", "50"))))
+            except ValueError:
+                self._send_json({"ok": False, "errors": ["page 必须是数字"]}, 400)
+                return
+            type_filter = qp("type")
+            wanted = None
+            if type_filter:
+                if type_filter not in self._ARCHIVE_TYPES:
+                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                    return
+                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+            hits = _archive.search(member, query, type_filter=wanted)
+            total = len(hits)
+            start = (page - 1) * per_page
+            slim = [{
+                "id": m.get("id"),
+                "type": m.get("type"),
+                "text": m.get("text", ""),
+                "translation": m.get("_translation", ""),
+                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
+                              if m.get("_local_file") else None),
+                "download_failed": bool(m.get("_download_failed")),
+                "year": m.get("_year"),
+                "month": m.get("_month"),
+            } for m in hits[start:start + per_page]]
+            self._send_json({
+                "ok": True, "member": member, "q": query, "total": total,
+                "page": page, "total_pages": max(1, -(-total // per_page)),
+                "capped": total >= 500, "messages": slim,
+            })
+            return
+
         if sub.startswith("media/"):
             rest = unquote(sub[len("media/"):])
             member, _, rel = rest.partition("/")

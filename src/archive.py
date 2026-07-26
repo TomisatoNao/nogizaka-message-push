@@ -312,6 +312,27 @@ def list_months(member_dir: str) -> list[dict]:
     return out
 
 
+def search(member_dir: str, query: str, type_filter: set[str] | None = None,
+           limit: int = 500) -> list[dict]:
+    """跨月搜索：原文与译文都参与匹配，空格分词取 AND 语义。
+    返回附加 _year/_month 字段的消息列表，新的在前，最多 limit 条。"""
+    terms = [t.lower() for t in query.split() if t.strip()]
+    if not terms:
+        return []
+    results: list[dict] = []
+    for m in list_months(member_dir):          # 已是新月份在前
+        msgs = load_month(member_dir, m["year"], m["month"])
+        for msg in reversed(msgs):             # 月内也按新→旧
+            if type_filter and msg.get("type") not in type_filter:
+                continue
+            haystack = ((msg.get("text") or "") + "\n" + (msg.get("_translation") or "")).lower()
+            if all(t in haystack for t in terms):
+                results.append({**msg, "_year": m["year"], "_month": m["month"]})
+                if len(results) >= limit:
+                    return results
+    return results
+
+
 def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
     """返回 (已归档 ID, 媒体下载失败的 ID)。回填工具用于跳过与重试。"""
     root = _member_root(m_name)

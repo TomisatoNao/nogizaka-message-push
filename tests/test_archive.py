@@ -266,6 +266,31 @@ def main() -> None:
             bf.PROGRESS_PATH = orig_pp
         print("✅ Test 7 通过\n")
 
+        # ── Test 7.5: 跨月搜索 ───────────────────────────
+        print("=== Test 7.5: 搜索 ===")
+        s_member = dict(member, m_name="搜索 用例")
+        for i, (mo, text, trans) in enumerate([
+            (3, "今日はライブでした", ""),
+            (4, "ライブ楽しかった！", "演唱会真开心！"),
+            (5, "おやすみなさい", "晚安"),
+        ]):
+            asyncio.run(archive.archive_message(
+                s_member,
+                {"id": 600 + i, "type": "text", "text": text,
+                 "published_at": f"2026-{mo:02d}-10T10:00:00Z",
+                 "updated_at": f"2026-{mo:02d}-10T10:00:00Z"},
+                translated=trans))
+        sdir = archive.member_dir_name("搜索 用例")
+        hits = archive.search(sdir, "ライブ")
+        assert len(hits) == 2 and hits[0]["_month"] == 4 and hits[1]["_month"] == 3, \
+            f"跨月命中且新的在前: {[(h['id'], h['_month']) for h in hits]}"
+        assert len(archive.search(sdir, "演唱会")) == 1, "译文应参与匹配"
+        assert len(archive.search(sdir, "ライブ 楽しかった")) == 1, "空格分词应为 AND 语义"
+        assert archive.search(sdir, "LIVE不存在的词") == []
+        assert archive.search(sdir, "   ") == [], "空关键词返回空"
+        assert len(archive.search(sdir, "ライブ", type_filter={"video"})) == 0, "类型过滤应生效"
+        print("✅ Test 7.5 通过\n")
+
         # ── Test 8: 查看器 API 边界 ──────────────────────
         print("=== Test 8: API 边界 ===")
         server = webui.start_webui(host="127.0.0.1", port=0)
@@ -301,6 +326,16 @@ def main() -> None:
             assert code == 200 and len(body) == 19, "非法 Range 应回退全量 200"
             code, body, h = _http("GET", murl, headers={"Range": "bytes=99-"})
             assert code == 416, f"越界 Range 应 416: {code}"
+
+            # 搜索接口：命中 / 缺参 / 未知成员
+            s_enc = "%E6%90%9C%E7%B4%A2_%E7%94%A8%E4%BE%8B"
+            code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96")
+            j = json.loads(body)
+            assert code == 200 and j["total"] == 2 and j["messages"][0]["year"] == 2026, f"搜索: {j}"
+            code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=")
+            assert code == 400, "缺关键词应 400"
+            code, body, _ = _http("GET", base + "/api/archive/search?member=ghost&q=x")
+            assert code == 404
         finally:
             server.shutdown()
             server.server_close()
