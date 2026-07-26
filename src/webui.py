@@ -35,6 +35,9 @@ _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
 
+# 重启回调（由主程序注入；触发优雅停机 + 进程自替换。独立模式下为 None）
+_on_restart_cb = None
+
 # 串行化所有写操作（config.json / .env 都是 read-modify-write，
 # ThreadingHTTPServer 的并发请求不加锁会互相丢更新）
 _mutation_lock = threading.Lock()
@@ -449,6 +452,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "env_status": _env_status(),
                 "config_path": str(CONFIG_PATH),
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
+                "can_restart": _on_restart_cb is not None,
             })
             return
 
@@ -492,6 +496,20 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/secrets":
             self._handle_secrets()
+            return
+        if path == "/api/restart":
+            if not self._check_auth():
+                return
+            if _on_restart_cb is None:
+                self._send_json(
+                    {"ok": False, "errors": ["独立模式下无法重启主程序（主程序未运行在本进程）"]}, 400)
+                return
+            # 先把响应发出去再触发停机，客户端才能收到确认
+            self._send_json({"ok": True, "restarting": True})
+            try:
+                _on_restart_cb()
+            except Exception as e:
+                print(f"🚨 重启回调异常: {e}")
             return
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
@@ -550,14 +568,18 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def start_webui(host: str | None = None, port: int | None = None, on_reload=None):
+def start_webui(host: str | None = None, port: int | None = None,
+                on_reload=None, on_restart=None):
     """启动网页管理端（后台守护线程）。
 
     参数缺省时从 config.config 读取 WEB_ADMIN_HOST / WEB_ADMIN_PORT。
+    on_restart: 主程序注入的重启回调（触发优雅停机 + 进程自替换），
+                不传则网页上不显示重启按钮（独立模式）。
     返回 ThreadingHTTPServer 实例（用于 shutdown() 清理），失败时返回 None。
     """
-    global _on_reload_cb, _enforce_host_check
+    global _on_reload_cb, _on_restart_cb, _enforce_host_check
     _on_reload_cb = on_reload
+    _on_restart_cb = on_restart
 
     if host is None or port is None:
         import config.config as cfg

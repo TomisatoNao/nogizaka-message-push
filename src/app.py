@@ -5,6 +5,7 @@ import asyncio
 import os
 import random
 import signal
+import sys
 import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -355,11 +356,23 @@ async def main() -> None:
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
     observer = start_watcher(config_path, on_reload=_on_config_reload)
 
-    # 7. 可选启动网页管理端（config.json 的 web_admin.enabled 控制）
-    webui_server = start_webui(on_reload=_on_config_reload) if cfg.WEB_ADMIN_ENABLED else None
-
     stop_event = asyncio.Event()
     _install_stop_handlers(stop_event)
+
+    # 7. 可选启动网页管理端（config.json 的 web_admin.enabled 控制）
+    #    重启回调运行在 HTTP 处理线程：走优雅停机流程，清理完毕后 execv 自替换
+    loop = asyncio.get_running_loop()
+    restart_requested = False
+
+    def _request_restart() -> None:
+        nonlocal restart_requested
+        restart_requested = True
+        loop.call_soon_threadsafe(stop_event.set)
+
+    webui_server = (
+        start_webui(on_reload=_on_config_reload, on_restart=_request_restart)
+        if cfg.WEB_ADMIN_ENABLED else None
+    )
 
     try:
         loop_task = asyncio.create_task(_run_loop(http_client))
@@ -385,6 +398,11 @@ async def main() -> None:
             observer.join()
         await asyncio.gather(http_client.aclose(), qq_client.aclose())
         print("✅ 资源清理完毕")
+
+    if restart_requested:
+        # 进程自替换：同 PID 拉起全新进程，.env / 模块状态全部重新加载
+        print("🔁 正在重启主程序...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 if __name__ == "__main__":

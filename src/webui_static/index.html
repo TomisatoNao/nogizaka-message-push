@@ -100,6 +100,8 @@
   <span class="dirty-dot" id="dirtyDot">● 有未保存的修改</span>
   <div class="spacer"></div>
   <button class="btn" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
+  <button class="btn danger" id="btnRestart" hidden
+          title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
 </header>
 
 <main>
@@ -124,7 +126,7 @@
         <span style="font-size:12.5px; color:var(--muted)">TG Bot Token (.env)</span>
         <span id="tgTokenStatus"></span>
         <button class="btn small" id="btnFillTgToken">填写</button>
-        <span class="hint" style="margin:0">（TG Token 修改后需重启生效）</span>
+        <span class="hint" style="margin:0">（TG Token 修改后点右上角「⟳ 重启主程序」生效）</span>
       </div>
     </div>
     <div class="card">
@@ -316,6 +318,7 @@ async function loadConfig() {
     credStatus = data.cred_status || {};
     qqBotStatus = data.qq_bot_status || [];
     envStatus = data.env_status || {};
+    $("btnRestart").hidden = !data.can_restart;
     setDirty(false);
     renderAll();
     msg("已载入 " + data.config_path, "ok");
@@ -805,6 +808,35 @@ $("btnSave").addEventListener("click", saveConfig);
 $("btnReloadFile").addEventListener("click", () => {
   if (dirty && !confirm("有未保存的修改，确定放弃并重新读取？")) return;
   loadConfig();
+});
+$("btnRestart").addEventListener("click", async () => {
+  if (dirty && !confirm("有未保存的修改，重启前要先保存吗？点「取消」回去保存，点「确定」放弃修改直接重启。")) return;
+  if (!confirm("确定重启主程序？推送轮询会中断几秒，重启后 .env 里的新凭证会生效。")) return;
+  try {
+    const data = await api("/api/restart", { method: "POST" });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
+  } catch (e) {
+    msg("重启请求失败：" + e.message, "err");
+    return;
+  }
+  msg("🔁 主程序重启中，等待恢复…", "");
+  setDirty(false);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const resp = await fetch("/api/config", {
+        headers: authToken ? { "X-Auth-Token": authToken } : {},
+        cache: "no-store",
+      });
+      if (resp.ok) {
+        await loadConfig();
+        msg("✅ 主程序已重启完成", "ok");
+        return;
+      }
+    } catch (e) { /* 服务还没起来，继续等 */ }
+  }
+  msg("⚠️ 等待超时（60s）：请到终端检查主程序是否成功重启", "err");
 });
 loadConfig();
 </script>

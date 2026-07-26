@@ -152,6 +152,7 @@ def main() -> None:
     orig_rotate = webui._rotate_account_creds
     reload_calls = []
     rotate_calls = []
+    restart_calls = []
     webui.CONFIG_PATH = tmp_config
     webui.ENV_PATH = Path(tmpdir) / ".env"
     webui._trigger_reload = lambda: (reload_calls.append(1), True)[1]
@@ -224,6 +225,16 @@ def main() -> None:
         assert code == 400 and any("未知账号" in e for e in data["errors"]), f"未知账号应 400: {data}"
         assert "GHOST_TOKEN" not in webui.ENV_PATH.read_text(encoding="utf-8"), "校验失败不应写 .env"
 
+        # POST /api/restart：独立模式（无回调）→ 400；注入回调后 → 触发重启
+        code, data = _http("POST", base + "/api/restart")
+        assert code == 400 and not data["ok"], "无重启回调时应 400"
+        webui._on_restart_cb = lambda: restart_calls.append(1)
+        code, data = _http("POST", base + "/api/restart")
+        assert code == 200 and data["ok"] and restart_calls == [1], f"应触发重启回调: {data}"
+        code, data = _http("GET", base + "/api/config")
+        assert data["can_restart"], "注入回调后 can_restart 应为 true"
+        webui._on_restart_cb = None
+
         # Host 校验：伪造外部域名的 Host 头 → 403（DNS rebinding 防护）
         code, data = _http("GET", base + "/api/config", headers={"Host": "evil.example.com"})
         assert code == 403, f"非本机 Host 应 403，实际 {code}"
@@ -243,6 +254,7 @@ def main() -> None:
             os.environ.pop(key, None)
         server.shutdown()
         server.server_close()
+        webui._on_restart_cb = None
         webui.CONFIG_PATH = orig_config_path
         webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger
