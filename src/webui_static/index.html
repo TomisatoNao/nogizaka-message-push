@@ -1025,28 +1025,25 @@ function renderQqBots() {
       const openidInput = mkInput(bot.target_openid || "", (v) => {
         const t = v.trim(); if (t) bot.target_openid = t; else delete bot.target_openid;
       }, "ABCDEF0123...", "width:150px");
-      tdOpenid.appendChild(openidInput);
-      if (canCaptureOpenid) {
-        tdOpenid.appendChild(document.createTextNode(" "));
-        tdOpenid.appendChild(mkBtn("🎯 自动获取", () => openOpenidDialog(bot, openidInput)));
-      }
+      tdOpenid.appendChild(openidInput);   // 「自动获取」放在操作列，避免撑歪本列对齐
 
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
-      if (st && st.secret_env === secretVar) {
-        tdSecret.innerHTML = st.client_secret
-          ? '<span class="cred ok">✓ ' + esc(secretVar) + "</span>"
-          : '<span class="cred miss">✗ 缺 ' + esc(secretVar) + "</span>";
-      } else {
-        tdSecret.innerHTML = '<span class="cred" style="color:var(--muted)">' + esc(secretVar) + "（保存后刷新）</span>";
-      }
-      if (st && st.secret_env === secretVar) {
-        tdSecret.appendChild(document.createTextNode(" "));
-        tdSecret.appendChild(mkBtn("填写", () => openSecretDialog(
-          "填写官方 Bot 密钥：" + (bot.name || ""), "保存并热重载后立即生效。",
-          [{ env: secretVar, label: "Client Secret", required: true,
-             help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
-      }
+      // 本次会话刚写入的密钥服务端状态里还查不到，一并算作已配置
+      const secretSet = (st && st.secret_env === secretVar && st.client_secret)
+        || secretsWritten.has(bot.name);
+      tdSecret.innerHTML = secretSet
+        ? '<span class="cred ok">✓ 已配置</span>'
+        : '<span class="cred miss">✗ 未配置</span>';
+      tdSecret.title = secretVar;
+      // 「修改/填写」按钮无条件提供 —— 新建但未保存的 Bot 也要能改密钥
+      tdSecret.appendChild(document.createTextNode(" "));
+      tdSecret.appendChild(mkBtn(secretSet ? "修改" : "填写", () => openSecretDialog(
+        (secretSet ? "修改" : "填写") + "官方 Bot 密钥：" + (bot.name || ""),
+        "写入 <code>" + esc(secretVar) + "</code>，保存并热重载后生效。",
+        [{ env: secretVar, label: "Client Secret", required: true,
+           help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }],
+        null, { onDone: () => { secretsWritten.add(bot.name); renderQqBots(); } })));
 
       const tdState = document.createElement("td");
       if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
@@ -1054,6 +1051,10 @@ function renderQqBots() {
       else tdState.innerHTML = '<span class="cred" style="color:var(--muted)">未保存</span>';
 
       const tdOps = document.createElement("td");
+      if (canCaptureOpenid) {
+        tdOps.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput)));
+        tdOps.appendChild(document.createTextNode(" "));
+      }
       tdOps.appendChild(mkBtn("删除", async () => {
         const upper = (bot.name || "").toUpperCase();
         if (!(await uiConfirm(
@@ -1076,6 +1077,9 @@ function renderQqBots() {
           secretsWritten.delete(bot.name);
         }
         config.qq_official_bots.splice(idx, 1);
+        // 同步剔除服务端状态里的该条目：否则删到最后一个 Bot 时，
+        // 内存里已空而 status 还留着声明条目，会被误当成 .env 遗留槽位渲染
+        qqBotStatus = (qqBotStatus || []).filter((s) => s.name !== bot.name);
         markDirty(); renderQqBots();
         msg("已删除，点「保存并热重载」生效", "ok");
       }, "danger"));
@@ -1083,15 +1087,15 @@ function renderQqBots() {
       tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
     });
-  } else if (!qqBotStatus.length) {
+  } else if (!qqBotStatus.filter((s) => !s.declared).length) {
     // 既没声明 Bot，.env 里也没有旧槽位 —— 明确的空态，不再挂占位行
     const tr = document.createElement("tr");
     tr.innerHTML = '<td colspan="6" class="empty">还没有配置官方 Bot。点下方「＋ 添加 Bot」，' +
       '在 QQ 开放平台拿到 App ID 和 Secret 即可。</td>';
     tbody.appendChild(tr);
   } else {
-    // 旧模式：.env 编号槽位，只读展示
-    for (const bot of qqBotStatus) {
+    // 旧模式：.env 编号槽位，只读展示（只取真正的遗留槽位）
+    for (const bot of qqBotStatus.filter((s) => !s.declared)) {
       const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
       const badge = (v) => unused ? '<span class="cred" style="color:var(--muted)">—</span>'
         : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
@@ -1255,7 +1259,8 @@ $("tab-general").addEventListener("input", () => markDirty());
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
 function openSecretDialog(title, hint, fields, account, opts) {
-  secretCtx = { fields, account, userAction: (opts || {}).userAction || null };
+  secretCtx = { fields, account, userAction: (opts || {}).userAction || null,
+                onDone: (opts || {}).onDone || null };
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
   $("secretDialogHint").hidden = !hint;
@@ -1371,6 +1376,7 @@ $("secretSave").addEventListener("click", async () => {
     if (data.qq_bot_status) qqBotStatus = data.qq_bot_status;
     if (data.env_status) envStatus = data.env_status;
     $("secretDialog").close();
+    if (secretCtx.onDone) { try { secretCtx.onDone(); } catch (e) { /* 忽略 */ } }
     renderGeneral(); renderAccounts();
     msg("✅ 已写入 .env（" + (data.updated || []).join(", ") + "）" +
         (secretCtx.account ? "，账号凭证已轮换" : "") +
