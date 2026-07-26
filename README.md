@@ -105,15 +105,28 @@ cp .env.example .env
 
 ### 获取成员 ID
 
-使用 [nogizaka-monitor](https://github.com/TomisatoNao/nogizaka-monitor) 项目的 `list_members.py`，通过手机端 API 查询：
+配好 `.env` 和 `config.json` 的 accounts 之后，用自带的工具查询：
 
 ```bash
-git clone https://github.com/TomisatoNao/nogizaka-monitor.git ../nogizaka-monitor
-cd ../nogizaka-monitor
-python list_members.py nogizaka    # 乃木坂46
-python list_members.py hinatazaka  # 日向坂46
-python list_members.py yodel       # yodel（毕业生）
+python tools/list_members.py                  # 列出所有账号能看到的成员
+python tools/list_members.py nogizaka_main    # 只列指定账号（可传多个）
 ```
+
+它直接复用项目的账号池和凭证，不需要额外配置，输出形如：
+
+```
+▸ nogizaka_main (nogizaka46 · mobile · https://api.n46.glastonr.net)
+
+  ── 5期生 ──
+    [ 55] 🟢 冨里 奈央
+    [ 56] 🟢 中西 アルノ
+
+  共 38 项，其中 35 个在籍（🟢 open）
+  config.json 的 monitor 里这样写：
+    { "id": "55", "name": "冨里 奈央", "account": "nogizaka_main", "groups": [你的QQ群号] }
+```
+
+🟢 = 在籍（`state=open`），⚫ = 已毕业/关闭。Token 剩余时间不足时会自动续期并写回 `data/web_credentials/`，跑这个工具不会影响主程序的凭证；续期失败也只打印在本地，不会往 QQ 群或 TG 频道发告警。
 
 也可以直接查阅下方速查表，手动填入 `m_id`。
 
@@ -240,6 +253,7 @@ nogizaka-message-push/
 │       ├── qq_official.py   # QQ 官方 Bot 单聊推送
 │       └── tgbot.py         # Telegram Bot 推送
 ├── tools/
+│   ├── list_members.py      # 列出账号可监控的成员及 m_id
 │   ├── get_qq_openid.py     # QQ Bot WebSocket 获取用户 OpenID
 │   └── test_models.py       # Gemini 模型序列连通性 + 响应结构诊断
 ├── tests/
