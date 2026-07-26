@@ -35,6 +35,16 @@ _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
 
+# 串行化所有写操作（config.json / .env 都是 read-modify-write，
+# ThreadingHTTPServer 的并发请求不加锁会互相丢更新）
+_mutation_lock = threading.Lock()
+
+# 绑定回环地址时校验 Host 头，阻断 DNS rebinding（恶意网页把自己域名解析到
+# 127.0.0.1 就能绕过浏览器同源策略直接调本地 API）。绑定其他地址时不启用 ——
+# 局域网访问的合法 Host 无法穷举，此时安全性由 WEB_ADMIN_TOKEN 保证。
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_enforce_host_check = False
+
 
 # ================================================================
 # 校验
@@ -63,6 +73,11 @@ def validate_config(raw: dict) -> list[str]:
     seen: set[tuple[str, str]] = set()
     for i, m in enumerate(raw.get("monitor", [])):
         label = m.get("name") or f"#{i}"
+        # schema 只查存在性和类型，空字符串会通过——在这里兜住
+        if not str(m.get("id", "")).strip():
+            errors.append(f"成员 {label} 的 id 为空")
+        if not str(m.get("name", "")).strip():
+            errors.append(f"成员 #{i} 的 name 为空")
         if m.get("account") not in accounts:
             errors.append(f"成员 {label} 引用了未定义的账号: {m.get('account')!r}")
         key = (str(m.get("id")), str(m.get("account")))
@@ -335,6 +350,13 @@ def _load_raw_config() -> dict:
         return json5.load(f)
 
 
+def _env_status() -> dict:
+    return {
+        "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
+        "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
+    }
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "SakamichiWebUI/1.0"
 
@@ -347,6 +369,20 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _check_host(self) -> bool:
+        """绑定回环地址时校验 Host 头（防 DNS rebinding）。"""
+        if not _enforce_host_check:
+            return True
+        host = self.headers.get("Host", "")
+        if host.startswith("["):                    # IPv6: [::1]:8787
+            hostname = host[1:].split("]", 1)[0]
+        else:
+            hostname = host.rsplit(":", 1)[0] if ":" in host else host
+        if hostname in _LOOPBACK_HOSTS:
+            return True
+        self._send_json({"ok": False, "errors": [f"拒绝非本机 Host: {host!r}"]}, 403)
+        return False
 
     def _check_auth(self) -> bool:
         token = os.getenv("WEB_ADMIN_TOKEN", "")
@@ -380,6 +416,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── 路由 ─────────────────────────────────────────────
     def do_GET(self) -> None:  # noqa: N802 - http.server 约定命名
+        if not self._check_host():
+            return
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             try:
@@ -408,10 +446,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "config": raw,
                 "cred_status": _cred_status(raw),
                 "qq_bot_status": _qq_bot_status(raw),
-                "env_status": {
-                    "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
-                    "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
-                },
+                "env_status": _env_status(),
                 "config_path": str(CONFIG_PATH),
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
             })
@@ -420,6 +455,8 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
     def do_PUT(self) -> None:  # noqa: N802
+        if not self._check_host():
+            return
         if self.path.split("?", 1)[0] != "/api/config":
             self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
             return
@@ -432,18 +469,21 @@ class _Handler(BaseHTTPRequestHandler):
         if errors:
             self._send_json({"ok": False, "errors": errors}, 400)
             return
-        try:
-            save_config(raw)
-        except Exception as e:
-            self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
-            return
-        reloaded = _trigger_reload()
+        with _mutation_lock:
+            try:
+                save_config(raw)
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
+                return
+            reloaded = _trigger_reload()
         self._send_json({
             "ok": True, "reloaded": reloaded,
             "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
         })
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._check_host():
+            return
         path = self.path.split("?", 1)[0]
         if path == "/api/reload":
             if not self._check_auth():
@@ -482,16 +522,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "errors": errors}, 400)
             return
 
-        try:
-            update_env_file(values)
-        except Exception as e:
-            self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
-            return
-        for key, val in values.items():
-            os.environ[key] = val
-        if account is not None:
-            _rotate_account_creds(account)
-        reloaded = _trigger_reload()
+        with _mutation_lock:
+            try:
+                update_env_file(values)
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
+                return
+            for key, val in values.items():
+                os.environ[key] = val
+            if account is not None:
+                _rotate_account_creds(account)
+            reloaded = _trigger_reload()
 
         try:
             raw = _load_raw_config()
@@ -500,10 +541,7 @@ class _Handler(BaseHTTPRequestHandler):
             status = {}
         self._send_json({
             "ok": True, "reloaded": reloaded, "updated": sorted(values),
-            "env_status": {
-                "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
-                "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
-            },
+            "env_status": _env_status(),
             **status,
         })
 
@@ -518,13 +556,15 @@ def start_webui(host: str | None = None, port: int | None = None, on_reload=None
     参数缺省时从 config.config 读取 WEB_ADMIN_HOST / WEB_ADMIN_PORT。
     返回 ThreadingHTTPServer 实例（用于 shutdown() 清理），失败时返回 None。
     """
-    global _on_reload_cb
+    global _on_reload_cb, _enforce_host_check
     _on_reload_cb = on_reload
 
     if host is None or port is None:
         import config.config as cfg
         host = host or getattr(cfg, "WEB_ADMIN_HOST", "127.0.0.1")
         port = port if port is not None else getattr(cfg, "WEB_ADMIN_PORT", 8787)
+
+    _enforce_host_check = host in _LOOPBACK_HOSTS
 
     try:
         server = ThreadingHTTPServer((host, port), _Handler)
@@ -555,4 +595,5 @@ if __name__ == "__main__":
         threading.Event().wait()
     except KeyboardInterrupt:
         server.shutdown()
+        server.server_close()
         print("✅ 网页管理端已停止")

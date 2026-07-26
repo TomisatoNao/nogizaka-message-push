@@ -379,6 +379,7 @@ async def main() -> None:
     finally:
         if webui_server is not None:
             webui_server.shutdown()
+            webui_server.server_close()
         if observer is not None:
             observer.stop()
             observer.join()

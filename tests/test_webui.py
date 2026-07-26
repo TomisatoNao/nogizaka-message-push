@@ -87,6 +87,13 @@ def main() -> None:
     errs = webui.validate_config(bad_schema)
     assert errs and "结构校验失败" in errs[0], f"应检出 schema 错误: {errs}"
 
+    empty_name = json.loads(json.dumps(SAMPLE))
+    empty_name["monitor"][0]["name"] = "  "
+    empty_name["monitor"][1]["id"] = ""
+    errs = webui.validate_config(empty_name)
+    assert any("name 为空" in e for e in errs) and any("id 为空" in e for e in errs), \
+        f"应检出空 id/name: {errs}"
+
     with_bots = json.loads(json.dumps(SAMPLE))
     with_bots["qq_official_bots"] = [
         {"name": "qq_official_bot1", "app_id": "102000001", "target_openid": "ABC123"},
@@ -217,6 +224,12 @@ def main() -> None:
         assert code == 400 and any("未知账号" in e for e in data["errors"]), f"未知账号应 400: {data}"
         assert "GHOST_TOKEN" not in webui.ENV_PATH.read_text(encoding="utf-8"), "校验失败不应写 .env"
 
+        # Host 校验：伪造外部域名的 Host 头 → 403（DNS rebinding 防护）
+        code, data = _http("GET", base + "/api/config", headers={"Host": "evil.example.com"})
+        assert code == 403, f"非本机 Host 应 403，实际 {code}"
+        code, data = _http("GET", base + "/api/config", headers={"Host": "localhost:9999"})
+        assert code == 200, "localhost 应放行"
+
         # 鉴权：设置 token 后无头 → 401，带头 → 200
         os.environ["WEB_ADMIN_TOKEN"] = "s3cret"
         code, data = _http("GET", base + "/api/config")
@@ -229,6 +242,7 @@ def main() -> None:
         for key in ("WEB_ADMIN_TOKEN", "HINATA_SHARED_TOKEN", "HINATA_SHARED_COOKIE"):
             os.environ.pop(key, None)
         server.shutdown()
+        server.server_close()
         webui.CONFIG_PATH = orig_config_path
         webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger

@@ -44,6 +44,7 @@
     padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit; width: 100%; }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input.invalid { border-color: var(--err); outline: 1px solid var(--err); }
   .pair { display: flex; gap: 8px; align-items: center; }
   .pair input { width: 90px; }
   .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
@@ -325,6 +326,13 @@ async function loadConfig() {
 
 async function saveConfig() {
   collectGeneral();
+  // 高级页有没点「应用到表单」的 JSON 修改时，保存会忽略它们——先确认
+  if (document.getElementById("tab-advanced").classList.contains("active")) {
+    let rawParsed = null;
+    try { rawParsed = JSON.stringify(JSON.parse($("rawJson").value)); } catch (e) { /* 解析失败也视为有改动 */ }
+    if (rawParsed !== JSON.stringify(config) &&
+        !confirm("高级页的 JSON 有未「应用到表单」的修改，保存将忽略这些修改。继续？")) return;
+  }
   try {
     msg("保存中…", "");
     const data = await api("/api/config", {
@@ -723,9 +731,13 @@ function renderMembers() {
     sel.addEventListener("change", () => { m.account = sel.value; setDirty(true); });
     tdAcc.appendChild(sel);
     const tdGroups = document.createElement("td");
-    tdGroups.appendChild(mkInput((m.groups || []).join(", "), (v) => {
+    tdGroups.appendChild(mkInput((m.groups || []).join(", "), (v, el) => {
       const nums = v.split(/[,，\s]+/).filter(Boolean).map(Number);
-      if (nums.some((n) => !Number.isInteger(n) || n <= 0)) return; // 非法输入不写回
+      if (nums.some((n) => !Number.isInteger(n) || n <= 0)) {
+        el.classList.add("invalid");  // 非法输入不写回，标红提示
+        return;
+      }
+      el.classList.remove("invalid");
       m.groups = nums;
     }, "533072575, 752269366"));
     const tdTg = document.createElement("td");
@@ -782,7 +794,7 @@ function mkInput(value, onChange, placeholder, style) {
   input.value = value;
   if (placeholder) input.placeholder = placeholder;
   if (style) input.style.cssText = style;
-  input.addEventListener("input", () => { onChange(input.value); setDirty(true); });
+  input.addEventListener("input", () => { onChange(input.value, input); setDirty(true); });
   return input;
 }
 
