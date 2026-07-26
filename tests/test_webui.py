@@ -232,7 +232,21 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config")
         assert code == 200 and data["ok"] and data["config"] == SAMPLE
         assert "nogizaka_main" in data["cred_status"]
-        assert [b["name"] for b in data["qq_bot_status"]] == ["BOT1", "BOT2"], "未声明时应报告 .env 编号槽位状态"
+        # 未声明 Bot 且 .env 里也没配过 → 空列表（早先会凭空显示两个空槽位）。
+        # 先清掉真实 .env 带来的编号槽位变量，让结果不依赖运行环境。
+        saved_env = {k: os.environ.pop(k) for k in list(os.environ)
+                     if k.startswith("QQ_OFFICIAL_BOT")}
+        try:
+            code, probe = _http("GET", base + "/api/config")
+            assert probe["qq_bot_status"] == [], \
+                f"无任何配置时不应有槽位: {probe['qq_bot_status']}"
+            os.environ["QQ_OFFICIAL_BOT1_APP_ID"] = "102000009"
+            code, probe = _http("GET", base + "/api/config")
+            names = [b["name"] for b in probe["qq_bot_status"]]
+            assert names == ["BOT1"], f".env 里配过的槽位才应出现: {names}"
+        finally:
+            os.environ.pop("QQ_OFFICIAL_BOT1_APP_ID", None)
+            os.environ.update(saved_env)
 
         # PUT 声明官方 Bot → 状态改为按声明报告
         cfg_bots = json.loads(json.dumps(SAMPLE))

@@ -441,6 +441,50 @@
   </div>
 </dialog>
 
+<!-- 添加 QQ 官方 Bot 对话框（一次填齐，不必先建后改） -->
+<dialog id="qqBotDialog">
+  <h3>添加 QQ 官方 Bot</h3>
+  <div class="dialog-note">
+    App ID 和 Secret 来自 <b>QQ 开放平台 → 应用管理 → 开发设置</b>。
+    Secret 会存入 <code>.env</code>，其余存入 <code>config.json</code>。
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">Bot 名称<span class="req">*</span></span>
+      <span class="fenv">小写字母 / 数字 / _</span></div>
+    <input type="text" id="qqBotName" placeholder="qq_official_bot1" autocomplete="off"
+           data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+    <div class="fhelp" id="qqBotNameHelp">你自己起的标识，用于区分多个 Bot，并决定密钥在 .env 里的变量名。</div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">App ID<span class="req">*</span></span></div>
+    <input type="text" id="qqBotAppId" placeholder="102000001" autocomplete="off"
+           data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">Client Secret<span class="req">*</span></span>
+      <span class="fenv" id="qqBotSecretEnv">.env · —</span></div>
+    <div class="input-group">
+      <input type="text" id="qqBotSecret" class="masked" autocomplete="off"
+             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
+             data-form-type="other">
+      <button type="button" class="eye" id="qqBotSecretEye">👁</button>
+    </div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">目标 OpenID</span>
+      <span class="fenv">可留空，稍后自动获取</span></div>
+    <div class="input-group">
+      <input type="text" id="qqBotOpenid" placeholder="留空则创建后点「🎯 自动获取」" autocomplete="off"
+             data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+    </div>
+    <div class="fhelp">OpenID 只能从「用户主动私聊 Bot」的事件里获得；不知道就先留空。</div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="qqBotCancel">取消</button>
+    <button class="btn primary" id="qqBotSave">添加</button>
+  </div>
+</dialog>
+
 <!-- QQ openid 捕获对话框 -->
 <dialog id="openidDialog">
   <h3>自动获取目标 OpenID</h3>
@@ -963,7 +1007,16 @@ function renderQqBots() {
       const tr = document.createElement("tr");
       const st = statusByName[bot.name];
       const tdName = document.createElement("td");
-      tdName.appendChild(mkInput(bot.name || "", (v) => { bot.name = v.trim().toLowerCase(); }, "qq_official_bot1", "width:130px"));
+      // 改名会改变密钥在 .env 里的变量名，提醒一次避免"改完密钥就丢了"
+      const originalName = bot.name;
+      tdName.appendChild(mkInput(bot.name || "", (v) => {
+        bot.name = v.trim().toLowerCase();
+        if (bot.name && bot.name !== originalName && st && st.client_secret) {
+          $("qqBotHint").innerHTML = "⚠️ 改名后密钥变量名变为 <code>" +
+            esc(bot.name.toUpperCase()) + "_CLIENT_SECRET</code>，" +
+            "保存后需要重新填一次 Client Secret。";
+        }
+      }, "qq_official_bot1", "width:130px"));
       const tdApp = document.createElement("td");
       tdApp.appendChild(mkInput(bot.app_id || "", (v) => {
         const t = v.trim(); if (t) bot.app_id = t; else delete bot.app_id;
@@ -1011,6 +1064,12 @@ function renderQqBots() {
       tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
     });
+  } else if (!qqBotStatus.length) {
+    // 既没声明 Bot，.env 里也没有旧槽位 —— 明确的空态，不再挂占位行
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="empty">还没有配置官方 Bot。点下方「＋ 添加 Bot」，' +
+      '在 QQ 开放平台拿到 App ID 和 Secret 即可。</td>';
+    tbody.appendChild(tr);
   } else {
     // 旧模式：.env 编号槽位，只读展示
     for (const bot of qqBotStatus) {
@@ -1035,6 +1094,7 @@ function renderQqBots() {
     }
   }
 }
+// 添加 Bot：一次填齐名称 / App ID / Secret / OpenID，避免"先建空行再逐个改"
 $("btnAddQqBot").addEventListener("click", async () => {
   config.qq_official_bots = config.qq_official_bots || [];
   if (config.qq_official_bots.length === 0) {
@@ -1044,8 +1104,65 @@ $("btnAddQqBot").addEventListener("click", async () => {
       "在这里添加 Bot 后将改为以本列表为准，.env 槽位不再自动扫描。\n" +
       "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？"))) return;
   }
-  config.qq_official_bots.push({ name: "qq_official_bot" + (config.qq_official_bots.length + 1) });
-  markDirty(); renderQqBots();
+  const n = config.qq_official_bots.length + 1;
+  $("qqBotName").value = "qq_official_bot" + n;
+  $("qqBotAppId").value = "";
+  $("qqBotSecret").value = "";
+  $("qqBotSecret").classList.add("masked");
+  $("qqBotSecretEye").textContent = "👁";
+  $("qqBotOpenid").value = "";
+  updateQqBotSecretEnv();
+  $("qqBotDialog").showModal();
+  $("qqBotAppId").focus();
+});
+
+function updateQqBotSecretEnv() {
+  const name = $("qqBotName").value.trim();
+  $("qqBotSecretEnv").textContent = ".env · " + (name ? name.toUpperCase() + "_CLIENT_SECRET" : "—");
+}
+$("qqBotName").addEventListener("input", updateQqBotSecretEnv);
+$("qqBotSecretEye").addEventListener("click", () => {
+  const el = $("qqBotSecret");
+  $("qqBotSecretEye").textContent = el.classList.toggle("masked") ? "👁" : "🚫";
+});
+$("qqBotCancel").addEventListener("click", () => $("qqBotDialog").close());
+
+$("qqBotSave").addEventListener("click", async () => {
+  const name = $("qqBotName").value.trim().toLowerCase();
+  const appId = $("qqBotAppId").value.trim();
+  const secret = $("qqBotSecret").value.trim();
+  const openid = $("qqBotOpenid").value.trim();
+
+  if (!/^[a-z0-9_]+$/.test(name)) { uiAlert("Bot 名称只能用小写字母、数字、下划线"); return; }
+  if ((config.qq_official_bots || []).some((b) => b.name === name)) { uiAlert("该名称已存在"); return; }
+  if (!appId) { uiAlert("请填写 App ID"); return; }
+  if (!secret) { uiAlert("请填写 Client Secret"); return; }
+
+  const btn = $("qqBotSave");
+  btn.disabled = true; btn.textContent = "添加中…";
+  try {
+    // Secret 立即写入 .env（密钥不进 config.json）
+    const res = await api("/api/secrets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: { [name.toUpperCase() + "_CLIENT_SECRET"]: secret } }),
+    });
+    if (!res.ok) { msg("❌ 密钥写入失败：" + (res.errors || []).join("；"), "err"); return; }
+    if (res.qq_bot_status) qqBotStatus = res.qq_bot_status;
+
+    const bot = { name: name, app_id: appId };
+    if (openid) bot.target_openid = openid;
+    config.qq_official_bots = config.qq_official_bots || [];
+    config.qq_official_bots.push(bot);
+    markDirty(); renderQqBots();
+    $("qqBotDialog").close();
+    msg(openid ? "✅ 已添加 Bot，点「保存并热重载」生效"
+               : "✅ 已添加 Bot（密钥已存入 .env）。还需要目标 OpenID —— 点该行「🎯 自动获取」，或手动填后保存", "ok");
+  } catch (e) {
+    msg("添加失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "添加";
+  }
 });
 
 // 把表单值收回 config（数字字段做 parse，空值回退默认）

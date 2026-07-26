@@ -345,16 +345,18 @@ python tools/manage_users.py list / passwd <用户名> / role <用户名> <角�
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Start   # 安装并启动
 powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status  # 查看
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Stop    # 停止服务
 powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall
-Stop-ScheduledTask -TaskName NogizakaMessagePush                              # 彻底停止
 ```
+
+⚠️ **停服务一定要用 `-Stop`**，不要直接 `Stop-ScheduledTask`：后者只终止守护脚本，它启动的 python 子进程会变成孤儿继续运行——而计划任务启动的进程**普通权限杀不掉**，孤儿会一直重复抓取推送。`-Stop` 通过信号文件让主程序自己优雅退出，不涉及权限。守护脚本启动时也会检测端口占用，已有实例就直接退出，不再叠加。
 
 登录时自动启动、后台无窗口、崩溃后 60 秒自动拉起（守护逻辑在 `tools/run_service.ps1`，日志 `logs/service.log`）。
 
 - 拉起由守护脚本负责，**不依赖** Task Scheduler 自带的"失败后重启"（那个策略只在任务整体失败时触发，捕捉不到"子进程被杀而包装器正常退出"）
 - 退出码 0 视为主动停止不再拉起，非 0 视为崩溃则重启；启动即崩溃会拉长退避
-- ⚠️ 想停服务用 `Stop-ScheduledTask`，只杀 python 进程的话守护循环会把它拉回来
 - ⚠️ 安装前先停掉手动启动的实例，否则抢 8787 端口
+- 万一出现杀不掉的孤儿进程（旧版本遗留），用**管理员** PowerShell 执行 `taskkill /F /IM python.exe`（注意会杀掉所有 python 进程）
 - ⚠️ `.ps1` 必须保持 **UTF-8 with BOM**（PowerShell 5.1 用系统 ANSI 读无 BOM 文件，中文变乱码导致脚本无法解析；单元测试会守住这点）
 
 **Linux —— systemd**

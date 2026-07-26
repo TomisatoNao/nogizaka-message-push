@@ -146,6 +146,11 @@ def _get_jst_now() -> datetime:
 # ──────────────────────────────────────────────
 # 每日运行摘要（同时是"死人开关"：哪天没收到摘要 = 系统挂了）
 # ──────────────────────────────────────────────
+# 停止信号文件：外部（部署脚本）创建它即可让主程序优雅退出。
+# 计划任务 / systemd 启动的进程往往需要管理员权限才能杀，用文件信号
+# 就绕开了权限问题，也保证走完整的清理流程。
+STOP_FILE = Path(__file__).resolve().parent.parent / "logs" / "service.stop"
+
 DISK_WARN_BYTES = 10 * 1024 ** 3   # 磁盘剩余低于此值在摘要里标红
 SUMMARY_MAX_ATTEMPTS = 3
 SUMMARY_RETRY_SECONDS = 1800       # 失败后 30 分钟补发
@@ -359,6 +364,14 @@ async def _run_cycle() -> None:
         log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
 
 
+def _stop_requested() -> bool:
+    """外部是否请求停止（存在停止信号文件）。"""
+    try:
+        return STOP_FILE.exists()
+    except OSError:
+        return False
+
+
 async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
     """等待 timeout 秒；期间事件被置位（网页「立即巡查」）则提前返回 True。"""
     try:
@@ -369,8 +382,14 @@ async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
         return False
 
 
-async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event) -> None:
+async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
+                    stop_event: asyncio.Event | None = None) -> None:
     while True:
+        if _stop_requested():
+            log_all("🛑 检测到停止信号文件，优雅退出")
+            if stop_event is not None:
+                stop_event.set()
+            return
         try:
             # ── 改进 3：休眠时段暂停轮询（手动触发可唤醒）──
             sleep_sec = _calc_sleep_seconds()
@@ -401,8 +420,16 @@ async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event) -
         wait_time, tag = _next_interval()
         health.get_tracker().record_next_cycle(time.time() + wait_time, tag)
         log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
-        if await _wait_or_trigger(poll_event, wait_time):
-            log_all("⏩ 手动触发巡查", is_debug=True)
+        # 长等待期间也要能及时响应停止信号，切成小段轮询
+        waited = 0.0
+        while waited < wait_time:
+            slice_s = min(10.0, wait_time - waited)
+            if await _wait_or_trigger(poll_event, slice_s):
+                log_all("⏩ 手动触发巡查", is_debug=True)
+                break
+            waited += slice_s
+            if _stop_requested():
+                break
 
 
 def _install_stop_handlers(stop_event: asyncio.Event) -> None:
@@ -456,6 +483,11 @@ async def main() -> None:
     print("=== 坂道联合监控系统 ===")
     os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
     os.makedirs(cfg.SENT_IDS_DIR, exist_ok=True)
+    # 上次的停止信号不该影响本次启动
+    try:
+        STOP_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
 
     # 1. 基础设施
     init_loggers()
@@ -568,7 +600,7 @@ async def main() -> None:
     )
 
     try:
-        loop_task = asyncio.create_task(_run_loop(http_client, poll_event))
+        loop_task = asyncio.create_task(_run_loop(http_client, poll_event, stop_event))
         stop_task = asyncio.create_task(stop_event.wait())
         done, _ = await asyncio.wait(
             {loop_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,

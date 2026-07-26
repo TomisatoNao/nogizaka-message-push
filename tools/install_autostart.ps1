@@ -20,7 +20,8 @@
 param(
     [switch]$Uninstall,
     [switch]$Status,
-    [switch]$Start      # 安装后立即启动，不做交互询问（自动化 / 非交互终端用）
+    [switch]$Start,     # 安装后立即启动，不做交互询问（自动化 / 非交互终端用）
+    [switch]$Stop       # 优雅停止服务（不需要管理员权限）
 )
 
 $TaskName = "NogizakaMessagePush"
@@ -39,13 +40,39 @@ if ($Status) {
     exit 0
 }
 
+if ($Stop) {
+    # 用信号文件让主程序自己优雅退出 —— 计划任务启动的进程通常需要
+    # 管理员权限才能强杀，走信号就绕开了权限问题，也保证清理流程走完。
+    $logDir = Join-Path $RepoDir "logs"
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+    Set-Content -Path (Join-Path $logDir "service.stop") -Value "stop" -Encoding utf8
+    Write-Host "已发送停止信号，等待主程序退出…"
+
+    $stopped = $false
+    for ($i = 0; $i -lt 40; $i++) {
+        Start-Sleep -Milliseconds 1500
+        if (-not (Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue)) {
+            $stopped = $true
+            break
+        }
+    }
+    try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch { }
+    if ($stopped) {
+        Write-Host "✅ 服务已停止"
+    } else {
+        Write-Warning "等待超时。若仍在运行，请用管理员 PowerShell 执行：taskkill /F /IM python.exe"
+    }
+    exit 0
+}
+
 if ($Uninstall) {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($null -eq $task) {
         Write-Host "任务 $TaskName 不存在，无需卸载"
     } else {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-        Write-Host "✅ 已卸载计划任务 $TaskName（正在运行的进程不受影响）"
+        Write-Host "✅ 已卸载计划任务 $TaskName"
+        Write-Host "   正在运行的进程不受影响，如需停止请先执行： -Stop"
     }
     exit 0
 }

@@ -3,6 +3,7 @@
 运行: python tests/test_units.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -184,6 +185,29 @@ def test_time_record_skip() -> None:
     print("  ✅ 相同值跳过、新值正常落盘")
 
 
+def test_stop_signal_file() -> None:
+    """停止信号文件：外部创建即请求优雅退出。
+
+    计划任务 / systemd 启动的进程常需管理员权限才能强杀，信号文件绕开
+    权限问题，也保证走完整清理流程。
+    """
+    print("=== 停止信号文件 ===")
+    import src.app as app_mod
+
+    orig = app_mod.STOP_FILE
+    tmp = Path(tempfile.mkdtemp(prefix="stopsig_")) / "service.stop"
+    app_mod.STOP_FILE = tmp
+    try:
+        assert not app_mod._stop_requested(), "文件不存在时不应请求停止"
+        tmp.write_text("stop", encoding="utf-8")
+        assert app_mod._stop_requested(), "文件存在时应请求停止"
+        tmp.unlink()
+        assert not app_mod._stop_requested(), "删除后应恢复"
+    finally:
+        app_mod.STOP_FILE = orig
+    print("  ✅ 信号文件语义正确")
+
+
 def test_powershell_scripts_have_bom() -> None:
     """含中文的 .ps1 必须带 UTF-8 BOM。
 
@@ -212,6 +236,7 @@ def main() -> None:
     test_chain_extract()
     test_health_rolling()
     test_time_record_skip()
+    test_stop_signal_file()
     test_powershell_scripts_have_bom()
     print("\n" + "=" * 50)
     print("🎉 全部单元断言通过")

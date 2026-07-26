@@ -387,6 +387,9 @@ def _qq_bot_status(raw: dict) -> list[dict]:
             bots.append(entry)
         return bots
 
+    # 兼容模式：只报告 .env 里确实配过的编号槽位。
+    # 早先无条件展示前两个空槽位，结果没配过 Bot 的用户也会看到两行"未使用"，
+    # 白白造成困惑。
     for i in range(1, 21):
         entry = {
             "name": f"BOT{i}",
@@ -397,8 +400,7 @@ def _qq_bot_status(raw: dict) -> list[dict]:
             "secret_env": f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET",
         }
         entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
-        # 只展示前两个槽位 + 任何已配置的更高槽位，避免表格里挂 20 行空行
-        if i <= 2 or entry["app_id"] or entry["client_secret"] or entry["target_openid"]:
+        if entry["app_id"] or entry["client_secret"] or entry["target_openid"]:
             bots.append(entry)
     return bots
 

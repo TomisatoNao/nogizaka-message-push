@@ -43,14 +43,42 @@ function Write-ServiceLog($message) {
     Add-Content -Path $logFile -Value $line -Encoding utf8
 }
 
+$stopFile = Join-Path $logDir "service.stop"
+$pidFile = Join-Path $logDir "service.pid"
+
+# ── 单实例保护 ──────────────────────────────────────────
+# 计划任务的进程往往需要管理员权限才能杀，多开会留下一堆抢不到端口、
+# 却仍在重复抓取推送的孤儿进程。启动前先确认没有实例在跑。
+$port = 8787
+try {
+    $cfgText = Get-Content (Join-Path $RepoDir "config\config.json") -Raw -ErrorAction Stop
+    if ($cfgText -match '"port"\s*:\s*(\d+)') { $port = [int]$Matches[1] }
+} catch { }
+if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+    Write-ServiceLog "端口 $port 已被占用，说明已有实例在运行 —— 本次启动中止（避免重复推送）"
+    exit 0
+}
+
+Remove-Item $stopFile -ErrorAction SilentlyContinue   # 清理上次遗留的停止信号
 Write-ServiceLog "守护循环启动（python: $python）"
 $restarts = 0
 
 while ($true) {
     $started = Get-Date
-    & $python main.py
-    $code = $LASTEXITCODE
+    $proc = Start-Process -FilePath $python -ArgumentList "main.py" `
+        -WorkingDirectory $RepoDir -NoNewWindow -PassThru
+    Set-Content -Path $pidFile -Value $proc.Id -Encoding utf8
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
     $ranFor = [int]((Get-Date) - $started).TotalSeconds
+
+    # 外部请求停止（install_autostart.ps1 -Stop 会创建该文件）
+    if (Test-Path $stopFile) {
+        Remove-Item $stopFile -ErrorAction SilentlyContinue
+        Write-ServiceLog "收到停止信号，守护循环结束"
+        break
+    }
 
     if ($code -eq 0) {
         Write-ServiceLog "主程序正常退出（运行 ${ranFor}s），守护循环结束"
