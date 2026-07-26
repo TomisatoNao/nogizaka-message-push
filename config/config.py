@@ -7,7 +7,6 @@
 import copy as _copy
 import json as _json
 import os as _os
-import re as _re
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -44,9 +43,6 @@ _DEFAULTS: dict = {
     "gemini_min_interval":      7.0,
     "translate_max_length":     2500,
     "translate_timeout":        30,
-    # B站
-    "bilibili_post_api":        "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create",
-    "bilibili_min_interval":    3.0,
     # 文件路径
     "cred_dir":                 "data/web_credentials",
     "time_record_dir":          "data/time_records",
@@ -154,7 +150,6 @@ def _normalize_config(raw: dict) -> dict:
                     "m_name":        m["name"],
                     "target_groups": m.get("groups") or [],
                     "tg_chat_id":    m.get("tg", ""),
-                    "post_to_bilibili": m.get("post_to_bilibili", False),
                 })
             cfg["monitor_list"] = normalized
             del cfg["monitor"]
@@ -280,10 +275,6 @@ _KEY_TO_VAR: dict[str, str] = {
     "gemini_min_interval":          "GEMINI_MIN_INTERVAL",
     "translate_max_length":         "TRANSLATE_MAX_LENGTH",
     "translate_timeout":            "TRANSLATE_TIMEOUT",
-    "bilibili_full_cookie":         "BILIBILI_FULL_COOKIE",
-    "bilibili_bili_jct":            "BILIBILI_BILI_JCT",
-    "bilibili_post_api":            "BILIBILI_POST_API",
-    "bilibili_min_interval":        "BILIBILI_MIN_INTERVAL",
     "health_summary_interval":      "HEALTH_SUMMARY_INTERVAL",
     "health_error_buffer":          "HEALTH_ERROR_BUFFER",
     "health_token_warn_seconds":    "HEALTH_TOKEN_WARN_SECONDS",
@@ -369,11 +360,6 @@ def _load_config() -> dict:
     # 7. 从 .env 补充密钥（覆盖 config.json 中的 $ENV: 占位符）
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
     cfg["tg_bot_token"]   = _env("TG_BOT_TOKEN", "")
-
-    # B站：合并 Cookie，自动提取 bili_jct
-    cfg["bilibili_full_cookie"] = _env("BILIBILI_COOKIE", "")
-    _jct_match = _re.search(r"bili_jct=([^;]+)", cfg["bilibili_full_cookie"])
-    cfg["bilibili_bili_jct"] = _jct_match.group(1) if _jct_match else _env("BILIBILI_BILI_JCT", "")
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
     cfg = _match_account_credentials(cfg)

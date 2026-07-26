@@ -11,16 +11,13 @@ from urllib.parse import quote
 import httpx
 
 import config.config as cfg
-from src.constants import TRANSLATION_SEPARATOR
 from src.logger import error_logger, format_httpx_error, log_all, log_response
 from config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
     get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
 )
 from src.dedup import load_sent_ids, save_sent_id
-from src.utils import utc_to_jst
 from src.translator import translate_text
-from src.platforms.bilibili import post_dynamic, resolve_cookie
 from src.notifier import send_member_message
 from src.health import ErrorTier, get_tracker as _health_tracker
 from src.platforms.napcat import build_message_chain
@@ -61,7 +58,7 @@ async def push_member_messages(member: dict, new_msgs: list,
 async def _handle_message(member: dict, msg: dict,
                            id_list: list, id_set: set, l_time_ref: list) -> bool:
     """
-    翻译 → 推送 QQ → 同步 B站 → 记录状态。
+    翻译 → 推送各通道 → 记录状态。
     返回 True 表示本条处理成功，False 表示发送失败需中断本轮。
     l_time_ref 是单元素列表，用于在此函数内修改外层的 l_time 变量。
     """
@@ -95,15 +92,6 @@ async def _handle_message(member: dict, msg: dict,
     if not await send_member_message(member, chain):
         log_all(f"⚠️ {m_name} 消息推送失败，保留时间戳等待下次重试", is_error=True)
         return False
-
-    # 同步 B站（无正文时跳过，避免只推送名字+时间戳）
-    if member.get("post_to_bilibili") and original_text.strip():
-        cookie, bili_jct = resolve_cookie(member)
-        jst_time = utc_to_jst(updated)
-        bili_text = f"{m_name} {jst_time}\n{original_text}"
-        if translated:
-            bili_text += f"{TRANSLATION_SEPARATOR}{translated}"
-        await post_dynamic(bili_text, cookie, bili_jct)
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
     l_time_ref[0] = updated

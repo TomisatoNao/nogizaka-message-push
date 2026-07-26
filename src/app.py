@@ -12,7 +12,6 @@ import httpx
 
 from src import fetcher
 from src import translator
-from src.platforms import bilibili
 from src.platforms import napcat
 from src.platforms import qq_official
 from src.platforms import tgbot
@@ -301,9 +300,8 @@ async def main() -> None:
         token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
     )
 
-    # 2. 在事件循环内创建需要 asyncio 的锁（translator / bilibili / tgbot）
+    # 2. 在事件循环内创建需要 asyncio 的锁（translator / tgbot）
     translator.initialize()
-    bilibili.initialize()
     tgbot.initialize()
 
     # 3. 创建共享 HTTP 客户端

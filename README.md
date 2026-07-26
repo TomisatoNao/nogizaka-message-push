@@ -2,7 +2,7 @@
 
 坂道系（乃木坂46 / 日向坂46）成员消息监控与推送系统。
 
-支持**网页端 Cookie** 和**手机端 refresh_token** 两种认证方式，可按账号自由选择。自动续期鉴权；轮询监听成员 Message；通过 NapCat/OneBot 推送到 QQ 群聊，同时支持 QQ 开放平台官方 Bot 单聊推送；可选同步至 Bilibili 动态。
+支持**网页端 Cookie** 和**手机端 refresh_token** 两种认证方式，可按账号自由选择。自动续期鉴权；轮询监听成员 Message；通过 NapCat/OneBot 推送到 QQ 群聊，同时支持 QQ 开放平台官方 Bot 单聊推送和 Telegram Bot 推送。
 
 ## 功能
 
@@ -13,9 +13,8 @@
 - **消息去重** — 基于消息 ID 的滑动窗口去重（每成员最多 500 条），O(1) 集合 + 有序列表
 - **Gemini 翻译** — 日文消息自动翻译为中文，多模型级联容错，串行化限速
 - **多通道推送** — NapCat/OneBot QQ 群聊 + QQ 官方 Bot 单聊 + Telegram Bot，可独立开关；系统警报（Token 失效等）通过所有已启用通道发送
-- **Bilibili 同步** — 可选将消息发布为 B 站文字动态，支持成员独立 Cookie
 - **多媒体支持** — 图片、视频、语音消息完整转发（官方 Bot 支持媒体文件下载重传）
-- **JST 时间显示** — 推送和 B 站动态中的消息时间统一使用日本標準時 (UTC+9)
+- **JST 时间显示** — 推送消息中的时间统一使用日本標準時 (UTC+9)
 - **自定义 API 域名** — 支持毕业生成员独立 API 域名（如 yodel），账号级配置 app_tag / api_base / web_origin
 - **反反爬虫** — Header 仿真（Web Chrome / 移动 iOS）、随机间隔抖动、指数退避重试、成员随机轮询顺序
 - **配置热重载（可选）** — 已提供 `config/watcher.py`，安装并接入 watchdog 后可自动重载；当前默认入口以启动时加载为主
@@ -69,7 +68,6 @@ cp .env.example .env
 | Web 账号 | `{KEY}_TOKEN`, `{KEY}_COOKIE` | JWT + 浏览器 Cookie |
 | Mobile 账号 | `{KEY}_REFRESH_TOKEN`（必填）, `{KEY}_TOKEN`（可选） | refresh_token UUID + JWT（TOKEN 可为空，系统自动获取） |
 | QQ 官方 Bot | `QQ_OFFICIAL_BOT{1,2}_{APP_ID,CLIENT_SECRET,TARGET_OPENID}` | 可选，不启用则留空 |
-| B 站 | `BILIBILI_COOKIE` | 包含 `SESSDATA=xxx; bili_jct=yyy` |
 
 #### 2. `config/config.json` — 用户配置
 
@@ -92,7 +90,6 @@ cp .env.example .env
 | `REFRESH_TOKEN`（Mobile） | 手机抓包（如 Charles / Proxyman）→ 拦截 `update_token` 请求 → Body 中的 `refresh_token` UUID |
 | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
 | `TG_BOT_TOKEN` | Telegram 找 `@BotFather` → `/newbot` |
-| `BILIBILI_COOKIE` | 浏览器登录 B 站 → DevTools → Cookies → `SESSDATA` + `bili_jct` |
 
 **monitor 字段说明：**
 
@@ -241,8 +238,7 @@ nogizaka-message-push/
 │   └── platforms/
 │       ├── napcat.py        # NapCat/OneBot HTTP 推送
 │       ├── qq_official.py   # QQ 官方 Bot 单聊推送
-│       ├── tgbot.py         # Telegram Bot 推送
-│       └── bilibili.py      # B 站动态发布
+│       └── tgbot.py         # Telegram Bot 推送
 ├── tools/
 │   ├── get_qq_openid.py     # QQ Bot WebSocket 获取用户 OpenID
 │   └── test_models.py       # Gemini 模型序列连通性 + 响应结构诊断
@@ -265,22 +261,22 @@ Member Message API          Gemini API            NapCat/OneBot
        |                      |                QQ Official Bot
        v                      v               (QQ 单聊推送)
   [fetcher.py] --------> [translator.py]           |
-       |                      |                     |
+       |                      |                Telegram Bot
        |                 [notifier.py] <------------+
        |                      |
        v                      v
-  [dedup.py]           [napcat.py] / [qq_official.py]
-  [credentials.py]           |
-       |                     v
-  [data/]              [bilibili.py] (可选)
-                        B 站动态 API
+  [dedup.py]           [napcat.py] / [qq_official.py] / [tgbot.py]
+  [credentials.py]
+       |
+       v
+  [data/]
 ```
 
 ### 核心设计
 
 - **双认证模式** — `accounts` 中每个账号可设 `auth_method: "web"`（Cookie + Bearer）或 `"mobile"`（refresh_token → JWT）。Web 端使用 Chrome 头仿真，移动端使用 iOS 头仿真，按 `is_mobile` 在 URL / Header / 401 三处分发
 - **依赖注入** — `fetcher`、`napcat`、`qq_official` 模块通过 `initialize()` 接收共享的 `httpx.AsyncClient` 和 `asyncio.Semaphore`，避免全局状态
-- **串行化限速** — 翻译和 B 站发帖使用 `asyncio.Lock` + 时间检查，无论多少成员并发拉取，翻译和发帖始终串行
+- **串行化限速** — 翻译使用 `asyncio.Lock` + 时间检查，无论多少成员并发拉取，翻译请求始终串行
 - **原子写入** — 时间记录、去重列表、凭证文件均采用「写入临时文件 + `os.replace`」模式，防止写入中断导致文件损坏
 - **Token 生命周期** — 启动时为移动端账号执行初始刷新；每轮轮询前解码 JWT 检查 `exp`，不足 300 秒则主动刷新；API 返回 401 时触发被动刷新后重试
 - **反爬虫** — 轮询间隔 ±10% 随机抖动；消息发送间隔 1.2~2.0s 随机；网络错误指数退避重试（base × 2^attempt + jitter）；成员处理顺序每轮 shuffle

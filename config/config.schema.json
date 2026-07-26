@@ -38,8 +38,7 @@
           "name":            { "type": "string" },
           "account":         { "type": "string" },
           "groups":          { "type": "array", "items": { "type": "integer" }, "default": [] },
-          "tg":              { "type": "string" },
-          "post_to_bilibili": { "type": "boolean", "default": false }
+          "tg":              { "type": "string" }
         }
       }
     },

@@ -30,7 +30,6 @@ def main() -> None:
         DEBUG_LOG_RESPONSE, DEBUG_LOG_QQ_PAYLOAD,
         GEMINI_API_KEY, GEMINI_MODELS, GEMINI_MIN_INTERVAL,
         TRANSLATE_MAX_LENGTH, TRANSLATE_TIMEOUT,
-        BILIBILI_FULL_COOKIE, BILIBILI_BILI_JCT, BILIBILI_POST_API, BILIBILI_MIN_INTERVAL,
     )
 
     # 类型断言
@@ -97,27 +96,11 @@ def main() -> None:
     print(f"  {len(MONITOR_LIST)} 个成员字段齐全，账号引用有效")
     print("✅ Test 4 通过\n")
 
-    # Test 5: 成员专属 B站 Cookie（可选）
-    print("=== Test 5: 成员专属 B站 Cookie（可选） ===")
-    members_with_bili_cookie = [m for m in MONITOR_LIST if "bilibili_cookie" in m]
-    if members_with_bili_cookie:
-        for member in members_with_bili_cookie:
-            assert isinstance(member["bilibili_cookie"], str), (
-                f"bilibili_cookie should be str for member {member['m_id']}"
-            )
-            print(
-                f"  {member['m_name']} (id={member['m_id']}) "
-                f"bilibili_cookie (空=未设env): {bool(member['bilibili_cookie'])!r}"
-            )
-    else:
-        print("  当前 monitor 未配置成员专属 bilibili_cookie，跳过专项检查")
-    print("✅ Test 5 通过\n")
-
-    # Test 6: 热重载
-    print("=== Test 6: 热重载 ===")
+    # Test 5: 热重载
+    print("=== Test 5: 热重载 ===")
     from config.config import reload
     assert reload(), "reload() should succeed with unchanged config"
-    print("✅ Test 6 通过\n")
+    print("✅ Test 5 通过\n")
 
     print("=" * 50)
     print("🎉 全部测试通过！config.py facade 工作正常")
