@@ -5,6 +5,8 @@ import logging
 import os
 import re
 import sys
+import threading
+from collections import deque
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
@@ -28,6 +30,25 @@ response_logger: logging.Logger | None = None
 
 # 终端单行最大长度（超出部分截断，多行内容逐行判断）
 _MAX_LINE_LENGTH = 120
+
+# ---- 内存日志环（供网页管理端实时查看；内容已脱敏，含 DEBUG 级）----
+_RECENT_MAX = 500
+_recent: deque = deque(maxlen=_RECENT_MAX)
+_recent_lock = threading.Lock()
+_recent_seq = 0
+
+
+def _push_recent(level: str, ts: str, text: str) -> None:
+    global _recent_seq
+    with _recent_lock:
+        _recent_seq += 1
+        _recent.append({"seq": _recent_seq, "ts": ts, "level": level, "text": text[:4000]})
+
+
+def get_recent(after: int = 0) -> tuple[list[dict], int]:
+    """返回 seq > after 的日志条目和当前最大 seq（供增量轮询）。"""
+    with _recent_lock:
+        return [e for e in _recent if e["seq"] > after], _recent_seq
 
 
 def _make_rotating_logger(name: str, filepath: str) -> logging.Logger:
@@ -86,6 +107,8 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
         print(f"{ts} {color}[{tag}]\033[0m {safe}")
     else:
         print(f"{ts} [{tag}] {safe}")
+
+    _push_recent(tag.strip(), ts, safe_content)
 
     if not is_debug and error_logger:
         (error_logger.error if is_error else error_logger.info)(safe_content)

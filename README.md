@@ -18,6 +18,7 @@
 - **自定义 API 域名** — 支持毕业生成员独立 API 域名（如 yodel），账号级配置 app_tag / api_base / web_origin
 - **反反爬虫** — Header 仿真（Web Chrome / 移动 iOS）、随机间隔抖动、指数退避重试、成员随机轮询顺序
 - **配置热重载（可选）** — 已提供 `config/watcher.py`，安装并接入 watchdog 后可自动重载；当前默认入口以启动时加载为主
+- **网页管理端** — 浏览器完成日常配置和运维：状态总览（Token 剩余 / 通道成功率 / 巡查倒计时）、通道 / 账号池 / 监控成员 / 官方 Bot 增删改、从 API 拉成员列表点选添加、凭证直接填写（写入 `.env` 并自动轮换）、实时日志、立即巡查、配置历史回滚、一键重启；保存即校验 + 热重载（详见下方「网页管理端」）
 - **启动健康检查** — 启动时校验 NapCat/TG Bot 连接、QQ Bot access_token、账号凭证状态
 - **运行时状态摘要** — 每隔 N 轮自动输出通道成功率、Token 剩余时间、成员拉取/推送状态、分级错误报告，终端一眼判断系统健康度
 
@@ -160,6 +161,38 @@ python main.py
 
 通道计数是**自上次摘要以来**的发送成功/总数（每输出一次摘要就清零），一轮里推送多条消息会累加多次。
 
+### 网页管理端
+
+主程序启动后（`config.json` 中 `web_admin.enabled` 为 `true` 时），浏览器打开：
+
+```
+http://127.0.0.1:8787/
+```
+
+六个标签页覆盖日常配置和运维操作：
+
+| 标签页 | 能做什么 |
+|---|---|
+| 状态 | 运行总览（默认页）：巡查轮次、下次巡查倒计时、各账号 Token 实时剩余、通道成功率、成员拉取/推送状态、近期错误；「⏩ 立即巡查」按钮跳过等待立刻跑一轮（休眠时段也能唤醒） |
+| 基本设置 | 推送通道开关、NapCat API 地址、QQ 官方 Bot 增删改、轮询/休眠节奏、翻译参数、TG Token / Gemini Key 填写 |
+| 账号池 | 增删改账号（团体 / 登录方式 / yodel 自定义域名），凭证状态展示 + 「填凭证」直接填写 |
+| 监控成员 | 表格内直接增删改成员；「📋 从账号拉取成员列表」直接从官方 API 拉全团成员点选添加，不用手查 ID |
+| 日志 | 实时日志（内存环 500 条，2 秒增量刷新，含 DEBUG 级）+ error / response 日志文件尾部查看，内容自动脱敏 |
+| 高级（JSON） | 整份配置的 JSON 编辑 + **历史版本回滚**（每次保存前自动快照，保留最近 10 份，恢复本身也可撤销） |
+
+点「保存并热重载」后，服务端按 `config.schema.json` 校验（外加账号引用完整性检查），校验通过才原子写回 `config.json` 并立即热重载 —— 大多数修改**无需重启**。
+
+**凭证也可以直接在网页填**（账号 Token / Cookie / refresh_token、官方 Bot 的 Client Secret、Gemini API Key、TG Bot Token）：值通过 `POST /api/secrets` 写入 `.env`（与手动编辑同一存放处，白名单变量名校验），**只进不出** —— 接口只回报有/无，绝不回显值。填账号凭证时会自动执行完整轮换（写 `.env` → 删除旧的磁盘凭证 → 热重载重建），所以**立即生效、无需重启**；例外是 TG Bot Token（启动时创建 Bot 实例，改完需重启）。
+
+**网页重启主程序**：右上角「⟳ 重启主程序」按钮触发优雅停机（与 SIGTERM 相同的清理流程），随后用 `os.execv` 原地拉起全新进程 —— 同 PID 自替换，`.env` 和所有模块状态完全重新加载，docker / systemd 下同样适用。页面会自动等待服务恢复。适用场景：改了 TG Bot Token、手动编辑了 `.env`、更新了代码。仅内嵌模式可用（独立运行 `python -m src.webui` 时按钮自动隐藏）。
+
+注意事项：
+
+- **新账号**：先在账号池添加并「保存并热重载」，再点「填凭证」。
+- **保存会重新生成 config.json**：使用标准分区注释，手写的自定义注释会丢失。
+- **安全**：默认只监听 `127.0.0.1`，接口是明文 HTTP —— 如需局域网访问，先在 `.env` 设置 `WEB_ADMIN_TOKEN`（页面首次访问时会提示输入），再把 `web_admin.host` 改成 `0.0.0.0`，且仅建议在可信内网使用；`WEB_ADMIN_TOKEN` 本身不允许通过网页修改。
+- 主程序没跑时也可以单独起管理端：`python -m src.webui`（此时填写的凭证在主程序下次启动时生效）。
+
 ### 常见操作
 
 **加一个成员：** 在 `config.json` 的 `monitor` 数组末尾添加一项：
@@ -168,7 +201,7 @@ python main.py
 ```
 热重载 (`config.reload()`) 或重启后生效。成员 ID 见下方速查表。
 
-**换一个 Token / Cookie：** 磁盘凭证的优先级**高于** `.env`（Token 会自动续期，磁盘上的值才是最新的），所以光改 `.env` 不会生效。正确步骤：
+**换一个 Token / Cookie：** 最简单的方式是网页管理端「账号池」→「填凭证」，它会自动完成下述全部步骤并热重载。手动操作的话：磁盘凭证的优先级**高于** `.env`（Token 会自动续期，磁盘上的值才是最新的），所以光改 `.env` 不会生效。正确步骤：
 
 1. 编辑 `.env` 中对应账号的 `{KEY}_TOKEN` / `{KEY}_COOKIE` / `{KEY}_REFRESH_TOKEN`
 2. 删除该账号的持久化凭证：`data/web_credentials/{account}.json`
@@ -184,7 +217,7 @@ python main.py
 
 **调轮询频率：** 修改 `config.json` 中 `day_interval` / `night_interval`（秒）。`sleep_hours` 控制休眠时段。
 
-**添加一个新账号：** 在 `config.json` 的 `accounts` 中添加一项，然后在 `.env` 里按命名约定填入凭证：
+**添加一个新账号：** 最简单的方式是网页管理端：「账号池」→「添加账号」→「保存并热重载」→「填凭证」，全程无需重启。手动操作的话：在 `config.json` 的 `accounts` 中添加一项，然后在 `.env` 里按命名约定填入凭证：
 
 ```json5
 // config.json
@@ -201,18 +234,23 @@ MY_NEW_ACCOUNT_COOKIE=session=xxx
 
 如果是 mobile 账号（`"auth": "mobile"`）：`{KEY}_REFRESH_TOKEN` 必填，`{KEY}_TOKEN` 可选（留空则首次运行时自动通过 refresh_token 获取）。也可不配 `{KEY}_REFRESH_TOKEN`，使用全局 `NOGIZAKA_REFRESH_TOKEN` 作为 fallback。
 
-⚠️ **新增账号必须重启**：`.env` 只在进程启动时加载一次，热重载读不到新增的凭证变量。（热重载只能识别 `config.json` 里新增的、且磁盘上已有凭证文件的账号。）
+⚠️ **手动改 `.env` 新增账号必须重启**：`.env` 只在进程启动时加载一次，热重载读不到新增的凭证变量。（热重载只能识别 `config.json` 里新增的、且磁盘上已有凭证文件的账号。）通过网页「填凭证」则没有这个限制——它会同步进程环境变量并立即轮换。
 
-**启用 QQ 官方 Bot：** 三步：
+**启用 QQ 官方 Bot：** 三步（Bot 数量不限）：
 
-1. `config.json` 的 `channels` 中加 `"qq_official": true`
-2. `.env` 中填 Bot 凭证：
+1. `config.json` 的 `channels` 中设 `"qq_official": true`，并声明 Bot（网页管理端「基本设置」里也能直接加）：
+   ```json5
+   "qq_official_bots": [
+       { "name": "qq_official_bot1", "app_id": "你的AppID", "target_openid": "目标用户OpenID" }
+   ]
+   ```
+2. `.env` 中填密钥（变量名 = Bot 名称大写 + `_CLIENT_SECRET`）：
    ```bash
-   QQ_OFFICIAL_BOT1_APP_ID=你的AppID
    QQ_OFFICIAL_BOT1_CLIENT_SECRET=你的Secret
-   QQ_OFFICIAL_BOT1_TARGET_OPENID=目标用户OpenID
    ```
 3. 获取目标用户 OpenID（见下方「获取 QQ 用户 OpenID」）
+
+`app_id` / `target_openid` 也可以不写在 config.json，改放 `.env` 的 `Bot名称大写_APP_ID` / `_TARGET_OPENID`。旧配置兼容：`config.json` 未声明 `qq_official_bots` 时，自动扫描 `.env` 的 `QQ_OFFICIAL_BOT{1..20}_*` 编号槽位。
 
 ### 获取 QQ 用户 OpenID
 
@@ -248,6 +286,10 @@ nogizaka-message-push/
 │   ├── notifier.py          # 多通道推送路由 + 系统警报
 │   ├── logger.py            # 日志系统（彩色终端 + 滚动文件）
 │   ├── utils.py             # 公共工具：JST 时间转换、时段判断、速率限制器
+│   ├── webui.py             # 网页管理端：配置编辑 / 凭证写入 / 状态 / 日志 / 历史回滚 / 重启
+│   ├── member_directory.py  # 成员目录拉取（/v2/groups），list_members 工具与网页端共用
+│   ├── webui_static/
+│   │   └── index.html       # 管理页面（零依赖单页应用）
 │   └── platforms/
 │       ├── napcat.py        # NapCat/OneBot HTTP 推送
 │       ├── qq_official.py   # QQ 官方 Bot 单聊推送
@@ -258,7 +300,8 @@ nogizaka-message-push/
 │   └── test_models.py       # Gemini 模型序列连通性 + 响应结构诊断
 ├── tests/
 │   ├── test_config_load.py  # config.json → config.py 加载校验
-│   └── test_units.py        # 时间解析 / 日志截断 / HTML 转义 / 消息链提取
+│   ├── test_units.py        # 时间解析 / 日志截断 / HTML 转义 / 消息链提取
+│   └── test_webui.py        # 网页管理端：序列化往返 / 校验 / HTTP 端点
 ├── data/                    # 运行时数据（git-ignored）
 │   ├── web_credentials/     # 持久化 Token + Cookie / refresh_token
 │   ├── sent_ids/            # 已发送消息 ID 去重记录
@@ -373,7 +416,7 @@ Member Message API          Gemini API            NapCat/OneBot
 
 | 文件 | 职责 |
 |---|---|
-| `.env` | 密钥和凭证（模板见 `.env.example`，~24 行） |
+| `.env` | 密钥和凭证（模板见 `.env.example`；也可通过网页管理端「填凭证」写入） |
 | `config/config.json` | 用户配置（schema 见 `config/config.schema.json`，~50 行） |
 | `config/config.py` `_DEFAULTS` | 内置默认值（文件路径、超时、速率限制、调试开关等，一般无需修改） |
 

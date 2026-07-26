@@ -165,9 +165,11 @@ async def _fetch_member_messages(member: dict):
             if is_mobile:
                 headers = get_mobile_headers(account_id)
             else:
-                cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
+                # .get 防御：认证方式刚切换、凭证尚未重建时结构可能错位，
+                # 缺字段应表现为 401 触发告警，而不是 KeyError 炸掉本轮
+                cookie_str = "; ".join(f"{k}={v}" for k, v in (cred.get("cookies") or {}).items())
                 headers = get_web_headers(
-                    group_type, cred["token"],
+                    group_type, cred.get("token", ""),
                     app_tag=acc_cfg.get("app_tag"),
                     api_base=acc_cfg.get("api_base"),
                     web_origin=acc_cfg.get("web_origin"),

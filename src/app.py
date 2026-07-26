@@ -5,6 +5,8 @@ import asyncio
 import os
 import random
 import signal
+import sys
+import time
 import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -26,6 +28,7 @@ from config.credentials import (
 )
 from config.watcher import start_watcher
 from src.logger import init_loggers, log_all
+from src.webui import start_webui
 from src.utils import in_hour_range
 
 
@@ -227,10 +230,20 @@ async def _run_cycle() -> None:
         log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
 
 
-async def _run_loop(http_client: httpx.AsyncClient) -> None:
+async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
+    """等待 timeout 秒；期间事件被置位（网页「立即巡查」）则提前返回 True。"""
+    try:
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+        event.clear()
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event) -> None:
     while True:
         try:
-            # ── 改进 3：休眠时段暂停轮询 ──
+            # ── 改进 3：休眠时段暂停轮询（手动触发可唤醒）──
             sleep_sec = _calc_sleep_seconds()
             if sleep_sec > 0:
                 jst = _get_jst_now()
@@ -239,8 +252,10 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
                     f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
                     is_debug=True,
                 )
-                await asyncio.sleep(sleep_sec)
-                continue
+                health.get_tracker().record_next_cycle(time.time() + sleep_sec, "😴 休眠")
+                if not await _wait_or_trigger(poll_event, sleep_sec):
+                    continue
+                log_all("⏩ 休眠时段手动触发巡查", is_debug=True)
 
             await _run_cycle()
         except asyncio.CancelledError:
@@ -255,8 +270,10 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
             log_all(summary)
 
         wait_time, tag = _next_interval()
+        health.get_tracker().record_next_cycle(time.time() + wait_time, tag)
         log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
-        await asyncio.sleep(wait_time)
+        if await _wait_or_trigger(poll_event, wait_time):
+            log_all("⏩ 手动触发巡查", is_debug=True)
 
 
 def _install_stop_handlers(stop_event: asyncio.Event) -> None:
@@ -357,8 +374,51 @@ async def main() -> None:
     stop_event = asyncio.Event()
     _install_stop_handlers(stop_event)
 
+    # 7. 可选启动网页管理端（config.json 的 web_admin.enabled 控制）
+    #    重启回调运行在 HTTP 处理线程：走优雅停机流程，清理完毕后 execv 自替换
+    loop = asyncio.get_running_loop()
+    restart_requested = False
+    poll_event = asyncio.Event()
+
+    def _request_restart() -> None:
+        nonlocal restart_requested
+        restart_requested = True
+        loop.call_soon_threadsafe(stop_event.set)
+
+    def _request_poll() -> None:
+        loop.call_soon_threadsafe(poll_event.set)
+
+    def _request_test_push(channel: str, target: str, text: str) -> tuple[bool, str]:
+        """网页「测试推送」回调（HTTP 线程调用）：把发送协程调度到主事件循环执行。"""
+        try:
+            if channel == "tg":
+                if not cfg.ENABLE_TG_BOT:
+                    return False, "TG 通道未启用（channels.tg）"
+                coro = tgbot.send_alert(target, text)
+            elif channel == "napcat":
+                if not cfg.ENABLE_NAPCAT_QQ:
+                    return False, "NapCat 通道未启用（channels.napcat）"
+                chain = [{"type": "text", "data": {"text": text}}]
+                coro = napcat.send_qq_message(int(target), chain)
+            else:
+                return False, f"不支持的通道: {channel}"
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+            ok = fut.result(timeout=45)
+            err = "" if ok else "发送失败（详见日志）"
+        except Exception as e:
+            ok, err = False, f"{type(e).__name__}: {e}"
+        # 测试推送的成败也计入通道统计，状态页才不会与事实矛盾
+        health.get_tracker().record_channel(channel, ok, err or None)
+        return ok, err
+
+    webui_server = (
+        start_webui(on_reload=_on_config_reload, on_restart=_request_restart,
+                    on_poll=_request_poll, on_test_push=_request_test_push)
+        if cfg.WEB_ADMIN_ENABLED else None
+    )
+
     try:
-        loop_task = asyncio.create_task(_run_loop(http_client))
+        loop_task = asyncio.create_task(_run_loop(http_client, poll_event))
         stop_task = asyncio.create_task(stop_event.wait())
         done, _ = await asyncio.wait(
             {loop_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,
@@ -373,11 +433,19 @@ async def main() -> None:
     except KeyboardInterrupt:
         print("\n🛑 安全退出中...")
     finally:
+        if webui_server is not None:
+            webui_server.shutdown()
+            webui_server.server_close()
         if observer is not None:
             observer.stop()
             observer.join()
         await asyncio.gather(http_client.aclose(), qq_client.aclose())
         print("✅ 资源清理完毕")
+
+    if restart_requested:
+        # 进程自替换：同 PID 拉起全新进程，.env / 模块状态全部重新加载
+        print("🔁 正在重启主程序...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 if __name__ == "__main__":

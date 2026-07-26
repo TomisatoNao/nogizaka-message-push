@@ -13,6 +13,26 @@
       }
     },
     "napcat_api": { "type": "string" },
+    "qq_official_bots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name":          { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "app_id":        { "type": "string" },
+          "target_openid": { "type": "string" }
+        }
+      }
+    },
+    "web_admin": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "host":    { "type": "string" },
+        "port":    { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
     "accounts": {
       "type": "object",
       "additionalProperties": {

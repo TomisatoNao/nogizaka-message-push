@@ -23,14 +23,12 @@ import httpx
 
 import config.config as cfg
 from config.credentials import (
-    get_mobile_api_base,
-    get_mobile_headers,
-    get_web_headers,
     load_all_accounts,
     proactive_refresh_if_expiring,
     validate_account_cred,
 )
 from src.logger import init_loggers, log_all
+from src.member_directory import api_base, fetch_member_directory, is_mobile
 
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -38,87 +36,6 @@ YELLOW = "\033[33m"
 CYAN = "\033[36m"
 DIM = "\033[90m"
 RESET = "\033[0m"
-
-
-def _is_mobile(acc_cfg: dict) -> bool:
-    return acc_cfg.get("auth_method") == "mobile"
-
-
-def _api_base(account_id: str, acc_cfg: dict) -> str:
-    """该账号列成员时应该打的 API 根地址。"""
-    if _is_mobile(acc_cfg):
-        return get_mobile_api_base(account_id)
-    if acc_cfg.get("api_base"):
-        return acc_cfg["api_base"]
-    return f"https://api.message.{acc_cfg.get('group_type', '')}.com"
-
-
-def _headers(account_id: str, acc_cfg: dict) -> dict[str, str]:
-    """按账号认证方式构造请求头（与 fetcher 保持一致）。"""
-    if _is_mobile(acc_cfg):
-        return get_mobile_headers(account_id)
-
-    from config.credentials import ACCOUNT_CREDS
-
-    cred = ACCOUNT_CREDS.get(account_id) or {}
-    headers = get_web_headers(
-        acc_cfg.get("group_type", ""),
-        cred.get("token", ""),
-        app_tag=acc_cfg.get("app_tag"),
-        api_base=acc_cfg.get("api_base"),
-        web_origin=acc_cfg.get("web_origin"),
-    )
-    cookies = cred.get("cookies") or {}
-    if cookies:
-        headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
-    return headers
-
-
-def _normalize(payload) -> list[dict] | None:
-    """/v2/groups 返回的可能是裸数组，也可能包一层 groups/items。"""
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        for key in ("groups", "items", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return value
-    return None
-
-
-async def _fetch_groups(client: httpx.AsyncClient, account_id: str,
-                        acc_cfg: dict) -> list[dict] | None:
-    url = f"{_api_base(account_id, acc_cfg).rstrip('/')}/v2/groups"
-    try:
-        resp = await client.get(url, headers=_headers(account_id, acc_cfg))
-    except Exception as e:
-        print(f"  {YELLOW}✗ 请求失败{RESET}: {type(e).__name__}: {e}")
-        return None
-
-    if resp.status_code == 401:
-        print(f"  {YELLOW}✗ HTTP 401{RESET} 凭证已失效，请更新该账号的凭证后重试")
-        print(f"    {DIM}Web 账号需重新抓 TOKEN + COOKIE，mobile 账号需更新 REFRESH_TOKEN；"
-              f"改完 .env 后记得删掉 data/web_credentials/{account_id}.json{RESET}")
-        return None
-    if resp.status_code == 404:
-        print(f"  {YELLOW}✗ HTTP 404{RESET} 该地址没有成员列表接口: {url}")
-        print(f"    {DIM}毕业生专用域名（如 yodel）可能不提供此接口，"
-              f"可改用同团的其他账号查询{RESET}")
-        return None
-    if resp.status_code != 200:
-        print(f"  {YELLOW}✗ HTTP {resp.status_code}{RESET}: {resp.text[:200]}")
-        return None
-
-    try:
-        groups = _normalize(resp.json())
-    except ValueError:
-        print(f"  {YELLOW}✗ 响应不是合法 JSON{RESET}: {resp.text[:200]}")
-        return None
-
-    if groups is None:
-        print(f"  {YELLOW}✗ 响应结构不认识{RESET}: {str(resp.json())[:200]}")
-        return None
-    return groups
 
 
 def _sort_key(member: dict):
@@ -188,10 +105,10 @@ async def main() -> None:
     client = httpx.AsyncClient(timeout=20)
     try:
         for account_id, acc_cfg in accounts.items():
-            auth = "mobile" if _is_mobile(acc_cfg) else "web"
+            auth = "mobile" if is_mobile(acc_cfg) else "web"
             print(f"\n{BOLD}▸ {CYAN}{account_id}{RESET} "
                   f"{DIM}({acc_cfg.get('group_type', '?')} · {auth} · "
-                  f"{_api_base(account_id, acc_cfg)}){RESET}")
+                  f"{api_base(account_id, acc_cfg)}){RESET}")
 
             ok, reason = validate_account_cred(account_id)
             if not ok:
@@ -201,8 +118,10 @@ async def main() -> None:
             # 与主程序同一套续期逻辑；target_group 传 0，告警不会走 QQ 群
             await proactive_refresh_if_expiring(account_id, 0)
 
-            groups = await _fetch_groups(client, account_id, acc_cfg)
-            if groups is not None:
+            groups, err = await fetch_member_directory(client, account_id)
+            if err:
+                print(f"  {YELLOW}✗ {err}{RESET}")
+            else:
                 _print_members(account_id, groups)
     finally:
         await client.aclose()

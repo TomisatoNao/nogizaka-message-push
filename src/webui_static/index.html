@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>⚙️</text></svg>">
+<title>坂道监控 · 配置管理</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c2333; --muted: #6b7280;
+    --border: #e3e6eb; --accent: #6d5bd0; --accent-soft: #ece9fa;
+    --ok: #1a9e5c; --warn: #c77700; --err: #d23f3f; --danger-soft: #fdecec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161c; --card: #1d2027; --text: #e8eaf0; --muted: #9aa1af;
+      --border: #2e323c; --accent: #9c8cf0; --accent-soft: #2a2740;
+      --ok: #3ecf8e; --warn: #e8a13c; --err: #ef6a6a; --danger-soft: #3a2426;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); font-size: 14px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px;
+           background: var(--card); border-bottom: 1px solid var(--border);
+           position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  .dirty-dot { color: var(--warn); font-size: 12px; display: none; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 24px 80px; }
+  nav.tabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+  nav.tabs button { border: 1px solid var(--border); background: var(--card); color: var(--muted);
+    padding: 7px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  nav.tabs button.active { background: var(--accent-soft); color: var(--accent);
+    border-color: var(--accent); font-weight: 600; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
+             text-transform: none; letter-spacing: .02em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 18px; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+  input[type=text], input[type=number], select, textarea {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit; width: 100%; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input.invalid { border-color: var(--err); outline: 1px solid var(--err); }
+  .pair { display: flex; gap: 8px; align-items: center; }
+  .pair input { width: 90px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+            font-size: 14px; color: var(--text); }
+  .switch input { display: none; }
+  .switch .track { width: 36px; height: 20px; border-radius: 10px; background: var(--border);
+    position: relative; transition: background .15s; flex: none; }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--card); transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::after { left: 18px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  td input, td select { min-width: 70px; }
+  .table-wrap { overflow-x: auto; }
+  button.btn { border: 1px solid var(--border); background: var(--card); color: var(--text);
+    padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px;
+    transition: transform .06s, border-color .12s, opacity .12s; }
+  button.btn:hover { border-color: var(--accent); }
+  button.btn:active { transform: translateY(1px) scale(.97); }
+  button.btn:disabled { opacity: .55; cursor: default; transform: none; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.btn.danger { color: var(--err); }
+  button.btn.danger:hover { background: var(--danger-soft); border-color: var(--err); }
+  button.btn.danger-solid { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+  button.btn.danger-solid:hover { border-color: var(--err); opacity: .88; }
+  button.btn.small { padding: 4px 10px; font-size: 12.5px; }
+  .cred { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+  .cred.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .cred.miss { color: var(--err); background: var(--danger-soft); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+  .hint code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  footer.savebar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
+    border-top: 1px solid var(--border); padding: 10px 24px; display: flex; gap: 12px;
+    align-items: center; z-index: 10; }
+  footer.savebar .msg { flex: 1; font-size: 13px; white-space: pre-wrap; }
+  footer.savebar .msg.ok { color: var(--ok); }
+  footer.savebar .msg.err { color: var(--err); }
+  textarea#rawJson { min-height: 420px; font-family: Consolas, Menlo, monospace; font-size: 13px;
+                     white-space: pre; }
+  dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+           color: var(--text); padding: 20px 22px; min-width: 320px; max-width: 92vw; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h3 { margin: 0 0 14px; font-size: 15px; }
+  #secretDialog { width: min(600px, 94vw); }
+  .dialog-note { background: var(--accent-soft); color: var(--text); border-radius: 8px;
+                 padding: 10px 14px; font-size: 12.5px; line-height: 1.65; margin-bottom: 16px; }
+  .dialog-note code { background: var(--card); padding: 1px 5px; border-radius: 4px; }
+  .secret-field { margin-bottom: 16px; }
+  .secret-field .flabel { display: flex; justify-content: space-between; align-items: baseline;
+                          gap: 10px; margin-bottom: 6px; }
+  .secret-field .fname { font-size: 13.5px; font-weight: 600; }
+  .secret-field .fname .req { color: var(--err); margin-left: 2px; }
+  .secret-field .fenv { font-family: Consolas, Menlo, monospace; font-size: 11px;
+                        color: var(--muted); background: var(--bg); border: 1px solid var(--border);
+                        padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+  .input-group { display: flex; }
+  .input-group input { flex: 1; border-radius: 8px 0 0 8px; border-right: none;
+                       font-family: Consolas, Menlo, monospace; font-size: 13px; }
+  /* 用 CSS 掩码代替 type=password：密码管理器（Bitwarden 等）不会识别为登录框 */
+  .input-group input.masked { -webkit-text-security: disc; }
+  .input-group .eye { border: 1px solid var(--border); border-radius: 0 8px 8px 0;
+                      background: var(--bg); color: var(--muted); cursor: pointer;
+                      padding: 0 13px; font-size: 14px; flex: none; }
+  .input-group .eye:hover { color: var(--accent); border-color: var(--accent); }
+  .secret-field .fhelp { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.55; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+          background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
+  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  #logView { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+             padding: 10px 12px; height: 62vh; overflow-y: auto;
+             font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.55; }
+  #logView div { white-space: pre-wrap; word-break: break-all; }
+  #logView .lg-ERROR { color: var(--err); }
+  #logView .lg-DEBUG { color: var(--muted); }
+  dialog .grid { grid-template-columns: 1fr 1fr; }
+  dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+  .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚙️ 坂道监控 · 配置管理</h1>
+  <span class="dirty-dot" id="dirtyDot">● 有未保存的修改</span>
+  <div class="spacer"></div>
+  <button class="btn" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
+  <button class="btn danger" id="btnRestart" hidden
+          title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
+</header>
+
+<main>
+  <nav class="tabs">
+    <button data-tab="status" class="active">状态</button>
+    <button data-tab="general">基本设置</button>
+    <button data-tab="accounts">账号池</button>
+    <button data-tab="members">监控成员</button>
+    <button data-tab="logs">日志</button>
+    <button data-tab="advanced">高级（JSON）</button>
+  </nav>
+
+  <!-- ── 状态 ─────────────────────────────── -->
+  <section class="tab active" id="tab-status">
+    <div class="card">
+      <h2>巡查</h2>
+      <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+        <span id="stCycle">—</span>
+        <span id="stNext" style="color:var(--muted)">—</span>
+        <button class="btn" id="btnPollNow" hidden>⏩ 立即巡查</button>
+        <button class="btn" id="btnTestPush" hidden>📨 测试推送</button>
+        <span class="hint" id="pollFeedback" style="margin:0"></span>
+      </div>
+      <p class="hint" id="stHint"></p>
+    </div>
+    <div class="card">
+      <h2>账号 Token</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>账号</th><th>剩余时间</th><th>状态</th></tr></thead>
+        <tbody id="stTokens"></tbody>
+      </table></div>
+      <p class="hint">Token 剩余不足 5 分钟时主程序会在下一轮巡查前自动续期，无需干预；只有显示「失效」时才需要重新填凭证。</p>
+    </div>
+    <div class="card">
+      <h2>推送通道（自上次状态摘要以来）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
+        <tbody id="stChannels"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>成员</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>成员</th><th>拉取</th><th>推送</th><th>最近错误</th></tr></thead>
+        <tbody id="stMembers"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>近期错误（最多 20 条）</h2>
+      <div id="stErrors" class="empty">（无）</div>
+    </div>
+  </section>
+
+  <!-- ── 基本设置 ─────────────────────────────── -->
+  <section class="tab" id="tab-general">
+    <div class="card">
+      <h2>推送通道</h2>
+      <div class="grid" id="channelSwitches"></div>
+      <div style="margin-top:14px">
+        <label class="field">NapCat API 地址
+          <input type="text" id="napcatApi" placeholder="http://127.0.0.1:3000/send_group_msg">
+        </label>
+      </div>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+        <span style="font-size:12.5px; color:var(--muted)">TG Bot Token (.env)</span>
+        <span id="tgTokenStatus"></span>
+        <button class="btn small" id="btnFillTgToken">填写</button>
+        <span class="hint" style="margin:0">（TG Token 修改后点右上角「⟳ 重启主程序」生效）</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>名称</th><th>App ID</th><th>目标 OpenID</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
+        <tbody id="qqBotRows"></tbody>
+      </table></div>
+      <div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
+      <p class="hint" id="qqBotHint">App ID 和目标 OpenID 直接在表格里填；Client Secret 是密钥，须在 <code>.env</code> 里配置
+      <code>Bot名称大写_CLIENT_SECRET</code>（改 <code>.env</code> 后需重启）。目标 OpenID 用 <code>python tools/get_qq_openid.py</code> 获取。
+      官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用 Bot，所有成员都有推送目标。</p>
+    </div>
+    <div class="card">
+      <h2>轮询节奏（秒 / JST 小时）</h2>
+      <div class="grid">
+        <label class="field">日间间隔（min / max 秒）
+          <span class="pair"><input type="number" id="dayMin" min="1"><span>–</span><input type="number" id="dayMax" min="1"></span>
+        </label>
+        <label class="field">深夜间隔（min / max 秒）
+          <span class="pair"><input type="number" id="nightMin" min="1"><span>–</span><input type="number" id="nightMax" min="1"></span>
+        </label>
+        <label class="field">休眠时段（起 / 止 时）
+          <span class="pair"><input type="number" id="sleepStart" min="0" max="23"><span>–</span><input type="number" id="sleepEnd" min="0" max="23"></span>
+        </label>
+        <label class="field">告警冷却（秒）
+          <input type="number" id="alertCooldown" min="0">
+        </label>
+        <label class="field">QQ 发送间隔（秒）
+          <input type="number" id="qqSendInterval" min="0" step="0.1">
+        </label>
+      </div>
+    </div>
+    <div class="card">
+      <h2>翻译</h2>
+      <div class="grid">
+        <label class="switch"><input type="checkbox" id="translateOn"><span class="track"></span>启用 Gemini 翻译</label>
+        <label class="field">Gemini 最小调用间隔（秒）
+          <input type="number" id="geminiMinInterval" min="0" step="0.5">
+        </label>
+        <label class="field">翻译超时（秒）
+          <input type="number" id="translateTimeout" min="1">
+        </label>
+      </div>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+        <span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
+        <span id="geminiKeyStatus"></span>
+        <button class="btn small" id="btnFillGeminiKey">填写</button>
+      </div>
+      <p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
+    </div>
+    <div class="card">
+      <h2>网页管理端</h2>
+      <div class="grid">
+        <label class="switch"><input type="checkbox" id="webAdminOn"><span class="track"></span>启用（下次重启生效）</label>
+        <label class="field">监听地址<input type="text" id="webAdminHost" placeholder="127.0.0.1"></label>
+        <label class="field">端口<input type="number" id="webAdminPort" min="1" max="65535"></label>
+      </div>
+      <p class="hint">⚠️ 关闭开关并保存后，需要通过直接编辑 <code>config.json</code> 才能重新打开。监听地址改为非 127.0.0.1 前请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。</p>
+    </div>
+  </section>
+
+  <!-- ── 账号池 ─────────────────────────────── -->
+  <section class="tab" id="tab-accounts">
+    <div class="card">
+      <h2>账号池（凭证在 .env，按账号名大写自动匹配）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>账号 ID</th><th>团体</th><th>登录方式</th><th>App 标签</th><th>凭证 (.env)</th><th></th></tr></thead>
+        <tbody id="accountRows"></tbody>
+      </table></div>
+      <div class="empty" id="accountEmpty" hidden>还没有账号，点下面添加一个。</div>
+      <div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
+      <p class="hint">凭证可以点每行的「填凭证」直接填写（存入 <code>.env</code> 并立即轮换生效），也可以手动编辑 <code>.env</code>（手动改需重启）：<br>
+        · web 账号 → <code>账号ID大写_TOKEN</code> + <code>账号ID大写_COOKIE</code><br>
+        · mobile 账号 → <code>账号ID大写_REFRESH_TOKEN</code><br>
+        ⚠️ 新账号要先「保存并热重载」把账号写进 config.json，然后才能填凭证。</p>
+    </div>
+  </section>
+
+  <!-- ── 监控成员 ─────────────────────────────── -->
+  <section class="tab" id="tab-members">
+    <div class="card">
+      <h2>监控成员</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>成员 ID</th><th>名字</th><th>账号</th><th>QQ 群（逗号分隔）</th><th>TG Chat ID</th><th></th></tr></thead>
+        <tbody id="memberRows"></tbody>
+      </table></div>
+      <div class="empty" id="memberEmpty" hidden>还没有监控成员。</div>
+      <div style="margin-top:12px; display:flex; gap:10px">
+        <button class="btn" id="btnAddMember">＋ 手动添加</button>
+        <button class="btn" id="btnPickMember">📋 从账号拉取成员列表</button>
+      </div>
+      <p class="hint">成员 ID 可用 <code>python tools/list_members.py &lt;账号ID&gt;</code> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。</p>
+    </div>
+  </section>
+
+  <!-- ── 日志 ─────────────────────────────── -->
+  <section class="tab" id="tab-logs">
+    <div class="card">
+      <h2>运行日志（已自动脱敏；打开本页时每 2 秒刷新）</h2>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
+        <div class="chips" id="logSourceChips"></div>
+        <label class="switch"><input type="checkbox" id="logErrOnly"><span class="track"></span>仅错误</label>
+        <input type="text" id="logKeyword" placeholder="关键词过滤…" style="width:170px">
+        <span class="hint" id="logFilterInfo" style="margin:0"></span>
+        <label class="switch" style="margin-left:auto"><input type="checkbox" id="logFollow" checked><span class="track"></span>自动滚动到底部</label>
+      </div>
+      <div id="logView"></div>
+      <p class="hint" id="logHint"></p>
+    </div>
+  </section>
+
+  <!-- ── 高级 ─────────────────────────────── -->
+  <section class="tab" id="tab-advanced">
+    <div class="card">
+      <h2>完整配置（严格 JSON，应用后回到表单继续编辑）</h2>
+      <textarea id="rawJson" spellcheck="false"></textarea>
+      <div style="margin-top:10px; display:flex; gap:10px">
+        <button class="btn" id="btnApplyJson">应用到表单</button>
+        <button class="btn" id="btnResetJson">从表单刷新</button>
+      </div>
+      <p class="hint">保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。</p>
+    </div>
+    <div class="card">
+      <h2>历史版本（每次保存前自动快照，保留最近 10 份）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>快照时间</th><th>大小</th><th></th></tr></thead>
+        <tbody id="historyRows"></tbody>
+      </table></div>
+      <div class="empty" id="historyEmpty" hidden>还没有历史快照（保存一次配置后出现）。</div>
+      <p class="hint">恢复前会把当前版本也快照一份，所以恢复操作本身可以再撤销。</p>
+    </div>
+  </section>
+</main>
+
+<footer class="savebar">
+  <button class="btn primary" id="btnSave">💾 保存并热重载</button>
+  <span class="msg" id="saveMsg"></span>
+</footer>
+
+<!-- 通用确认 / 提示对话框（替代原生 confirm/alert） -->
+<dialog id="confirmDialog">
+  <h3 id="confirmTitle">确认操作</h3>
+  <div id="confirmBody" style="white-space:pre-wrap; font-size:13.5px; line-height:1.75;
+       max-width:min(440px, 88vw); color:var(--text)"></div>
+  <div class="actions">
+    <button class="btn" id="confirmNo">取消</button>
+    <button class="btn primary" id="confirmYes">确定</button>
+  </div>
+</dialog>
+
+<!-- 历史快照查看对话框 -->
+<dialog id="historyViewDialog">
+  <h3 id="historyViewTitle">历史快照</h3>
+  <pre id="historyViewContent" style="max-height:60vh; overflow:auto; background:var(--bg);
+    border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12.5px;
+    min-width:min(560px, 90vw); white-space:pre-wrap; word-break:break-all"></pre>
+  <div class="actions">
+    <button class="btn" id="historyViewClose">关闭</button>
+    <button class="btn primary" id="historyViewRestore">恢复到这个版本</button>
+  </div>
+</dialog>
+
+<!-- 测试推送对话框 -->
+<dialog id="testPushDialog">
+  <h3>测试推送</h3>
+  <div class="dialog-note">往指定目标发一条测试消息，验证通道配置是否正确。只发一条纯文本，不影响正常巡查。</div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">通道</span></div>
+    <div class="chips" id="testPushChannel"></div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">目标<span class="req">*</span></span>
+      <span class="fenv" id="testPushTargetHint">TG chat_id</span></div>
+    <input type="text" id="testPushTarget" list="testPushTargets" placeholder="-1001234567890">
+    <datalist id="testPushTargets"></datalist>
+    <div class="fhelp">下拉可选配置里已有的目标，也可以手动输入其他目标。</div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="testPushCancel">取消</button>
+    <button class="btn primary" id="testPushSend">发送</button>
+  </div>
+</dialog>
+
+<!-- 成员选择对话框 -->
+<dialog id="memberPickDialog">
+  <h3>从账号拉取成员列表</h3>
+  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
+    <div class="chips" id="pickAccountChips"></div>
+    <button class="btn small" id="btnFetchMembers">拉取</button>
+  </div>
+  <div id="memberPickList" style="max-height:50vh; overflow-y:auto; min-width:420px"></div>
+  <p class="hint" id="memberPickHint">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
+  <div class="actions">
+    <button class="btn" id="memberPickClose">关闭</button>
+  </div>
+</dialog>
+
+<!-- 凭证填写对话框 -->
+<dialog id="secretDialog">
+  <h3 id="secretDialogTitle">填写凭证</h3>
+  <div class="dialog-note" id="secretDialogHint"></div>
+  <div id="secretFields"></div>
+  <div class="actions">
+    <button class="btn" id="secretCancel">取消</button>
+    <button class="btn primary" id="secretSave">🔐 保存到 .env</button>
+  </div>
+</dialog>
+
+<!-- 账号编辑对话框 -->
+<dialog id="accountDialog">
+  <h3 id="accountDialogTitle">添加账号</h3>
+  <div class="grid">
+    <label class="field">账号 ID（小写下划线）<input type="text" id="accId" placeholder="nogizaka_main"></label>
+    <label class="field">团体
+      <div class="chips" id="accGroupChips"></div>
+    </label>
+    <label class="field">登录方式
+      <div class="chips" id="accAuthChips"></div>
+    </label>
+    <label class="field">App 标签（可选）<input type="text" id="accAppTag" placeholder="yodel"></label>
+    <label class="field">API Base（可选）<input type="text" id="accApiBase" placeholder="https://api.service.yodel-app.com"></label>
+    <label class="field">Web Origin（可选）<input type="text" id="accWebOrigin" placeholder="https://service.yodel-app.com"></label>
+  </div>
+  <div class="actions">
+    <button class="btn" id="accCancel">取消</button>
+    <button class="btn primary" id="accSave">确定</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+// ── 状态 ─────────────────────────────────────────
+let config = null;        // 当前编辑中的配置对象（新格式）
+let credStatus = {};      // 账号凭证状态
+let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
+let envStatus = {};       // GEMINI_API_KEY / TG_BOT_TOKEN 是否已配置
+let dirty = false;
+let authToken = localStorage.getItem("webAdminToken") || "";
+
+const $ = (id) => document.getElementById(id);
+const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
+
+let baseline = "";   // 最近一次加载/保存时的配置快照（JSON 串）
+
+function setDirty(v) {
+  dirty = v;
+  $("dirtyDot").style.display = v ? "inline" : "none";
+  document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
+}
+
+// 基于内容对比的脏标记：加了又删、改了又改回去，会自动恢复"无修改"状态
+function markDirty() {
+  collectGeneral();
+  setDirty(JSON.stringify(config) !== baseline);
+}
+
+// ── 页面内确认 / 提示（替代原生 confirm/alert）────
+let _confirmResolve = null;
+function _openConfirm(message, { title, yesText, danger, alertOnly } = {}) {
+  return new Promise((resolve) => {
+    _confirmResolve = resolve;
+    $("confirmTitle").textContent = title || (alertOnly ? "提示" : "确认操作");
+    $("confirmBody").textContent = message;
+    $("confirmNo").hidden = !!alertOnly;
+    const yes = $("confirmYes");
+    yes.textContent = yesText || (alertOnly ? "知道了" : "确定");
+    yes.className = "btn " + (danger ? "danger-solid" : "primary");
+    $("confirmDialog").showModal();
+    yes.focus();
+  });
+}
+function uiConfirm(message, opts) { return _openConfirm(message, opts || {}); }
+function uiAlert(message, title) { return _openConfirm(message, { title: title, alertOnly: true }); }
+function _settleConfirm(v) {
+  if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(v); }
+}
+$("confirmYes").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(true); });
+$("confirmNo").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(false); });
+$("confirmDialog").addEventListener("close", () => _settleConfirm(false));  // Esc 等价取消
+function msg(text, cls) { const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); }
+
+window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+// ── API ─────────────────────────────────────────
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers);
+  if (authToken) opts.headers["X-Auth-Token"] = authToken;
+  const resp = await fetch(path, opts);
+  let data = null;
+  try { data = await resp.json(); } catch (_) { /* 保底 */ }
+  if (resp.status === 401) {
+    const t = prompt("需要访问令牌（.env 的 WEB_ADMIN_TOKEN）：");
+    if (t !== null && t !== "") {
+      authToken = t.trim();
+      localStorage.setItem("webAdminToken", authToken);
+      return api(path, opts);
+    }
+    throw new Error("未授权");
+  }
+  if (!data) throw new Error("服务端返回异常（HTTP " + resp.status + "）");
+  if (!resp.ok && !data.errors) throw new Error("HTTP " + resp.status);
+  return data;
+}
+
+async function loadConfig() {
+  msg("加载中…", "");
+  try {
+    const data = await api("/api/config");
+    config = data.config;
+    baseline = JSON.stringify(config);
+    credStatus = data.cred_status || {};
+    qqBotStatus = data.qq_bot_status || [];
+    envStatus = data.env_status || {};
+    $("btnRestart").hidden = !data.can_restart;
+    $("btnPollNow").hidden = !data.can_poll;
+    $("btnTestPush").hidden = !data.can_test_push;
+    setDirty(false);
+    renderAll();
+    msg("已载入 " + data.config_path, "ok");
+  } catch (e) {
+    msg("载入失败：" + e.message, "err");
+  }
+}
+
+async function saveConfig() {
+  collectGeneral();
+  // 高级页有没点「应用到表单」的 JSON 修改时，保存会忽略它们——先确认
+  if (document.getElementById("tab-advanced").classList.contains("active")) {
+    let rawParsed = null;
+    try { rawParsed = JSON.stringify(JSON.parse($("rawJson").value)); } catch (e) { /* 解析失败也视为有改动 */ }
+    if (rawParsed !== JSON.stringify(config) &&
+        !(await uiConfirm("高级页的 JSON 有未「应用到表单」的修改，保存将忽略这些修改。继续？"))) return;
+  }
+  try {
+    msg("保存中…", "");
+    const data = await api("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    if (!data.ok) {
+      msg("❌ 校验失败：\n" + (data.errors || []).join("\n"), "err");
+      return;
+    }
+    credStatus = data.cred_status || credStatus;
+    baseline = JSON.stringify(config);
+    setDirty(false);
+    renderAccounts(); renderMembers(); refreshRawJson();
+    msg(data.reloaded ? "✅ 已保存并热重载" : "⚠️ 已保存，但热重载失败（详见主程序日志）",
+        data.reloaded ? "ok" : "err");
+  } catch (e) {
+    msg("保存失败：" + e.message, "err");
+  }
+}
+
+// ── Tab 切换 ─────────────────────────────────────
+document.querySelectorAll("nav.tabs button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.tab === "advanced") { collectGeneral(); refreshRawJson(); refreshHistory(); }
+    document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+    document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
+    if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
+    if (btn.dataset.tab === "status") startStatusPolling(); else stopStatusPolling();
+  });
+});
+
+// ── 状态页 ───────────────────────────────────────
+let statusTimer = null, countdownTimer = null;
+let stNextCycle = null, stClockDelta = 0, stCycleCount = 0;
+
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h > 0) return h + "h " + m + "m";
+  if (m > 0) return m + "m " + s + "s";
+  return s + "s";
+}
+
+async function fetchStatus() {
+  if (document.hidden) {
+    $("stHint").textContent = "⏸ 页面在后台，已暂停刷新（回到前台自动恢复）";
+    return;
+  }
+  let data;
+  try { data = await api("/api/status"); } catch (e) { return; }
+  if (!data.ok) return;
+  stClockDelta = data.now_epoch - Date.now() / 1000;
+  stNextCycle = data.next_cycle;
+  stCycleCount = data.cycle_count;
+  $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
+  $("stHint").textContent = data.embedded ? "" :
+    "独立模式：主程序未在本进程运行，以下仅为可见信息；Token 剩余时间不可用。";
+  updateCountdown();
+
+  const okBadge = (v, okText, badText) => v
+    ? '<span class="cred ok">' + okText + "</span>"
+    : '<span class="cred miss">' + badText + "</span>";
+
+  const tokens = $("stTokens");
+  tokens.innerHTML = "";
+  const names = Object.keys(data.tokens || {});
+  if (!names.length) tokens.innerHTML = '<tr><td colspan="3" class="empty">（无数据）</td></tr>';
+  for (const acc of names) {
+    const t = data.tokens[acc];
+    let badge;
+    if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效（需重新填凭证）</span>';
+    else if (t.remaining < (data.token_warn_seconds || 600))
+      badge = '<span class="cred" style="color:var(--warn)">🔄 即将自动续期</span>';
+    else badge = '<span class="cred ok">✓ 正常</span>';
+    tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
+      (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
+  }
+
+  const channels = $("stChannels");
+  channels.innerHTML = "";
+  const chNames = Object.keys(data.channels || {});
+  if (!chNames.length) channels.innerHTML = '<tr><td colspan="4" class="empty">（本周期还没有发送记录）</td></tr>';
+  for (const name of chNames) {
+    const c = data.channels[name];
+    channels.innerHTML += "<tr><td><b>" + esc(name) + "</b></td><td>" + c.success + " / " + c.total +
+      "</td><td>" + okBadge(c.healthy, "✓ 正常", "⚠️ 有失败") +
+      "</td><td>" + esc(c.last_error || "—") + "</td></tr>";
+  }
+
+  const members = $("stMembers");
+  members.innerHTML = "";
+  if (!(data.members || []).length) members.innerHTML = '<tr><td colspan="4" class="empty">（无数据）</td></tr>';
+  for (const m of data.members || []) {
+    members.innerHTML += "<tr><td><b>" + esc(m.name) + "</b></td>" +
+      "<td>" + okBadge(m.fetch_ok, "✓", "✗") + "</td>" +
+      "<td>" + okBadge(m.push_ok, "✓", "✗") + "</td>" +
+      "<td>" + esc((m.last_error || "—").slice(0, 120)) + "</td></tr>";
+  }
+
+  const errBox = $("stErrors");
+  if (!(data.errors || []).length) {
+    errBox.className = "empty";
+    errBox.textContent = "（无）";
+  } else {
+    errBox.className = "";
+    errBox.innerHTML = "";
+    for (const e of data.errors.slice().reverse()) {
+      const div = document.createElement("div");
+      div.style.cssText = "padding:3px 0; font-size:13px;" +
+        (e.tier === "PERSISTENT" ? "color:var(--err)" : "color:var(--muted)");
+      div.textContent = "[" + (e.tier === "PERSISTENT" ? "需处理" : "临时") + "] " + e.msg +
+        "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + "）";
+      errBox.appendChild(div);
+    }
+  }
+}
+
+function updateCountdown() {
+  if (!stNextCycle) { $("stNext").textContent = ""; return; }
+  const remain = stNextCycle.at_epoch - Date.now() / 1000 - stClockDelta;
+  $("stNext").textContent = (stNextCycle.tag || "") + " · 下次巡查: " +
+    (remain > 0 ? fmtDur(remain) + " 后" : "即将开始…");
+}
+
+function startStatusPolling() {
+  fetchStatus();
+  if (statusTimer === null) statusTimer = setInterval(fetchStatus, 3000);
+  if (countdownTimer === null) countdownTimer = setInterval(updateCountdown, 1000);
+}
+function stopStatusPolling() {
+  if (statusTimer !== null) { clearInterval(statusTimer); statusTimer = null; }
+  if (countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
+}
+
+// ── 测试推送 ─────────────────────────────────────
+function testPushPrefill(channel) {
+  $("testPushTargetHint").textContent = channel === "tg" ? "TG chat_id" : "QQ 群号";
+  const monitor = config && config.monitor || [];
+  // 收集配置里该通道的全部目标（去重）供下拉选择
+  const targets = [];
+  for (const m of monitor) {
+    if (channel === "tg" && m.tg && !targets.includes(m.tg)) targets.push(m.tg);
+    if (channel === "napcat") {
+      for (const g of m.groups || []) {
+        if (!targets.includes(String(g))) targets.push(String(g));
+      }
+    }
+  }
+  const dl = $("testPushTargets");
+  dl.innerHTML = "";
+  for (const t of targets) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    dl.appendChild(opt);
+  }
+  $("testPushTarget").value = targets[0] || "";
+  $("testPushTarget").placeholder = channel === "tg" ? "-1001234567890" : "533072575";
+}
+$("btnTestPush").addEventListener("click", () => {
+  const ch = (config.channels || {});
+  const enabled = [];
+  if (ch.tg) enabled.push(["tg", "Telegram"]);
+  if (ch.napcat) enabled.push(["napcat", "NapCat QQ"]);
+  if (!enabled.length) { uiAlert("没有已启用的可测试通道（TG / NapCat），先在「基本设置」打开通道开关。"); return; }
+  chipGroup("testPushChannel", enabled, enabled[0][0]);
+  // chip 切换时联动预填目标
+  $("testPushChannel").querySelectorAll(".chip").forEach((c, i) => {
+    c.addEventListener("click", () => testPushPrefill(enabled[i][0]));
+  });
+  testPushPrefill(enabled[0][0]);
+  $("testPushDialog").showModal();
+});
+$("testPushCancel").addEventListener("click", () => $("testPushDialog").close());
+$("testPushSend").addEventListener("click", async () => {
+  const channel = $("testPushChannel").dataset.value;
+  const target = $("testPushTarget").value.trim();
+  if (!target) { uiAlert("请填写推送目标"); return; }
+  const btn = $("testPushSend");
+  btn.disabled = true; btn.textContent = "发送中…";
+  try {
+    const data = await api("/api/test_push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: channel, target: target }),
+    });
+    if (data.ok) {
+      $("testPushDialog").close();
+      msg("✅ 测试消息已发送到 " + channel + " · " + target + "，去客户端确认收到即可", "ok");
+    } else {
+      msg("❌ 测试推送失败：" + (data.errors || []).join("；"), "err");
+    }
+  } catch (e) {
+    msg("测试推送失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "发送";
+  }
+});
+
+$("btnPollNow").addEventListener("click", async () => {
+  const btn = $("btnPollNow");
+  const fb = $("pollFeedback");
+  const startCycle = stCycleCount;
+  btn.disabled = true;
+  btn.textContent = "⏳ 巡查中…";
+  fb.textContent = "已触发，等待本轮完成…";
+  fb.style.color = "";
+  try {
+    const data = await api("/api/poll", { method: "POST" });
+    if (!data.ok) throw new Error((data.errors || []).join("；"));
+    // 盯着轮次计数，直到本轮巡查真正跑完（最多等 120s）
+    const t0 = Date.now();
+    while (Date.now() - t0 < 120000) {
+      await new Promise((r) => setTimeout(r, 2000));
+      let st;
+      try { st = await api("/api/status"); } catch (e) { continue; }
+      if (st.ok && st.cycle_count > startCycle) {
+        await fetchStatus();
+        fb.textContent = "✅ 第 " + st.cycle_count + " 轮巡查完成（" +
+          new Date().toLocaleTimeString() + "）";
+        fb.style.color = "var(--ok)";
+        setTimeout(() => { if (fb.style.color) { fb.textContent = ""; fb.style.color = ""; } }, 8000);
+        return;
+      }
+    }
+    fb.textContent = "⚠️ 等待超时，请到「日志」页查看进展";
+    fb.style.color = "var(--warn)";
+  } catch (e) {
+    fb.textContent = "❌ 触发失败：" + e.message;
+    fb.style.color = "var(--err)";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⏩ 立即巡查";
+  }
+});
+
+// ── 基本设置 ─────────────────────────────────────
+function renderGeneral() {
+  const box = $("channelSwitches");
+  box.innerHTML = "";
+  const ch = config.channels || {};
+  for (const [key, label] of CHANNELS) {
+    const lab = document.createElement("label");
+    lab.className = "switch";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!ch[key];
+    input.addEventListener("change", () => {
+      config.channels = config.channels || {};
+      config.channels[key] = input.checked;
+      markDirty();
+      if (key === "qq_official") renderQqBots();
+    });
+    const track = document.createElement("span"); track.className = "track";
+    lab.append(input, track, document.createTextNode(label));
+    box.appendChild(lab);
+  }
+  $("napcatApi").value = config.napcat_api || "";
+  const di = config.day_interval || [120, 180], ni = config.night_interval || [1500, 1800];
+  const sh = config.sleep_hours || [2, 7];
+  $("dayMin").value = di[0]; $("dayMax").value = di[1];
+  $("nightMin").value = ni[0]; $("nightMax").value = ni[1];
+  $("sleepStart").value = sh[0]; $("sleepEnd").value = sh[1];
+  $("alertCooldown").value = config.alert_cooldown ?? 3600;
+  $("qqSendInterval").value = config.qq_send_interval ?? 1.5;
+  $("translateOn").checked = config.translate !== false;
+  $("geminiMinInterval").value = config.gemini_min_interval ?? 7.0;
+  $("translateTimeout").value = config.translate_timeout ?? 30;
+  const wa = config.web_admin || {};
+  $("webAdminOn").checked = wa.enabled !== false;
+  $("webAdminHost").value = wa.host || "127.0.0.1";
+  $("webAdminPort").value = wa.port || 8787;
+  const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
+  $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
+  $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
+  renderQqBots();
+}
+
+function renderQqBots() {
+  const tbody = $("qqBotRows");
+  tbody.innerHTML = "";
+  const enabled = (config.channels || {}).qq_official;
+  const declared = config.qq_official_bots || [];
+  const statusByName = {};
+  for (const s of qqBotStatus) statusByName[s.name] = s;
+
+  if (declared.length > 0) {
+    // 声明模式：config.json 管理，表格可编辑
+    declared.forEach((bot, idx) => {
+      const tr = document.createElement("tr");
+      const st = statusByName[bot.name];
+      const tdName = document.createElement("td");
+      tdName.appendChild(mkInput(bot.name || "", (v) => { bot.name = v.trim().toLowerCase(); }, "qq_official_bot1", "width:130px"));
+      const tdApp = document.createElement("td");
+      tdApp.appendChild(mkInput(bot.app_id || "", (v) => {
+        const t = v.trim(); if (t) bot.app_id = t; else delete bot.app_id;
+      }, "102012345", "width:110px"));
+      const tdOpenid = document.createElement("td");
+      tdOpenid.appendChild(mkInput(bot.target_openid || "", (v) => {
+        const t = v.trim(); if (t) bot.target_openid = t; else delete bot.target_openid;
+      }, "ABCDEF0123...", "width:150px"));
+
+      const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
+      const tdSecret = document.createElement("td");
+      if (st && st.secret_env === secretVar) {
+        tdSecret.innerHTML = st.client_secret
+          ? '<span class="cred ok">✓ ' + esc(secretVar) + "</span>"
+          : '<span class="cred miss">✗ 缺 ' + esc(secretVar) + "</span>";
+      } else {
+        tdSecret.innerHTML = '<span class="cred" style="color:var(--muted)">' + esc(secretVar) + "（保存后刷新）</span>";
+      }
+      if (st && st.secret_env === secretVar) {
+        tdSecret.appendChild(document.createTextNode(" "));
+        tdSecret.appendChild(mkBtn("填写", () => openSecretDialog(
+          "填写官方 Bot 密钥：" + (bot.name || ""), "保存并热重载后立即生效。",
+          [{ env: secretVar, label: "Client Secret", required: true,
+             help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
+      }
+
+      const tdState = document.createElement("td");
+      if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
+      else if (st) tdState.innerHTML = '<span class="cred miss">✗ 不完整</span>';
+      else tdState.innerHTML = '<span class="cred" style="color:var(--muted)">未保存</span>';
+
+      const tdOps = document.createElement("td");
+      tdOps.appendChild(mkBtn("删除", async () => {
+        if (!(await uiConfirm("删除官方 Bot " + (bot.name || "#" + idx) + "？",
+                              { yesText: "删除", danger: true }))) return;
+        config.qq_official_bots.splice(idx, 1);
+        markDirty(); renderQqBots();
+      }, "danger"));
+
+      tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
+      tbody.appendChild(tr);
+    });
+  } else {
+    // 旧模式：.env 编号槽位，只读展示
+    for (const bot of qqBotStatus) {
+      const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
+      const badge = (v) => unused ? '<span class="cred" style="color:var(--muted)">—</span>'
+        : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
+      let state;
+      if (bot.ok) state = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
+      else if (!unused) state = '<span class="cred miss">✗ 不完整</span>';
+      else state = '<span class="cred" style="color:var(--muted)">未使用</span>';
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td><b>" + esc(bot.name) + "</b> <span style='color:var(--muted);font-size:11px'>(.env 槽位)</span></td>" +
+        "<td>" + badge(bot.app_id) + "</td>" +
+        "<td>" + badge(bot.target_openid) + "</td>" +
+        "<td>" + badge(bot.client_secret) + " </td>" +
+        "<td>" + state + "</td><td></td>";
+      tr.cells[3].appendChild(mkBtn("填写", () => openSecretDialog(
+        "填写官方 Bot 密钥：" + bot.name, "保存并热重载后立即生效。",
+        [{ env: bot.secret_env, label: "Client Secret", required: true,
+           help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
+      tbody.appendChild(tr);
+    }
+  }
+}
+$("btnAddQqBot").addEventListener("click", async () => {
+  config.qq_official_bots = config.qq_official_bots || [];
+  if (config.qq_official_bots.length === 0) {
+    const legacyUsed = qqBotStatus.some((s) => !s.declared && (s.app_id || s.client_secret || s.target_openid));
+    if (legacyUsed && !(await uiConfirm(
+      "检测到 .env 里已有编号槽位（QQ_OFFICIAL_BOT1_* 等）。\n" +
+      "在这里添加 Bot 后将改为以本列表为准，.env 槽位不再自动扫描。\n" +
+      "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？"))) return;
+  }
+  config.qq_official_bots.push({ name: "qq_official_bot" + (config.qq_official_bots.length + 1) });
+  markDirty(); renderQqBots();
+});
+
+// 把表单值收回 config（数字字段做 parse，空值回退默认）
+function collectGeneral() {
+  if (!config) return;
+  const num = (id, fallback, float) => {
+    const v = float ? parseFloat($(id).value) : parseInt($(id).value, 10);
+    return Number.isFinite(v) ? v : fallback;
+  };
+  config.napcat_api = $("napcatApi").value.trim() || undefined;
+  if (config.napcat_api === undefined) delete config.napcat_api;
+  config.day_interval = [num("dayMin", 120), num("dayMax", 180)];
+  config.night_interval = [num("nightMin", 1500), num("nightMax", 1800)];
+  config.sleep_hours = [num("sleepStart", 2), num("sleepEnd", 7)];
+  config.alert_cooldown = num("alertCooldown", 3600);
+  config.qq_send_interval = num("qqSendInterval", 1.5, true);
+  config.translate = $("translateOn").checked;
+  config.gemini_min_interval = num("geminiMinInterval", 7.0, true);
+  config.translate_timeout = num("translateTimeout", 30);
+  config.web_admin = {
+    enabled: $("webAdminOn").checked,
+    host: $("webAdminHost").value.trim() || "127.0.0.1",
+    port: num("webAdminPort", 8787),
+  };
+}
+document.querySelectorAll("#tab-general input").forEach(() => {});
+$("tab-general").addEventListener("input", () => markDirty());
+
+// ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
+let secretCtx = null;
+function openSecretDialog(title, hint, fields, account) {
+  secretCtx = { fields, account };
+  $("secretDialogTitle").textContent = title;
+  $("secretDialogHint").innerHTML = hint || "";
+  $("secretDialogHint").hidden = !hint;
+  const box = $("secretFields");
+  box.innerHTML = "";
+  for (const f of fields) {
+    const wrap = document.createElement("div");
+    wrap.className = "secret-field";
+
+    const labelRow = document.createElement("div");
+    labelRow.className = "flabel";
+    const name = document.createElement("span");
+    name.className = "fname";
+    name.innerHTML = esc(f.label) + (f.required ? '<span class="req">*</span>'
+                                                : ' <span style="color:var(--muted);font-weight:400">（可选）</span>');
+    const envChip = document.createElement("span");
+    envChip.className = "fenv";
+    envChip.textContent = ".env · " + f.env;
+    labelRow.append(name, envChip);
+
+    const group = document.createElement("div");
+    group.className = "input-group";
+    const input = document.createElement("input");
+    // 不用 type=password：Bitwarden 等密码管理器会把它当登录框弹自动填充。
+    // 改用 type=text + CSS 掩码（不支持 -webkit-text-security 的浏览器退回 password）。
+    const cssMask = CSS.supports("-webkit-text-security", "disc");
+    if (cssMask) {
+      input.type = "text";
+      input.classList.add("masked");
+    } else {
+      input.type = "password";
+    }
+    input.autocomplete = "off";
+    input.setAttribute("data-bwignore", "true");   // Bitwarden
+    input.setAttribute("data-1p-ignore", "true");  // 1Password
+    input.setAttribute("data-lpignore", "true");   // LastPass
+    input.placeholder = f.placeholder || "";
+    input.dataset.env = f.env;
+    // 粘贴自动清理：去掉换行和 Bearer 前缀（从 DevTools 复制常带这些）
+    input.addEventListener("input", () => {
+      let v = input.value.replace(/[\r\n]+/g, " ");
+      if (f.stripBearer) v = v.replace(/^\s*Bearer\s+/i, "");
+      if (v !== input.value) input.value = v;
+    });
+    const eye = document.createElement("button");
+    eye.type = "button";
+    eye.className = "eye";
+    eye.textContent = "👁";
+    eye.title = "显示 / 隐藏";
+    eye.addEventListener("click", () => {
+      if (cssMask) {
+        eye.textContent = input.classList.toggle("masked") ? "👁" : "🚫";
+      } else {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        eye.textContent = show ? "🚫" : "👁";
+      }
+    });
+    group.append(input, eye);
+
+    wrap.append(labelRow, group);
+    if (f.help) {
+      const help = document.createElement("div");
+      help.className = "fhelp";
+      help.textContent = f.help;
+      wrap.appendChild(help);
+    }
+    box.appendChild(wrap);
+  }
+  $("secretDialog").showModal();
+  const first = box.querySelector("input");
+  if (first) first.focus();
+}
+$("secretCancel").addEventListener("click", () => $("secretDialog").close());
+$("secretSave").addEventListener("click", async () => {
+  const values = {};
+  let missing = null;
+  for (const input of $("secretFields").querySelectorAll("input")) {
+    const f = secretCtx.fields.find((x) => x.env === input.dataset.env);
+    const v = input.value.trim();
+    if (v) values[input.dataset.env] = v;
+    else if (f && f.required && !missing) missing = f.label;
+  }
+  if (missing) { uiAlert("请填写：" + missing); return; }
+  if (!Object.keys(values).length) { uiAlert("没有填写任何值"); return; }
+  const saveBtn = $("secretSave");
+  saveBtn.disabled = true;
+  const origText = saveBtn.textContent;
+  saveBtn.textContent = "写入中…";
+  try {
+    msg("写入 .env 中…", "");
+    const data = await api("/api/secrets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: values, account: secretCtx.account || undefined }),
+    });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
+    if (data.cred_status) credStatus = data.cred_status;
+    if (data.qq_bot_status) qqBotStatus = data.qq_bot_status;
+    if (data.env_status) envStatus = data.env_status;
+    $("secretDialog").close();
+    renderGeneral(); renderAccounts();
+    msg("✅ 已写入 .env（" + (data.updated || []).join(", ") + "）" +
+        (secretCtx.account ? "，账号凭证已轮换" : "") +
+        (data.reloaded ? "" : "；⚠️ 热重载失败，详见主程序日志"),
+        data.reloaded ? "ok" : "err");
+  } catch (e) {
+    msg("写入失败：" + e.message, "err");
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = origText;
+  }
+});
+
+function openAccountCredDialog(accId) {
+  if (!credStatus[accId]) {
+    uiAlert("请先「保存并热重载」把该账号写进 config.json，再填凭证。");
+    return;
+  }
+  const acc = (config.accounts || {})[accId] || {};
+  const prefix = accId.toUpperCase();
+  const fields = acc.auth === "mobile"
+    ? [{ env: prefix + "_REFRESH_TOKEN", label: "Refresh Token", required: true,
+         placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+         help: "手机抓包（Charles / Proxyman）拦截 update_token 请求，取请求体里的 refresh_token（UUID 格式）。" },
+       { env: prefix + "_TOKEN", label: "Access Token", required: false, stripBearer: true,
+         placeholder: "eyJ...",
+         help: "留空即可，首次巡查时会用 Refresh Token 自动获取。" }]
+    : [{ env: prefix + "_TOKEN", label: "Token（JWT）", required: true, stripBearer: true,
+         placeholder: "eyJ...",
+         help: "浏览器 DevTools → Network → 任意 API 请求 → Request Headers 的 authorization。粘贴时 Bearer 前缀会自动去掉。" },
+       { env: prefix + "_COOKIE", label: "Cookie", required: true,
+         placeholder: "session=xxx; other=yyy",
+         help: "同一个请求的 Request Headers 里 cookie 整串复制（分号分隔的完整内容）。" }];
+  openSecretDialog("填写账号凭证：" + accId,
+    "保存后写入 <code>.env</code>，同时删除旧的磁盘凭证并热重载 —— 新凭证<b>立即生效，无需重启</b>。值只写入不回显。",
+    fields, accId);
+}
+$("btnFillTgToken").addEventListener("click", () => openSecretDialog(
+  "填写 TG Bot Token", "⚠️ TG Bot 实例在启动时创建，保存后需点右上角「⟳ 重启主程序」生效。",
+  [{ env: "TG_BOT_TOKEN", label: "Bot Token", required: true, placeholder: "123456:ABC-DEF...",
+     help: "Telegram 找 @BotFather → /newbot 创建后获得，格式如 123456789:AAE0abc...。" }], null));
+$("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
+  "填写 Gemini API Key", "保存并热重载后立即生效（翻译每次调用时读取最新值）。",
+  [{ env: "GEMINI_API_KEY", label: "API Key", required: true, placeholder: "AIza...",
+     help: "Google AI Studio（aistudio.google.com/apikey）创建，免费额度即可用。" }], null));
+
+// ── 账号池 ───────────────────────────────────────
+function credBadge(accId) {
+  const st = credStatus[accId];
+  if (!st) return '<span class="cred miss">未知</span>';
+  if (st.ok) return '<span class="cred ok">✓ 已配置</span>';
+  const missing = st.expected.filter((name, i) => {
+    if ("refresh_token" in st) return !st.refresh_token;
+    return i === 0 ? !st.token : !st.cookie;
+  });
+  return '<span class="cred miss" title="缺少: ' + missing.join(", ") + '">✗ 缺 ' + missing.join(" / ") + "</span>";
+}
+
+function renderAccounts() {
+  const tbody = $("accountRows");
+  tbody.innerHTML = "";
+  const accounts = config.accounts || {};
+  const ids = Object.keys(accounts);
+  $("accountEmpty").hidden = ids.length > 0;
+  for (const id of ids) {
+    const acc = accounts[id];
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td><b>" + esc(id) + "</b></td>" +
+      "<td>" + esc(acc.group || "") + "</td>" +
+      "<td>" + esc(acc.auth || "web") + "</td>" +
+      "<td>" + esc(acc.app_tag || "—") + "</td>" +
+      "<td>" + credBadge(id) + "</td>";
+    const tdOps = document.createElement("td");
+    const btnCred = mkBtn("填凭证", () => openAccountCredDialog(id));
+    const btnEdit = mkBtn("编辑", () => openAccountDialog(id));
+    const btnDel = mkBtn("删除", async () => {
+      const used = (config.monitor || []).filter((m) => m.account === id);
+      if (used.length > 0) {
+        const names = used.map((m) => m.name || m.id).join("、");
+        if (!(await uiConfirm(
+          "账号 " + id + " 下还有 " + used.length + " 个监控成员：\n" + names +
+          "\n\n将连同这些成员一起删除。",
+          { title: "删除账号", yesText: "连同成员一起删除", danger: true }))) return;
+        config.monitor = config.monitor.filter((m) => m.account !== id);
+      } else {
+        if (!(await uiConfirm("删除账号 " + id + "？",
+                              { title: "删除账号", yesText: "删除", danger: true }))) return;
+      }
+      delete config.accounts[id];
+      markDirty(); renderAccounts(); renderMembers();
+    }, "danger");
+    tdOps.append(btnCred, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
+    tr.appendChild(tdOps);
+    tbody.appendChild(tr);
+  }
+}
+
+// 单选按钮组（替代 <dialog> 里的原生 <select> —— 其弹出层在部分 Chrome 版本点不开）
+function chipGroup(containerId, options, value) {
+  const box = $(containerId);
+  box.innerHTML = "";
+  box.dataset.value = value;
+  for (const [val, label] of options) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (val === value ? " active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      box.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+      b.classList.add("active");
+      box.dataset.value = val;
+    });
+    box.appendChild(b);
+  }
+}
+
+let editingAccountId = null;
+function openAccountDialog(id) {
+  editingAccountId = id;
+  const acc = id ? config.accounts[id] : {};
+  $("accountDialogTitle").textContent = id ? "编辑账号 " + id : "添加账号";
+  $("accId").value = id || "";
+  $("accId").disabled = !!id;
+  chipGroup("accGroupChips", [
+    ["nogizaka46", "nogizaka46"], ["hinatazaka46", "hinatazaka46"],
+    ["sakurazaka46", "sakurazaka46"], ["yodel", "yodel"],
+  ], acc.group || "nogizaka46");
+  chipGroup("accAuthChips", [
+    ["web", "web（token+cookie）"], ["mobile", "mobile（refresh_token）"],
+  ], acc.auth || "web");
+  $("accAppTag").value = acc.app_tag || "";
+  $("accApiBase").value = acc.api_base || "";
+  $("accWebOrigin").value = acc.web_origin || "";
+  $("accountDialog").showModal();
+}
+$("btnAddAccount").addEventListener("click", () => openAccountDialog(null));
+$("accCancel").addEventListener("click", () => $("accountDialog").close());
+$("accSave").addEventListener("click", () => {
+  const id = $("accId").value.trim();
+  if (!/^[a-z0-9_]+$/.test(id)) { uiAlert("账号 ID 只能用小写字母、数字、下划线"); return; }
+  if (!editingAccountId && config.accounts && config.accounts[id]) { uiAlert("账号 ID 已存在"); return; }
+  const acc = { group: $("accGroupChips").dataset.value };
+  if ($("accAuthChips").dataset.value === "mobile") acc.auth = "mobile";
+  if ($("accAppTag").value.trim()) acc.app_tag = $("accAppTag").value.trim();
+  if ($("accApiBase").value.trim()) acc.api_base = $("accApiBase").value.trim();
+  if ($("accWebOrigin").value.trim()) acc.web_origin = $("accWebOrigin").value.trim();
+  config.accounts = config.accounts || {};
+  config.accounts[id] = acc;
+  $("accountDialog").close();
+  markDirty(); renderAccounts(); renderMembers();
+});
+
+// ── 监控成员 ─────────────────────────────────────
+function renderMembers() {
+  const tbody = $("memberRows");
+  tbody.innerHTML = "";
+  const monitor = config.monitor || [];
+  $("memberEmpty").hidden = monitor.length > 0;
+  const accountIds = Object.keys(config.accounts || {});
+  monitor.forEach((m, idx) => {
+    const tr = document.createElement("tr");
+
+    const tdId = document.createElement("td");
+    tdId.appendChild(mkInput(m.id || "", (v) => { m.id = v.trim(); }, "55", "width:70px"));
+    const tdName = document.createElement("td");
+    tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里奈央"));
+    const tdAcc = document.createElement("td");
+    const sel = document.createElement("select");
+    for (const aid of accountIds) {
+      const opt = document.createElement("option");
+      opt.value = aid; opt.textContent = aid;
+      sel.appendChild(opt);
+    }
+    if (m.account && !accountIds.includes(m.account)) {
+      const opt = document.createElement("option");
+      opt.value = m.account; opt.textContent = m.account + " (未定义!)";
+      sel.appendChild(opt);
+    }
+    sel.value = m.account || accountIds[0] || "";
+    sel.addEventListener("change", () => { m.account = sel.value; markDirty(); });
+    tdAcc.appendChild(sel);
+    const tdGroups = document.createElement("td");
+    tdGroups.appendChild(mkInput((m.groups || []).join(", "), (v, el) => {
+      const nums = v.split(/[,，\s]+/).filter(Boolean).map(Number);
+      if (nums.some((n) => !Number.isInteger(n) || n <= 0)) {
+        el.classList.add("invalid");  // 非法输入不写回，标红提示
+        return;
+      }
+      el.classList.remove("invalid");
+      m.groups = nums;
+    }, "533072575, 752269366"));
+    const tdTg = document.createElement("td");
+    tdTg.appendChild(mkInput(m.tg || "", (v) => {
+      const t = v.trim();
+      if (t) m.tg = t; else delete m.tg;
+    }, "-1001234567890", "width:140px"));
+
+    const tdOps = document.createElement("td");
+    tdOps.appendChild(mkBtn("删除", async () => {
+      if (!(await uiConfirm("删除成员 " + (m.name || m.id) + "？",
+                            { title: "删除成员", yesText: "删除", danger: true }))) return;
+      config.monitor.splice(idx, 1);
+      markDirty(); renderMembers();
+    }, "danger"));
+
+    tr.append(tdId, tdName, tdAcc, tdGroups, tdTg, tdOps);
+    tbody.appendChild(tr);
+  });
+}
+// ── 成员选择器 ───────────────────────────────────
+$("btnPickMember").addEventListener("click", () => {
+  const ids = Object.keys(config.accounts || {});
+  if (!ids.length) { uiAlert("先在账号池添加账号"); return; }
+  chipGroup("pickAccountChips", ids.map((id) => [id, id]), ids[0]);
+  $("memberPickList").innerHTML = "";
+  $("memberPickHint").textContent = "选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。";
+  $("memberPickDialog").showModal();
+});
+$("memberPickClose").addEventListener("click", () => $("memberPickDialog").close());
+
+$("btnFetchMembers").addEventListener("click", async () => {
+  const account = $("pickAccountChips").dataset.value;
+  const list = $("memberPickList");
+  list.innerHTML = "";
+  $("memberPickHint").textContent = "拉取中…";
+  let data;
+  try {
+    data = await api("/api/members?account=" + encodeURIComponent(account));
+  } catch (e) {
+    $("memberPickHint").textContent = "拉取失败：" + e.message;
+    return;
+  }
+  if (!data.ok) {
+    $("memberPickHint").textContent = "❌ " + (data.errors || []).join("；");
+    return;
+  }
+  const open = data.members.filter((m) => m.state === "open").length;
+  $("memberPickHint").textContent = "共 " + data.members.length + " 项，" + open + " 个在籍（🟢）。点「添加」后记得回到列表保存。";
+  const already = () => new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
+  const sorted = data.members.slice().sort((a, b) => {
+    const an = /^\d+$/.test(a.id) ? parseInt(a.id, 10) : 1e9;
+    const bn = /^\d+$/.test(b.id) ? parseInt(b.id, 10) : 1e9;
+    return (a.state === "open" ? 0 : 1) - (b.state === "open" ? 0 : 1) || an - bn;
+  });
+  for (const m of sorted) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; gap:10px; padding:5px 4px; border-bottom:1px solid var(--border)";
+    const label = document.createElement("span");
+    label.style.flex = "1";
+    label.textContent = "[" + m.id + "] " + (m.state === "open" ? "🟢" : "⚫") + " " + m.name +
+      (m.tags.length ? "（" + m.tags.join(" · ") + "）" : "");
+    const btn = mkBtn("添加", () => {
+      config.monitor = config.monitor || [];
+      config.monitor.push({ id: m.id, name: m.name, account: account, groups: [] });
+      markDirty(); renderMembers();
+      btn.textContent = "✓ 已添加"; btn.disabled = true;
+    });
+    if (already().has(account + ":" + m.id)) { btn.textContent = "✓ 已添加"; btn.disabled = true; }
+    row.append(label, btn);
+    list.appendChild(row);
+  }
+});
+
+$("btnAddMember").addEventListener("click", () => {
+  config.monitor = config.monitor || [];
+  const firstAccount = Object.keys(config.accounts || {})[0] || "";
+  config.monitor.push({ id: "", name: "", account: firstAccount, groups: [] });
+  markDirty(); renderMembers();
+});
+
+// ── 日志 ─────────────────────────────────────────
+const LOG_SOURCES = [["live", "实时"], ["error", "错误日志文件"], ["response", "响应日志文件"]];
+let logSource = "live";
+let logSeq = 0;
+let logTimer = null;
+
+let logEntries = [];   // live 源累积（未过滤，供筛选重渲染）
+let logLines = [];     // 文件源当前内容
+let logErrOnly = false, logKeyword = "";
+
+function setLogSource(src) {
+  logSource = src;
+  logSeq = 0;
+  logEntries = [];
+  logLines = [];
+  $("logView").innerHTML = "";
+  $("logSourceChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.src === src));
+  fetchLogs();
+}
+
+function renderLogs() {
+  const view = $("logView");
+  const kw = logKeyword.toLowerCase();
+  view.innerHTML = "";
+  let shown = 0, total = 0;
+  const push = (text, cls) => {
+    const div = document.createElement("div");
+    if (cls) div.className = cls;
+    div.textContent = text;
+    view.appendChild(div);
+    shown++;
+  };
+  if (logSource === "live") {
+    total = logEntries.length;
+    for (const e of logEntries) {
+      if (logErrOnly && e.level !== "ERROR") continue;
+      const line = e.ts + " [" + e.level + "] " + e.text;
+      if (kw && !line.toLowerCase().includes(kw)) continue;
+      push(line, "lg-" + e.level);
+    }
+  } else {
+    total = logLines.length;
+    for (const line of logLines) {
+      if (logErrOnly && !line.includes("ERROR")) continue;
+      if (kw && !line.toLowerCase().includes(kw)) continue;
+      push(line, line.includes("ERROR") ? "lg-ERROR" : "");
+    }
+  }
+  $("logFilterInfo").textContent = (logErrOnly || kw) ? "显示 " + shown + " / " + total + " 条" : "";
+  if ($("logFollow").checked) view.scrollTop = view.scrollHeight;
+}
+$("logErrOnly").addEventListener("change", () => { logErrOnly = $("logErrOnly").checked; renderLogs(); });
+$("logKeyword").addEventListener("input", () => { logKeyword = $("logKeyword").value.trim(); renderLogs(); });
+
+function initLogChips() {
+  const box = $("logSourceChips");
+  if (box.childElementCount) return;
+  for (const [src, label] of LOG_SOURCES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (src === logSource ? " active" : "");
+    b.dataset.src = src;
+    b.textContent = label;
+    b.addEventListener("click", () => setLogSource(src));
+    box.appendChild(b);
+  }
+}
+
+async function fetchLogs() {
+  if (document.hidden) {
+    $("logHint").textContent = "⏸ 页面在后台，已暂停刷新（回到前台自动恢复）";
+    return;
+  }
+  let data;
+  try {
+    const url = logSource === "live"
+      ? "/api/logs?source=live&after=" + logSeq
+      : "/api/logs?source=" + logSource + "&tail=300";
+    data = await api(url);
+  } catch (e) { return; }        // 主程序重启间隙等场景，静默跳过这轮
+  if (!data.ok) return;
+  if (logSource === "live") {
+    if (data.entries.length) {
+      logEntries.push(...data.entries);
+      if (logEntries.length > 600) logEntries = logEntries.slice(-600);  // 防内存无限膨胀
+    }
+    logSeq = data.seq;
+    $("logHint").textContent = logEntries.length ? "" :
+      "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「错误日志文件」。）";
+  } else {
+    logLines = data.lines;
+    $("logHint").textContent = !data.lines.length ? "（日志文件为空或不存在）"
+      : (data.file ? "文件: " + data.file + "（末尾 300 行）" : "");
+  }
+  renderLogs();
+}
+
+function startLogPolling() {
+  initLogChips();
+  fetchLogs();
+  if (logTimer === null) logTimer = setInterval(fetchLogs, 2000);
+}
+function stopLogPolling() {
+  if (logTimer !== null) { clearInterval(logTimer); logTimer = null; }
+}
+
+// ── 配置历史 ─────────────────────────────────────
+async function restoreHistory(name, when) {
+  if (!(await uiConfirm("恢复到 " + when + " 的配置？\n当前版本会先快照，之后可再撤销。",
+                        { title: "恢复历史版本", yesText: "恢复" }))) return;
+  try {
+    const res = await api("/api/config/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name }),
+    });
+    if (!res.ok) { msg("❌ " + (res.errors || []).join("\n"), "err"); return; }
+    msg(res.reloaded ? "✅ 已恢复并热重载" : "⚠️ 已恢复，但热重载失败（详见日志）",
+        res.reloaded ? "ok" : "err");
+    await loadConfig();
+    document.querySelector('[data-tab="advanced"]').click();
+  } catch (e) {
+    msg("恢复失败：" + e.message, "err");
+  }
+}
+
+async function viewHistory(name, when) {
+  let data;
+  try { data = await api("/api/config/history?name=" + encodeURIComponent(name)); }
+  catch (e) { msg("读取快照失败：" + e.message, "err"); return; }
+  if (!data.ok) { msg("❌ " + (data.errors || []).join("；"), "err"); return; }
+  $("historyViewTitle").textContent = "历史快照 · " + when;
+  $("historyViewContent").textContent = data.content;
+  const restoreBtn = $("historyViewRestore");
+  restoreBtn.onclick = () => { $("historyViewDialog").close(); restoreHistory(name, when); };
+  $("historyViewDialog").showModal();
+}
+$("historyViewClose").addEventListener("click", () => $("historyViewDialog").close());
+
+async function refreshHistory() {
+  let data;
+  try { data = await api("/api/config/history"); } catch (e) { return; }
+  if (!data.ok) return;
+  const tbody = $("historyRows");
+  tbody.innerHTML = "";
+  $("historyEmpty").hidden = data.history.length > 0;
+  for (const h of data.history) {
+    const tr = document.createElement("tr");
+    const when = new Date(h.mtime_epoch * 1000).toLocaleString();
+    tr.innerHTML = "<td>" + esc(when) + "</td><td>" + (h.size / 1024).toFixed(1) + " KB</td>";
+    const td = document.createElement("td");
+    td.append(
+      mkBtn("查看", () => viewHistory(h.name, when)),
+      document.createTextNode(" "),
+      mkBtn("恢复", () => restoreHistory(h.name, when)),
+    );
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+// ── 高级 JSON ────────────────────────────────────
+function refreshRawJson() { $("rawJson").value = JSON.stringify(config, null, 2); }
+$("btnResetJson").addEventListener("click", () => { collectGeneral(); refreshRawJson(); });
+$("btnApplyJson").addEventListener("click", () => {
+  try {
+    const obj = JSON.parse($("rawJson").value);
+    if (typeof obj !== "object" || obj === null || Array.isArray(obj)) throw new Error("必须是 JSON 对象");
+    config = obj;
+    markDirty(); renderAll();
+    msg("已应用到表单（尚未保存）", "ok");
+  } catch (e) {
+    msg("JSON 解析失败：" + e.message, "err");
+  }
+});
+
+// ── 小工具 ───────────────────────────────────────
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
+function mkBtn(text, onClick, extraCls) {
+  const b = document.createElement("button");
+  b.className = "btn small" + (extraCls ? " " + extraCls : "");
+  b.textContent = text;
+  b.addEventListener("click", onClick);
+  return b;
+}
+function mkInput(value, onChange, placeholder, style) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value;
+  if (placeholder) input.placeholder = placeholder;
+  if (style) input.style.cssText = style;
+  input.addEventListener("input", () => { onChange(input.value, input); markDirty(); });
+  return input;
+}
+
+function renderAll() { renderGeneral(); renderAccounts(); renderMembers(); refreshRawJson(); }
+
+// ── 入口 ─────────────────────────────────────────
+$("btnSave").addEventListener("click", saveConfig);
+$("btnReloadFile").addEventListener("click", async () => {
+  if (dirty && !(await uiConfirm("有未保存的修改，确定放弃并重新读取？",
+                                 { yesText: "放弃修改", danger: true }))) return;
+  loadConfig();
+});
+$("btnRestart").addEventListener("click", async () => {
+  if (dirty && !(await uiConfirm(
+    "有未保存的修改，重启将放弃它们。\n要先保存的话请点「取消」回去保存。",
+    { title: "重启主程序", yesText: "放弃修改并继续", danger: true }))) return;
+  if (!(await uiConfirm("确定重启主程序？\n推送轮询会中断几秒，重启后 .env 里的新凭证会生效。",
+                        { title: "重启主程序", yesText: "重启" }))) return;
+  try {
+    const data = await api("/api/restart", { method: "POST" });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
+  } catch (e) {
+    msg("重启请求失败：" + e.message, "err");
+    return;
+  }
+  msg("🔁 主程序重启中，等待恢复…", "");
+  setDirty(false);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const resp = await fetch("/api/config", {
+        headers: authToken ? { "X-Auth-Token": authToken } : {},
+        cache: "no-store",
+      });
+      if (resp.ok) {
+        await loadConfig();
+        msg("✅ 主程序已重启完成", "ok");
+        return;
+      }
+    } catch (e) { /* 服务还没起来，继续等 */ }
+  }
+  msg("⚠️ 等待超时（60s）：请到终端检查主程序是否成功重启", "err");
+});
+// 标签页从后台切回时立即刷新（轮询在 document.hidden 时是暂停的）
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  if (statusTimer !== null) fetchStatus();
+  if (logTimer !== null) fetchLogs();
+});
+
+loadConfig();
+startStatusPolling();   // 状态页是默认标签页
+</script>
+</body>
+</html>
