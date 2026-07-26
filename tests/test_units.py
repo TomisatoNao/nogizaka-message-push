@@ -133,11 +133,62 @@ def test_chain_extract() -> None:
     print("  ✅ 4 种消息链提取正确、payload 无内部字段")
 
 
+def test_health_rolling() -> None:
+    print("=== health 通道计数滚动清零 ===")
+    from src.health import HealthTracker
+
+    tracker = HealthTracker()
+    tracker.initialize(summary_interval=2)
+    tracker.record_channel("napcat", True)
+    tracker.record_channel("napcat", False, "群 1 发送失败")
+
+    assert tracker.cycle_complete() is None          # 第 1 轮：未到摘要周期
+    summary = tracker.cycle_complete()               # 第 2 轮：输出摘要
+    assert summary and "napcat" in summary and "1/2" in summary, summary
+
+    stats = tracker._channels["napcat"]
+    assert stats.total == 0 and stats.success == 0, "摘要后计数应清零"
+    assert stats.last_error == "群 1 发送失败", "last_error 应保留"
+    print("  ✅ 摘要输出 1/2，输出后计数清零、last_error 保留")
+
+
+def test_time_record_skip() -> None:
+    print("=== write_time_record 值未变时跳过写盘 ===")
+    import asyncio
+    import os
+    import tempfile
+    from config.credentials import write_time_record
+
+    async def run() -> None:
+        path = os.path.join(tempfile.gettempdir(), "_nmp_time_test.txt")
+        lock = asyncio.Lock()
+
+        await write_time_record(path, lock, "2026-07-26T12:00:00Z")
+        with open(path, encoding="utf-8") as f:
+            assert f.read() == "2026-07-26T12:00:00Z"
+
+        # 删掉文件后用相同值再写：应被值缓存跳过，文件不重新出现
+        os.remove(path)
+        await write_time_record(path, lock, "2026-07-26T12:00:00Z")
+        assert not os.path.exists(path), "值未变时不应写盘"
+
+        # 值变了则正常写入
+        await write_time_record(path, lock, "2026-07-26T13:00:00Z")
+        with open(path, encoding="utf-8") as f:
+            assert f.read() == "2026-07-26T13:00:00Z"
+        os.remove(path)
+
+    asyncio.run(run())
+    print("  ✅ 相同值跳过、新值正常落盘")
+
+
 def main() -> None:
     test_utc_to_jst()
     test_log_truncation()
     test_escape_html()
     test_chain_extract()
+    test_health_rolling()
+    test_time_record_skip()
     print("\n" + "=" * 50)
     print("🎉 全部单元断言通过")
 

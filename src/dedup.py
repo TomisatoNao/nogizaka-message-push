@@ -5,13 +5,14 @@ import json
 import os
 import shutil
 
-from config.config import SENT_IDS_DIR, SENT_IDS_MAX
+# 统一通过 cfg.X 访问，热重载后 sent_ids_max 等标量才能生效
+import config.config as cfg
 from src.logger import log_all
 
 
 def _id_file(group_type: str, m_id: str) -> str:
-    os.makedirs(SENT_IDS_DIR, exist_ok=True)
-    return os.path.join(SENT_IDS_DIR, f"sent_{group_type}_{m_id}.json")
+    os.makedirs(cfg.SENT_IDS_DIR, exist_ok=True)
+    return os.path.join(cfg.SENT_IDS_DIR, f"sent_{group_type}_{m_id}.json")
 
 
 def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
@@ -27,7 +28,7 @@ def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             ids: list[str] = json.load(f)
-        trimmed = ids[-SENT_IDS_MAX:]
+        trimmed = ids[-cfg.SENT_IDS_MAX:]
         return trimmed, set(trimmed)
     except Exception:
         # 文件损坏时保留备份，避免静默丢弃全部去重历史
@@ -58,7 +59,7 @@ def save_sent_id(
     id_list.append(msg_id)
     id_set.add(msg_id)
 
-    while len(id_list) > SENT_IDS_MAX:
+    while len(id_list) > cfg.SENT_IDS_MAX:
         old = id_list.pop(0)
         id_set.discard(old)
 

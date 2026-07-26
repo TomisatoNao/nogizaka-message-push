@@ -4,6 +4,7 @@
 import asyncio
 import os
 import random
+import signal
 import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -258,6 +259,24 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
         await asyncio.sleep(wait_time)
 
 
+def _install_stop_handlers(stop_event: asyncio.Event) -> None:
+    """注册 SIGTERM / SIGINT → 优雅停止。
+
+    docker stop / systemd 发送的是 SIGTERM，此前只处理 KeyboardInterrupt，
+    容器停止时 finally 里的 observer / client 清理完全不会执行。
+    Windows 的事件循环不支持 add_signal_handler，退回 signal.signal
+    （其回调运行在主线程信号上下文，需 call_soon_threadsafe 交回事件循环）。"""
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except (NotImplementedError, RuntimeError):
+            try:
+                signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop_event.set))
+            except (ValueError, OSError):
+                pass  # 非主线程等场景注册失败：保底仍有 KeyboardInterrupt
+
+
 def _on_config_reload(success: bool) -> None:
     """config.json 热重载后的补偿动作（由 watchdog 线程调用）。
 
@@ -335,8 +354,22 @@ async def main() -> None:
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
     observer = start_watcher(config_path, on_reload=_on_config_reload)
 
+    stop_event = asyncio.Event()
+    _install_stop_handlers(stop_event)
+
     try:
-        await _run_loop(http_client)
+        loop_task = asyncio.create_task(_run_loop(http_client))
+        stop_task = asyncio.create_task(stop_event.wait())
+        done, _ = await asyncio.wait(
+            {loop_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done:
+            print("\n🛑 收到停止信号，安全退出中...")
+            loop_task.cancel()
+            await asyncio.gather(loop_task, return_exceptions=True)
+        else:
+            stop_task.cancel()
+            loop_task.result()   # _run_loop 不会正常返回；到这里说明它抛了异常，向上传播
     except KeyboardInterrupt:
         print("\n🛑 安全退出中...")
     finally:

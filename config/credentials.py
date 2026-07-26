@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 
 import httpx
 
-from config.config import ACCOUNTS, ALERT_COOLDOWN_SECONDS, CRED_DIR, TOKEN_REFRESH_BEFORE_SECONDS
+# 统一通过 cfg.X 访问，热重载后标量值（告警冷却、刷新阈值等）才能生效
+import config.config as cfg
 from src.health import get_tracker as _health_tracker
 from src.logger import format_httpx_error, log_all, log_response
 
@@ -103,7 +104,7 @@ def _env_fingerprint(acc_cfg: dict) -> str:
 
 
 def _load_env_seen() -> dict[str, str]:
-    path = os.path.join(CRED_DIR, _ENV_SEEN_FILE)
+    path = os.path.join(cfg.CRED_DIR, _ENV_SEEN_FILE)
     if not os.path.exists(path):
         return {}
     try:
@@ -115,7 +116,7 @@ def _load_env_seen() -> dict[str, str]:
 
 
 def _save_env_seen(seen: dict[str, str]) -> None:
-    path = os.path.join(CRED_DIR, _ENV_SEEN_FILE)
+    path = os.path.join(cfg.CRED_DIR, _ENV_SEEN_FILE)
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -126,8 +127,8 @@ def _save_env_seen(seen: dict[str, str]) -> None:
 
 
 def _save_cred(account_id: str, token: str, cookies: dict) -> None:
-    os.makedirs(CRED_DIR, exist_ok=True)
-    path = os.path.join(CRED_DIR, f"{account_id}.json")
+    os.makedirs(cfg.CRED_DIR, exist_ok=True)
+    path = os.path.join(cfg.CRED_DIR, f"{account_id}.json")
     tmp  = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"token": token, "cookies": cookies}, f)
@@ -157,8 +158,8 @@ def _resolve_mobile_group(acc_cfg: dict) -> str:
 
 def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) -> None:
     """保存移动端凭证：{access_token, refresh_token}。"""
-    os.makedirs(CRED_DIR, exist_ok=True)
-    path = os.path.join(CRED_DIR, f"{account_id}.json")
+    os.makedirs(cfg.CRED_DIR, exist_ok=True)
+    path = os.path.join(cfg.CRED_DIR, f"{account_id}.json")
     tmp  = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"access_token": access_token, "refresh_token": refresh_token}, f)
@@ -174,7 +175,7 @@ def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) ->
 # ──────────────────────────────────────────────
 def get_mobile_headers(account_id: str) -> dict[str, str]:
     """构建 iOS 端请求头（无 Cookie，仅 Bearer Token + X-Talk-App-ID）。"""
-    acc_cfg = ACCOUNTS.get(account_id, {})
+    acc_cfg = cfg.ACCOUNTS.get(account_id, {})
     mg_key = _resolve_mobile_group(acc_cfg)
     mg = _MOBILE_GROUP_CONFIG[mg_key]
     headers = {
@@ -193,7 +194,7 @@ def get_mobile_headers(account_id: str) -> dict[str, str]:
 
 def get_mobile_api_base(account_id: str) -> str:
     """获取移动端 API 基础 URL（优先使用显式 api_base 配置，否则用 glastonr.net）。"""
-    acc_cfg = ACCOUNTS.get(account_id, {})
+    acc_cfg = cfg.ACCOUNTS.get(account_id, {})
     if acc_cfg.get("api_base"):
         return acc_cfg["api_base"]
     mg_key = _resolve_mobile_group(acc_cfg)
@@ -222,7 +223,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
-        acc_cfg = ACCOUNTS[account_id]
+        acc_cfg = cfg.ACCOUNTS[account_id]
         rt = cred.get("refresh_token") or acc_cfg.get("init_refresh_token", "")
         if not rt:
             log_all(f"🚨 账号 {account_id} 无 refresh_token", is_error=True)
@@ -274,7 +275,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
     log_all(f"🚨 致命错误：账号 {account_id} 移动端续期失败，refresh_token 可能已失效", is_error=True)
     now  = datetime.now().timestamp()
     last = _alert_last_sent.get(account_id, 0)
-    if now - last > ALERT_COOLDOWN_SECONDS:
+    if now - last > cfg.ALERT_COOLDOWN_SECONDS:
         _alert_last_sent[account_id] = now
         try:
             await send_alert_message(
@@ -284,7 +285,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
         except Exception:
             pass
     else:
-        remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
+        remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
         _health_tracker().record_alert_cooldown(account_id, float(remaining))
         log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
 
@@ -345,7 +346,7 @@ def get_source_headers_for_account(account_id: str, group_type: str) -> dict[str
     if not cred:
         return {}
 
-    acc_cfg = ACCOUNTS.get(account_id, {})
+    acc_cfg = cfg.ACCOUNTS.get(account_id, {})
     if acc_cfg.get("auth_method") == "mobile":
         return get_mobile_headers(account_id)
 
@@ -389,16 +390,16 @@ def load_all_accounts() -> None:
     幂等：已加载的账号会跳过，因此热重载后可安全重复调用以加载新增账号。
     优先级：磁盘凭证 > `.env`。若 `.env` 相比上次启动发生变化，会打告警提示
     正确的轮换方式（删除磁盘凭证文件），而不会自动采用 `.env` 的值。"""
-    os.makedirs(CRED_DIR, exist_ok=True)
+    os.makedirs(cfg.CRED_DIR, exist_ok=True)
     env_seen = _load_env_seen()
     seen_dirty = False
 
-    for acc_id, acc_cfg in ACCOUNTS.items():
+    for acc_id, acc_cfg in cfg.ACCOUNTS.items():
         if acc_id in ACCOUNT_CREDS:
             continue
         is_mobile = acc_cfg.get("auth_method") == "mobile"
         fingerprint = _env_fingerprint(acc_cfg)
-        path = os.path.join(CRED_DIR, f"{acc_id}.json")
+        path = os.path.join(cfg.CRED_DIR, f"{acc_id}.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -451,7 +452,7 @@ def load_all_accounts() -> None:
 
 def validate_account_cred(account_id: str) -> tuple[bool, str]:
     """校验账号凭证内容是否满足当前 auth_method 的最低要求。"""
-    acc_cfg = ACCOUNTS.get(account_id)
+    acc_cfg = cfg.ACCOUNTS.get(account_id)
     if not acc_cfg:
         return False, "账号未在 ACCOUNTS 中定义"
 
@@ -491,7 +492,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
-        acc_cfg    = ACCOUNTS[account_id]
+        acc_cfg    = cfg.ACCOUNTS[account_id]
         group_type = acc_cfg["group_type"]
         api_base   = acc_cfg.get("api_base")
         if api_base:
@@ -547,7 +548,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
     log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)
     now  = datetime.now().timestamp()
     last = _alert_last_sent.get(account_id, 0)
-    if now - last > ALERT_COOLDOWN_SECONDS:
+    if now - last > cfg.ALERT_COOLDOWN_SECONDS:
         _alert_last_sent[account_id] = now
         try:
             await send_alert_message(
@@ -557,7 +558,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
         except Exception:
             pass
     else:
-        remaining = int(ALERT_COOLDOWN_SECONDS - (now - last))
+        remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
         _health_tracker().record_alert_cooldown(account_id, float(remaining))
         log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
 
@@ -601,7 +602,7 @@ def get_token_remaining_seconds(account_id: str) -> float | None:
 async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> None:
     """
     每轮巡查前调用。
-    若 Token 剩余时间 <= TOKEN_REFRESH_BEFORE_SECONDS，主动刷新，
+    若 Token 剩余时间 <= cfg.TOKEN_REFRESH_BEFORE_SECONDS，主动刷新，
     避免在实际 API 请求时才触发 401 浪费一轮。
     按 auth_method 自动派发到 Web 或移动端刷新。
     """
@@ -609,11 +610,11 @@ async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> N
     if remaining is None:
         log_all(f"⚠️ 无法解析 {account_id} 的 Token 过期时间，跳过主动刷新", is_debug=True)
         return
-    if remaining <= TOKEN_REFRESH_BEFORE_SECONDS:
-        acc_cfg = ACCOUNTS.get(account_id, {})
+    if remaining <= cfg.TOKEN_REFRESH_BEFORE_SECONDS:
+        acc_cfg = cfg.ACCOUNTS.get(account_id, {})
         log_all(
             f"🔄 {account_id} Token 剩余 {int(remaining)}s"
-            f"（阈值 {TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新...",
+            f"（阈值 {cfg.TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新...",
         )
         if acc_cfg.get("auth_method") == "mobile":
             await refresh_mobile_token(account_id, target_group)

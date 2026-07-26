@@ -121,7 +121,13 @@ class HealthTracker:
         self._cycle_count += 1
         if self._cycle_count % self._summary_interval != 0:
             return None
-        return self._build_summary()
+        summary = self._build_summary()
+        # 通道计数按摘要周期滚动清零：不清零的话跑几天后，
+        # 几天前的一次失败仍在稀释成功率，摘要数字失去判断价值
+        for stats in self._channels.values():
+            stats.success = 0
+            stats.total = 0
+        return summary
 
     def _build_summary(self) -> str:
         elapsed = time.monotonic() - self._start_time
