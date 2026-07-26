@@ -1055,10 +1055,23 @@ function renderQqBots() {
 
       const tdOps = document.createElement("td");
       tdOps.appendChild(mkBtn("删除", async () => {
-        if (!(await uiConfirm("删除官方 Bot " + (bot.name || "#" + idx) + "？",
-                              { yesText: "删除", danger: true }))) return;
+        const hasSecret = st && st.client_secret;
+        if (!(await uiConfirm(
+          "删除官方 Bot " + (bot.name || "#" + idx) + "？" +
+          (hasSecret ? "\n同时会清除 .env 里的 " + (bot.name || "").toUpperCase() + "_CLIENT_SECRET。" : ""),
+          { title: "删除官方 Bot", yesText: "删除", danger: true }))) return;
+        if (hasSecret) {
+          try {
+            await api("/api/secrets", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ remove: [(bot.name || "").toUpperCase() + "_CLIENT_SECRET"] }),
+            });
+          } catch (e) { /* 密钥清理失败不阻断配置删除 */ }
+        }
         config.qq_official_bots.splice(idx, 1);
         markDirty(); renderQqBots();
+        msg("已删除，点「保存并热重载」生效", "ok");
       }, "danger"));
 
       tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
@@ -1090,6 +1103,31 @@ function renderQqBots() {
         "填写官方 Bot 密钥：" + bot.name, "保存并热重载后立即生效。",
         [{ env: bot.secret_env, label: "Client Secret", required: true,
            help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
+      // 遗留槽位没有 config.json 记录，删除 = 清掉 .env 里的三个变量
+      const slotNo = bot.name.replace("BOT", "");
+      tr.cells[5].appendChild(mkBtn("清除", async () => {
+        if (!(await uiConfirm(
+          "清除 .env 里 " + bot.name + " 的配置？\n将删除 QQ_OFFICIAL_" + bot.name +
+          "_APP_ID / _CLIENT_SECRET / _TARGET_OPENID 三个变量。",
+          { title: "清除遗留槽位", yesText: "清除", danger: true }))) return;
+        try {
+          const res = await api("/api/secrets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ remove: [
+              "QQ_OFFICIAL_BOT" + slotNo + "_APP_ID",
+              "QQ_OFFICIAL_BOT" + slotNo + "_CLIENT_SECRET",
+              "QQ_OFFICIAL_BOT" + slotNo + "_TARGET_OPENID",
+            ] }),
+          });
+          if (!res.ok) { msg("❌ " + (res.errors || []).join("；"), "err"); return; }
+          qqBotStatus = res.qq_bot_status || [];
+          renderQqBots();
+          msg("✅ 已清除 " + bot.name + " 的 .env 配置", "ok");
+        } catch (e) {
+          msg("清除失败：" + e.message, "err");
+        }
+      }, "danger"));
       tbody.appendChild(tr);
     }
   }

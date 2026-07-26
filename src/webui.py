@@ -296,18 +296,27 @@ def validate_secret_values(values: dict) -> list[str]:
     return errors
 
 
-def update_env_file(values: dict[str, str], path: Path | None = None) -> None:
-    """更新 .env：已有的键原地替换，新键追加到末尾；其余行（注释等）原样保留。"""
+def update_env_file(values: dict[str, str], path: Path | None = None,
+                    remove: list[str] | None = None) -> None:
+    """更新 .env：已有的键原地替换，新键追加到末尾；其余行（注释等）原样保留。
+    remove 里的键会被整行删除。"""
     path = path or ENV_PATH
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else [
         "# .env — 密钥和凭证（由网页管理端创建，参考 .env.example）",
     ]
+    drop = set(remove or [])
     remaining = dict(values)
-    for i, line in enumerate(lines):
+    out: list[str] = []
+    for line in lines:
         m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
-        if m and m.group(1) in remaining:
-            key = m.group(1)
-            lines[i] = f"{key}={_quote_env(remaining.pop(key))}"
+        key = m.group(1) if m else None
+        if key and key in drop:
+            continue                       # 整行删除
+        if key and key in remaining:
+            out.append(f"{key}={_quote_env(remaining.pop(key))}")
+        else:
+            out.append(line)
+    lines = out
     for key, val in remaining.items():
         lines.append(f"{key}={_quote_env(val)}")
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -1388,6 +1397,33 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_body_json()
         if body is None:
             return
+        remove = body.get("remove")
+        if isinstance(remove, list) and remove and not body.get("values"):
+            # 删除模式：仅接受白名单内的键（与写入同一套校验）
+            bad = [k for k in remove
+                   if not isinstance(k, str) or k in _FORBIDDEN_ENV_KEYS
+                   or not _SECRET_KEY_RE.match(k)]
+            if bad:
+                self._send_json({"ok": False, "errors": [f"不允许删除的变量: {bad}"]}, 400)
+                return
+            with _mutation_lock:
+                try:
+                    update_env_file({}, remove=remove)
+                except Exception as e:
+                    self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
+                    return
+                for key in remove:
+                    os.environ.pop(key, None)
+                reloaded = _trigger_reload()
+            try:
+                raw = _load_raw_config()
+                status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
+            except Exception:
+                status = {}
+            self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove),
+                             "env_status": _env_status(), **status})
+            return
+
         values = body.get("values")
         if not isinstance(values, dict):
             self._send_json({"ok": False, "errors": ["缺少 values 对象"]}, 400)

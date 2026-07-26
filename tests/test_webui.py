@@ -145,6 +145,12 @@ def main() -> None:
     parsed = dotenv_values(env_file)
     assert parsed["BAR_COOKIE"] == "session=a; b=c", "dotenv 应能解析写入的值"
 
+    # 删除键：整行移除，注释与其他键不受影响
+    webui.update_env_file({}, path=env_file, remove=["FOO_TOKEN", "BAR_COOKIE"])
+    text = env_file.read_text(encoding="utf-8")
+    assert "FOO_TOKEN" not in text and "BAR_COOKIE" not in text, "应删除指定键"
+    assert "# 注释保留" in text and "GEMINI_API_KEY" in text, "其余内容应保留"
+
     # 值含单引号 → 走双引号转义路径，dotenv 仍能还原
     webui.update_env_file({"BAZ_TOKEN": "it's a 'quoted' value"}, path=env_file)
     assert dotenv_values(env_file)["BAZ_TOKEN"] == "it's a 'quoted' value", "单引号值应经双引号转义往返"
@@ -289,6 +295,18 @@ def main() -> None:
         env_text = webui.ENV_PATH.read_text(encoding="utf-8")
         assert "HINATA_SHARED_COOKIE='session=abc; x=y'" in env_text, ".env 应写入带引号的值"
         assert data["cred_status"]["hinata_shared"]["ok"], "写入后凭证状态应变为已配置"
+
+        # POST /api/secrets 删除模式：白名单内可删，禁用键被拒
+        code, data = _http("POST", base + "/api/secrets",
+                           body={"remove": ["HINATA_SHARED_COOKIE"]})
+        assert code == 200 and data["ok"] and data["removed"] == ["HINATA_SHARED_COOKIE"], \
+            f"删除应成功: {data}"
+        assert "HINATA_SHARED_COOKIE" not in webui.ENV_PATH.read_text(encoding="utf-8")
+        assert "HINATA_SHARED_COOKIE" not in os.environ, "删除后应同步清进程环境变量"
+        code, data = _http("POST", base + "/api/secrets", body={"remove": ["WEB_ADMIN_TOKEN"]})
+        assert code == 400, "禁用键不应可删"
+        code, data = _http("POST", base + "/api/secrets", body={"remove": ["PATH"]})
+        assert code == 400, "白名单外的变量不应可删"
 
         # POST /api/secrets：非法键 / 未知账号 → 400 且不写文件
         code, data = _http("POST", base + "/api/secrets", body={"values": {"WEB_ADMIN_TOKEN": "x"}})
