@@ -115,6 +115,7 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config")
         assert code == 200 and data["ok"] and data["config"] == SAMPLE
         assert "nogizaka_main" in data["cred_status"]
+        assert [b["name"] for b in data["qq_bot_status"]] == ["BOT1", "BOT2"], "应报告两个官方 Bot 槽位状态"
 
         # PUT 合法配置：新增一个成员
         new_cfg = json.loads(json.dumps(SAMPLE))

@@ -194,6 +194,21 @@ def _cred_status(raw: dict) -> dict:
     return status
 
 
+def _qq_bot_status() -> list[dict]:
+    """QQ 官方 Bot 凭证状态（.env 的 QQ_OFFICIAL_BOT{1,2}_*，只报有/无）。"""
+    bots = []
+    for i in (1, 2):
+        entry = {
+            "name": f"BOT{i}",
+            "app_id": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_APP_ID")),
+            "client_secret": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET")),
+            "target_openid": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID")),
+        }
+        entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
+        bots.append(entry)
+    return bots
+
+
 # ================================================================
 # HTTP 服务
 # ================================================================
@@ -277,6 +292,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "config": raw,
                 "cred_status": _cred_status(raw),
+                "qq_bot_status": _qq_bot_status(),
                 "config_path": str(CONFIG_PATH),
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
             })
@@ -303,7 +319,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
             return
         reloaded = _trigger_reload()
-        self._send_json({"ok": True, "reloaded": reloaded, "cred_status": _cred_status(raw)})
+        self._send_json({
+            "ok": True, "reloaded": reloaded,
+            "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(),
+        })
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path.split("?", 1)[0] != "/api/reload":

@@ -117,6 +117,15 @@
       </div>
     </div>
     <div class="card">
+      <h2>QQ 官方 Bot（凭证在 .env，修改后需重启）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>槽位</th><th>App ID</th><th>Client Secret</th><th>目标 OpenID</th><th>状态</th></tr></thead>
+        <tbody id="qqBotRows"></tbody>
+      </table></div>
+      <p class="hint">在 <code>.env</code> 里配置 <code>QQ_OFFICIAL_BOT1_APP_ID</code> / <code>_CLIENT_SECRET</code> / <code>_TARGET_OPENID</code>（第二个 Bot 用 <code>BOT2</code> 前缀）。
+      目标 OpenID 用 <code>python tools/get_qq_openid.py</code> 获取。官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用槽位，所有成员都有推送目标。</p>
+    </div>
+    <div class="card">
       <h2>轮询节奏（秒 / JST 小时）</h2>
       <div class="grid">
         <label class="field">日间间隔（min / max 秒）
@@ -240,6 +249,7 @@
 // ── 状态 ─────────────────────────────────────────
 let config = null;        // 当前编辑中的配置对象（新格式）
 let credStatus = {};      // 账号凭证状态
+let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
 let dirty = false;
 let authToken = localStorage.getItem("webAdminToken") || "";
 
@@ -278,6 +288,7 @@ async function loadConfig() {
     const data = await api("/api/config");
     config = data.config;
     credStatus = data.cred_status || {};
+    qqBotStatus = data.qq_bot_status || [];
     setDirty(false);
     renderAll();
     msg("已载入 " + data.config_path, "ok");
@@ -335,6 +346,7 @@ function renderGeneral() {
       config.channels = config.channels || {};
       config.channels[key] = input.checked;
       setDirty(true);
+      if (key === "qq_official") renderQqBots();
     });
     const track = document.createElement("span"); track.className = "track";
     lab.append(input, track, document.createTextNode(label));
@@ -355,6 +367,29 @@ function renderGeneral() {
   $("webAdminOn").checked = wa.enabled !== false;
   $("webAdminHost").value = wa.host || "127.0.0.1";
   $("webAdminPort").value = wa.port || 8787;
+  renderQqBots();
+}
+
+function renderQqBots() {
+  const tbody = $("qqBotRows");
+  tbody.innerHTML = "";
+  const enabled = (config.channels || {}).qq_official;
+  for (const bot of qqBotStatus) {
+    const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
+    const badge = (v) => unused ? '<span class="cred" style="color:var(--muted)">—</span>'
+      : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
+    const tr = document.createElement("tr");
+    let state;
+    if (bot.ok) state = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
+    else if (!unused) state = '<span class="cred miss">✗ 不完整</span>';
+    else state = '<span class="cred" style="color:var(--muted)">未使用</span>';
+    tr.innerHTML = "<td><b>" + esc(bot.name) + "</b></td>" +
+      "<td>" + badge(bot.app_id) + "</td>" +
+      "<td>" + badge(bot.client_secret) + "</td>" +
+      "<td>" + badge(bot.target_openid) + "</td>" +
+      "<td>" + state + "</td>";
+    tbody.appendChild(tr);
+  }
 }
 
 // 把表单值收回 config（数字字段做 parse，空值回退默认）
