@@ -350,5 +350,11 @@ def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
             mid = str(m.get("id", ""))
             if not mid:
                 continue
-            (fail_ids if m.get("_download_failed") else ok_ids).add(mid)
+            # 需重试的两种情况：明确标记失败；或媒体消息既无本地文件也无失败标记
+            # （下载中途进程被杀会留下这种"幽灵"状态，不重试就永久缺媒体）
+            incomplete = (
+                m.get("_download_failed")
+                or (m.get("type") in _MEDIA_TYPES and m.get("file") and not m.get("_local_file"))
+            )
+            (fail_ids if incomplete else ok_ids).add(mid)
     return ok_ids, fail_ids

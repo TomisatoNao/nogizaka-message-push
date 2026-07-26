@@ -77,6 +77,16 @@ def main() -> None:
         month_json.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         ok_ids, fail_ids = archive.load_archived_ids("测试 成员")
         assert ok_ids == {"101"} and fail_ids == {"102"}, f"失败索引: {ok_ids} {fail_ids}"
+
+        # "幽灵"状态：媒体消息无 _local_file 也无失败标记（下载中途被杀）→ 应纳入重试
+        data = json.loads(month_json.read_text(encoding="utf-8"))
+        data.append({"id": 103, "type": "video", "file": "https://x/v.mp4",
+                     "updated_at": "2026-07-07T00:00:00Z"})
+        month_json.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        _, fail_ids = archive.load_archived_ids("测试 成员")
+        assert "103" in fail_ids, f"无本地文件的媒体消息应进重试集合: {fail_ids}"
+        data = [m for m in data if m.get("id") != 103]   # 还原，避免影响后续用例
+        month_json.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         print("✅ Test 2 通过\n")
 
         # ── Test 3: 查看器 API ───────────────────────────
