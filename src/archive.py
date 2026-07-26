@@ -312,6 +312,52 @@ def list_months(member_dir: str) -> list[dict]:
     return out
 
 
+def _jst_date(utc_str: str) -> str:
+    """UTC 时间串 → JST 日期串 YYYY-MM-DD（解析失败返回空串）。"""
+    try:
+        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return ""
+    from datetime import timedelta
+    return (dt + timedelta(hours=9)).strftime("%Y-%m-%d")
+
+
+# 按天计数缓存：{json_path: (mtime, {"YYYY-MM-DD": count})}
+_day_cache: dict[str, tuple[float, dict[str, int]]] = {}
+
+
+def day_counts(member_dir: str) -> dict[str, int]:
+    """全档按 JST 日期统计消息数（日历视图用），逐月 mtime 缓存。"""
+    out: dict[str, int] = {}
+    root = archive_root() / member_dir
+    if not root.is_dir():
+        return out
+    for json_path in root.glob("[0-9]*/[0-9]*/messages.json"):
+        try:
+            mtime = json_path.stat().st_mtime
+        except OSError:
+            continue
+        key = str(json_path)
+        cached = _day_cache.get(key)
+        if cached and cached[0] == mtime:
+            month_counts = cached[1]
+        else:
+            month_counts = {}
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    msgs = json.load(f)
+            except (OSError, ValueError):
+                msgs = []
+            for m in msgs:
+                d = _jst_date(m.get("published_at") or m.get("updated_at", ""))
+                if d:
+                    month_counts[d] = month_counts.get(d, 0) + 1
+            _day_cache[key] = (mtime, month_counts)
+        for d, n in month_counts.items():
+            out[d] = out.get(d, 0) + n
+    return out
+
+
 def search(member_dir: str, query: str, type_filter: set[str] | None = None,
            limit: int = 500) -> list[dict]:
     """跨月搜索：原文与译文都参与匹配，空格分词取 AND 语义。

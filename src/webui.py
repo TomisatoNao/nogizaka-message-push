@@ -691,12 +691,22 @@ class _Handler(BaseHTTPRequestHandler):
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
                 "download_failed": bool(m.get("_download_failed")),
+                "w": m.get("thumbnail_width"),
+                "h": m.get("thumbnail_height"),
             } for m in msgs[start:start + per_page]]
             self._send_json({
                 "ok": True, "member": member, "year": year, "month": month,
                 "total": total, "page": page,
                 "total_pages": max(1, -(-total // per_page)), "messages": slim,
             })
+            return
+
+        if sub == "calendar":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            self._send_json({"ok": True, "member": member, "days": _archive.day_counts(member)})
             return
 
         if sub == "search":
@@ -733,6 +743,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
                 "download_failed": bool(m.get("_download_failed")),
+                "w": m.get("thumbnail_width"),
+                "h": m.get("thumbnail_height"),
                 "year": m.get("_year"),
                 "month": m.get("_month"),
             } for m in hits[start:start + per_page]]

@@ -301,6 +301,27 @@ def main() -> None:
         assert len(archive.search(sdir, "ライブ", type_filter={"video"})) == 0, "类型过滤应生效"
         print("✅ Test 7.5 通过\n")
 
+        # ── Test 7.8: 日历按天计数（JST 日界）────────────
+        print("=== Test 7.8: 日历计数 ===")
+        c_member = dict(member, m_name="日历 用例")
+        for i, utc in enumerate([
+            "2026-07-05T10:00:00Z",   # JST 7/5 19:00
+            "2026-07-05T14:59:00Z",   # JST 7/5 23:59
+            "2026-07-05T15:00:00Z",   # JST 7/6 00:00 ← 跨日界
+            "2026-07-31T16:00:00Z",   # JST 8/1 ← 跨月界
+        ]):
+            asyncio.run(archive.archive_message(c_member, {
+                "id": 700 + i, "type": "text", "text": "x",
+                "published_at": utc, "updated_at": utc}))
+        cdir = archive.member_dir_name("日历 用例")
+        days = archive.day_counts(cdir)
+        assert days.get("2026-07-05") == 2, f"JST 7/5 应 2 条: {days}"
+        assert days.get("2026-07-06") == 1, f"UTC 15:00 应归入 JST 次日: {days}"
+        assert days.get("2026-08-01") == 1, f"月末跨界应归入 JST 8/1: {days}"
+        days2 = archive.day_counts(cdir)   # 二次调用走缓存，结果一致
+        assert days2 == days
+        print("✅ Test 7.8 通过\n")
+
         # ── Test 8: 查看器 API 边界 ──────────────────────
         print("=== Test 8: API 边界 ===")
         server = webui.start_webui(host="127.0.0.1", port=0)
@@ -345,6 +366,14 @@ def main() -> None:
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=")
             assert code == 400, "缺关键词应 400"
             code, body, _ = _http("GET", base + "/api/archive/search?member=ghost&q=x")
+            assert code == 404
+
+            # 日历接口
+            c_enc = "%E6%97%A5%E5%8E%86_%E7%94%A8%E4%BE%8B"
+            code, body, _ = _http("GET", base + f"/api/archive/calendar?member={c_enc}")
+            j = json.loads(body)
+            assert code == 200 and j["days"]["2026-07-05"] == 2, f"日历接口: {j}"
+            code, body, _ = _http("GET", base + "/api/archive/calendar?member=ghost")
             assert code == 404
         finally:
             server.shutdown()
