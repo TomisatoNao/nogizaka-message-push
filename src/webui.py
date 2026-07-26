@@ -44,6 +44,9 @@ _on_restart_cb = None
 # 立即巡查回调（由主程序注入；唤醒主循环跳过等待。独立模式下为 None）
 _on_poll_cb = None
 
+# 测试推送回调（由主程序注入；签名 (channel, target, text) -> (ok, err)）
+_on_test_push_cb = None
+
 # 串行化所有写操作（config.json / .env 都是 read-modify-write，
 # ThreadingHTTPServer 的并发请求不加锁会互相丢更新）
 _mutation_lock = threading.Lock()
@@ -517,6 +520,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
                 "can_restart": _on_restart_cb is not None,
                 "can_poll": _on_poll_cb is not None,
+                "can_test_push": _on_test_push_cb is not None,
             })
             return
 
@@ -685,6 +689,36 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/secrets":
             self._handle_secrets()
             return
+        if path == "/api/test_push":
+            if not self._check_auth():
+                return
+            if _on_test_push_cb is None:
+                self._send_json({"ok": False, "errors": ["独立模式下无法测试推送（主程序未运行在本进程）"]}, 400)
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            channel = body.get("channel", "tg")
+            target = str(body.get("target", "")).strip()
+            text = str(body.get("text", "")).strip() or (
+                f"🧪 坂道监控 · 测试推送\n发送时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                "（来自网页管理端，收到即代表该通道配置正确）"
+            )
+            if channel not in ("tg", "napcat"):
+                self._send_json({"ok": False, "errors": [f"不支持的通道: {channel!r}"]}, 400)
+                return
+            if not target:
+                self._send_json({"ok": False, "errors": ["缺少推送目标 target"]}, 400)
+                return
+            if channel == "napcat" and not target.lstrip("-").isdigit():
+                self._send_json({"ok": False, "errors": ["NapCat 目标必须是 QQ 群号"]}, 400)
+                return
+            ok, err = _on_test_push_cb(channel, target, text[:1000])
+            if ok:
+                self._send_json({"ok": True, "channel": channel, "target": target})
+            else:
+                self._send_json({"ok": False, "errors": [err or "发送失败"]}, 502)
+            return
         if path == "/api/poll":
             if not self._check_auth():
                 return
@@ -804,19 +838,21 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def start_webui(host: str | None = None, port: int | None = None,
-                on_reload=None, on_restart=None, on_poll=None):
+                on_reload=None, on_restart=None, on_poll=None, on_test_push=None):
     """启动网页管理端（后台守护线程）。
 
     参数缺省时从 config.config 读取 WEB_ADMIN_HOST / WEB_ADMIN_PORT。
-    on_restart: 主程序注入的重启回调（触发优雅停机 + 进程自替换）。
-    on_poll:    主程序注入的立即巡查回调（唤醒主循环）。
-    二者不传则网页上不显示对应按钮（独立模式）。
+    on_restart:   主程序注入的重启回调（触发优雅停机 + 进程自替换）。
+    on_poll:      主程序注入的立即巡查回调（唤醒主循环）。
+    on_test_push: 主程序注入的测试推送回调（(channel, target, text) -> (ok, err)）。
+    不传则网页上不显示对应按钮（独立模式）。
     返回 ThreadingHTTPServer 实例（用于 shutdown() 清理），失败时返回 None。
     """
-    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _enforce_host_check
+    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _enforce_host_check
     _on_reload_cb = on_reload
     _on_restart_cb = on_restart
     _on_poll_cb = on_poll
+    _on_test_push_cb = on_test_push
 
     if host is None or port is None:
         import config.config as cfg

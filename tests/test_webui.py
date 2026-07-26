@@ -293,6 +293,24 @@ def main() -> None:
         assert code == 200 and data["ok"] and poll_calls == [1], f"应触发巡查回调: {data}"
         webui._on_poll_cb = None
 
+        # POST /api/test_push：独立模式 → 400；注入回调后 → 校验参数并转发
+        code, data = _http("POST", base + "/api/test_push", body={"channel": "tg", "target": "-100"})
+        assert code == 400, "无测试推送回调时应 400"
+        push_calls = []
+        webui._on_test_push_cb = lambda ch, tgt, txt: (push_calls.append((ch, tgt)), (True, ""))[1]
+        code, data = _http("POST", base + "/api/test_push", body={"channel": "tg", "target": "-100123"})
+        assert code == 200 and data["ok"] and push_calls == [("tg", "-100123")], f"应转发到回调: {data}"
+        code, data = _http("POST", base + "/api/test_push", body={"channel": "email", "target": "x"})
+        assert code == 400, "非法通道应 400"
+        code, data = _http("POST", base + "/api/test_push", body={"channel": "tg", "target": ""})
+        assert code == 400, "缺目标应 400"
+        code, data = _http("POST", base + "/api/test_push", body={"channel": "napcat", "target": "abc"})
+        assert code == 400, "NapCat 非数字群号应 400"
+        webui._on_test_push_cb = lambda ch, tgt, txt: (False, "模拟失败")
+        code, data = _http("POST", base + "/api/test_push", body={"channel": "tg", "target": "-100123"})
+        assert code == 502 and "模拟失败" in data["errors"][0], f"回调失败应 502: {data}"
+        webui._on_test_push_cb = None
+
         # POST /api/restart：独立模式（无回调）→ 400；注入回调后 → 触发重启
         code, data = _http("POST", base + "/api/restart")
         assert code == 400 and not data["ok"], "无重启回调时应 400"
@@ -349,6 +367,7 @@ def main() -> None:
         server.server_close()
         webui._on_restart_cb = None
         webui._on_poll_cb = None
+        webui._on_test_push_cb = None
         webui.CONFIG_PATH = orig_config_path
         webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger

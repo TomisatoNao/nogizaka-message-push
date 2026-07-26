@@ -388,9 +388,29 @@ async def main() -> None:
     def _request_poll() -> None:
         loop.call_soon_threadsafe(poll_event.set)
 
+    def _request_test_push(channel: str, target: str, text: str) -> tuple[bool, str]:
+        """网页「测试推送」回调（HTTP 线程调用）：把发送协程调度到主事件循环执行。"""
+        try:
+            if channel == "tg":
+                if not cfg.ENABLE_TG_BOT:
+                    return False, "TG 通道未启用（channels.tg）"
+                coro = tgbot.send_alert(target, text)
+            elif channel == "napcat":
+                if not cfg.ENABLE_NAPCAT_QQ:
+                    return False, "NapCat 通道未启用（channels.napcat）"
+                chain = [{"type": "text", "data": {"text": text}}]
+                coro = napcat.send_qq_message(int(target), chain)
+            else:
+                return False, f"不支持的通道: {channel}"
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+            ok = fut.result(timeout=45)
+            return (True, "") if ok else (False, "发送失败（详见日志）")
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+
     webui_server = (
         start_webui(on_reload=_on_config_reload, on_restart=_request_restart,
-                    on_poll=_request_poll)
+                    on_poll=_request_poll, on_test_push=_request_test_push)
         if cfg.WEB_ADMIN_ENABLED else None
     )
 
