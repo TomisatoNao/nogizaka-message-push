@@ -63,8 +63,11 @@
   td input, td select { min-width: 70px; }
   .table-wrap { overflow-x: auto; }
   button.btn { border: 1px solid var(--border); background: var(--card); color: var(--text);
-    padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+    padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px;
+    transition: transform .06s, border-color .12s, opacity .12s; }
   button.btn:hover { border-color: var(--accent); }
+  button.btn:active { transform: translateY(1px) scale(.97); }
+  button.btn:disabled { opacity: .55; cursor: default; transform: none; }
   button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.btn.danger { color: var(--err); }
   button.btn.danger:hover { background: var(--danger-soft); border-color: var(--err); }
@@ -152,6 +155,7 @@
         <span id="stNext" style="color:var(--muted)">—</span>
         <button class="btn" id="btnPollNow" hidden>⏩ 立即巡查</button>
         <button class="btn" id="btnTestPush" hidden>📨 测试推送</button>
+        <span class="hint" id="pollFeedback" style="margin:0"></span>
       </div>
       <p class="hint" id="stHint"></p>
     </div>
@@ -430,10 +434,18 @@ let authToken = localStorage.getItem("webAdminToken") || "";
 const $ = (id) => document.getElementById(id);
 const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
 
+let baseline = "";   // 最近一次加载/保存时的配置快照（JSON 串）
+
 function setDirty(v) {
   dirty = v;
   $("dirtyDot").style.display = v ? "inline" : "none";
   document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
+}
+
+// 基于内容对比的脏标记：加了又删、改了又改回去，会自动恢复"无修改"状态
+function markDirty() {
+  collectGeneral();
+  setDirty(JSON.stringify(config) !== baseline);
 }
 function msg(text, cls) { const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); }
 
@@ -465,6 +477,7 @@ async function loadConfig() {
   try {
     const data = await api("/api/config");
     config = data.config;
+    baseline = JSON.stringify(config);
     credStatus = data.cred_status || {};
     qqBotStatus = data.qq_bot_status || [];
     envStatus = data.env_status || {};
@@ -500,6 +513,7 @@ async function saveConfig() {
       return;
     }
     credStatus = data.cred_status || credStatus;
+    baseline = JSON.stringify(config);
     setDirty(false);
     renderAccounts(); renderMembers(); refreshRawJson();
     msg(data.reloaded ? "✅ 已保存并热重载" : "⚠️ 已保存，但热重载失败（详见主程序日志）",
@@ -522,7 +536,7 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
 
 // ── 状态页 ───────────────────────────────────────
 let statusTimer = null, countdownTimer = null;
-let stNextCycle = null, stClockDelta = 0;
+let stNextCycle = null, stClockDelta = 0, stCycleCount = 0;
 
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
@@ -542,6 +556,7 @@ async function fetchStatus() {
   if (!data.ok) return;
   stClockDelta = data.now_epoch - Date.now() / 1000;
   stNextCycle = data.next_cycle;
+  stCycleCount = data.cycle_count;
   $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
   $("stHint").textContent = data.embedded ? "" :
     "独立模式：主程序未在本进程运行，以下仅为可见信息；Token 剩余时间不可用。";
@@ -687,13 +702,39 @@ $("testPushSend").addEventListener("click", async () => {
 });
 
 $("btnPollNow").addEventListener("click", async () => {
+  const btn = $("btnPollNow");
+  const fb = $("pollFeedback");
+  const startCycle = stCycleCount;
+  btn.disabled = true;
+  btn.textContent = "⏳ 巡查中…";
+  fb.textContent = "已触发，等待本轮完成…";
+  fb.style.color = "";
   try {
     const data = await api("/api/poll", { method: "POST" });
-    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
-    msg("⏩ 已触发巡查，稍候查看日志 / 状态", "ok");
-    setTimeout(fetchStatus, 2000);
+    if (!data.ok) throw new Error((data.errors || []).join("；"));
+    // 盯着轮次计数，直到本轮巡查真正跑完（最多等 120s）
+    const t0 = Date.now();
+    while (Date.now() - t0 < 120000) {
+      await new Promise((r) => setTimeout(r, 2000));
+      let st;
+      try { st = await api("/api/status"); } catch (e) { continue; }
+      if (st.ok && st.cycle_count > startCycle) {
+        await fetchStatus();
+        fb.textContent = "✅ 第 " + st.cycle_count + " 轮巡查完成（" +
+          new Date().toLocaleTimeString() + "）";
+        fb.style.color = "var(--ok)";
+        setTimeout(() => { if (fb.style.color) { fb.textContent = ""; fb.style.color = ""; } }, 8000);
+        return;
+      }
+    }
+    fb.textContent = "⚠️ 等待超时，请到「日志」页查看进展";
+    fb.style.color = "var(--warn)";
   } catch (e) {
-    msg("触发失败：" + e.message, "err");
+    fb.textContent = "❌ 触发失败：" + e.message;
+    fb.style.color = "var(--err)";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⏩ 立即巡查";
   }
 });
 
@@ -711,7 +752,7 @@ function renderGeneral() {
     input.addEventListener("change", () => {
       config.channels = config.channels || {};
       config.channels[key] = input.checked;
-      setDirty(true);
+      markDirty();
       if (key === "qq_official") renderQqBots();
     });
     const track = document.createElement("span"); track.className = "track";
@@ -789,7 +830,7 @@ function renderQqBots() {
       tdOps.appendChild(mkBtn("删除", () => {
         if (!confirm("删除官方 Bot " + (bot.name || "#" + idx) + "？")) return;
         config.qq_official_bots.splice(idx, 1);
-        setDirty(true); renderQqBots();
+        markDirty(); renderQqBots();
       }, "danger"));
 
       tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
@@ -829,7 +870,7 @@ $("btnAddQqBot").addEventListener("click", () => {
       "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？")) return;
   }
   config.qq_official_bots.push({ name: "qq_official_bot" + (config.qq_official_bots.length + 1) });
-  setDirty(true); renderQqBots();
+  markDirty(); renderQqBots();
 });
 
 // 把表单值收回 config（数字字段做 parse，空值回退默认）
@@ -856,7 +897,7 @@ function collectGeneral() {
   };
 }
 document.querySelectorAll("#tab-general input").forEach(() => {});
-$("tab-general").addEventListener("input", () => setDirty(true));
+$("tab-general").addEventListener("input", () => markDirty());
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
@@ -1050,7 +1091,7 @@ function renderAccounts() {
         if (!confirm("删除账号 " + id + "？")) return;
       }
       delete config.accounts[id];
-      setDirty(true); renderAccounts(); renderMembers();
+      markDirty(); renderAccounts(); renderMembers();
     }, "danger");
     tdOps.append(btnCred, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
     tr.appendChild(tdOps);
@@ -1110,7 +1151,7 @@ $("accSave").addEventListener("click", () => {
   config.accounts = config.accounts || {};
   config.accounts[id] = acc;
   $("accountDialog").close();
-  setDirty(true); renderAccounts(); renderMembers();
+  markDirty(); renderAccounts(); renderMembers();
 });
 
 // ── 监控成员 ─────────────────────────────────────
@@ -1140,7 +1181,7 @@ function renderMembers() {
       sel.appendChild(opt);
     }
     sel.value = m.account || accountIds[0] || "";
-    sel.addEventListener("change", () => { m.account = sel.value; setDirty(true); });
+    sel.addEventListener("change", () => { m.account = sel.value; markDirty(); });
     tdAcc.appendChild(sel);
     const tdGroups = document.createElement("td");
     tdGroups.appendChild(mkInput((m.groups || []).join(", "), (v, el) => {
@@ -1162,7 +1203,7 @@ function renderMembers() {
     tdOps.appendChild(mkBtn("删除", () => {
       if (!confirm("删除成员 " + (m.name || m.id) + "？")) return;
       config.monitor.splice(idx, 1);
-      setDirty(true); renderMembers();
+      markDirty(); renderMembers();
     }, "danger"));
 
     tr.append(tdId, tdName, tdAcc, tdGroups, tdTg, tdOps);
@@ -1214,7 +1255,7 @@ $("btnFetchMembers").addEventListener("click", async () => {
     const btn = mkBtn("添加", () => {
       config.monitor = config.monitor || [];
       config.monitor.push({ id: m.id, name: m.name, account: account, groups: [] });
-      setDirty(true); renderMembers();
+      markDirty(); renderMembers();
       btn.textContent = "✓ 已添加"; btn.disabled = true;
     });
     if (already().has(account + ":" + m.id)) { btn.textContent = "✓ 已添加"; btn.disabled = true; }
@@ -1227,7 +1268,7 @@ $("btnAddMember").addEventListener("click", () => {
   config.monitor = config.monitor || [];
   const firstAccount = Object.keys(config.accounts || {})[0] || "";
   config.monitor.push({ id: "", name: "", account: firstAccount, groups: [] });
-  setDirty(true); renderMembers();
+  markDirty(); renderMembers();
 });
 
 // ── 日志 ─────────────────────────────────────────
@@ -1398,7 +1439,7 @@ $("btnApplyJson").addEventListener("click", () => {
     const obj = JSON.parse($("rawJson").value);
     if (typeof obj !== "object" || obj === null || Array.isArray(obj)) throw new Error("必须是 JSON 对象");
     config = obj;
-    setDirty(true); renderAll();
+    markDirty(); renderAll();
     msg("已应用到表单（尚未保存）", "ok");
   } catch (e) {
     msg("JSON 解析失败：" + e.message, "err");
@@ -1420,7 +1461,7 @@ function mkInput(value, onChange, placeholder, style) {
   input.value = value;
   if (placeholder) input.placeholder = placeholder;
   if (style) input.style.cssText = style;
-  input.addEventListener("input", () => { onChange(input.value, input); setDirty(true); });
+  input.addEventListener("input", () => { onChange(input.value, input); markDirty(); });
   return input;
 }
 
