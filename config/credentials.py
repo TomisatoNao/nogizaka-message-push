@@ -395,14 +395,48 @@ def load_all_accounts() -> None:
     seen_dirty = False
 
     for acc_id, acc_cfg in cfg.ACCOUNTS.items():
-        if acc_id in ACCOUNT_CREDS:
-            continue
         is_mobile = acc_cfg.get("auth_method") == "mobile"
         fingerprint = _env_fingerprint(acc_cfg)
         path = os.path.join(cfg.CRED_DIR, f"{acc_id}.json")
+
+        # ── 认证方式切换检测 ──────────────────────────
+        # 账号在 config.json 里从 mobile 改成 web（或反之）后，内存/磁盘里
+        # 旧格式的凭证结构不再匹配（web 需要 cookies，mobile 需要 refresh_token），
+        # 继续沿用会在抓取时 KeyError。这里检测到不匹配就丢弃旧凭证，
+        # 走下方初始化分支用 .env 的新凭证重建。
+        if acc_id in ACCOUNT_CREDS:
+            cred_is_mobile = "refresh_token" in ACCOUNT_CREDS[acc_id]
+            if cred_is_mobile == is_mobile:
+                continue
+            log_all(
+                f"🔁 {acc_id} 认证方式已切换为 {'mobile' if is_mobile else 'web'}，"
+                f"丢弃旧凭证并用 .env 重建",
+            )
+            del ACCOUNT_CREDS[acc_id]
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            disk_is_mobile = "refresh_token" in data
+            if disk_is_mobile != is_mobile:
+                # 磁盘凭证也是切换前的旧格式（如切换后首次重启）：作废重建
+                log_all(
+                    f"🔁 {acc_id} 磁盘凭证为旧认证方式（{'mobile' if disk_is_mobile else 'web'}）"
+                    f"，作废并用 .env 重建",
+                )
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                data = None
+        else:
+            data = None
+
+        if data is not None:
             # 自动识别格式：含 refresh_token → 移动端
             if "refresh_token" in data:
                 ACCOUNT_CREDS[acc_id] = {
