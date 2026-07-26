@@ -252,15 +252,41 @@ data/archive/{成员名}/{YYYY}/{MM}/
 
 **每日运行摘要**（`config.json` 的 `daily_summary`，默认每天 JST 23:00）：通过已启用的推送通道发一条当日报告——各成员今日消息数、巡查轮次、Token 状态、待处理错误、归档占用与磁盘剩余（低于 10 GB 标红）。它同时是**反向监控（死人开关）**：系统挂了不会有报错通知，但"今天没收到摘要"本身就是告警。发送失败会每 30 分钟补发，最多 3 次——摘要自己静默失败等于监控失灵。
 
-**开机自启 / 崩溃自拉起**（Windows）：
+### 长期运行（开机自启 + 崩溃自拉起）
+
+系统本身已有内层容错——单个成员抓取失败不影响其他成员、任何未预料的异常都不会终止主循环、Token 失效自动续期并告警。下面配置的是外层：进程整个挂掉（断电、OOM、误关）时由系统拉起来。配合每日摘要（死人开关），两层都失效时你会因为"没收到摘要"而察觉。
+
+**Windows —— 计划任务**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1            # 安装
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status    # 状态
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall # 卸载
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1         # 安装（交互询问是否立即启动）
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Start  # 安装并立即启动
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall
 ```
 
-注册一个计划任务：登录时自动启动 `python main.py`（后台无窗口运行），进程崩溃后 1 分钟自动重启（最多连续 10 次）。日志照常写 `logs/`，管理端照常在 http://127.0.0.1:8787/ 。
+登录时自动启动、后台无窗口运行、崩溃后 60 秒自动拉起（守护逻辑在 `tools/run_service.ps1`，日志写 `logs/service.log`）。
+
+拉起逻辑刻意没用 Task Scheduler 自带的"失败后重启"——那个策略只在任务整体返回失败时才触发，主程序被杀而包装脚本正常退出的情况它捕捉不到（实测确认）。守护脚本按退出码判断：**0 视为主动停止不再拉起，非 0 视为崩溃则重启**；启动即崩溃（如配置错误）会拉长退避间隔，避免疯狂重启。网页端的「⟳ 重启主程序」用进程自替换，PID 不变，守护循环不会重复拉起。
+
+权限说明：脚本优先按 S4U 注册（未登录也能运行），普通权限下会自动降级为 Interactive（登录后运行）并提示——想要前者就用管理员 PowerShell 执行。
+⚠️ 安装前先停掉手动启动的实例，否则两个进程会抢 8787 端口。
+⚠️ 想彻底停止服务：`Stop-ScheduledTask -TaskName NogizakaMessagePush`（只杀 python 进程的话守护循环会把它拉回来）。
+⚠️ `install_autostart.ps1` 必须保持 **UTF-8 with BOM** 编码——PowerShell 5.1 用系统 ANSI 代码页读无 BOM 的 `.ps1`，中文会变乱码导致脚本无法解析（单元测试会守住这一点）。
+
+**Linux —— systemd**
+
+```bash
+bash tools/install_systemd.sh              # 用户级服务（推荐，无需 root）
+bash tools/install_systemd.sh --system     # 系统级服务（需 sudo）
+bash tools/install_systemd.sh --status     # 状态
+bash tools/install_systemd.sh --logs       # 跟踪日志（journald）
+bash tools/install_systemd.sh --uninstall  # 卸载
+```
+
+开机自启、异常退出 60 秒后自动重启（无次数上限）。停止时发 `SIGTERM`，主程序走优雅停机（关闭连接池、等待归档任务收尾），比 Windows 计划任务的强杀更干净。脚本会自动识别 `.venv/bin/python`，并为用户级服务开启 linger（否则登出即停）。日志同时进 journald 和仓库的 `logs/`。
+
+**容器**：镜像里跑 `python main.py` 即可，注意三件事——`data/` 和 `logs/` 挂成卷（归档和凭证在里面）、`.env` 用 secrets 注入、`web_admin.host` 设为 `0.0.0.0` 并映射端口（此时**务必启用账号系统或 `WEB_ADMIN_TOKEN`**）。重启策略交给编排器（`restart: unless-stopped`），不要再叠加上面的脚本。
 
 ### 常见操作
 
@@ -366,6 +392,11 @@ nogizaka-message-push/
 │       └── tgbot.py         # Telegram Bot 推送
 ├── tools/
 │   ├── list_members.py      # 列出账号可监控的成员及 m_id
+│   ├── manage_users.py      # 网页端账号管理（增删改密 / 角色）
+│   ├── backfill_archive.py  # 历史消息回填归档（断点续传 + 自适应限速）
+│   ├── install_autostart.ps1 # Windows：注册计划任务（开机自启）
+│   ├── run_service.ps1      # Windows：守护循环（崩溃自拉起）
+│   ├── install_systemd.sh   # Linux：systemd 服务（开机自启 + 自拉起）
 │   ├── get_qq_openid.py     # QQ Bot WebSocket 获取用户 OpenID
 │   └── test_models.py       # Gemini 模型序列连通性 + 响应结构诊断
 ├── tests/
