@@ -35,3 +35,6 @@ jobs:
 
       - name: Unit assertions
         run: python tests/test_units.py
+
+      - name: Web admin test
+        run: python tests/test_webui.py

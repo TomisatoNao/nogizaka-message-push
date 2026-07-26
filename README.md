@@ -18,6 +18,7 @@
 - **自定义 API 域名** — 支持毕业生成员独立 API 域名（如 yodel），账号级配置 app_tag / api_base / web_origin
 - **反反爬虫** — Header 仿真（Web Chrome / 移动 iOS）、随机间隔抖动、指数退避重试、成员随机轮询顺序
 - **配置热重载（可选）** — 已提供 `config/watcher.py`，安装并接入 watchdog 后可自动重载；当前默认入口以启动时加载为主
+- **网页管理端** — 浏览器里编辑配置：通道开关、轮询节奏、账号池、监控成员增删改，保存即校验 + 热重载（详见下方「网页管理端」）
 - **启动健康检查** — 启动时校验 NapCat/TG Bot 连接、QQ Bot access_token、账号凭证状态
 - **运行时状态摘要** — 每隔 N 轮自动输出通道成功率、Token 剩余时间、成员拉取/推送状态、分级错误报告，终端一眼判断系统健康度
 
@@ -160,6 +161,32 @@ python main.py
 
 通道计数是**自上次摘要以来**的发送成功/总数（每输出一次摘要就清零），一轮里推送多条消息会累加多次。
 
+### 网页管理端
+
+主程序启动后（`config.json` 中 `web_admin.enabled` 为 `true` 时），浏览器打开：
+
+```
+http://127.0.0.1:8787/
+```
+
+四个标签页覆盖日常配置操作：
+
+| 标签页 | 能做什么 |
+|---|---|
+| 基本设置 | 推送通道开关、NapCat API 地址、轮询/休眠节奏、翻译参数 |
+| 账号池 | 增删改账号（团体 / 登录方式 / yodel 自定义域名），并显示 `.env` 凭证是否已配置 |
+| 监控成员 | 表格内直接增删改成员（ID / 名字 / 账号 / QQ 群 / TG chat_id） |
+| 高级（JSON） | 整份配置的 JSON 编辑（`gemini_models` 等少用项在这里改） |
+
+点「保存并热重载」后，服务端按 `config.schema.json` 校验（外加账号引用完整性检查），校验通过才原子写回 `config.json` 并立即热重载 —— 大多数修改**无需重启**。
+
+注意事项：
+
+- **新增账号仍需重启**：凭证要先填进 `.env`，而 `.env` 只在启动时读取一次（页面上会有提示）。
+- **保存会重新生成 config.json**：使用标准分区注释，手写的自定义注释会丢失。
+- **安全**：默认只监听 `127.0.0.1`。如需局域网访问，先在 `.env` 设置 `WEB_ADMIN_TOKEN`（页面首次访问时会提示输入），再把 `web_admin.host` 改成 `0.0.0.0`。
+- 主程序没跑时也可以单独起管理端：`python -m src.webui`。
+
 ### 常见操作
 
 **加一个成员：** 在 `config.json` 的 `monitor` 数组末尾添加一项：
@@ -248,6 +275,9 @@ nogizaka-message-push/
 │   ├── notifier.py          # 多通道推送路由 + 系统警报
 │   ├── logger.py            # 日志系统（彩色终端 + 滚动文件）
 │   ├── utils.py             # 公共工具：JST 时间转换、时段判断、速率限制器
+│   ├── webui.py             # 网页管理端：编辑 config.json + 热重载（stdlib http.server）
+│   ├── webui_static/
+│   │   └── index.html       # 管理页面（零依赖单页应用）
 │   └── platforms/
 │       ├── napcat.py        # NapCat/OneBot HTTP 推送
 │       ├── qq_official.py   # QQ 官方 Bot 单聊推送
@@ -258,7 +288,8 @@ nogizaka-message-push/
 │   └── test_models.py       # Gemini 模型序列连通性 + 响应结构诊断
 ├── tests/
 │   ├── test_config_load.py  # config.json → config.py 加载校验
-│   └── test_units.py        # 时间解析 / 日志截断 / HTML 转义 / 消息链提取
+│   ├── test_units.py        # 时间解析 / 日志截断 / HTML 转义 / 消息链提取
+│   └── test_webui.py        # 网页管理端：序列化往返 / 校验 / HTTP 端点
 ├── data/                    # 运行时数据（git-ignored）
 │   ├── web_credentials/     # 持久化 Token + Cookie / refresh_token
 │   ├── sent_ids/            # 已发送消息 ID 去重记录

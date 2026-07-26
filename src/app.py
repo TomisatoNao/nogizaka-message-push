@@ -26,6 +26,7 @@ from config.credentials import (
 )
 from config.watcher import start_watcher
 from src.logger import init_loggers, log_all
+from src.webui import start_webui
 from src.utils import in_hour_range
 
 
@@ -354,6 +355,9 @@ async def main() -> None:
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
     observer = start_watcher(config_path, on_reload=_on_config_reload)
 
+    # 7. 可选启动网页管理端（config.json 的 web_admin.enabled 控制）
+    webui_server = start_webui(on_reload=_on_config_reload) if cfg.WEB_ADMIN_ENABLED else None
+
     stop_event = asyncio.Event()
     _install_stop_handlers(stop_event)
 
@@ -373,6 +377,8 @@ async def main() -> None:
     except KeyboardInterrupt:
         print("\n🛑 安全退出中...")
     finally:
+        if webui_server is not None:
+            webui_server.shutdown()
         if observer is not None:
             observer.stop()
             observer.join()

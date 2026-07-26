@@ -81,6 +81,10 @@ _DEFAULTS: dict = {
     "health_token_warn_seconds": 600,
     # 告警
     "alert_cooldown_seconds":   3600,
+    # 网页管理端（config.json 的 web_admin 可覆盖；token 在 .env 的 WEB_ADMIN_TOKEN）
+    "web_admin_enabled":        False,
+    "web_admin_host":           "127.0.0.1",
+    "web_admin_port":           8787,
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
     "enable_napcat_qq":         True,
@@ -136,6 +140,15 @@ def _normalize_config(raw: dict) -> dict:
 
         if "alert_cooldown" in cfg:
             cfg["alert_cooldown_seconds"] = cfg.pop("alert_cooldown")
+
+        if "web_admin" in cfg:
+            wa = cfg.pop("web_admin")
+            if "enabled" in wa:
+                cfg["web_admin_enabled"] = wa["enabled"]
+            if "host" in wa:
+                cfg["web_admin_host"] = wa["host"]
+            if "port" in wa:
+                cfg["web_admin_port"] = wa["port"]
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
@@ -262,6 +275,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "night_interval":               "NIGHT_INTERVAL",
     "backtrack_hours":              "BACKTRACK_HOURS",
     "alert_cooldown_seconds":       "ALERT_COOLDOWN_SECONDS",
+    "web_admin_enabled":            "WEB_ADMIN_ENABLED",
+    "web_admin_host":               "WEB_ADMIN_HOST",
+    "web_admin_port":               "WEB_ADMIN_PORT",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",

@@ -13,6 +13,14 @@
       }
     },
     "napcat_api": { "type": "string" },
+    "web_admin": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "host":    { "type": "string" },
+        "port":    { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
     "accounts": {
       "type": "object",
       "additionalProperties": {
