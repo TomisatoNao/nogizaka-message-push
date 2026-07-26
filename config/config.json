@@ -15,6 +15,13 @@
     "port": 8787
   },
 
+  // ── 消息归档 ──
+  "archive": {
+    "enabled": true,
+    "dir": "data/archive",
+    "media": true
+  },
+
   // ── 账号池 ──
   "accounts": {
     "nogizaka_main": {"group": "nogizaka46"}

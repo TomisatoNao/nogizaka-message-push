@@ -85,6 +85,10 @@ _DEFAULTS: dict = {
     "web_admin_enabled":        False,
     "web_admin_host":           "127.0.0.1",
     "web_admin_port":           8787,
+    # 消息归档（config.json 的 archive 可覆盖）
+    "archive_enabled":          False,
+    "archive_dir":              "data/archive",
+    "archive_media":            True,
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
     "enable_napcat_qq":         True,
@@ -149,6 +153,15 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["web_admin_host"] = wa["host"]
             if "port" in wa:
                 cfg["web_admin_port"] = wa["port"]
+
+        if "archive" in cfg:
+            ar = cfg.pop("archive")
+            if "enabled" in ar:
+                cfg["archive_enabled"] = ar["enabled"]
+            if "dir" in ar:
+                cfg["archive_dir"] = ar["dir"]
+            if "media" in ar:
+                cfg["archive_media"] = ar["media"]
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
@@ -257,7 +270,7 @@ def _build_paths(cfg: dict) -> dict:
     """将 JSON 中的相对路径字符串拼接为项目根目录下的绝对路径。"""
     _path_keys = {
         "cred_dir", "time_record_dir", "sent_ids_dir",
-        "error_log_file", "response_log_file",
+        "error_log_file", "response_log_file", "archive_dir",
     }
     for key in _path_keys:
         if key in cfg:
@@ -296,6 +309,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "web_admin_enabled":            "WEB_ADMIN_ENABLED",
     "web_admin_host":               "WEB_ADMIN_HOST",
     "web_admin_port":               "WEB_ADMIN_PORT",
+    "archive_enabled":              "ARCHIVE_ENABLED",
+    "archive_dir":                  "ARCHIVE_DIR",
+    "archive_media":                "ARCHIVE_MEDIA",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",

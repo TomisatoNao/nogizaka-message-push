@@ -38,3 +38,6 @@ jobs:
 
       - name: Web admin test
         run: python tests/test_webui.py
+
+      - name: Archive test
+        run: python tests/test_archive.py

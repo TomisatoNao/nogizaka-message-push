@@ -33,6 +33,14 @@
         "port":    { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },
+    "archive": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "dir":     { "type": "string" },
+        "media":   { "type": "boolean", "default": true }
+      }
+    },
     "accounts": {
       "type": "object",
       "additionalProperties": {

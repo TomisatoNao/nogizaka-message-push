@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 import config.config as cfg
+from src import archive
 from src.logger import error_logger, format_httpx_error, log_all, log_response
 from config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
@@ -86,6 +87,9 @@ async def _handle_message(member: dict, msg: dict,
             translated = raw
             if error_logger:
                 error_logger.info(f"🌐 翻译结果 ({m_name}): {translated[:150]}")
+
+    # 归档（后台执行，不阻塞推送；开关 archive.enabled）
+    archive.schedule_archive(member, msg, translated)
 
     # 推送 QQ
     chain = build_message_chain(m_name, updated, msg, translated)

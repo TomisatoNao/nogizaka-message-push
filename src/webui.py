@@ -34,6 +34,7 @@ CONFIG_PATH = _BASE_DIR / "config" / "config.json"
 SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 ENV_PATH = _BASE_DIR / ".env"
 _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
+_ARCHIVE_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "archive.html"
 
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
@@ -114,6 +115,7 @@ def validate_config(raw: dict) -> list[str]:
 _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 推送通道 ──",  ["channels", "napcat_api", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
+    ("── 消息归档 ──",  ["archive"]),
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
@@ -135,7 +137,7 @@ def _render_value(key: str, val) -> str:
     if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin") and isinstance(val, dict) and val:
+    if key in ("channels", "web_admin", "archive") and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
     return _dump(val)
@@ -462,6 +464,10 @@ class _Handler(BaseHTTPRequestHandler):
             auth = self.headers.get("Authorization", "")
             if auth.startswith("Bearer "):
                 supplied = auth[7:]
+        if not supplied:
+            # <img>/<video> 标签无法带自定义头，归档媒体通过 query 传 token
+            from urllib.parse import parse_qs
+            supplied = (parse_qs(self.path.partition("?")[2]).get("token") or [""])[0]
         if hmac.compare_digest(supplied, token):
             return True
         self._send_json({"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
@@ -484,22 +490,33 @@ class _Handler(BaseHTTPRequestHandler):
         return obj
 
     # ── 路由 ─────────────────────────────────────────────
+    def _send_html(self, file_path: Path) -> None:
+        try:
+            body = file_path.read_bytes()
+        except OSError:
+            self._send_json({"ok": False, "errors": ["页面文件缺失"]}, 500)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # noqa: N802 - http.server 约定命名
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            try:
-                body = _STATIC_PATH.read_bytes()
-            except OSError:
-                self._send_json({"ok": False, "errors": ["管理页面文件缺失"]}, 500)
+            self._send_html(_STATIC_PATH)
+            return
+        if path == "/archive":
+            self._send_html(_ARCHIVE_HTML_PATH)
+            return
+        if path.startswith("/api/archive/"):
+            if not self._check_auth():
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            self._handle_archive(path[len("/api/archive/"):])
             return
 
         if path == "/api/config":
@@ -608,6 +625,138 @@ class _Handler(BaseHTTPRequestHandler):
             "subscription": (m.get("subscription") or {}).get("type", ""),
         } for m in members]
         self._send_json({"ok": True, "account": account, "members": slim})
+
+    # ── 消息归档查看器 ─────────────────────────────
+    _ARCHIVE_TYPES = ("text", "picture", "image", "video", "voice")
+
+    def _handle_archive(self, sub: str) -> None:
+        from urllib.parse import parse_qs, unquote
+
+        from src import archive as _archive
+        qs = parse_qs(self.path.partition("?")[2])
+
+        def qp(key: str, default: str = "") -> str:
+            return (qs.get(key) or [default])[0]
+
+        if sub == "members":
+            members = []
+            for name in _archive.list_members():
+                months = _archive.list_months(name)
+                members.append({
+                    "name": name,
+                    "display": name.replace("_", " "),
+                    "months": len(months),
+                    "total": sum(m["count"] for m in months),
+                })
+            self._send_json({"ok": True, "members": members})
+            return
+
+        if sub == "months":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            self._send_json({"ok": True, "member": member, "months": _archive.list_months(member)})
+            return
+
+        if sub == "messages":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            try:
+                year, month = int(qp("year")), int(qp("month"))
+                page = max(1, int(qp("page", "1")))
+                per_page = min(200, max(1, int(qp("per_page", "50"))))
+            except ValueError:
+                self._send_json({"ok": False, "errors": ["year/month/page 必须是数字"]}, 400)
+                return
+            type_filter = qp("type")
+            msgs = _archive.load_month(member, year, month)
+            if type_filter:
+                if type_filter not in self._ARCHIVE_TYPES:
+                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                    return
+                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+                msgs = [m for m in msgs if m.get("type") in wanted]
+            total = len(msgs)
+            start = (page - 1) * per_page
+            slim = [{
+                "id": m.get("id"),
+                "type": m.get("type"),
+                "text": m.get("text", ""),
+                "translation": m.get("_translation", ""),
+                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
+                              if m.get("_local_file") else None),
+                "download_failed": bool(m.get("_download_failed")),
+            } for m in msgs[start:start + per_page]]
+            self._send_json({
+                "ok": True, "member": member, "year": year, "month": month,
+                "total": total, "page": page,
+                "total_pages": max(1, -(-total // per_page)), "messages": slim,
+            })
+            return
+
+        if sub.startswith("media/"):
+            rest = unquote(sub[len("media/"):])
+            member, _, rel = rest.partition("/")
+            if member not in _archive.list_members() or not rel:
+                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
+                return
+            member_root = (_archive.archive_root() / member).resolve()
+            full = (member_root / rel).resolve()
+            if member_root not in full.parents:
+                self._send_json({"ok": False, "errors": ["非法路径"]}, 403)
+                return
+            if not full.is_file():
+                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
+                return
+            self._serve_file_range(full)
+            return
+
+        self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _serve_file_range(self, path: Path) -> None:
+        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。"""
+        import mimetypes
+        size = path.stat().st_size
+        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        start, end, status = 0, size - 1, 200
+        m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", "").strip())
+        if m and (m.group(1) or m.group(2)):
+            if m.group(1):
+                start = int(m.group(1))
+                if m.group(2):
+                    end = min(int(m.group(2)), size - 1)
+            else:
+                start = max(0, size - int(m.group(2)))
+            if start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            status = 206
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = f.read(min(1 << 16, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (ConnectionError, OSError):
+            pass   # 播放器中断连接是常态
 
     def _handle_status(self) -> None:
         """运行状态快照：健康追踪数据 + 各账号实时 Token 剩余时间。"""

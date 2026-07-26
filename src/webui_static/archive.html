@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📚</text></svg>">
+<title>坂道监控 · 消息归档</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c2333; --muted: #6b7280;
+    --border: #e3e6eb; --accent: #6d5bd0; --accent-soft: #ece9fa;
+    --bubble: #ffffff; --trans-bg: #f0f7f2; --trans-text: #1a6b40; --err: #d23f3f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161c; --card: #1d2027; --text: #e8eaf0; --muted: #9aa1af;
+      --border: #2e323c; --accent: #9c8cf0; --accent-soft: #2a2740;
+      --bubble: #23262e; --trans-bg: #1d2b22; --trans-text: #6fd39a; --err: #ef6a6a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); font-size: 14px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+           background: var(--card); border-bottom: 1px solid var(--border);
+           position: sticky; top: 0; z-index: 10; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: auto; }
+  header a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 16px 16px 60px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 6px 13px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+          background: var(--card); color: var(--text); font-size: 13px; font-family: inherit; }
+  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+           background: var(--card); color: var(--text); font-size: 13.5px; font-family: inherit; }
+  button.nav { border: 1px solid var(--border); background: var(--card); color: var(--text);
+               padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+  button.nav:hover { border-color: var(--accent); }
+  button.nav:disabled { opacity: .4; cursor: default; }
+  .stats { font-size: 12.5px; color: var(--muted); margin-left: auto; }
+  .day-sep { text-align: center; margin: 18px 0 10px; color: var(--muted); font-size: 12px; }
+  .day-sep span { background: var(--card); border: 1px solid var(--border);
+                  border-radius: 999px; padding: 3px 14px; }
+  .bubble { background: var(--bubble); border: 1px solid var(--border); border-radius: 14px;
+            padding: 11px 14px; margin: 8px 0; max-width: 92%;
+            box-shadow: 0 1px 2px rgba(0,0,0,.04); overflow-wrap: break-word; }
+  .bubble .time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+  .bubble .text { white-space: pre-wrap; line-height: 1.7; }
+  .bubble .trans { margin-top: 8px; padding: 8px 11px; background: var(--trans-bg);
+                   color: var(--trans-text); border-radius: 9px; font-size: 13.5px;
+                   white-space: pre-wrap; line-height: 1.65; }
+  .bubble img { max-width: 100%; max-height: 420px; border-radius: 10px; cursor: zoom-in; display: block; }
+  .bubble video, .bubble audio { max-width: 100%; border-radius: 10px; display: block; }
+  .bubble .miss { color: var(--err); font-size: 12.5px; }
+  .center { text-align: center; padding: 28px 0; color: var(--muted); }
+  #loadMore { display: block; margin: 18px auto; }
+  /* 灯箱 */
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none;
+              align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 94vw; max-height: 92vh; border-radius: 6px; }
+  #lightbox .nav-btn { position: absolute; top: 50%; transform: translateY(-50%);
+    background: rgba(255,255,255,.12); color: #fff; border: none; font-size: 26px;
+    padding: 14px 16px; cursor: pointer; border-radius: 10px; }
+  #lightbox .nav-btn:hover { background: rgba(255,255,255,.25); }
+  #lbPrev { left: 14px; } #lbNext { right: 14px; }
+  #lbCounter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+               color: #ddd; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 消息归档</h1>
+  <div class="chips" id="memberChips"></div>
+  <a href="/">⚙️ 返回管理端</a>
+</header>
+
+<main>
+  <div class="toolbar">
+    <button class="nav" id="prevMonth">← 上月</button>
+    <select id="monthSelect"></select>
+    <button class="nav" id="nextMonth">下月 →</button>
+    <div class="chips" id="typeChips"></div>
+    <span class="stats" id="stats"></span>
+  </div>
+  <div id="timeline"></div>
+  <button class="nav" id="loadMore" hidden>加载更多 ↓</button>
+  <div class="center" id="emptyHint" hidden></div>
+</main>
+
+<div id="lightbox">
+  <span id="lbCounter"></span>
+  <button class="nav-btn" id="lbPrev">‹</button>
+  <img id="lbImg" alt="">
+  <button class="nav-btn" id="lbNext">›</button>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const authToken = localStorage.getItem("webAdminToken") || "";
+const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
+
+let members = [];        // [{name, display, total, months}]
+let curMember = "";
+let months = [];         // [{year, month, count}] 新的在前
+let curYM = null;        // {year, month}
+let curType = "";
+let page = 1, totalPages = 1;
+let images = [];         // 当月已渲染图片 [{url, caption}]，供灯箱翻页
+let lastDay = "";
+
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
+function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
+
+async function api(path) {
+  const resp = await fetch(path, { headers: authToken ? { "X-Auth-Token": authToken } : {} });
+  return resp.json();
+}
+
+// ── JST 时间 ─────────────────────────────────────
+function toJst(utc) { return new Date(new Date(utc).getTime() + 9 * 3600 * 1000); }
+function fmtDay(utc) {
+  const d = toJst(utc);
+  const w = "日一二三四五六"[d.getUTCDay()];
+  return d.getUTCFullYear() + "/" + (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + "（" + w + "）";
+}
+function fmtTime(utc) {
+  const d = toJst(utc);
+  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+}
+
+// ── 数据加载 ─────────────────────────────────────
+async function loadMembers() {
+  const data = await api("/api/archive/members");
+  if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
+  members = data.members;
+  const box = $("memberChips");
+  box.innerHTML = "";
+  if (!members.length) {
+    showEmpty("还没有任何归档。确认 config.json 的 archive.enabled 已开启，" +
+              "新消息会自动归档；历史消息用 python tools/backfill_archive.py 回填。");
+    return;
+  }
+  for (const m of members) {
+    const b = document.createElement("button");
+    b.className = "chip" + (m.name === curMember ? " active" : "");
+    b.textContent = m.display + "（" + m.total + "）";
+    b.addEventListener("click", () => { selectMember(m.name); });
+    box.appendChild(b);
+  }
+  if (!curMember || !members.some((m) => m.name === curMember)) {
+    await selectMember(members[0].name, true);
+  }
+}
+
+async function selectMember(name, keepHash) {
+  curMember = name;
+  $("memberChips").querySelectorAll(".chip").forEach((c, i) =>
+    c.classList.toggle("active", members[i] && members[i].name === name));
+  const data = await api("/api/archive/months?member=" + encodeURIComponent(name));
+  months = data.ok ? data.months : [];
+  const sel = $("monthSelect");
+  sel.innerHTML = "";
+  for (const m of months) {
+    const opt = document.createElement("option");
+    opt.value = m.year + "-" + m.month;
+    opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
+    sel.appendChild(opt);
+  }
+  if (!months.length) { showEmpty("该成员还没有归档内容"); return; }
+  const wanted = keepHash ? readHashYM() : null;
+  const pick = (wanted && months.find((m) => m.year === wanted.year && m.month === wanted.month)) || months[0];
+  await selectMonth(pick.year, pick.month);
+}
+
+function readHashYM() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const y = parseInt(p.get("y"), 10), m = parseInt(p.get("m"), 10);
+  return (y && m) ? { year: y, month: m } : null;
+}
+
+function syncHash() {
+  location.hash = "member=" + encodeURIComponent(curMember) +
+    "&y=" + curYM.year + "&m=" + curYM.month + (curType ? "&t=" + curType : "");
+}
+
+async function selectMonth(year, month) {
+  curYM = { year, month };
+  $("monthSelect").value = year + "-" + month;
+  const idx = months.findIndex((m) => m.year === year && m.month === month);
+  $("prevMonth").disabled = idx >= months.length - 1;   // months 新的在前
+  $("nextMonth").disabled = idx <= 0;
+  page = 1;
+  images = [];
+  lastDay = "";
+  $("timeline").innerHTML = "";
+  $("emptyHint").hidden = true;
+  syncHash();
+  await loadPage();
+}
+
+async function loadPage() {
+  const data = await api("/api/archive/messages?member=" + encodeURIComponent(curMember) +
+    "&year=" + curYM.year + "&month=" + curYM.month +
+    "&type=" + curType + "&page=" + page + "&per_page=50");
+  if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
+  totalPages = data.total_pages;
+  $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 条";
+  if (!data.messages.length && page === 1) {
+    showEmpty("本月没有" + (curType ? "该类型的" : "") + "消息");
+  }
+  for (const msg of data.messages) renderBubble(msg);
+  $("loadMore").hidden = page >= totalPages;
+}
+
+function showEmpty(text) {
+  $("emptyHint").textContent = text;
+  $("emptyHint").hidden = false;
+  $("loadMore").hidden = true;
+  $("stats").textContent = "";
+}
+
+// ── 渲染 ─────────────────────────────────────────
+function renderBubble(msg) {
+  const tl = $("timeline");
+  const day = fmtDay(msg.published_at);
+  if (day !== lastDay) {
+    lastDay = day;
+    const sep = document.createElement("div");
+    sep.className = "day-sep";
+    sep.innerHTML = "<span>" + esc(day) + "</span>";
+    tl.appendChild(sep);
+  }
+  const b = document.createElement("div");
+  b.className = "bubble";
+  let html = '<div class="time">' + fmtTime(msg.published_at) + " · " + esc(msg.type) + "</div>";
+  if (msg.media_url) {
+    const url = mediaUrl(msg.media_url);
+    if (msg.type === "video") {
+      html += '<video controls preload="metadata" src="' + esc(url) + '"></video>';
+    } else if (msg.type === "voice") {
+      html += '<audio controls preload="metadata" src="' + esc(url) + '"></audio>';
+    } else {
+      images.push({ url: url, caption: (msg.text || "").slice(0, 80) });
+      html += '<img loading="lazy" data-lb="' + (images.length - 1) + '" src="' + esc(url) + '" alt="">';
+    }
+  } else if (msg.download_failed) {
+    html += '<div class="miss">⚠️ 媒体文件下载失败（可用回填工具重试）</div>';
+  }
+  if (msg.text) html += '<div class="text">' + esc(msg.text) + "</div>";
+  if (msg.translation) html += '<div class="trans">' + esc(msg.translation) + "</div>";
+  b.innerHTML = html;
+  const img = b.querySelector("img[data-lb]");
+  if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10)));
+  tl.appendChild(b);
+}
+
+// ── 灯箱 ─────────────────────────────────────────
+let lbIndex = 0;
+function openLightbox(i) {
+  lbIndex = i;
+  $("lbImg").src = images[i].url;
+  $("lbCounter").textContent = (i + 1) + " / " + images.length;
+  $("lightbox").classList.add("open");
+}
+function lbMove(delta) {
+  const next = lbIndex + delta;
+  if (next < 0 || next >= images.length) return;
+  openLightbox(next);
+}
+$("lightbox").addEventListener("click", (e) => {
+  if (e.target === $("lightbox") || e.target === $("lbImg")) $("lightbox").classList.remove("open");
+});
+$("lbPrev").addEventListener("click", (e) => { e.stopPropagation(); lbMove(-1); });
+$("lbNext").addEventListener("click", (e) => { e.stopPropagation(); lbMove(1); });
+document.addEventListener("keydown", (e) => {
+  if (!$("lightbox").classList.contains("open")) return;
+  if (e.key === "Escape") $("lightbox").classList.remove("open");
+  if (e.key === "ArrowLeft") lbMove(-1);
+  if (e.key === "ArrowRight") lbMove(1);
+});
+
+// ── 控件 ─────────────────────────────────────────
+function initTypeChips() {
+  const box = $("typeChips");
+  for (const [val, label] of TYPES) {
+    const b = document.createElement("button");
+    b.className = "chip" + (val === curType ? " active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      curType = val;
+      box.querySelectorAll(".chip").forEach((c, i) => c.classList.toggle("active", TYPES[i][0] === val));
+      if (curYM) selectMonth(curYM.year, curYM.month);
+    });
+    box.appendChild(b);
+  }
+}
+$("monthSelect").addEventListener("change", () => {
+  const [y, m] = $("monthSelect").value.split("-").map(Number);
+  selectMonth(y, m);
+});
+$("prevMonth").addEventListener("click", () => {
+  const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
+  if (idx < months.length - 1) selectMonth(months[idx + 1].year, months[idx + 1].month);
+});
+$("nextMonth").addEventListener("click", () => {
+  const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
+  if (idx > 0) selectMonth(months[idx - 1].year, months[idx - 1].month);
+});
+$("loadMore").addEventListener("click", () => { page++; loadPage(); });
+
+// ── 入口（支持 #member=&y=&m=&t= 深链）────────────
+(function boot() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  curMember = p.get("member") || "";
+  curType = p.get("t") || "";
+  initTypeChips();
+  loadMembers();
+})();
+</script>
+</body>
+</html>
