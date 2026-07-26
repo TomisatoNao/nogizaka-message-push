@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 import config.config as cfg
+from src.constants import TRANSLATION_SEPARATOR
 from src.logger import error_logger, format_httpx_error, log_all, log_response
 from config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
@@ -79,7 +80,7 @@ async def _handle_message(member: dict, msg: dict,
     # 翻译
     translated = ""
     if cfg.ENABLE_TRANSLATION and original_text.strip():
-        raw = await translate_text(original_text)
+        raw = await translate_text(original_text, m_name, group_type)
         if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
             log_all(f"⚠️ {m_name} 翻译失败，仅推送原文 ({raw})", is_error=True)
         elif raw.strip() == original_text.strip():
@@ -101,7 +102,7 @@ async def _handle_message(member: dict, msg: dict,
         jst_time = utc_to_jst(updated)
         bili_text = f"{m_name} {jst_time}\n{original_text}"
         if translated:
-            bili_text += f"\n\n📝 翻译：\n{translated}"
+            bili_text += f"{TRANSLATION_SEPARATOR}{translated}"
         await post_dynamic(bili_text, cookie, bili_jct)
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)

@@ -8,6 +8,7 @@ from src.utils import utc_to_jst
 import httpx
 
 import config.config as cfg
+from src.constants import ROLE_KEY, ROLE_TRANSLATION, TRANSLATION_SEPARATOR
 from src.logger import format_httpx_error, log_all
 
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
@@ -52,9 +53,23 @@ def build_message_chain(
             log_all(f"⚠️ 未知媒体类型 '{msg.get('type')}'，跳过媒体段")
 
     if translated_text:
-        chain.append({"type": "text", "data": {"text": f"\n\n📝 翻译：\n{translated_text}"}})
+        # 打上角色标记，供下游通道识别翻译段（发送前会被剥离）
+        chain.append({
+            "type": "text",
+            "data": {"text": f"{TRANSLATION_SEPARATOR}{translated_text}"},
+            ROLE_KEY: ROLE_TRANSLATION,
+        })
 
     return chain
+
+
+def strip_internal_keys(message_chain: list[dict]) -> list[dict]:
+    """剥离消息链各段中以 _ 开头的内部字段（如 _role），
+    保证发给 OneBot 的 payload 只含协议字段。"""
+    return [
+        {k: v for k, v in item.items() if not k.startswith("_")}
+        for item in message_chain
+    ]
 
 
 def _split_video_record_chain(message_chain: list[dict]) -> list[list[dict]]:
@@ -94,7 +109,8 @@ def _split_video_record_chain(message_chain: list[dict]) -> list[list[dict]]:
 # ──────────────────────────────────────────────
 async def _post_message(group_id: int, message_chain: list[dict], max_retries: int) -> bool:
     payload_str = json.dumps(
-        {"group_id": group_id, "message": message_chain}, ensure_ascii=False
+        {"group_id": group_id, "message": strip_internal_keys(message_chain)},
+        ensure_ascii=False,
     )
     if cfg.DEBUG_LOG_QQ_PAYLOAD:
         log_all(

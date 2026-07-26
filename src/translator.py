@@ -12,10 +12,20 @@ from src.utils import RateLimiter
 # ---- 模块级状态（由 initialize() 在事件循环内创建） ----
 _limiter: RateLimiter = None   # type: ignore
 
+_GROUP_DISPLAY: dict[str, str] = {
+    "nogizaka46": "乃木坂46",
+    "hinatazaka46": "日向坂46",
+    "sakurazaka46": "櫻坂46",
+    "yodel": "吉本坂46",
+}
+
 _PROMPT_TEMPLATE = (
-    "你是坂道系偶像团体的日文翻译。将以下成员消息翻译成中文（简体）：\n"
+    "你是坂道系偶像团体的日文翻译。"
+    "以下消息来自{group_name}成员{member_name}，请翻译成中文（简体）：\n"
     "- 翻译自然流畅，保留原文的语气、口吻和情感\n"
     "- 颜文字（如(笑)(*´∀｀*)）和emoji保留原样，URL和话题标签不翻译\n"
+    "- 不认识的日语人名保持原文，不要猜测或音译\n"
+    "- 日语俚语、网络梗、团内用语等在译文后以「（注：…）」形式简要解释\n"
     "- 只输出翻译结果\n\n"
     "原文：\n{text}"
 )
@@ -36,9 +46,11 @@ def _is_already_chinese(text: str) -> bool:
             return False
     return True
 
-async def translate_text(text: str) -> str:
+async def translate_text(text: str, member_name: str = "", group_type: str = "") -> str:
     """
     将日文翻译为中文。
+    member_name / group_type 用于给翻译 AI 提供成员和团体的上下文，
+    帮助更准确地翻译成员特有的语气和用词。
     RateLimiter 覆盖「等待间隔 + HTTP 请求」全程，彻底串行化，
     杜绝并发请求触发 Gemini RPM 限制。
     """
@@ -51,8 +63,15 @@ async def translate_text(text: str) -> str:
         log_all(f"⚠️ 文本过长 ({len(text)} 字符)，跳过翻译", is_debug=True)
         return "[消息过长，暂不翻译]"
 
+    group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
+    prompt = _PROMPT_TEMPLATE.format(
+        group_name=group_name,
+        member_name=member_name or "未知成员",
+        text=text,
+    )
+
     payload = {
-        "contents": [{"parts": [{"text": _PROMPT_TEMPLATE.format(text=text)}]}],
+        "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
     }
 

@@ -3,4 +3,5 @@ python-dotenv
 websockets
 json5
 jsonschema
+python-telegram-bot>=21.0
 # watchdog  # 可选：取消注释以启用 config.json 自动热重载
