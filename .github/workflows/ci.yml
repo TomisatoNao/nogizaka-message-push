@@ -41,3 +41,6 @@ jobs:
 
       - name: Archive test
         run: python tests/test_archive.py
+
+      - name: Auth test
+        run: python tests/test_auth.py

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🔐</text></svg>">
+<title>登录 · 坂道监控</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c2333; --muted: #6b7280;
+    --border: #e3e6eb; --accent: #6d5bd0; --err: #d23f3f; --ok: #1a9e5c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14161c; --card: #1d2027; --text: #e8eaf0; --muted: #9aa1af;
+            --border: #2e323c; --accent: #9c8cf0; --err: #ef6a6a; --ok: #3ecf8e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: var(--bg); color: var(--text); font-size: 14px;
+         font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+          padding: 32px 34px; width: min(390px, 92vw); box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
+  input { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+          background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit;
+          margin-bottom: 16px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--accent);
+           color: #fff; font-size: 14.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+           transition: transform .06s, opacity .12s; }
+  button:hover { opacity: .92; }
+  button:active { transform: translateY(1px) scale(.99); }
+  button:disabled { opacity: .6; cursor: default; }
+  .msg { margin-top: 14px; font-size: 13px; min-height: 20px; line-height: 1.6; }
+  .msg.err { color: var(--err); }
+  .msg.ok { color: var(--ok); }
+  .hint { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border);
+          font-size: 12px; color: var(--muted); line-height: 1.75; }
+  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔐 坂道监控</h1>
+  <div class="sub" id="sub">请登录以继续</div>
+  <form id="form">
+    <label for="u">用户名</label>
+    <input id="u" name="username" autocomplete="username" autofocus required>
+    <label for="p">密码</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" id="btn">登 录</button>
+  </form>
+  <div class="msg" id="msg"></div>
+  <div class="hint" id="hint" hidden></div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+function nextUrl() {
+  const p = new URLSearchParams(location.search).get("next") || "/";
+  // 只接受站内相对路径，杜绝开放重定向
+  return (p.startsWith("/") && !p.startsWith("//")) ? p : "/";
+}
+
+(async function init() {
+  try {
+    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    if (!me.auth_enabled) {
+      $("sub").textContent = "账号系统未启用";
+      $("form").hidden = true;
+      $("hint").hidden = false;
+      $("hint").innerHTML = "在 <code>config.json</code> 的 <code>auth.enabled</code> 打开后即可使用账号登录。" +
+        '<br><a href="/">前往管理端</a>';
+      return;
+    }
+    if (!me.has_users) {
+      $("sub").textContent = "还没有创建任何账号";
+      $("form").hidden = true;
+      $("hint").hidden = false;
+      $("hint").innerHTML = "在服务器上执行以下命令创建第一个管理员：<br>" +
+        "<code>python tools/manage_users.py add 你的用户名</code><br>" +
+        "（密码在命令行交互输入，不会出现在历史记录里）";
+      return;
+    }
+    if (me.user) {
+      $("msg").className = "msg ok";
+      $("msg").textContent = "已登录为 " + me.user.username + "，正在跳转…";
+      setTimeout(() => location.href = nextUrl(), 600);
+    }
+  } catch (e) { /* 离线时正常显示表单 */ }
+})();
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("btn"), msg = $("msg");
+  btn.disabled = true;
+  btn.textContent = "登录中…";
+  msg.className = "msg";
+  msg.textContent = "";
+  try {
+    const resp = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("u").value, password: $("p").value }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      msg.className = "msg ok";
+      msg.textContent = "✅ 登录成功，正在跳转…";
+      location.href = data.user.role === "admin" ? nextUrl() : "/archive";
+      return;
+    }
+    msg.className = "msg err";
+    msg.textContent = "❌ " + (data.errors || ["登录失败"]).join("；");
+    $("p").value = "";
+    $("p").focus();
+  } catch (err) {
+    msg.className = "msg err";
+    msg.textContent = "请求失败：" + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "登 录";
+  }
+});
+</script>
+</body>
+</html>

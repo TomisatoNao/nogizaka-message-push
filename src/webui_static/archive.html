@@ -25,7 +25,7 @@
            background: var(--card); border-bottom: 1px solid var(--border);
            position: sticky; top: 0; z-index: 10; flex-wrap: wrap; }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: auto; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: 12px; }
   header a:hover { color: var(--accent); }
   .layout { display: flex; gap: 18px; max-width: 1060px; margin: 0 auto; padding: 16px 16px 60px; }
   aside.side { width: 258px; flex: none; position: sticky; top: 64px; align-self: flex-start; }
@@ -103,7 +103,9 @@
 <header>
   <h1>📚 消息归档</h1>
   <div class="chips" id="memberChips"></div>
-  <a href="/">⚙️ 返回管理端</a>
+  <span id="whoami" style="margin-left:auto; font-size:12.5px; color:var(--muted)"></span>
+  <a href="/" id="adminLink" hidden>⚙️ 管理端</a>
+  <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
 </header>
 
 <div class="layout">
@@ -517,6 +519,26 @@ $("nextMonth").addEventListener("click", () => {
   if (idx > 0) selectMonth(months[idx - 1].year, months[idx - 1].month);
 });
 $("loadMore").addEventListener("click", () => { page++; loadPage(); });
+
+// ── 登录状态 ─────────────────────────────────────
+(async function initAuth() {
+  try {
+    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    if (!me.auth_enabled) { $("adminLink").hidden = false; return; }   // 未启用账号系统：照旧
+    if (me.user) {
+      $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
+      $("logoutLink").hidden = false;
+      if (me.user.role === "admin") $("adminLink").hidden = false;
+    } else if (me.archive_public) {
+      $("whoami").innerHTML = '<a href="/login">登录</a>';
+    }
+  } catch (e) { /* 忽略 */ }
+})();
+$("logoutLink").addEventListener("click", async (e) => {
+  e.preventDefault();
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
+  location.href = "/login";
+});
 
 // ── 入口（支持 #member=&y=&m=&t= 深链）────────────
 (function boot() {

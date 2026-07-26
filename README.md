@@ -214,6 +214,39 @@ data/archive/{成员名}/{YYYY}/{MM}/
 - **写入语义**：按消息 id 幂等合并、原子写；先落 JSON 再补媒体文件，进程中断最多丢媒体不丢消息
 - 媒体文件较占空间（参考：单成员三年约 3-4 GB），`archive.media` 设为 `false` 可只存文字
 
+### 账号系统（登录与权限）
+
+默认关闭（本机访问无需登录）。开启后管理端需要登录，且分两种角色：
+
+| 角色 | 权限 |
+|---|---|
+| `admin` | 管理端全部功能（配置 / 凭证 / 日志 / 重启）+ 归档 |
+| `viewer` | 只能访问归档查看器 `/archive` |
+
+**启用步骤**：
+
+1. 创建第一个管理员（密码交互式输入，不进命令行历史，存储为 scrypt 加盐哈希）：
+   ```bash
+   python tools/manage_users.py add 你的用户名              # admin
+   python tools/manage_users.py add 朋友的用户名 --viewer    # 只能看归档
+   python tools/manage_users.py list / passwd / role / del
+   ```
+2. `config.json` 里打开：
+   ```json5
+   "auth": { "enabled": true, "archive_public": false, "session_hours": 12 }
+   ```
+   `archive_public: true` 时归档页对所有人开放（无需登录），管理端仍受保护。
+3. 重启主程序，访问时会跳转到 `/login`。
+
+**安全说明**：
+
+- 密码用 **scrypt 加盐哈希**存 `data/users.json`（文件权限 600，git-ignored），永不存明文、不可逆
+- 会话是随机 token + **HttpOnly / SameSite=Strict** cookie，仅存进程内存（重启即失效），支持滑动续期和登出；改密码会立即踢掉该用户所有会话
+- 登录失败按 IP 限流（10 分钟内 5 次 → 锁定 15 分钟），密码校验用常时比较，用户不存在时也走一次哈希（防时序探测）
+- 写请求校验 `Origin`（配合 SameSite cookie 防 CSRF），绑定回环地址时校验 `Host`（防 DNS rebinding）
+- `WEB_ADMIN_TOKEN` 继续可用，作为脚本 / 自动化的 API 通道（等价 admin 身份）
+- ⚠️ 服务仍是**明文 HTTP**：局域网使用请挂 TLS 反代（如 Caddy），否则密码和会话 cookie 在链路上是明文
+
 ### 每日摘要与开机自启
 
 **每日运行摘要**（`config.json` 的 `daily_summary`，默认每天 JST 23:00）：通过已启用的推送通道发一条当日报告——各成员今日消息数、巡查轮次、Token 状态、待处理错误。它同时是**反向监控（死人开关）**：系统挂了不会有报错通知，但"今天没收到摘要"本身就是告警。
@@ -322,6 +355,7 @@ nogizaka-message-push/
 │   ├── logger.py            # 日志系统（彩色终端 + 滚动文件）
 │   ├── utils.py             # 公共工具：JST 时间转换、时段判断、速率限制器
 │   ├── webui.py             # 网页管理端：配置编辑 / 凭证写入 / 状态 / 日志 / 历史回滚 / 重启
+│   ├── auth.py              # 账号系统：scrypt 密码哈希、用户库、会话、登录限流
 │   ├── member_directory.py  # 成员目录拉取（/v2/groups），list_members 工具与网页端共用
 │   ├── webui_static/
 │   │   └── index.html       # 管理页面（零依赖单页应用）

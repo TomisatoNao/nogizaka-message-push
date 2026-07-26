@@ -92,6 +92,11 @@ _DEFAULTS: dict = {
     # 每日运行摘要（config.json 的 daily_summary 可覆盖；hour 为 JST 小时）
     "daily_summary_enabled":    False,
     "daily_summary_hour":       23,
+    # 账号系统（config.json 的 auth 可覆盖；用户库 data/users.json 由
+    # tools/manage_users.py 维护）
+    "auth_enabled":             False,
+    "auth_archive_public":      False,   # true = 归档页无需登录即可访问
+    "auth_session_hours":       12,
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
     "enable_napcat_qq":         True,
@@ -172,6 +177,15 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["daily_summary_enabled"] = ds["enabled"]
             if "hour" in ds:
                 cfg["daily_summary_hour"] = ds["hour"]
+
+        if "auth" in cfg:
+            au = cfg.pop("auth")
+            if "enabled" in au:
+                cfg["auth_enabled"] = au["enabled"]
+            if "archive_public" in au:
+                cfg["auth_archive_public"] = au["archive_public"]
+            if "session_hours" in au:
+                cfg["auth_session_hours"] = au["session_hours"]
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
@@ -324,6 +338,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "archive_media":                "ARCHIVE_MEDIA",
     "daily_summary_enabled":        "DAILY_SUMMARY_ENABLED",
     "daily_summary_hour":           "DAILY_SUMMARY_HOUR",
+    "auth_enabled":                 "AUTH_ENABLED",
+    "auth_archive_public":          "AUTH_ARCHIVE_PUBLIC",
+    "auth_session_hours":           "AUTH_SESSION_HOURS",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",

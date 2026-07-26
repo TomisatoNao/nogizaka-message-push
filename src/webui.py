@@ -26,8 +26,10 @@ import sys
 import threading
 import time as _time
 from datetime import datetime
+from html import escape as html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = _BASE_DIR / "config" / "config.json"
@@ -35,6 +37,9 @@ SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 ENV_PATH = _BASE_DIR / ".env"
 _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
 _ARCHIVE_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "archive.html"
+_LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.html"
+
+_SESSION_COOKIE = "sakamichi_session"
 
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
@@ -117,6 +122,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 消息归档 ──",  ["archive"]),
     ("── 每日摘要 ──",  ["daily_summary"]),
+    ("── 账号系统 ──",  ["auth"]),
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
@@ -138,7 +144,8 @@ def _render_value(key: str, val) -> str:
     if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin", "archive", "daily_summary") and isinstance(val, dict) and val:
+    if key in ("channels", "web_admin", "archive", "daily_summary", "auth") \
+            and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
     return _dump(val)
@@ -456,23 +463,129 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "errors": [f"拒绝非本机 Host: {host!r}"]}, 403)
         return False
 
-    def _check_auth(self) -> bool:
+    # ── 认证与授权 ─────────────────────────────────
+    def _api_token_ok(self) -> bool:
+        """WEB_ADMIN_TOKEN 校验（脚本 / 无会话访问用，等价 admin 身份）。"""
         token = os.getenv("WEB_ADMIN_TOKEN", "")
         if not token:
-            return True
+            return False
         supplied = self.headers.get("X-Auth-Token", "")
         if not supplied:
-            auth = self.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                supplied = auth[7:]
+            authz = self.headers.get("Authorization", "")
+            if authz.startswith("Bearer "):
+                supplied = authz[7:]
         if not supplied:
             # <img>/<video> 标签无法带自定义头，归档媒体通过 query 传 token
             from urllib.parse import parse_qs
             supplied = (parse_qs(self.path.partition("?")[2]).get("token") or [""])[0]
-        if hmac.compare_digest(supplied, token):
+        return bool(supplied) and hmac.compare_digest(supplied, token)
+
+    def _cookie_token(self) -> str:
+        raw = self.headers.get("Cookie", "")
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == _SESSION_COOKIE:
+                return value
+        return ""
+
+    def _current_user(self) -> dict | None:
+        """解析当前身份：会话 cookie 优先，其次 API token（视为 admin）。"""
+        import config.config as cfg
+        from src import auth as _auth
+        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 12))) * 3600
+        sess = _auth.get_session(self._cookie_token(), ttl_seconds=ttl)
+        if sess:
+            return {"username": sess["username"], "role": sess["role"], "via": "session"}
+        if self._api_token_ok():
+            return {"username": "(api-token)", "role": "admin", "via": "token"}
+        return None
+
+    def _check_origin(self) -> bool:
+        """非 GET 请求校验 Origin（配合 SameSite=Strict cookie 防 CSRF）。
+        无 Origin 头的请求（curl / 脚本）放行——它们不携带浏览器 cookie 语义。"""
+        origin = self.headers.get("Origin", "")
+        if not origin:
             return True
-        self._send_json({"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
+        from urllib.parse import urlparse
+        host = (urlparse(origin).hostname or "")
+        if host in _LOOPBACK_HOSTS or host == (self.headers.get("Host", "").rsplit(":", 1)[0]):
+            return True
+        self._send_json({"ok": False, "errors": [f"拒绝跨站请求 Origin: {origin!r}"]}, 403)
         return False
+
+    def _guard(self, need_admin: bool = True, is_page: bool = False) -> bool:
+        """路由守卫。通过返回 True；否则已发送响应（页面 302 / API 401·403）返回 False。"""
+        import config.config as cfg
+        from src import auth as _auth
+
+        if not getattr(cfg, "AUTH_ENABLED", False):
+            # 账号系统未启用：沿用 WEB_ADMIN_TOKEN 语义（未设 token 则全放行）
+            if not os.getenv("WEB_ADMIN_TOKEN", ""):
+                return True
+            if self._api_token_ok():
+                return True
+            self._send_json({"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
+            return False
+
+        # 归档在 archive_public 下免登录
+        if not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
+            return True
+
+        if not _auth.has_users():
+            msg = ("账号系统已启用但还没有任何用户。请在服务器上执行："
+                   "python tools/manage_users.py add <用户名>")
+            if is_page:
+                self._send_html_text("尚未创建账号", msg, 503)
+            else:
+                self._send_json({"ok": False, "errors": [msg]}, 503)
+            return False
+
+        user = self._current_user()
+        if user is None:
+            if is_page:
+                self._redirect("/login?next=" + quote(self.path, safe=""))
+            else:
+                self._send_json({"ok": False, "errors": ["未登录"]}, 401)
+            return False
+        if need_admin and user["role"] != "admin":
+            if is_page:
+                self._send_html_text(
+                    "权限不足",
+                    f"当前账号 {user['username']}（{user['role']}）只能访问归档。",
+                    403, link=("/archive", "前往消息归档"))
+            else:
+                self._send_json({"ok": False, "errors": ["需要管理员权限"]}, 403)
+            return False
+        return True
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_html_text(self, title: str, message: str, code: int = 200,
+                        link: tuple[str, str] | None = None) -> None:
+        """极简提示页（未登录 / 权限不足 / 未初始化）。"""
+        extra = (f'<p><a href="{link[0]}">{html_escape(link[1])}</a></p>') if link else ""
+        body = (
+            "<style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#1c2333;"
+            "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
+            "div{background:#fff;padding:32px 38px;border-radius:14px;max-width:520px;"
+            "box-shadow:0 2px 12px rgba(0,0,0,.06);line-height:1.8}"
+            "code{background:#f0f1f4;padding:2px 6px;border-radius:4px}"
+            "a{color:#6d5bd0}</style>"
+            f"<div><h2>{html_escape(title)}</h2><p>{html_escape(message)}</p>{extra}</div>"
+        ).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _check_auth(self) -> bool:
+        """管理端 API 守卫（需要 admin）。"""
+        return self._guard(need_admin=True)
 
     def _read_body_json(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -508,14 +621,24 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
+        if path == "/login":
+            self._send_html(_LOGIN_HTML_PATH)
+            return
+        if path == "/api/auth/me":
+            self._handle_auth_me()
+            return
         if path in ("/", "/index.html"):
+            if not self._guard(need_admin=True, is_page=True):
+                return
             self._send_html(_STATIC_PATH)
             return
         if path == "/archive":
+            if not self._guard(need_admin=False, is_page=True):
+                return
             self._send_html(_ARCHIVE_HTML_PATH)
             return
         if path.startswith("/api/archive/"):
-            if not self._check_auth():
+            if not self._guard(need_admin=False):
                 return
             self._handle_archive(path[len("/api/archive/"):])
             return
@@ -629,6 +752,74 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── 消息归档查看器 ─────────────────────────────
     _ARCHIVE_TYPES = ("text", "picture", "image", "video", "voice")
+
+    # ── 登录 / 登出 / 身份 ─────────────────────────
+    def _handle_auth_me(self) -> None:
+        import config.config as cfg
+        from src import auth as _auth
+        user = self._current_user() if getattr(cfg, "AUTH_ENABLED", False) else None
+        self._send_json({
+            "ok": True,
+            "auth_enabled": bool(getattr(cfg, "AUTH_ENABLED", False)),
+            "archive_public": bool(getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False)),
+            "has_users": _auth.has_users(),
+            "user": {"username": user["username"], "role": user["role"]} if user else None,
+        })
+
+    def _handle_login(self) -> None:
+        import config.config as cfg
+        from src import auth as _auth
+        from src.logger import log_all
+        if not getattr(cfg, "AUTH_ENABLED", False):
+            self._send_json({"ok": False, "errors": ["账号系统未启用"]}, 400)
+            return
+        body = self._read_body_json()
+        if body is None:
+            return
+        ip = self.client_address[0] if self.client_address else "?"
+        locked = _auth.is_locked_out(ip)
+        if locked > 0:
+            self._send_json({"ok": False, "errors": [
+                f"登录失败次数过多，请 {int(locked // 60) + 1} 分钟后再试"]}, 429)
+            return
+
+        username = str(body.get("username", ""))[:64]
+        password = str(body.get("password", ""))[:256]
+        user = _auth.authenticate(username, password)
+        if user is None:
+            _auth.record_failure(ip)
+            log_all(f"🔒 网页登录失败: {username!r} 来自 {ip}", is_error=True)
+            self._send_json({"ok": False, "errors": ["用户名或密码错误"]}, 401)
+            return
+
+        _auth.clear_failures(ip)
+        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 12))) * 3600
+        token = _auth.create_session(user["username"], user["role"], ttl)
+        log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
+
+        body_out = json.dumps({"ok": True, "user": user}, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_out)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Set-Cookie",
+            f"{_SESSION_COOKIE}={token}; Path=/; Max-Age={ttl}; HttpOnly; SameSite=Strict",
+        )
+        self.end_headers()
+        self.wfile.write(body_out)
+
+    def _handle_logout(self) -> None:
+        from src import auth as _auth
+        _auth.destroy_session(self._cookie_token())
+        body_out = json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_out)))
+        self.send_header("Set-Cookie",
+                         f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+        self.end_headers()
+        self.wfile.write(body_out)
 
     def _handle_archive(self, sub: str) -> None:
         from urllib.parse import parse_qs, unquote
@@ -880,6 +1071,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:  # noqa: N802
         if not self._check_host():
             return
+        if not self._check_origin():
+            return
         if self.path.split("?", 1)[0] != "/api/config":
             self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
             return
@@ -907,7 +1100,15 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if not self._check_host():
             return
+        if not self._check_origin():
+            return
         path = self.path.split("?", 1)[0]
+        if path == "/api/auth/login":
+            self._handle_login()
+            return
+        if path == "/api/auth/logout":
+            self._handle_logout()
+            return
         if path == "/api/reload":
             if not self._check_auth():
                 return
@@ -1097,8 +1298,20 @@ def start_webui(host: str | None = None, port: int | None = None,
     thread = threading.Thread(target=server.serve_forever, name="webui", daemon=True)
     thread.start()
 
-    token_hint = "已启用 token 鉴权" if os.getenv("WEB_ADMIN_TOKEN") else "未设置 WEB_ADMIN_TOKEN（仅限本机访问时可接受）"
-    print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{token_hint}）")
+    import config.config as cfg
+    if getattr(cfg, "AUTH_ENABLED", False):
+        from src import auth as _auth
+        if _auth.has_users():
+            users = _auth.load_users()
+            admins = sum(1 for u in users.values() if u.get("role") == "admin")
+            hint = f"账号登录（{len(users)} 个用户 / {admins} 个管理员）"
+        else:
+            hint = "⚠️ 账号系统已启用但无用户，请执行 python tools/manage_users.py add <用户名>"
+    elif os.getenv("WEB_ADMIN_TOKEN"):
+        hint = "已启用 token 鉴权"
+    else:
+        hint = "无鉴权（仅限本机访问时可接受）"
+    print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
     return server
 
 
