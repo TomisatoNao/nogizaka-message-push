@@ -7,14 +7,8 @@ import time
 
 import httpx
 
-from config.config import (
-    QQ_OFFICIAL_API_BASE,
-    QQ_OFFICIAL_BOTS,
-    QQ_OFFICIAL_MEDIA_MAX_BYTES,
-    QQ_OFFICIAL_MIN_INTERVAL,
-    QQ_OFFICIAL_TIMEOUT,
-    QQ_OFFICIAL_TOKEN_URL,
-)
+# 统一通过 cfg.X 访问，热重载后标量值（超时、限速间隔等）才能生效
+import config.config as cfg
 from src.logger import log_all
 
 _MEDIA_FILE_TYPES = {
@@ -66,13 +60,13 @@ class QQOfficialBot:
 
         try:
             resp = await self._client.post(
-                QQ_OFFICIAL_TOKEN_URL,
+                cfg.QQ_OFFICIAL_TOKEN_URL,
                 json={
                     "appId": self.app_id,
                     "clientSecret": self.client_secret,
                 },
                 headers={"Content-Type": "application/json"},
-                timeout=QQ_OFFICIAL_TIMEOUT,
+                timeout=cfg.QQ_OFFICIAL_TIMEOUT,
             )
         except Exception as e:
             log_all(
@@ -113,8 +107,8 @@ class QQOfficialBot:
 
     async def _wait_rate_limit(self) -> None:
         elapsed = time.monotonic() - self._last_send_ts
-        if elapsed < QQ_OFFICIAL_MIN_INTERVAL:
-            await asyncio.sleep(QQ_OFFICIAL_MIN_INTERVAL - elapsed)
+        if elapsed < cfg.QQ_OFFICIAL_MIN_INTERVAL:
+            await asyncio.sleep(cfg.QQ_OFFICIAL_MIN_INTERVAL - elapsed)
 
     def _auth_headers(self) -> dict[str, str]:
         return {
@@ -130,7 +124,7 @@ class QQOfficialBot:
                     url,
                     json=payload,
                     headers=self._auth_headers(),
-                    timeout=QQ_OFFICIAL_TIMEOUT,
+                    timeout=cfg.QQ_OFFICIAL_TIMEOUT,
                 )
                 self._last_send_ts = time.monotonic()
 
@@ -171,49 +165,12 @@ class QQOfficialBot:
             if not await self.ensure_access_token():
                 return False
 
-            url = f"{QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
+            url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
             payload = {
                 "content": text[:1900],
                 "msg_type": 0,
             }
             return await self._post_json(url, payload, max_retries) is not None
-
-    def _source_headers_for_member(self, member: dict) -> dict[str, str]:
-        """构造访问 message 私有媒体资源的账号请求头。"""
-        from config.credentials import get_source_headers_for_account
-
-        return get_source_headers_for_account(member["account_id"], member["group_type"])
-
-    async def _download_media(self, file_url: str, source_headers: dict[str, str]) -> bytes | None:
-        try:
-            resp = await self._client.get(
-                file_url,
-                headers=source_headers,
-                follow_redirects=True,
-                timeout=QQ_OFFICIAL_TIMEOUT,
-            )
-        except Exception as e:
-            log_all(
-                f"🔥 官方 QQ Bot [{self.name}] 下载媒体异常: {type(e).__name__}: {e}",
-                is_error=True,
-            )
-            return None
-
-        if resp.status_code != 200:
-            log_all(
-                f"⚠️ 官方 QQ Bot [{self.name}] 下载媒体失败: HTTP {resp.status_code}",
-                is_error=True,
-            )
-            return None
-
-        content = resp.content
-        if len(content) > QQ_OFFICIAL_MEDIA_MAX_BYTES:
-            log_all(
-                f"⚠️ 官方 QQ Bot [{self.name}] 媒体过大，跳过 ({len(content)} bytes)",
-                is_error=True,
-            )
-            return None
-        return content
 
     async def _upload_media(self, media_type: str, content: bytes) -> str | None:
         if not await self.ensure_access_token():
@@ -223,7 +180,7 @@ class QQOfficialBot:
         if not file_type:
             return None
 
-        url = f"{QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/files"
+        url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/files"
         payload = {
             "file_type": file_type,
             "file_data": base64.b64encode(content).decode("ascii"),
@@ -249,7 +206,7 @@ class QQOfficialBot:
         return file_info
 
     async def _send_uploaded_media(self, file_info: str) -> bool:
-        url = f"{QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
+        url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
         payload = {
             "msg_type": 7,
             "media": {
@@ -258,10 +215,13 @@ class QQOfficialBot:
         }
         return await self._post_json(url, payload) is not None
 
-    async def send_message_chain(self, member: dict, message_chain: list[dict]) -> bool:
+    async def send_message_chain(self, member: dict, message_chain: list[dict],
+                                 media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
         """
         发送完整消息链。
-        文本单独发送；图片/视频/语音会先下载私有资源，再上传到 QQ 官方 Bot 后发送。
+        文本单独发送；图片/视频/语音先下载私有资源，再上传到 QQ 官方 Bot 后发送。
+        media_payloads 可传入预先下载好的媒体内容（多 Bot 时由 notifier 下载一次共用，
+        上传仍须按 Bot 各自进行 —— file_info 与 app_id 绑定）；None 表示自行下载。
         """
         async with self._lock:
             if not await self.ensure_access_token():
@@ -270,15 +230,15 @@ class QQOfficialBot:
             ok = True
             text = chain_to_text(message_chain)
             if text:
-                url = f"{QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
+                url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
                 if await self._post_json(url, {"content": text[:1900], "msg_type": 0}) is None:
                     ok = False
 
-            source_headers = self._source_headers_for_member(member)
-            for media_type, file_url in media_items(message_chain):
-                content = await self._download_media(file_url, source_headers)
+            if media_payloads is None:
+                media_payloads = await download_media_payloads(member, message_chain)
+            for media_type, content in media_payloads:
                 if content is None:
-                    ok = False
+                    ok = False   # 下载阶段已失败并记录日志
                     continue
                 file_info = await self._upload_media(media_type, content)
                 if not file_info or not await self._send_uploaded_media(file_info):
@@ -288,16 +248,59 @@ class QQOfficialBot:
 
 
 # ──────────────────────────────────────────────
-# 模块级 Bot 注册表
+# 模块级 Bot 注册表 & 媒体下载
 # ──────────────────────────────────────────────
 _bots: list[QQOfficialBot] = []
+_client: httpx.AsyncClient | None = None   # 媒体下载用（与各 Bot 共享同一实例）
+
+
+async def _download_media(file_url: str, source_headers: dict[str, str]) -> bytes | None:
+    """下载 message 私有媒体资源。用独立的媒体超时 —— 25MB 视频跑不进 API 的 15s。"""
+    try:
+        resp = await _client.get(
+            file_url,
+            headers=source_headers,
+            follow_redirects=True,
+            timeout=cfg.QQ_OFFICIAL_MEDIA_TIMEOUT,
+        )
+    except Exception as e:
+        log_all(f"🔥 官方 QQ Bot 下载媒体异常: {type(e).__name__}: {e}", is_error=True)
+        return None
+
+    if resp.status_code != 200:
+        log_all(f"⚠️ 官方 QQ Bot 下载媒体失败: HTTP {resp.status_code}", is_error=True)
+        return None
+
+    content = resp.content
+    if len(content) > cfg.QQ_OFFICIAL_MEDIA_MAX_BYTES:
+        log_all(f"⚠️ 官方 QQ Bot 媒体过大，跳过 ({len(content)} bytes)", is_error=True)
+        return None
+    return content
+
+
+async def download_media_payloads(member: dict,
+                                  message_chain: list[dict]) -> list[tuple[str, bytes | None]]:
+    """把消息链中的媒体段逐个下载为 (type, bytes|None)，None 表示该项下载失败。
+    多 Bot 场景下由 notifier 调用一次，避免同一文件按 Bot 数重复下载。"""
+    items = media_items(message_chain)
+    if not items:
+        return []
+
+    from config.credentials import get_source_headers_for_account
+
+    headers = get_source_headers_for_account(member["account_id"], member["group_type"])
+    payloads: list[tuple[str, bytes | None]] = []
+    for media_type, file_url in items:
+        payloads.append((media_type, await _download_media(file_url, headers)))
+    return payloads
 
 
 def initialize(client: httpx.AsyncClient) -> None:
     """初始化所有配置的官方 Bot 实例。"""
-    global _bots
+    global _bots, _client
+    _client = client
     _bots = []
-    for bot_cfg in QQ_OFFICIAL_BOTS:
+    for bot_cfg in cfg.QQ_OFFICIAL_BOTS:
         if not bot_cfg.get("app_id"):
             continue  # 跳过未配置的 Bot
         bot = QQOfficialBot(

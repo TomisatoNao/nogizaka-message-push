@@ -52,11 +52,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "url", "rpm"],
+        "required": ["name", "url"],
         "properties": {
           "name": { "type": "string" },
-          "url":  { "type": "string", "format": "uri" },
-          "rpm":  { "type": "integer", "minimum": 1 }
+          "url":  { "type": "string", "format": "uri" }
         }
       }
     },

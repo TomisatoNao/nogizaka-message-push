@@ -63,10 +63,6 @@ class RateLimiter:
         self._lock: asyncio.Lock = asyncio.Lock()
         self._last_ts: float = 0.0
 
-    def update_interval(self, interval_seconds: float) -> None:
-        """运行时替换为固定间隔（覆盖构造时传入的 getter）。"""
-        self._get_interval = lambda: interval_seconds
-
     async def __aenter__(self):
         await self._lock.acquire()
         elapsed = time.monotonic() - self._last_ts

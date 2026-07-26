@@ -11,6 +11,7 @@ from src.utils import RateLimiter
 
 # ---- 模块级状态（由 initialize() 在事件循环内创建） ----
 _limiter: RateLimiter = None   # type: ignore
+_http_client: httpx.AsyncClient | None = None   # 共享连接池；未注入时按需临时创建
 
 _GROUP_DISPLAY: dict[str, str] = {
     "nogizaka46": "乃木坂46",
@@ -30,10 +31,24 @@ _PROMPT_TEMPLATE = (
     "原文：\n{text}"
 )
 
-def initialize() -> None:
-    """在事件循环内调用，创建 RateLimiter（lambda 确保热重载后读取最新值）。"""
-    global _limiter
+def initialize(client: httpx.AsyncClient | None = None) -> None:
+    """在事件循环内调用，创建 RateLimiter 并注入共享 HTTP 客户端。
+    （lambda 确保热重载后读取最新间隔值）"""
+    global _limiter, _http_client
     _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
+    _http_client = client
+
+
+async def _post_json(url: str, payload: dict) -> httpx.Response:
+    """发送翻译请求。优先复用共享连接池（超时按请求覆盖），
+    未注入时（如工具脚本单独调用）退回临时客户端。"""
+    headers = {"Content-Type": "application/json"}
+    if _http_client is not None:
+        return await _http_client.post(
+            url, json=payload, headers=headers, timeout=cfg.TRANSLATE_TIMEOUT,
+        )
+    async with httpx.AsyncClient(timeout=cfg.TRANSLATE_TIMEOUT) as client:
+        return await client.post(url, json=payload, headers=headers)
 
 def _is_already_chinese(text: str) -> bool:
     """检查文本是否不需要翻译。
@@ -116,11 +131,7 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
             url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
             for attempt in range(2):
                 try:
-                    async with httpx.AsyncClient(timeout=cfg.TRANSLATE_TIMEOUT) as client:
-                        resp = await client.post(
-                            url, json=payload,
-                            headers={"Content-Type": "application/json"},
-                        )
+                    resp = await _post_json(url, payload)
 
                     if resp.status_code == 200:
                         result = _extract_text(resp.json(), model["name"])

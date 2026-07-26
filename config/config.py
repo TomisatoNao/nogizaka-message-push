@@ -30,15 +30,17 @@ _DEFAULTS: dict = {
     "qq_official_api_base":     "https://api.sgroup.qq.com",
     "qq_official_min_interval": 1.2,
     "qq_official_timeout":      15,
+    "qq_official_media_timeout": 60,   # 下载/上传媒体的独立超时（25MB 视频跑不进 15s）
     "qq_official_media_max_bytes": 26214400,
     "qq_official_bots":         [],
     # Gemini
     "gemini_api_key":           "",
+    # 注：限速是全局串行的 gemini_min_interval，模型级 rpm 从未生效，已移除
     "gemini_models": [
-        {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",       "rpm": 10},
-        {"name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",       "rpm": 10},
-        {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",  "rpm": 15},
-        {"name": "gemini-3.1-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",  "rpm": 15},
+        {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
+        {"name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
+        {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
+        {"name": "gemini-3.1-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
     ],
     "gemini_min_interval":      7.0,
     "translate_max_length":     2500,
@@ -244,6 +246,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "qq_official_api_base":         "QQ_OFFICIAL_API_BASE",
     "qq_official_min_interval":     "QQ_OFFICIAL_MIN_INTERVAL",
     "qq_official_timeout":          "QQ_OFFICIAL_TIMEOUT",
+    "qq_official_media_timeout":    "QQ_OFFICIAL_MEDIA_TIMEOUT",
     "qq_official_media_max_bytes":  "QQ_OFFICIAL_MEDIA_MAX_BYTES",
     "qq_official_bots":             "QQ_OFFICIAL_BOTS",
     "accounts":                     "ACCOUNTS",
@@ -473,10 +476,14 @@ def reload() -> bool:
         TG_BOT_TOKEN   = _env("TG_BOT_TOKEN", TG_BOT_TOKEN)
 
         return True
-    except SystemExit:
-        # _load_config 在致命错误时调用 sys.exit，我们拦截住
+    except SystemExit as e:
+        # _load_config 在致命错误时调用 sys.exit(message)，拦截并把原因打出来
+        # （不能 import src.logger —— 会形成循环依赖，用 print）
+        print(f"🚨 配置重载失败（保留旧配置）: {e.code}")
         return False
     except Exception:
+        import traceback as _tb
+        print(f"🚨 配置重载失败（保留旧配置）:\n{_tb.format_exc()}")
         return False
 
 

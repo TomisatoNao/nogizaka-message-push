@@ -4,6 +4,7 @@
 import config.config as cfg
 from src.logger import error_logger, log_all
 from src.platforms.napcat import send_qq_message
+from src.platforms import qq_official
 from src.platforms.qq_official import get_configured_bots, has_bots
 from src.platforms import tgbot
 from src import health
@@ -44,8 +45,12 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
         bots = get_configured_bots()
+        # 媒体只下载一次，分发给所有 Bot（上传仍按 Bot 各自进行）
+        media_payloads = None
+        if bots:
+            media_payloads = await qq_official.download_media_payloads(member, message_chain)
         for bot in bots:
-            ok = await bot.send_message_chain(member, message_chain)
+            ok = await bot.send_message_chain(member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}", ok)
             if not ok:
                 log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 推送失败", is_error=True)
@@ -73,7 +78,6 @@ async def send_alert_message(target_group: int, text: str) -> bool:
 
     # NapCat 群告警（target_group 为 0 表示该账号无关联 QQ 群，跳过）
     if cfg.ENABLE_NAPCAT_QQ and target_group:
-        from src.platforms.napcat import send_qq_message
         alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
         ok = await send_qq_message(target_group, alert_chain)
         if ok:
@@ -87,7 +91,6 @@ async def send_alert_message(target_group: int, text: str) -> bool:
 
     # QQ 官方 Bot 告警 — 发给所有已配置的 Bot
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
-        from src.platforms.qq_official import get_configured_bots
         bots = get_configured_bots()
         if not bots:
             log_all(f"⏸️ 没有已配置的 QQ 官方 Bot，警报未发送: {text}", is_error=True)

@@ -19,6 +19,7 @@ from src import health
 from src.platforms.qq_official import health_check as qq_official_health_check
 import config.config as cfg
 from config.credentials import (
+    initialize as init_credentials,
     load_all_accounts, proactive_refresh_if_expiring,
     refresh_mobile_token, get_token_remaining_seconds,
 )
@@ -300,11 +301,7 @@ async def main() -> None:
         token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
     )
 
-    # 2. 在事件循环内创建需要 asyncio 的锁（translator / tgbot）
-    translator.initialize()
-    tgbot.initialize()
-
-    # 3. 创建共享 HTTP 客户端
+    # 2. 创建共享 HTTP 客户端
     http_client = httpx.AsyncClient(
         timeout=20,
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
@@ -316,21 +313,25 @@ async def main() -> None:
     )
     semaphore = asyncio.Semaphore(cfg.HTTP_SEMAPHORE_LIMIT)
 
-    # 4. 注入依赖
+    # 3. 注入依赖 & 在事件循环内创建各模块的锁
+    #    translator / credentials 也复用共享连接池，避免每次翻译/续期新建 TLS 连接
+    init_credentials(http_client)
+    translator.initialize(http_client)
+    tgbot.initialize()
     napcat.initialize(qq_client)
     qq_official.initialize(qq_client)
     fetcher.initialize(http_client, semaphore)
 
-    # 5. 移动端账号初始 Token 刷新
-    #    必须放在通道注入（步骤 2/4）之后：刷新失败时 refresh_mobile_token 会走
+    # 4. 移动端账号初始 Token 刷新
+    #    必须放在通道注入（步骤 3）之后：刷新失败时 refresh_mobile_token 会走
     #    send_alert_message，此时 napcat._client / tgbot._bot 必须已就绪，否则告警静默丢失。
     await _init_mobile_accounts()
 
-    # 6. 启动健康检查（改进 3）
+    # 5. 启动健康检查（改进 3）
     await _health_check(qq_client)
     print()
 
-    # 7. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
+    # 6. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
     observer = start_watcher(config_path, on_reload=_on_config_reload)
 

@@ -19,6 +19,26 @@ ACCOUNT_CREDS:        dict[str, dict]          = {}
 _file_locks:          dict[str, asyncio.Lock]  = {}
 _token_refresh_locks: dict[str, asyncio.Lock]  = {}
 _alert_last_sent:     dict[str, float]         = {}
+_http_client:         httpx.AsyncClient | None = None
+_last_time_written:   dict[str, str]           = {}   # write_time_record 的值缓存
+
+
+def initialize(client: httpx.AsyncClient) -> None:
+    """注入共享 HTTP 客户端（Token 刷新复用连接池）。
+    未注入时（如 tools/list_members.py 单独运行）按需临时创建。"""
+    global _http_client
+    _http_client = client
+
+
+async def _post(url: str, *, headers: dict,
+                json_body: dict | None = None,
+                content: bytes | None = None) -> httpx.Response:
+    if _http_client is not None:
+        return await _http_client.post(
+            url, headers=headers, json=json_body, content=content, timeout=15,
+        )
+    async with httpx.AsyncClient(timeout=15) as client:
+        return await client.post(url, headers=headers, json=json_body, content=content)
 
 
 # ──────────────────────────────────────────────
@@ -213,8 +233,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
         headers.pop("Authorization", None)  # 移动端刷新时不含旧 Auth
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(url, headers=headers, json={"refresh_token": rt})
+            r = await _post(url, headers=headers, json_body={"refresh_token": rt})
             log_response(r.text)
 
             if r.status_code == 200:
@@ -345,12 +364,16 @@ def get_source_headers_for_account(account_id: str, group_type: str) -> dict[str
 
 
 async def write_time_record(time_file: str, file_lock: asyncio.Lock, updated: str) -> None:
+    # 值没变就不落盘：无新消息的轮次会以完全相同的内容反复重写同一文件
+    if _last_time_written.get(time_file) == updated:
+        return
     tmp = time_file + ".tmp"
     async with file_lock:
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(updated)
             os.replace(tmp, time_file)
+            _last_time_written[time_file] = updated
         except Exception as e:
             log_all(f"🚨 时间戳写入失败 ({time_file}): {e}", is_error=True)
             try:
@@ -485,8 +508,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
         headers["cookie"] = cookie_str
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(url, headers=headers, content=b'{"refresh_token":null}')
+            r = await _post(url, headers=headers, content=b'{"refresh_token":null}')
             log_response(r.text)
 
             if r.status_code == 200:
