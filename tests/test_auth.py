@@ -204,6 +204,57 @@ def main() -> None:
             code, body, _ = _http("PUT", base + "/api/config", body={"x": 1}, headers=vck)
             assert code == 403, "viewer 不应能改配置"
 
+            # 用户管理接口：admin 可用，viewer 一律 403
+            code, body, _ = _http("GET", base + "/api/users", headers=ck)
+            assert code == 200 and any(u["username"] == "admin1" and u["is_me"]
+                                       for u in body["users"]), f"用户列表: {body}"
+            assert all("password" not in json.dumps(u) for u in body["users"]), "列表不得含密码字段"
+            code, body, _ = _http("GET", base + "/api/users", headers=vck)
+            assert code == 403, "viewer 不应看到用户列表"
+            code, body, _ = _http("POST", base + "/api/users", headers=vck,
+                                  body={"action": "add", "username": "hacker",
+                                        "password": "hackerpass1", "role": "admin"})
+            assert code == 403, "viewer 不应能创建用户"
+
+            # 通过接口新增 viewer → 可登录且只有归档权限
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "add", "username": "guest1",
+                                        "password": "guestpass123", "role": "viewer"})
+            assert code == 200 and body["ok"], f"新增用户应成功: {body}"
+            code, body, h = _http("POST", base + "/api/auth/login",
+                                  {"username": "guest1", "password": "guestpass123"})
+            assert code == 200 and body["user"]["role"] == "viewer"
+            gck = {"Cookie": h.get("Set-Cookie", "").split(";")[0]}
+            assert _http("GET", base + "/api/archive/members", headers=gck)[0] == 200
+            assert _http("GET", base + "/api/config", headers=gck)[0] == 403
+
+            # 改密码 → 旧会话立即失效
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "passwd", "username": "guest1",
+                                        "password": "newguestpass1"})
+            assert code == 200 and body["ok"]
+            assert _http("GET", base + "/api/archive/members", headers=gck)[0] == 401, \
+                "改密后旧会话应失效"
+
+            # 防误锁：不能删自己、不能删/降最后一个 admin、弱密码被拒
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "delete", "username": "admin1"})
+            assert code == 400 and "当前登录" in body["errors"][0], f"不应能删自己: {body}"
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "role", "username": "admin1", "role": "viewer"})
+            assert code == 400, "不应能降级最后一个 admin"
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "add", "username": "weakling", "password": "123"})
+            assert code == 400 and "至少" in body["errors"][0]
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "bogus", "username": "x"})
+            assert code == 400, "未知操作应 400"
+
+            # 删除 viewer
+            code, body, _ = _http("POST", base + "/api/users", headers=ck,
+                                  body={"action": "delete", "username": "guest1"})
+            assert code == 200 and body["ok"], f"删除应成功: {body}"
+
             # CSRF：跨站 Origin 的写请求被拒
             code, body, _ = _http("POST", base + "/api/restart",
                                   headers={**ck, "Origin": "https://evil.example.com"})

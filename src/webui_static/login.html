@@ -7,53 +7,127 @@
 <title>登录 · 坂道监控</title>
 <style>
   :root {
-    --bg: #f5f6f8; --card: #ffffff; --text: #1c2333; --muted: #6b7280;
-    --border: #e3e6eb; --accent: #6d5bd0; --err: #d23f3f; --ok: #1a9e5c;
+    --card: rgba(255,255,255,.82); --text: #1c2333; --muted: #6b7280;
+    --border: rgba(255,255,255,.6); --field: rgba(255,255,255,.75);
+    --accent: #6d5bd0; --accent2: #b07de0; --err: #d23f3f; --ok: #1a9e5c;
+    --g1: #e8e4fb; --g2: #f6e6f2; --g3: #e2ecfa; --shadow: rgba(90,70,160,.16);
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #14161c; --card: #1d2027; --text: #e8eaf0; --muted: #9aa1af;
-            --border: #2e323c; --accent: #9c8cf0; --err: #ef6a6a; --ok: #3ecf8e; }
+    :root {
+      --card: rgba(30,33,42,.78); --text: #e8eaf0; --muted: #9aa1af;
+      --border: rgba(255,255,255,.09); --field: rgba(255,255,255,.06);
+      --accent: #9c8cf0; --accent2: #c79bf0; --err: #ef6a6a; --ok: #3ecf8e;
+      --g1: #191c26; --g2: #221d2c; --g3: #161c28; --shadow: rgba(0,0,0,.45);
+    }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         background: var(--bg); color: var(--text); font-size: 14px;
-         font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-          padding: 32px 34px; width: min(390px, 92vw); box-shadow: 0 4px 20px rgba(0,0,0,.06); }
-  h1 { font-size: 18px; margin: 0 0 6px; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
-  label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
-  input { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
-          background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit;
-          margin-bottom: 16px; }
-  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  button { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--accent);
-           color: #fff; font-size: 14.5px; font-weight: 600; cursor: pointer; font-family: inherit;
-           transition: transform .06s, opacity .12s; }
-  button:hover { opacity: .92; }
-  button:active { transform: translateY(1px) scale(.99); }
-  button:disabled { opacity: .6; cursor: default; }
-  .msg { margin-top: 14px; font-size: 13px; min-height: 20px; line-height: 1.6; }
-  .msg.err { color: var(--err); }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--text); font-size: 14px; padding: 20px;
+    font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(125deg, var(--g1), var(--g2), var(--g3), var(--g1));
+    background-size: 400% 400%; animation: drift 24s ease-in-out infinite;
+  }
+  @keyframes drift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+  @media (prefers-reduced-motion: reduce) { body { animation: none; } }
+
+  .card {
+    width: min(400px, 100%); padding: 40px 38px 34px; border-radius: 20px;
+    background: var(--card); border: 1px solid var(--border);
+    backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    box-shadow: 0 18px 50px var(--shadow);
+    animation: rise .45s cubic-bezier(.2,.8,.3,1) both;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+  .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 6px; }
+  .brand .logo {
+    width: 40px; height: 40px; border-radius: 12px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 20px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+  h1 { font-size: 19px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 26px 51px; }
+
+  .field { position: relative; margin-bottom: 16px; }
+  .field input {
+    width: 100%; padding: 25px 13px 9px; border: 1px solid transparent; border-radius: 11px;
+    background: var(--field); color: var(--text); font-size: 14.5px; font-family: inherit;
+    transition: border-color .15s, background .15s;
+  }
+  .field input:focus { outline: none; border-color: var(--accent);
+                       background: color-mix(in srgb, var(--field) 70%, transparent); }
+  /* 密码管理器自动填充时 Chrome 会强刷背景色，用长过渡把玻璃质感保住 */
+  .field input:-webkit-autofill,
+  .field input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text);
+    box-shadow: 0 0 0 60px var(--g1) inset;
+    transition: background-color 100000s ease-in-out 0s;
+  }
+  .field label {
+    position: absolute; left: 13px; top: 17px; font-size: 14px; color: var(--muted);
+    pointer-events: none; transition: all .16s ease; }
+  .field input:focus + label,
+  .field input:not(:placeholder-shown) + label,
+  .field input:-webkit-autofill + label { top: 7px; font-size: 10.5px; color: var(--accent); }
+  .field .toggle {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer; font-size: 14px; padding: 6px 9px;
+    opacity: .55; color: var(--text); }
+  .field .toggle:hover { opacity: 1; }
+
+  button.submit {
+    width: 100%; margin-top: 8px; padding: 12px; border: none; border-radius: 11px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; font-size: 15px; font-weight: 650; cursor: pointer; font-family: inherit;
+    letter-spacing: .08em; transition: transform .07s, box-shadow .18s, opacity .18s;
+    box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+  button.submit:hover { box-shadow: 0 9px 24px color-mix(in srgb, var(--accent) 42%, transparent); }
+  button.submit:active { transform: translateY(1px) scale(.99); }
+  button.submit:disabled { opacity: .65; cursor: default; box-shadow: none; }
+
+  .msg { margin-top: 15px; font-size: 13px; min-height: 20px; line-height: 1.6; text-align: center; }
+  .msg.err { color: var(--err); animation: shake .32s; }
   .msg.ok { color: var(--ok); }
-  .hint { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border);
-          font-size: 12px; color: var(--muted); line-height: 1.75; }
-  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  @keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+
+  .notice { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);
+            font-size: 12px; color: var(--muted); line-height: 1.85; }
+  code { background: color-mix(in srgb, var(--muted) 16%, transparent);
+         padding: 2px 6px; border-radius: 5px; font-size: 11.5px; }
+  a { color: var(--accent); }
+  .foot { margin-top: 20px; text-align: center; font-size: 11px; color: var(--muted); opacity: .75; }
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>🔐 坂道监控</h1>
-  <div class="sub" id="sub">请登录以继续</div>
-  <form id="form">
-    <label for="u">用户名</label>
-    <input id="u" name="username" autocomplete="username" autofocus required>
-    <label for="p">密码</label>
-    <input id="p" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit" id="btn">登 录</button>
+  <div class="brand">
+    <div class="logo">⛩️</div>
+    <div>
+      <h1>坂道监控</h1>
+    </div>
+  </div>
+  <p class="sub" id="sub">请登录以继续</p>
+
+  <form id="form" autocomplete="on">
+    <div class="field">
+      <input id="u" name="username" placeholder=" " autocomplete="username" autofocus required>
+      <label for="u">用户名</label>
+    </div>
+    <div class="field">
+      <input id="p" name="password" type="password" placeholder=" " autocomplete="current-password" required>
+      <label for="p">密码</label>
+      <button type="button" class="toggle" id="pwToggle" title="显示 / 隐藏">👁</button>
+    </div>
+    <button type="submit" class="submit" id="btn">登 录</button>
   </form>
+
   <div class="msg" id="msg"></div>
-  <div class="hint" id="hint" hidden></div>
+  <div class="notice" id="notice" hidden></div>
+  <div class="foot" id="foot">📚 消息归档 · ⚙️ 配置管理</div>
 </div>
 
 <script>
@@ -62,8 +136,13 @@ const $ = (id) => document.getElementById(id);
 
 function nextUrl() {
   const p = new URLSearchParams(location.search).get("next") || "/";
-  // 只接受站内相对路径，杜绝开放重定向
-  return (p.startsWith("/") && !p.startsWith("//")) ? p : "/";
+  return (p.startsWith("/") && !p.startsWith("//")) ? p : "/";   // 只接受站内路径，杜绝开放重定向
+}
+
+function showNotice(html) {
+  $("form").hidden = true;
+  $("notice").hidden = false;
+  $("notice").innerHTML = html;
 }
 
 (async function init() {
@@ -71,28 +150,30 @@ function nextUrl() {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
     if (!me.auth_enabled) {
       $("sub").textContent = "账号系统未启用";
-      $("form").hidden = true;
-      $("hint").hidden = false;
-      $("hint").innerHTML = "在 <code>config.json</code> 的 <code>auth.enabled</code> 打开后即可使用账号登录。" +
-        '<br><a href="/">前往管理端</a>';
+      showNotice("在 <code>config.json</code> 的 <code>auth.enabled</code> 打开后即可使用账号登录。" +
+                 '<br><a href="/">前往管理端 →</a>');
       return;
     }
     if (!me.has_users) {
       $("sub").textContent = "还没有创建任何账号";
-      $("form").hidden = true;
-      $("hint").hidden = false;
-      $("hint").innerHTML = "在服务器上执行以下命令创建第一个管理员：<br>" +
-        "<code>python tools/manage_users.py add 你的用户名</code><br>" +
-        "（密码在命令行交互输入，不会出现在历史记录里）";
+      showNotice("在服务器上执行以下命令创建第一个管理员：<br>" +
+                 "<code>python tools/manage_users.py add 用户名</code><br>" +
+                 "密码在命令行交互输入，不会留在历史记录里。");
       return;
     }
     if (me.user) {
       $("msg").className = "msg ok";
       $("msg").textContent = "已登录为 " + me.user.username + "，正在跳转…";
-      setTimeout(() => location.href = nextUrl(), 600);
+      setTimeout(() => location.href = me.user.role === "admin" ? nextUrl() : "/archive", 500);
     }
   } catch (e) { /* 离线时正常显示表单 */ }
 })();
+
+$("pwToggle").addEventListener("click", () => {
+  const el = $("p");
+  el.type = el.type === "password" ? "text" : "password";
+  $("pwToggle").textContent = el.type === "password" ? "👁" : "🚫";
+});
 
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -110,12 +191,12 @@ $("form").addEventListener("submit", async (e) => {
     const data = await resp.json();
     if (data.ok) {
       msg.className = "msg ok";
-      msg.textContent = "✅ 登录成功，正在跳转…";
+      msg.textContent = "✅ 欢迎回来，" + data.user.username;
       location.href = data.user.role === "admin" ? nextUrl() : "/archive";
       return;
     }
     msg.className = "msg err";
-    msg.textContent = "❌ " + (data.errors || ["登录失败"]).join("；");
+    msg.textContent = (data.errors || ["登录失败"]).join("；");
     $("p").value = "";
     $("p").focus();
   } catch (err) {

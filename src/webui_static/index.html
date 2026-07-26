@@ -148,6 +148,7 @@
     <button data-tab="accounts">账号池</button>
     <button data-tab="members">监控成员</button>
     <button data-tab="logs">日志</button>
+    <button data-tab="users" id="tabUsers" hidden>用户</button>
     <button data-tab="advanced">高级（JSON）</button>
   </nav>
 
@@ -332,6 +333,23 @@
     </div>
   </section>
 
+  <!-- ── 用户 ─────────────────────────────── -->
+  <section class="tab" id="tab-users">
+    <div class="card">
+      <h2>账号管理</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th></th></tr></thead>
+        <tbody id="userRows"></tbody>
+      </table></div>
+      <div style="margin-top:12px"><button class="btn" id="btnAddUser">＋ 添加用户</button></div>
+      <p class="hint">
+        <b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br>
+        密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br>
+        为防止把自己锁在门外：不能删除或降级最后一个 admin，也不能删除当前登录的账号。
+      </p>
+    </div>
+  </section>
+
   <!-- ── 高级 ─────────────────────────────── -->
   <section class="tab" id="tab-advanced">
     <div class="card">
@@ -401,6 +419,35 @@
   <div class="actions">
     <button class="btn" id="testPushCancel">取消</button>
     <button class="btn primary" id="testPushSend">发送</button>
+  </div>
+</dialog>
+
+<!-- 添加用户对话框 -->
+<dialog id="userDialog">
+  <h3>添加用户</h3>
+  <div class="dialog-note">密码仅上传、不回显；创建后可随时改密或改角色。</div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">用户名<span class="req">*</span></span>
+      <span class="fenv">字母 / 数字 / _ / -</span></div>
+    <input type="text" id="newUserName" placeholder="friend" autocomplete="off">
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">角色</span></div>
+    <div class="chips" id="newUserRole"></div>
+    <div class="fhelp" id="newUserRoleHelp"></div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">密码<span class="req">*</span></span>
+      <span class="fenv" id="pwLenHint">至少 8 位</span></div>
+    <div class="input-group">
+      <input type="text" id="newUserPw" class="masked" autocomplete="new-password"
+             data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+      <button type="button" class="eye" id="newUserPwEye">👁</button>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="userCancel">取消</button>
+    <button class="btn primary" id="userSave">创建</button>
   </div>
 </dialog>
 
@@ -584,6 +631,7 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
     document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
     if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
     if (btn.dataset.tab === "status") startStatusPolling(); else stopStatusPolling();
+    if (btn.dataset.tab === "users") refreshUsers();
   });
 });
 
@@ -970,8 +1018,8 @@ $("tab-general").addEventListener("input", () => markDirty());
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
-function openSecretDialog(title, hint, fields, account) {
-  secretCtx = { fields, account };
+function openSecretDialog(title, hint, fields, account, opts) {
+  secretCtx = { fields, account, userAction: (opts || {}).userAction || null };
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
   $("secretDialogHint").hidden = !hint;
@@ -987,10 +1035,13 @@ function openSecretDialog(title, hint, fields, account) {
     name.className = "fname";
     name.innerHTML = esc(f.label) + (f.required ? '<span class="req">*</span>'
                                                 : ' <span style="color:var(--muted);font-weight:400">（可选）</span>');
-    const envChip = document.createElement("span");
-    envChip.className = "fenv";
-    envChip.textContent = ".env · " + f.env;
-    labelRow.append(name, envChip);
+    labelRow.appendChild(name);
+    if (f.env !== "__password__") {   // 账号密码不涉及 .env，不显示变量名标签
+      const envChip = document.createElement("span");
+      envChip.className = "fenv";
+      envChip.textContent = ".env · " + f.env;
+      labelRow.appendChild(envChip);
+    }
 
     const group = document.createElement("div");
     group.className = "input-group";
@@ -1057,6 +1108,16 @@ $("secretSave").addEventListener("click", async () => {
   }
   if (missing) { uiAlert("请填写：" + missing); return; }
   if (!Object.keys(values).length) { uiAlert("没有填写任何值"); return; }
+
+  // 账号密码走用户管理接口（不写 .env）
+  if (secretCtx.userAction) {
+    const pw = values["__password__"] || "";
+    if (pw.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
+    const ok = await userAction({ ...secretCtx.userAction, password: pw });
+    if (ok) $("secretDialog").close();
+    return;
+  }
+
   const saveBtn = $("secretSave");
   saveBtn.disabled = true;
   const origText = saveBtn.textContent;
@@ -1450,6 +1511,102 @@ function stopLogPolling() {
   if (logTimer !== null) { clearInterval(logTimer); logTimer = null; }
 }
 
+// ── 用户管理 ─────────────────────────────────────
+let minPwLen = 8;
+
+async function refreshUsers() {
+  let data;
+  try { data = await api("/api/users"); } catch (e) { return; }
+  if (!data.ok) return;
+  minPwLen = data.min_password_len || 8;
+  const tbody = $("userRows");
+  tbody.innerHTML = "";
+  const adminCount = data.users.filter((u) => u.role === "admin").length;
+  for (const u of data.users) {
+    const tr = document.createElement("tr");
+    const when = u.created_at ? new Date(u.created_at * 1000).toLocaleString() : "—";
+    tr.innerHTML = "<td><b>" + esc(u.username) + "</b>" +
+      (u.is_me ? ' <span class="cred ok">当前登录</span>' : "") + "</td>" +
+      "<td>" + (u.role === "admin" ? '<span class="cred ok">admin</span>'
+                                   : '<span class="cred" style="color:var(--muted)">viewer</span>') +
+      "</td><td>" + esc(when) + "</td>";
+    const td = document.createElement("td");
+    td.appendChild(mkBtn("改密码", () => openSecretDialog(
+      "重置密码：" + u.username,
+      "保存后该用户所有已登录会话立即失效，需用新密码重新登录。",
+      [{ env: "__password__", label: "新密码", required: true,
+         help: "至少 " + minPwLen + " 位。" }],
+      null, { userAction: { action: "passwd", username: u.username } })));
+    td.appendChild(document.createTextNode(" "));
+    // 最后一个 admin 不给降级入口；其余可切换角色
+    const canToggle = !(u.role === "admin" && adminCount <= 1);
+    if (canToggle) {
+      const target = u.role === "admin" ? "viewer" : "admin";
+      td.appendChild(mkBtn("改为 " + target, async () => {
+        if (!(await uiConfirm("把 " + u.username + " 的角色改为 " + target + "？",
+                              { title: "修改角色", yesText: "确定" }))) return;
+        await userAction({ action: "role", username: u.username, role: target });
+      }));
+      td.appendChild(document.createTextNode(" "));
+    }
+    if (!u.is_me && canToggle) {
+      td.appendChild(mkBtn("删除", async () => {
+        if (!(await uiConfirm("删除用户 " + u.username + "？该账号将立即失去访问权限。",
+                              { title: "删除用户", yesText: "删除", danger: true }))) return;
+        await userAction({ action: "delete", username: u.username });
+      }, "danger"));
+    }
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+async function userAction(payload) {
+  try {
+    const data = await api("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("；"), "err"); return false; }
+    msg("✅ " + (data.message || "已完成"), "ok");
+    refreshUsers();
+    return true;
+  } catch (e) {
+    msg("操作失败：" + e.message, "err");
+    return false;
+  }
+}
+
+$("btnAddUser").addEventListener("click", () => {
+  $("newUserName").value = "";
+  $("newUserPw").value = "";
+  $("pwLenHint").textContent = "至少 " + minPwLen + " 位";
+  chipGroup("newUserRole", [["viewer", "viewer（只看归档）"], ["admin", "admin（完整权限）"]], "viewer");
+  $("newUserRoleHelp").textContent = "访客选 viewer：他们只能打开消息归档，碰不到配置和凭证。";
+  $("userDialog").showModal();
+  $("newUserName").focus();
+});
+$("userCancel").addEventListener("click", () => $("userDialog").close());
+$("newUserPwEye").addEventListener("click", () => {
+  const el = $("newUserPw");
+  $("newUserPwEye").textContent = el.classList.toggle("masked") ? "👁" : "🚫";
+});
+$("userSave").addEventListener("click", async () => {
+  const username = $("newUserName").value.trim();
+  const password = $("newUserPw").value;
+  if (!username) { uiAlert("请填写用户名"); return; }
+  if (password.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
+  const btn = $("userSave");
+  btn.disabled = true; btn.textContent = "创建中…";
+  const ok = await userAction({
+    action: "add", username: username, password: password,
+    role: $("newUserRole").dataset.value,
+  });
+  btn.disabled = false; btn.textContent = "创建";
+  if (ok) { $("newUserPw").value = ""; $("userDialog").close(); }
+});
+
 // ── 配置历史 ─────────────────────────────────────
 async function restoreHistory(name, when) {
   if (!(await uiConfirm("恢复到 " + when + " 的配置？\n当前版本会先快照，之后可再撤销。",
@@ -1595,6 +1752,7 @@ document.addEventListener("visibilitychange", () => {
       $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
       $("whoami").hidden = false;
       $("btnLogout").hidden = false;
+      if (me.user.role === "admin") $("tabUsers").hidden = false;   // 用户管理仅 admin 可见
     }
   } catch (e) { /* 忽略 */ }
 })();

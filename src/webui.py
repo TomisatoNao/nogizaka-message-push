@@ -683,6 +683,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_members()
             return
 
+        if path == "/api/users":
+            if not self._check_auth():
+                return
+            from src import auth as _auth
+            me = self._current_user() or {}
+            users = [{
+                "username": name,
+                "role": u.get("role", "viewer"),
+                "created_at": u.get("created_at", 0),
+                "is_me": name == me.get("username"),
+            } for name, u in sorted(_auth.load_users().items())]
+            self._send_json({"ok": True, "users": users,
+                             "min_password_len": _auth.MIN_PASSWORD_LEN})
+            return
+
         if path == "/api/config/history":
             if not self._check_auth():
                 return
@@ -822,6 +837,42 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Clear-Site-Data", '"cache", "cookies", "storage"')
         self.end_headers()
         self.wfile.write(body_out)
+
+    def _handle_users_write(self) -> None:
+        """用户管理（仅 admin）：add / passwd / role / delete。
+        密码只接收不回显；关键防误锁规则在 auth 模块内统一保证。"""
+        from src import auth as _auth
+        from src.logger import log_all
+
+        body = self._read_body_json()
+        if body is None:
+            return
+        action = str(body.get("action", ""))
+        username = str(body.get("username", ""))[:64]
+        password = str(body.get("password", ""))[:256]
+        role = str(body.get("role", "viewer"))
+        me = (self._current_user() or {}).get("username", "?")
+
+        if action == "add":
+            ok, msg = _auth.add_user(username, password, role)
+        elif action == "passwd":
+            ok, msg = _auth.set_password(username, password)
+        elif action == "role":
+            ok, msg = _auth.set_role(username, role)
+        elif action == "delete":
+            if username == me:
+                ok, msg = False, "不能删除当前登录的账号"
+            else:
+                ok, msg = _auth.delete_user(username)
+        else:
+            self._send_json({"ok": False, "errors": [f"未知操作: {action!r}"]}, 400)
+            return
+
+        if ok:
+            log_all(f"👤 用户管理[{me}]: {action} {username} — {msg}")
+            self._send_json({"ok": True, "message": msg})
+        else:
+            self._send_json({"ok": False, "errors": [msg]}, 400)
 
     def _handle_archive(self, sub: str) -> None:
         from urllib.parse import parse_qs, unquote
@@ -1142,6 +1193,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/auth/logout":
             self._handle_logout()
+            return
+        if path == "/api/users":
+            if not self._check_auth():
+                return
+            self._handle_users_write()
             return
         if path == "/api/reload":
             if not self._check_auth():
