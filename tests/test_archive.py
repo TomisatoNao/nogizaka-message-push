@@ -170,6 +170,51 @@ def main() -> None:
             cfg.MONITOR_LIST.extend(orig_monitor)
         assert "每日运行摘要" in text and "摘要测试 1 条" in text, f"摘要应含今日计数:\n{text}"
         assert "正常运行" in text
+        assert "存储:" in text and "归档" in text, f"摘要应含存储水位:\n{text}"
+
+        # 磁盘告警：阈值调到极大时应出现警告
+        import src.app as app_mod
+        orig_warn = app_mod.DISK_WARN_BYTES
+        app_mod.DISK_WARN_BYTES = 10 ** 18
+        try:
+            assert "磁盘空间不足" in app_mod._storage_line(), "低于阈值应告警"
+        finally:
+            app_mod.DISK_WARN_BYTES = orig_warn
+        assert "磁盘空间不足" not in app_mod._storage_line(), "空间充足时不应告警"
+
+        # 摘要发送失败 → 按次重试，全失败后记 PERSISTENT 错误
+        import src.notifier as notifier_mod
+        from src import health as health_mod
+        orig_send = notifier_mod.send_report_message
+        orig_retry, orig_attempts = app_mod.SUMMARY_RETRY_SECONDS, app_mod.SUMMARY_MAX_ATTEMPTS
+        calls = []
+
+        async def _fail(text):
+            calls.append(1)
+            return False
+
+        notifier_mod.send_report_message = _fail
+        app_mod.SUMMARY_RETRY_SECONDS = 0
+        app_mod.SUMMARY_MAX_ATTEMPTS = 3
+        try:
+            before = len(health_mod.get_tracker().snapshot()["errors"])
+            asyncio.run(app_mod._send_summary_with_retry())
+            assert len(calls) == 3, f"应重试到 3 次: {len(calls)}"
+            after = health_mod.get_tracker().snapshot()["errors"]
+            assert len(after) > before and after[-1]["tier"] == "PERSISTENT", \
+                "连续失败应记 PERSISTENT 错误"
+
+            # 第二次尝试成功 → 不再继续重试
+            calls.clear()
+            async def _second_ok(text):
+                calls.append(1)
+                return len(calls) >= 2
+            notifier_mod.send_report_message = _second_ok
+            asyncio.run(app_mod._send_summary_with_retry())
+            assert len(calls) == 2, f"成功后应停止重试: {len(calls)}"
+        finally:
+            notifier_mod.send_report_message = orig_send
+            app_mod.SUMMARY_RETRY_SECONDS, app_mod.SUMMARY_MAX_ATTEMPTS = orig_retry, orig_attempts
         print("✅ Test 4 通过\n")
 
         # ── Test 5: 并发合并写（无丢失、无损坏）─────────
