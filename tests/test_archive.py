@@ -320,6 +320,16 @@ def main() -> None:
         assert days.get("2026-08-01") == 1, f"月末跨界应归入 JST 8/1: {days}"
         days2 = archive.day_counts(cdir)   # 二次调用走缓存，结果一致
         assert days2 == days
+
+        # 类型过滤：7/5 补一条 picture，各口径计数应正确
+        asyncio.run(archive.archive_message(c_member, {
+            "id": 704, "type": "picture", "text": "photo",
+            "published_at": "2026-07-05T11:00:00Z", "updated_at": "2026-07-05T11:00:00Z"}))
+        assert archive.day_counts(cdir)["2026-07-05"] == 3, "全类型应 3 条"
+        assert archive.day_counts(cdir, {"text"})["2026-07-05"] == 2, "text 过滤应 2 条"
+        assert archive.day_counts(cdir, {"picture", "image"})["2026-07-05"] == 1, "picture 过滤应 1 条"
+        assert "2026-07-06" not in archive.day_counts(cdir, {"picture", "image"}), \
+            "过滤后无该类型的日期不应出现"
         print("✅ Test 7.8 通过\n")
 
         # ── Test 8: 查看器 API 边界 ──────────────────────
@@ -372,7 +382,11 @@ def main() -> None:
             c_enc = "%E6%97%A5%E5%8E%86_%E7%94%A8%E4%BE%8B"
             code, body, _ = _http("GET", base + f"/api/archive/calendar?member={c_enc}")
             j = json.loads(body)
-            assert code == 200 and j["days"]["2026-07-05"] == 2, f"日历接口: {j}"
+            assert code == 200 and j["days"]["2026-07-05"] == 3, f"日历接口: {j}"
+            code, body, _ = _http("GET", base + f"/api/archive/calendar?member={c_enc}&type=text")
+            assert json.loads(body)["days"]["2026-07-05"] == 2, "日历类型过滤应生效"
+            code, body, _ = _http("GET", base + f"/api/archive/calendar?member={c_enc}&type=bogus")
+            assert code == 400, "非法类型应 400"
             code, body, _ = _http("GET", base + "/api/archive/calendar?member=ghost")
             assert code == 404
         finally:

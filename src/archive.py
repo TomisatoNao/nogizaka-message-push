@@ -322,12 +322,14 @@ def _jst_date(utc_str: str) -> str:
     return (dt + timedelta(hours=9)).strftime("%Y-%m-%d")
 
 
-# 按天计数缓存：{json_path: (mtime, {"YYYY-MM-DD": count})}
-_day_cache: dict[str, tuple[float, dict[str, int]]] = {}
+# 按天计数缓存：{json_path: (mtime, {"YYYY-MM-DD": {类型: count}})}
+# 缓存按类型细分存储，聚合时再按筛选求和——同一份缓存服务任意类型过滤
+_day_cache: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
 
 
-def day_counts(member_dir: str) -> dict[str, int]:
-    """全档按 JST 日期统计消息数（日历视图用），逐月 mtime 缓存。"""
+def day_counts(member_dir: str, type_filter: set[str] | None = None) -> dict[str, int]:
+    """全档按 JST 日期统计消息数（日历视图用），逐月 mtime 缓存。
+    type_filter 为 None 统计全部类型，否则只计入指定类型集合。"""
     out: dict[str, int] = {}
     root = archive_root() / member_dir
     if not root.is_dir():
@@ -351,10 +353,15 @@ def day_counts(member_dir: str) -> dict[str, int]:
             for m in msgs:
                 d = _jst_date(m.get("published_at") or m.get("updated_at", ""))
                 if d:
-                    month_counts[d] = month_counts.get(d, 0) + 1
+                    by_type = month_counts.setdefault(d, {})
+                    t = m.get("type", "text")
+                    by_type[t] = by_type.get(t, 0) + 1
             _day_cache[key] = (mtime, month_counts)
-        for d, n in month_counts.items():
-            out[d] = out.get(d, 0) + n
+        for d, by_type in month_counts.items():
+            n = sum(c for t, c in by_type.items()
+                    if type_filter is None or t in type_filter)
+            if n:
+                out[d] = out.get(d, 0) + n
     return out
 
 

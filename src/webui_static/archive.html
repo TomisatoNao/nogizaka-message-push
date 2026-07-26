@@ -191,7 +191,8 @@ function fmtDateKey(utc) {
 // ── 日历 ─────────────────────────────────────────
 async function loadCalendar() {
   try {
-    const data = await api("/api/archive/calendar?member=" + encodeURIComponent(curMember));
+    const data = await api("/api/archive/calendar?member=" + encodeURIComponent(curMember) +
+                           "&type=" + curType);
     dayCounts = data.ok ? data.days : {};
   } catch (e) { dayCounts = {}; }
   renderCalendar();
@@ -250,6 +251,17 @@ async function jumpToDay(dateKey) {
   // 加载全月（最多几页），保证目标日期的分隔条已渲染
   while (page < totalPages) { page++; await loadPage(); }
   $("loadMore").hidden = true;
+  // 兜底：当前类型筛选下该日期没有消息（理论上日历已按类型过滤，防边角）
+  // → 自动切回「全部」重载，保证跳转永远有落点
+  if (!document.querySelector('.day-sep[data-date="' + dateKey + '"]') && curType) {
+    curType = "";
+    $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
+      c.classList.toggle("active", TYPES[i][0] === ""));
+    loadCalendar();
+    await selectMonth(y, m);
+    while (page < totalPages) { page++; await loadPage(); }
+    $("loadMore").hidden = true;
+  }
   // 懒加载图片会持续撑高上方内容、把目标位置往下推，
   // 因此瞬时定位后再校正几次，最后一次才闪烁提示
   const pin = () => {
@@ -485,6 +497,7 @@ function initTypeChips() {
     b.addEventListener("click", () => {
       curType = val;
       box.querySelectorAll(".chip").forEach((c, i) => c.classList.toggle("active", TYPES[i][0] === val));
+      loadCalendar();                                     // 日历计数跟随类型筛选
       if (searchQuery) startSearch(searchQuery);          // 搜索模式下重搜（带新类型）
       else if (curYM) selectMonth(curYM.year, curYM.month);
     });

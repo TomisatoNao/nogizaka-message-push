@@ -706,7 +706,15 @@ class _Handler(BaseHTTPRequestHandler):
             if member not in _archive.list_members():
                 self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
                 return
-            self._send_json({"ok": True, "member": member, "days": _archive.day_counts(member)})
+            type_filter = qp("type")
+            wanted = None
+            if type_filter:
+                if type_filter not in self._ARCHIVE_TYPES:
+                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                    return
+                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+            self._send_json({"ok": True, "member": member,
+                             "days": _archive.day_counts(member, type_filter=wanted)})
             return
 
         if sub == "search":
