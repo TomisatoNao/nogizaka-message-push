@@ -67,6 +67,13 @@ def validate_config(raw: dict) -> list[str]:
             errors.append(f"成员 {label} 重复：同一账号下 id={m.get('id')} 出现多次")
         seen.add(key)
 
+    bot_names: set[str] = set()
+    for b in raw.get("qq_official_bots", []):
+        name = b.get("name", "")
+        if name in bot_names:
+            errors.append(f"官方 Bot 名称重复: {name!r}")
+        bot_names.add(name)
+
     return errors
 
 
@@ -75,7 +82,7 @@ def validate_config(raw: dict) -> list[str]:
 # ================================================================
 
 _SECTIONS: list[tuple[str, list[str]]] = [
-    ("── 推送通道 ──",  ["channels", "napcat_api"]),
+    ("── 推送通道 ──",  ["channels", "napcat_api", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
@@ -95,7 +102,7 @@ def _render_value(key: str, val) -> str:
     if key == "accounts" and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
-    if key in ("monitor", "gemini_models") and isinstance(val, list) and val:
+    if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
     if key in ("channels", "web_admin") and isinstance(val, dict) and val:
@@ -194,18 +201,42 @@ def _cred_status(raw: dict) -> dict:
     return status
 
 
-def _qq_bot_status() -> list[dict]:
-    """QQ 官方 Bot 凭证状态（.env 的 QQ_OFFICIAL_BOT{1,2}_*，只报有/无）。"""
+def _qq_bot_status(raw: dict) -> list[dict]:
+    """QQ 官方 Bot 状态（凭证只报有/无，值不出服务端）。
+
+    config.json 声明了 qq_official_bots 时按声明报告（secret 从 .env 匹配）；
+    未声明时回落到旧的 .env 编号槽位（QQ_OFFICIAL_BOT{1..20}_*）。
+    """
+    declared = raw.get("qq_official_bots") or []
     bots = []
-    for i in (1, 2):
+    if declared:
+        for b in declared:
+            prefix = str(b.get("name", "")).upper()
+            entry = {
+                "name": b.get("name", ""),
+                "declared": True,
+                "app_id": bool(b.get("app_id") or os.getenv(f"{prefix}_APP_ID")),
+                "client_secret": bool(os.getenv(f"{prefix}_CLIENT_SECRET")),
+                "target_openid": bool(b.get("target_openid") or os.getenv(f"{prefix}_TARGET_OPENID")),
+                "secret_env": f"{prefix}_CLIENT_SECRET",
+            }
+            entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
+            bots.append(entry)
+        return bots
+
+    for i in range(1, 21):
         entry = {
             "name": f"BOT{i}",
+            "declared": False,
             "app_id": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_APP_ID")),
             "client_secret": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET")),
             "target_openid": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID")),
+            "secret_env": f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET",
         }
         entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
-        bots.append(entry)
+        # 只展示前两个槽位 + 任何已配置的更高槽位，避免表格里挂 20 行空行
+        if i <= 2 or entry["app_id"] or entry["client_secret"] or entry["target_openid"]:
+            bots.append(entry)
     return bots
 
 
@@ -292,7 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "config": raw,
                 "cred_status": _cred_status(raw),
-                "qq_bot_status": _qq_bot_status(),
+                "qq_bot_status": _qq_bot_status(raw),
                 "config_path": str(CONFIG_PATH),
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
             })
@@ -321,7 +352,7 @@ class _Handler(BaseHTTPRequestHandler):
         reloaded = _trigger_reload()
         self._send_json({
             "ok": True, "reloaded": reloaded,
-            "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(),
+            "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
         })
 
     def do_POST(self) -> None:  # noqa: N802

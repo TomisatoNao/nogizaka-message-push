@@ -214,22 +214,40 @@ def _match_account_credentials(cfg: dict) -> dict:
 
 
 def _build_qq_official_bots(cfg: dict) -> dict:
-    """从 .env 构建 QQ 官方 Bot 列表。"""
+    """构建 QQ 官方 Bot 列表（数量不限）。
+
+    新方式：config.json 的 qq_official_bots 声明 Bot（name / app_id / target_openid），
+            client_secret 按 {NAME大写}_CLIENT_SECRET 从 .env 匹配；
+            app_id / target_openid 未写在 JSON 时也回退到 {NAME大写}_APP_ID / _TARGET_OPENID。
+            （给 Bot 起名 qq_official_bot1 即可复用旧 .env 变量名，无需迁移。）
+    旧方式兼容：config.json 未声明时，扫描 .env 的 QQ_OFFICIAL_BOT{1..20}_* 编号槽位。
+    """
     if not cfg.get("enable_qq_official_bot"):
         cfg["qq_official_bots"] = []
         return cfg
 
+    declared = cfg.get("qq_official_bots") or []
     bots = []
-    for i in (1, 2):
-        app_id = _env(f"QQ_OFFICIAL_BOT{i}_APP_ID", "")
-        if not app_id:
-            continue
-        bots.append({
-            "name":          f"bot_{i}",
-            "app_id":        app_id,
-            "client_secret": _env(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET", ""),
-            "target_openid": _env(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID", ""),
-        })
+    if declared:
+        for b in declared:
+            prefix = str(b["name"]).upper()
+            bots.append({
+                "name":          b["name"],
+                "app_id":        b.get("app_id") or _env(f"{prefix}_APP_ID", ""),
+                "client_secret": _env(f"{prefix}_CLIENT_SECRET", ""),
+                "target_openid": b.get("target_openid") or _env(f"{prefix}_TARGET_OPENID", ""),
+            })
+    else:
+        for i in range(1, 21):
+            app_id = _env(f"QQ_OFFICIAL_BOT{i}_APP_ID", "")
+            if not app_id:
+                continue
+            bots.append({
+                "name":          f"bot_{i}",
+                "app_id":        app_id,
+                "client_secret": _env(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET", ""),
+                "target_openid": _env(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID", ""),
+            })
 
     cfg["qq_official_bots"] = bots
     return cfg

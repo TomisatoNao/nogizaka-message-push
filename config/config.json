@@ -3,35 +3,39 @@
   "channels": {
     "napcat": true,
     "tg": true,
-    "qq_official": false
+    "qq_official": true
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
 
-  // ── 网页管理 ──（浏览器打开 http://127.0.0.1:8787/ 编辑配置）
-  "web_admin": { "enabled": true, "host": "127.0.0.1", "port": 8787 },
+  // ── 网页管理 ──
+  "web_admin": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787
+  },
 
   // ── 账号池 ──
   "accounts": {
-    "nogizaka_main":  { "group": "nogizaka46", "auth": "mobile" },
-    "nogizaka_shared": { "group": "nogizaka46" },
-    "hinata_shared":   { "group": "hinatazaka46" },
-    "yodel_grad":      { "group": "hinatazaka46", "app_tag": "yodel", "api_base": "https://api.service.yodel-app.com", "web_origin": "https://service.yodel-app.com" }
+    "nogizaka_main": {"group": "nogizaka46", "auth": "mobile"},
+    "nogizaka_shared": {"group": "nogizaka46"},
+    "hinata_shared": {"group": "hinatazaka46"},
+    "yodel_grad": {"group": "hinatazaka46", "app_tag": "yodel", "api_base": "https://api.service.yodel-app.com", "web_origin": "https://service.yodel-app.com"}
   },
 
   // ── 监控成员 ──
   "monitor": [
-    { "id": "55", "name": "冨里奈央",    "account": "nogizaka_main",  "groups": [533072575], "tg": "-1004219007326" },
-    { "id": "30", "name": "賀喜遥香",    "account": "nogizaka_shared", "groups": [752269366] },
-    { "id": "34", "name": "金村美玖",    "account": "hinata_shared",   "groups": [752269366] },
-    { "id": "36", "name": "小坂菜绪",    "account": "hinata_shared",   "groups": [752269366] },
-    { "id": "84", "name": "大野愛実",    "account": "hinata_shared",   "groups": [752269366] },
-    { "id": "88", "name": "佐藤優羽",    "account": "hinata_shared",   "groups": [752269366] },
-    { "id": "77", "name": "松田好花",    "account": "yodel_grad",      "groups": [752269366] },
-    { "id": "81", "name": "松田好花 Staff", "account": "yodel_grad",   "groups": [752269366] },
-    { "id": "47", "name": "丹生明里",    "account": "yodel_grad",      "groups": [752269366] }
+    {"id": "55", "name": "冨里奈央", "account": "nogizaka_main", "groups": [533072575], "tg": "-1004219007326"},
+    {"id": "30", "name": "賀喜遥香", "account": "nogizaka_shared", "groups": [752269366]},
+    {"id": "34", "name": "金村美玖", "account": "hinata_shared", "groups": [752269366]},
+    {"id": "36", "name": "小坂菜绪", "account": "hinata_shared", "groups": [752269366]},
+    {"id": "84", "name": "大野愛実", "account": "hinata_shared", "groups": [752269366]},
+    {"id": "88", "name": "佐藤優羽", "account": "hinata_shared", "groups": [752269366]},
+    {"id": "77", "name": "松田好花", "account": "yodel_grad", "groups": [752269366]},
+    {"id": "81", "name": "松田好花 Staff", "account": "yodel_grad", "groups": [752269366]},
+    {"id": "47", "name": "丹生明里", "account": "yodel_grad", "groups": [752269366]}
   ],
 
-  // ── 推送配置 ──
+  // ── 推送节奏 ──
   "day_interval": [120, 180],
   "night_interval": [1500, 1800],
   "sleep_hours": [2, 7],
@@ -41,11 +45,11 @@
   "qq_send_interval": 1.5,
   "translate": true,
   "gemini_models": [
-    { "name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent" },
-    { "name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" },
-    { "name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent" },
-    { "name": "gemini-3.1-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent" }
+    {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
+    {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
+    {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
+    {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"}
   ],
-  "gemini_min_interval": 7.0,
+  "gemini_min_interval": 7,
   "translate_timeout": 30
 }

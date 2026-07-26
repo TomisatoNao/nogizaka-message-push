@@ -86,6 +86,21 @@ def main() -> None:
     del bad_schema["monitor"][0]["name"]
     errs = webui.validate_config(bad_schema)
     assert errs and "结构校验失败" in errs[0], f"应检出 schema 错误: {errs}"
+
+    with_bots = json.loads(json.dumps(SAMPLE))
+    with_bots["qq_official_bots"] = [
+        {"name": "qq_official_bot1", "app_id": "102000001", "target_openid": "ABC123"},
+        {"name": "push_bot", "app_id": "102000002"},
+    ]
+    assert webui.validate_config(with_bots) == [], "合法的官方 Bot 声明不应报错"
+    dup_bot = json.loads(json.dumps(with_bots))
+    dup_bot["qq_official_bots"][1]["name"] = "qq_official_bot1"
+    errs = webui.validate_config(dup_bot)
+    assert any("Bot 名称重复" in e for e in errs), f"应检出重复 Bot 名: {errs}"
+    bad_bot = json.loads(json.dumps(with_bots))
+    bad_bot["qq_official_bots"][0]["name"] = "Bad Name"
+    errs = webui.validate_config(bad_bot)
+    assert errs and "结构校验失败" in errs[0], f"Bot 名不合法应被 schema 拒绝: {errs}"
     print("✅ Test 2 通过\n")
 
     # ── Test 3: HTTP 端点 ────────────────────────────
@@ -115,7 +130,17 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config")
         assert code == 200 and data["ok"] and data["config"] == SAMPLE
         assert "nogizaka_main" in data["cred_status"]
-        assert [b["name"] for b in data["qq_bot_status"]] == ["BOT1", "BOT2"], "应报告两个官方 Bot 槽位状态"
+        assert [b["name"] for b in data["qq_bot_status"]] == ["BOT1", "BOT2"], "未声明时应报告 .env 编号槽位状态"
+
+        # PUT 声明官方 Bot → 状态改为按声明报告
+        cfg_bots = json.loads(json.dumps(SAMPLE))
+        cfg_bots["qq_official_bots"] = [{"name": "my_push_bot", "app_id": "102000001", "target_openid": "XYZ"}]
+        code, data = _http("PUT", base + "/api/config", body=cfg_bots)
+        assert code == 200 and data["ok"], f"声明官方 Bot 的 PUT 应成功: {data}"
+        st = data["qq_bot_status"]
+        assert [b["name"] for b in st] == ["my_push_bot"] and st[0]["declared"], f"应按声明报告: {st}"
+        assert st[0]["secret_env"] == "MY_PUSH_BOT_CLIENT_SECRET"
+        assert st[0]["app_id"] and st[0]["target_openid"] and not st[0]["client_secret"]
 
         # PUT 合法配置：新增一个成员
         new_cfg = json.loads(json.dumps(SAMPLE))

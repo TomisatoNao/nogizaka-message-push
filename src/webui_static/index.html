@@ -117,13 +117,15 @@
       </div>
     </div>
     <div class="card">
-      <h2>QQ 官方 Bot（凭证在 .env，修改后需重启）</h2>
+      <h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>槽位</th><th>App ID</th><th>Client Secret</th><th>目标 OpenID</th><th>状态</th></tr></thead>
+        <thead><tr><th>名称</th><th>App ID</th><th>目标 OpenID</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
         <tbody id="qqBotRows"></tbody>
       </table></div>
-      <p class="hint">在 <code>.env</code> 里配置 <code>QQ_OFFICIAL_BOT1_APP_ID</code> / <code>_CLIENT_SECRET</code> / <code>_TARGET_OPENID</code>（第二个 Bot 用 <code>BOT2</code> 前缀）。
-      目标 OpenID 用 <code>python tools/get_qq_openid.py</code> 获取。官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用槽位，所有成员都有推送目标。</p>
+      <div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
+      <p class="hint" id="qqBotHint">App ID 和目标 OpenID 直接在表格里填；Client Secret 是密钥，须在 <code>.env</code> 里配置
+      <code>Bot名称大写_CLIENT_SECRET</code>（改 <code>.env</code> 后需重启）。目标 OpenID 用 <code>python tools/get_qq_openid.py</code> 获取。
+      官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用 Bot，所有成员都有推送目标。</p>
     </div>
     <div class="card">
       <h2>轮询节奏（秒 / JST 小时）</h2>
@@ -374,23 +376,83 @@ function renderQqBots() {
   const tbody = $("qqBotRows");
   tbody.innerHTML = "";
   const enabled = (config.channels || {}).qq_official;
-  for (const bot of qqBotStatus) {
-    const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
-    const badge = (v) => unused ? '<span class="cred" style="color:var(--muted)">—</span>'
-      : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
-    const tr = document.createElement("tr");
-    let state;
-    if (bot.ok) state = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
-    else if (!unused) state = '<span class="cred miss">✗ 不完整</span>';
-    else state = '<span class="cred" style="color:var(--muted)">未使用</span>';
-    tr.innerHTML = "<td><b>" + esc(bot.name) + "</b></td>" +
-      "<td>" + badge(bot.app_id) + "</td>" +
-      "<td>" + badge(bot.client_secret) + "</td>" +
-      "<td>" + badge(bot.target_openid) + "</td>" +
-      "<td>" + state + "</td>";
-    tbody.appendChild(tr);
+  const declared = config.qq_official_bots || [];
+  const statusByName = {};
+  for (const s of qqBotStatus) statusByName[s.name] = s;
+
+  if (declared.length > 0) {
+    // 声明模式：config.json 管理，表格可编辑
+    declared.forEach((bot, idx) => {
+      const tr = document.createElement("tr");
+      const st = statusByName[bot.name];
+      const tdName = document.createElement("td");
+      tdName.appendChild(mkInput(bot.name || "", (v) => { bot.name = v.trim().toLowerCase(); }, "qq_official_bot1", "width:130px"));
+      const tdApp = document.createElement("td");
+      tdApp.appendChild(mkInput(bot.app_id || "", (v) => {
+        const t = v.trim(); if (t) bot.app_id = t; else delete bot.app_id;
+      }, "102012345", "width:110px"));
+      const tdOpenid = document.createElement("td");
+      tdOpenid.appendChild(mkInput(bot.target_openid || "", (v) => {
+        const t = v.trim(); if (t) bot.target_openid = t; else delete bot.target_openid;
+      }, "ABCDEF0123...", "width:150px"));
+
+      const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
+      const tdSecret = document.createElement("td");
+      if (st && st.secret_env === secretVar) {
+        tdSecret.innerHTML = st.client_secret
+          ? '<span class="cred ok">✓ ' + esc(secretVar) + "</span>"
+          : '<span class="cred miss">✗ 缺 ' + esc(secretVar) + "</span>";
+      } else {
+        tdSecret.innerHTML = '<span class="cred" style="color:var(--muted)">' + esc(secretVar) + "（保存后刷新）</span>";
+      }
+
+      const tdState = document.createElement("td");
+      if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
+      else if (st) tdState.innerHTML = '<span class="cred miss">✗ 不完整</span>';
+      else tdState.innerHTML = '<span class="cred" style="color:var(--muted)">未保存</span>';
+
+      const tdOps = document.createElement("td");
+      tdOps.appendChild(mkBtn("删除", () => {
+        if (!confirm("删除官方 Bot " + (bot.name || "#" + idx) + "？")) return;
+        config.qq_official_bots.splice(idx, 1);
+        setDirty(true); renderQqBots();
+      }, "danger"));
+
+      tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
+      tbody.appendChild(tr);
+    });
+  } else {
+    // 旧模式：.env 编号槽位，只读展示
+    for (const bot of qqBotStatus) {
+      const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
+      const badge = (v) => unused ? '<span class="cred" style="color:var(--muted)">—</span>'
+        : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
+      let state;
+      if (bot.ok) state = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
+      else if (!unused) state = '<span class="cred miss">✗ 不完整</span>';
+      else state = '<span class="cred" style="color:var(--muted)">未使用</span>';
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td><b>" + esc(bot.name) + "</b> <span style='color:var(--muted);font-size:11px'>(.env 槽位)</span></td>" +
+        "<td>" + badge(bot.app_id) + "</td>" +
+        "<td>" + badge(bot.target_openid) + "</td>" +
+        "<td>" + badge(bot.client_secret) + "</td>" +
+        "<td>" + state + "</td><td></td>";
+      tbody.appendChild(tr);
+    }
   }
 }
+$("btnAddQqBot").addEventListener("click", () => {
+  config.qq_official_bots = config.qq_official_bots || [];
+  if (config.qq_official_bots.length === 0) {
+    const legacyUsed = qqBotStatus.some((s) => !s.declared && (s.app_id || s.client_secret || s.target_openid));
+    if (legacyUsed && !confirm(
+      "检测到 .env 里已有编号槽位（QQ_OFFICIAL_BOT1_* 等）。\n" +
+      "在这里添加 Bot 后将改为以本列表为准，.env 槽位不再自动扫描。\n" +
+      "把新 Bot 命名为 qq_official_bot1 可继续复用原有的 .env 变量。继续？")) return;
+  }
+  config.qq_official_bots.push({ name: "qq_official_bot" + (config.qq_official_bots.length + 1) });
+  setDirty(true); renderQqBots();
+});
 
 // 把表单值收回 config（数字字段做 parse，空值回退默认）
 function collectGeneral() {

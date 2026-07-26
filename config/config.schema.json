@@ -13,6 +13,18 @@
       }
     },
     "napcat_api": { "type": "string" },
+    "qq_official_bots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name":          { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "app_id":        { "type": "string" },
+          "target_openid": { "type": "string" }
+        }
+      }
+    },
     "web_admin": {
       "type": "object",
       "properties": {

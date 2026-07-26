@@ -230,16 +230,21 @@ MY_NEW_ACCOUNT_COOKIE=session=xxx
 
 ⚠️ **新增账号必须重启**：`.env` 只在进程启动时加载一次，热重载读不到新增的凭证变量。（热重载只能识别 `config.json` 里新增的、且磁盘上已有凭证文件的账号。）
 
-**启用 QQ 官方 Bot：** 三步：
+**启用 QQ 官方 Bot：** 三步（Bot 数量不限）：
 
-1. `config.json` 的 `channels` 中加 `"qq_official": true`
-2. `.env` 中填 Bot 凭证：
+1. `config.json` 的 `channels` 中设 `"qq_official": true`，并声明 Bot（网页管理端「基本设置」里也能直接加）：
+   ```json5
+   "qq_official_bots": [
+       { "name": "qq_official_bot1", "app_id": "你的AppID", "target_openid": "目标用户OpenID" }
+   ]
+   ```
+2. `.env` 中填密钥（变量名 = Bot 名称大写 + `_CLIENT_SECRET`）：
    ```bash
-   QQ_OFFICIAL_BOT1_APP_ID=你的AppID
    QQ_OFFICIAL_BOT1_CLIENT_SECRET=你的Secret
-   QQ_OFFICIAL_BOT1_TARGET_OPENID=目标用户OpenID
    ```
 3. 获取目标用户 OpenID（见下方「获取 QQ 用户 OpenID」）
+
+`app_id` / `target_openid` 也可以不写在 config.json，改放 `.env` 的 `Bot名称大写_APP_ID` / `_TARGET_OPENID`。旧配置兼容：`config.json` 未声明 `qq_official_bots` 时，自动扫描 `.env` 的 `QQ_OFFICIAL_BOT{1..20}_*` 编号槽位。
 
 ### 获取 QQ 用户 OpenID
 
