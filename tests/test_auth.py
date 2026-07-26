@@ -212,11 +212,15 @@ def main() -> None:
                                   headers={**ck, "Origin": "http://127.0.0.1:1"})
             assert code != 403 or "跨站" not in str(body), "同源 Origin 不应被拦"
 
-            # 登出后 cookie 失效
-            code, _, _ = _http("POST", base + "/api/auth/logout", headers=ck)
+            # 登出后 cookie 失效，且指示浏览器清理已缓存的私密媒体
+            code, _, h = _http("POST", base + "/api/auth/logout", headers=ck)
             assert code == 200
+            assert "cache" in h.get("Clear-Site-Data", ""), \
+                f"登出应带 Clear-Site-Data: {h.get('Clear-Site-Data')!r}"
             code, _, _ = _http("GET", base + "/api/config", headers=ck)
             assert code == 401, "登出后应 401"
+            code, _, _ = _http("GET", base + "/api/archive/members", headers=ck)
+            assert code == 401, "登出后归档 API 也应 401"
 
             # archive_public：归档免登录，管理端仍受保护
             cfg.AUTH_ARCHIVE_PUBLIC = True

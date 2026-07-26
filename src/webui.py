@@ -818,6 +818,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body_out)))
         self.send_header("Set-Cookie",
                          f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+        # 让浏览器丢弃已缓存的归档媒体副本（localhost 视为安全上下文，该头生效）
+        self.send_header("Clear-Site-Data", '"cache", "cookies", "storage"')
         self.end_headers()
         self.wfile.write(body_out)
 
@@ -974,10 +976,39 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
     def _serve_file_range(self, path: Path) -> None:
-        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。"""
+        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。
+
+        缓存策略用 private + no-cache：浏览器可以存副本，但每次使用前必须回源
+        验证（带 ETag 命中则 304，几乎零流量）。绝不能用 max-age —— 那会让
+        登出后的浏览器直接从本地缓存渲染私密图片，绕过鉴权。
+        """
         import mimetypes
-        size = path.stat().st_size
+        from email.utils import formatdate, parsedate_to_datetime
+        st = path.stat()
+        size = st.st_size
+        etag = f'"{int(st.st_mtime)}-{size:x}"'
+        last_modified = formatdate(st.st_mtime, usegmt=True)
         content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+        # 条件请求（无 Range 时才处理 304）
+        if not self.headers.get("Range"):
+            fresh = False
+            inm = self.headers.get("If-None-Match", "")
+            if inm:
+                fresh = any(t.strip().lstrip("W/") == etag for t in inm.split(","))
+            elif self.headers.get("If-Modified-Since"):
+                try:
+                    since = parsedate_to_datetime(self.headers["If-Modified-Since"]).timestamp()
+                    fresh = int(st.st_mtime) <= int(since)
+                except (TypeError, ValueError):
+                    fresh = False
+            if fresh:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "private, no-cache")
+                self.end_headers()
+                return
+
         start, end, status = 0, size - 1, 200
         m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", "").strip())
         if m and (m.group(1) or m.group(2)):
@@ -999,7 +1030,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(end - start + 1))
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Cache-Control", "max-age=86400")
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", last_modified)
+        # private: 禁止中间代理缓存；no-cache: 每次使用前必须回源鉴权
+        self.send_header("Cache-Control", "private, no-cache")
         self.end_headers()
         try:
             with open(path, "rb") as f:

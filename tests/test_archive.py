@@ -34,9 +34,11 @@ def main() -> None:
     orig_dir = cfg.ARCHIVE_DIR
     orig_enabled = cfg.ARCHIVE_ENABLED
     orig_media = cfg.ARCHIVE_MEDIA
+    orig_auth = cfg.AUTH_ENABLED
     cfg.ARCHIVE_DIR = str(tmpdir)
     cfg.ARCHIVE_ENABLED = True
     cfg.ARCHIVE_MEDIA = False   # 单测不碰网络
+    cfg.AUTH_ENABLED = False    # 本套件测归档本身，鉴权由 test_auth 覆盖
 
     member = {"m_name": "测试 成员", "m_id": "99", "group_type": "nogizaka46", "account_id": "x"}
 
@@ -368,6 +370,19 @@ def main() -> None:
             code, body, h = _http("GET", murl, headers={"Range": "bytes=99-"})
             assert code == 416, f"越界 Range 应 416: {code}"
 
+            # 缓存策略：绝不能让浏览器在登出后仍从本地缓存渲染私密媒体
+            code, body, h = _http("GET", murl)
+            cc = h.get("Cache-Control", "")
+            assert "no-cache" in cc and "private" in cc, f"媒体应 private+no-cache: {cc!r}"
+            assert "max-age" not in cc, f"媒体不得带 max-age（会绕过鉴权）: {cc!r}"
+            etag = h.get("ETag", "")
+            assert etag and h.get("Last-Modified"), "应带 ETag / Last-Modified 供条件请求"
+            # 条件请求命中 → 304（省流量但仍每次回源鉴权）
+            code, body, h = _http("GET", murl, headers={"If-None-Match": etag})
+            assert code == 304, f"ETag 命中应 304: {code}"
+            code, body, h = _http("GET", murl, headers={"If-None-Match": '"stale-etag"'})
+            assert code == 200, "ETag 不匹配应返回完整内容"
+
             # 搜索接口：命中 / 缺参 / 未知成员
             s_enc = "%E6%90%9C%E7%B4%A2_%E7%94%A8%E4%BE%8B"
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96")
@@ -398,6 +413,7 @@ def main() -> None:
         cfg.ARCHIVE_DIR = orig_dir
         cfg.ARCHIVE_ENABLED = orig_enabled
         cfg.ARCHIVE_MEDIA = orig_media
+        cfg.AUTH_ENABLED = orig_auth
 
     print("=" * 50)
     print("🎉 全部测试通过！消息归档工作正常")
