@@ -429,7 +429,9 @@
   <div class="secret-field">
     <div class="flabel"><span class="fname">用户名<span class="req">*</span></span>
       <span class="fenv">字母 / 数字 / _ / -</span></div>
-    <input type="text" id="newUserName" placeholder="friend" autocomplete="off">
+    <input type="text" id="newUserName" placeholder="friend" autocomplete="off"
+           data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
+           data-form-type="other">
   </div>
   <div class="secret-field">
     <div class="flabel"><span class="fname">角色</span></div>
@@ -440,9 +442,17 @@
     <div class="flabel"><span class="fname">密码<span class="req">*</span></span>
       <span class="fenv" id="pwLenHint">至少 8 位</span></div>
     <div class="input-group">
-      <input type="text" id="newUserPw" class="masked" autocomplete="new-password"
-             data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+      <!-- autocomplete=off 而非 new-password：后者会触发密码管理器的
+           「生成密码」悬浮层，它会盖住输入框导致无法输入 -->
+      <input type="text" id="newUserPw" class="masked" autocomplete="off"
+             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
+             data-form-type="other">
       <button type="button" class="eye" id="newUserPwEye">👁</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap">
+      <button type="button" class="btn small" id="btnGenPw">🎲 生成随机密码</button>
+      <button type="button" class="btn small" id="btnCopyPw" hidden>📋 复制</button>
+      <span class="fhelp" id="genPwHint" style="margin:0"></span>
     </div>
   </div>
   <div class="actions">
@@ -1059,6 +1069,7 @@ function openSecretDialog(title, hint, fields, account, opts) {
     input.setAttribute("data-bwignore", "true");   // Bitwarden
     input.setAttribute("data-1p-ignore", "true");  // 1Password
     input.setAttribute("data-lpignore", "true");   // LastPass
+    input.setAttribute("data-form-type", "other"); // Dashlane
     input.placeholder = f.placeholder || "";
     input.dataset.env = f.env;
     // 粘贴自动清理：去掉换行和 Bearer 前缀（从 DevTools 复制常带这些）
@@ -1581,6 +1592,10 @@ async function userAction(payload) {
 $("btnAddUser").addEventListener("click", () => {
   $("newUserName").value = "";
   $("newUserPw").value = "";
+  $("newUserPw").classList.add("masked");
+  $("newUserPwEye").textContent = "👁";
+  $("btnCopyPw").hidden = true;
+  $("genPwHint").textContent = "";
   $("pwLenHint").textContent = "至少 " + minPwLen + " 位";
   chipGroup("newUserRole", [["viewer", "viewer（只看归档）"], ["admin", "admin（完整权限）"]], "viewer");
   $("newUserRoleHelp").textContent = "访客选 viewer：他们只能打开消息归档，碰不到配置和凭证。";
@@ -1591,6 +1606,33 @@ $("userCancel").addEventListener("click", () => $("userDialog").close());
 $("newUserPwEye").addEventListener("click", () => {
   const el = $("newUserPw");
   $("newUserPwEye").textContent = el.classList.toggle("masked") ? "👁" : "🚫";
+});
+
+// 一键生成强随机密码：不必在输入框里打字，绕开密码管理器浮层的干扰
+function randomPassword(len) {
+  // 去掉容易混淆的 0/O/1/l/I，方便口头或抄写转达
+  const set = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#%&*-_=+";
+  const buf = new Uint32Array(len);
+  crypto.getRandomValues(buf);
+  return [...buf].map((n) => set[n % set.length]).join("");
+}
+$("btnGenPw").addEventListener("click", () => {
+  const pw = randomPassword(16);
+  const el = $("newUserPw");
+  el.value = pw;
+  el.classList.remove("masked");          // 生成后直接显示，方便记录
+  $("newUserPwEye").textContent = "🚫";
+  $("btnCopyPw").hidden = false;
+  $("genPwHint").textContent = "已生成，请复制并转告对方（此后不再显示）";
+});
+$("btnCopyPw").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("newUserPw").value);
+    $("genPwHint").textContent = "✅ 已复制到剪贴板";
+  } catch (e) {
+    $("newUserPw").select();
+    $("genPwHint").textContent = "已选中，按 Ctrl+C 复制";
+  }
 });
 $("userSave").addEventListener("click", async () => {
   const username = $("newUserName").value.trim();
