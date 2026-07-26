@@ -1198,6 +1198,13 @@ $("btnRestart").addEventListener("click", async () => {
   }
   msg("⚠️ 等待超时（60s）：请到终端检查主程序是否成功重启", "err");
 });
+// 标签页从后台切回时立即刷新（轮询在 document.hidden 时是暂停的）
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  if (statusTimer !== null) fetchStatus();
+  if (logTimer !== null) fetchLogs();
+});
+
 loadConfig();
 startStatusPolling();   // 状态页是默认标签页
 </script>
