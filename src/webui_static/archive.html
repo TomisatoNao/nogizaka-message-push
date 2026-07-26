@@ -299,9 +299,10 @@ async function loadMembers() {
     b.addEventListener("click", () => { selectMember(m.name); });
     box.appendChild(b);
   }
-  if (!curMember || !members.some((m) => m.name === curMember)) {
-    await selectMember(members[0].name, true);
-  }
+  // 无论 hash 是否指定成员都要真正加载一次：
+  // 早先只在"成员缺失或无效"时才调用，导致带 member= 的深链打开后一片空白
+  const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
+  await selectMember(wanted, true);
 }
 
 async function selectMember(name, keepHash) {
@@ -334,10 +335,37 @@ function readHashYM() {
   return (y && m) ? { year: y, month: m } : null;
 }
 
+let selfHashUpdate = false;   // 区分"自己写的 hash"和"用户粘贴/前进后退"
+
 function syncHash() {
+  selfHashUpdate = true;
   location.hash = "member=" + encodeURIComponent(curMember) +
     "&y=" + curYM.year + "&m=" + curYM.month + (curType ? "&t=" + curType : "");
+  setTimeout(() => { selfHashUpdate = false; }, 0);
 }
+
+// 同一标签页里粘贴另一个深链（或前进/后退）时，hash 变了但 SPA 不会重载，
+// 需要手动把新状态应用上
+window.addEventListener("hashchange", async () => {
+  if (selfHashUpdate) return;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const m = p.get("member") || "";
+  const y = parseInt(p.get("y"), 10), mo = parseInt(p.get("m"), 10);
+  const t = p.get("t") || "";
+  if (t !== curType) {
+    curType = t;
+    $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
+      c.classList.toggle("active", TYPES[i][0] === curType));
+    loadCalendar();
+  }
+  if (m && m !== curMember && members.some((x) => x.name === m)) {
+    await selectMember(m, true);
+  } else if (y && mo && curYM && (y !== curYM.year || mo !== curYM.month)) {
+    await selectMonth(y, mo);
+  } else if (t !== undefined && curYM) {
+    await selectMonth(curYM.year, curYM.month);
+  }
+});
 
 async function selectMonth(year, month) {
   curYM = { year, month };
