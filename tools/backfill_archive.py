@@ -43,6 +43,24 @@ EMPTY_PAGES_TO_STOP = 3
 DEFAULT_START = "2013-01-01T00:00:00Z"
 
 
+class AdaptivePacer:
+    """自适应分页限速：顺畅时逐步提速，出错/被限流时指数退避。"""
+
+    def __init__(self, base: float = 1.5, floor: float = 0.8, ceil: float = 90.0):
+        self.delay = base
+        self.floor = floor
+        self.ceil = ceil
+
+    def on_success(self) -> None:
+        self.delay = max(self.floor, self.delay * 0.85)
+
+    def on_error(self, rate_limited: bool = False) -> None:
+        self.delay = min(self.ceil, max(self.delay, 1.5) * (3.0 if rate_limited else 2.0))
+
+    async def wait(self) -> None:
+        await asyncio.sleep(self.delay)
+
+
 def _load_progress() -> dict:
     if PROGRESS_PATH.exists():
         try:
@@ -79,6 +97,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
     base = acc_cfg.get("api_base") or api_base(account_id, acc_cfg)
     empty_pages = 0
     total_new = 0
+    pacer = AdaptivePacer()
 
     while True:
         await proactive_refresh_if_expiring(account_id, 0)   # target_group=0：告警只打日志
@@ -87,8 +106,9 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         try:
             resp = await client.get(url, headers=build_headers(account_id, acc_cfg))
         except Exception as e:
-            print(f"  ✗ 请求失败: {type(e).__name__}: {e}，60s 后重试")
-            await asyncio.sleep(60)
+            pacer.on_error()
+            print(f"  ✗ 请求失败: {type(e).__name__}: {e}，{pacer.delay:.0f}s 后重试")
+            await pacer.wait()
             continue
 
         if resp.status_code == 401:
@@ -96,10 +116,17 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             await proactive_refresh_if_expiring(account_id, 0)
             await asyncio.sleep(3)
             continue
-        if resp.status_code != 200:
-            print(f"  ✗ HTTP {resp.status_code}: {resp.text[:150]}，60s 后重试")
-            await asyncio.sleep(60)
+        if resp.status_code == 429:
+            pacer.on_error(rate_limited=True)
+            print(f"  ⏳ 被限流 (429)，退避 {pacer.delay:.0f}s…")
+            await pacer.wait()
             continue
+        if resp.status_code != 200:
+            pacer.on_error()
+            print(f"  ✗ HTTP {resp.status_code}: {resp.text[:150]}，{pacer.delay:.0f}s 后重试")
+            await pacer.wait()
+            continue
+        pacer.on_success()
 
         msgs = resp.json().get("messages", [])
         if not msgs:
@@ -129,8 +156,8 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         cursor = new_cursor
         progress[key] = cursor
         _save_progress(progress)
-        print(f"  … 游标 {cursor}（本页新归档 {page_new} 条，累计 {total_new}）")
-        await asyncio.sleep(1.5)   # 分页间隔，别打太猛
+        print(f"  … 游标 {cursor}（本页新归档 {page_new} 条，累计 {total_new}，间隔 {pacer.delay:.1f}s）")
+        await pacer.wait()   # 自适应分页间隔
 
     progress[key] = cursor
     _save_progress(progress)
