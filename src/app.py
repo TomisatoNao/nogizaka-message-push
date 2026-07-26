@@ -404,9 +404,12 @@ async def main() -> None:
                 return False, f"不支持的通道: {channel}"
             fut = asyncio.run_coroutine_threadsafe(coro, loop)
             ok = fut.result(timeout=45)
-            return (True, "") if ok else (False, "发送失败（详见日志）")
+            err = "" if ok else "发送失败（详见日志）"
         except Exception as e:
-            return False, f"{type(e).__name__}: {e}"
+            ok, err = False, f"{type(e).__name__}: {e}"
+        # 测试推送的成败也计入通道统计，状态页才不会与事实矛盾
+        health.get_tracker().record_channel(channel, ok, err or None)
+        return ok, err
 
     webui_server = (
         start_webui(on_reload=_on_config_reload, on_restart=_request_restart,

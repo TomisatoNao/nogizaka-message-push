@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>⚙️</text></svg>">
 <title>坂道监控 · 配置管理</title>
 <style>
   :root {
@@ -160,6 +161,7 @@
         <thead><tr><th>账号</th><th>剩余时间</th><th>状态</th></tr></thead>
         <tbody id="stTokens"></tbody>
       </table></div>
+      <p class="hint">Token 剩余不足 5 分钟时主程序会在下一轮巡查前自动续期，无需干预；只有显示「失效」时才需要重新填凭证。</p>
     </div>
     <div class="card">
       <h2>推送通道（自上次状态摘要以来）</h2>
@@ -296,8 +298,11 @@
   <section class="tab" id="tab-logs">
     <div class="card">
       <h2>运行日志（已自动脱敏；打开本页时每 2 秒刷新）</h2>
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
         <div class="chips" id="logSourceChips"></div>
+        <label class="switch"><input type="checkbox" id="logErrOnly"><span class="track"></span>仅错误</label>
+        <input type="text" id="logKeyword" placeholder="关键词过滤…" style="width:170px">
+        <span class="hint" id="logFilterInfo" style="margin:0"></span>
         <label class="switch" style="margin-left:auto"><input type="checkbox" id="logFollow" checked><span class="track"></span>自动滚动到底部</label>
       </div>
       <div id="logView"></div>
@@ -333,6 +338,18 @@
   <span class="msg" id="saveMsg"></span>
 </footer>
 
+<!-- 历史快照查看对话框 -->
+<dialog id="historyViewDialog">
+  <h3 id="historyViewTitle">历史快照</h3>
+  <pre id="historyViewContent" style="max-height:60vh; overflow:auto; background:var(--bg);
+    border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12.5px;
+    min-width:min(560px, 90vw); white-space:pre-wrap; word-break:break-all"></pre>
+  <div class="actions">
+    <button class="btn" id="historyViewClose">关闭</button>
+    <button class="btn primary" id="historyViewRestore">恢复到这个版本</button>
+  </div>
+</dialog>
+
 <!-- 测试推送对话框 -->
 <dialog id="testPushDialog">
   <h3>测试推送</h3>
@@ -344,7 +361,9 @@
   <div class="secret-field">
     <div class="flabel"><span class="fname">目标<span class="req">*</span></span>
       <span class="fenv" id="testPushTargetHint">TG chat_id</span></div>
-    <input type="text" id="testPushTarget" placeholder="-1001234567890">
+    <input type="text" id="testPushTarget" list="testPushTargets" placeholder="-1001234567890">
+    <datalist id="testPushTargets"></datalist>
+    <div class="fhelp">下拉可选配置里已有的目标，也可以手动输入其他目标。</div>
   </div>
   <div class="actions">
     <button class="btn" id="testPushCancel">取消</button>
@@ -411,7 +430,11 @@ let authToken = localStorage.getItem("webAdminToken") || "";
 const $ = (id) => document.getElementById(id);
 const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
 
-function setDirty(v) { dirty = v; $("dirtyDot").style.display = v ? "inline" : "none"; }
+function setDirty(v) {
+  dirty = v;
+  $("dirtyDot").style.display = v ? "inline" : "none";
+  document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
+}
 function msg(text, cls) { const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); }
 
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
@@ -510,7 +533,10 @@ function fmtDur(sec) {
 }
 
 async function fetchStatus() {
-  if (document.hidden) return;
+  if (document.hidden) {
+    $("stHint").textContent = "⏸ 页面在后台，已暂停刷新（回到前台自动恢复）";
+    return;
+  }
   let data;
   try { data = await api("/api/status"); } catch (e) { return; }
   if (!data.ok) return;
@@ -532,8 +558,9 @@ async function fetchStatus() {
   for (const acc of names) {
     const t = data.tokens[acc];
     let badge;
-    if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效</span>';
-    else if (t.remaining < (data.token_warn_seconds || 600)) badge = '<span class="cred miss">⚠️ 即将过期</span>';
+    if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效（需重新填凭证）</span>';
+    else if (t.remaining < (data.token_warn_seconds || 600))
+      badge = '<span class="cred" style="color:var(--warn)">🔄 即将自动续期</span>';
     else badge = '<span class="cred ok">✓ 正常</span>';
     tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
       (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
@@ -599,15 +626,24 @@ function stopStatusPolling() {
 function testPushPrefill(channel) {
   $("testPushTargetHint").textContent = channel === "tg" ? "TG chat_id" : "QQ 群号";
   const monitor = config && config.monitor || [];
-  let prefill = "";
-  if (channel === "tg") {
-    const m = monitor.find((x) => x.tg);
-    prefill = m ? m.tg : "";
-  } else {
-    const m = monitor.find((x) => (x.groups || []).length);
-    prefill = m ? String(m.groups[0]) : "";
+  // 收集配置里该通道的全部目标（去重）供下拉选择
+  const targets = [];
+  for (const m of monitor) {
+    if (channel === "tg" && m.tg && !targets.includes(m.tg)) targets.push(m.tg);
+    if (channel === "napcat") {
+      for (const g of m.groups || []) {
+        if (!targets.includes(String(g))) targets.push(String(g));
+      }
+    }
   }
-  $("testPushTarget").value = prefill;
+  const dl = $("testPushTargets");
+  dl.innerHTML = "";
+  for (const t of targets) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    dl.appendChild(opt);
+  }
+  $("testPushTarget").value = targets[0] || "";
   $("testPushTarget").placeholder = channel === "tg" ? "-1001234567890" : "533072575";
 }
 $("btnTestPush").addEventListener("click", () => {
@@ -1200,13 +1236,53 @@ let logSource = "live";
 let logSeq = 0;
 let logTimer = null;
 
+let logEntries = [];   // live 源累积（未过滤，供筛选重渲染）
+let logLines = [];     // 文件源当前内容
+let logErrOnly = false, logKeyword = "";
+
 function setLogSource(src) {
   logSource = src;
   logSeq = 0;
+  logEntries = [];
+  logLines = [];
   $("logView").innerHTML = "";
   $("logSourceChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.src === src));
   fetchLogs();
 }
+
+function renderLogs() {
+  const view = $("logView");
+  const kw = logKeyword.toLowerCase();
+  view.innerHTML = "";
+  let shown = 0, total = 0;
+  const push = (text, cls) => {
+    const div = document.createElement("div");
+    if (cls) div.className = cls;
+    div.textContent = text;
+    view.appendChild(div);
+    shown++;
+  };
+  if (logSource === "live") {
+    total = logEntries.length;
+    for (const e of logEntries) {
+      if (logErrOnly && e.level !== "ERROR") continue;
+      const line = e.ts + " [" + e.level + "] " + e.text;
+      if (kw && !line.toLowerCase().includes(kw)) continue;
+      push(line, "lg-" + e.level);
+    }
+  } else {
+    total = logLines.length;
+    for (const line of logLines) {
+      if (logErrOnly && !line.includes("ERROR")) continue;
+      if (kw && !line.toLowerCase().includes(kw)) continue;
+      push(line, line.includes("ERROR") ? "lg-ERROR" : "");
+    }
+  }
+  $("logFilterInfo").textContent = (logErrOnly || kw) ? "显示 " + shown + " / " + total + " 条" : "";
+  if ($("logFollow").checked) view.scrollTop = view.scrollHeight;
+}
+$("logErrOnly").addEventListener("change", () => { logErrOnly = $("logErrOnly").checked; renderLogs(); });
+$("logKeyword").addEventListener("input", () => { logKeyword = $("logKeyword").value.trim(); renderLogs(); });
 
 function initLogChips() {
   const box = $("logSourceChips");
@@ -1223,7 +1299,10 @@ function initLogChips() {
 }
 
 async function fetchLogs() {
-  if (document.hidden) return;   // 页面在后台时不白拉
+  if (document.hidden) {
+    $("logHint").textContent = "⏸ 页面在后台，已暂停刷新（回到前台自动恢复）";
+    return;
+  }
   let data;
   try {
     const url = logSource === "live"
@@ -1232,33 +1311,20 @@ async function fetchLogs() {
     data = await api(url);
   } catch (e) { return; }        // 主程序重启间隙等场景，静默跳过这轮
   if (!data.ok) return;
-  const view = $("logView");
   if (logSource === "live") {
-    if (logSeq === 0 && !data.entries.length) {
-      $("logHint").textContent = "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「错误日志文件」。）";
-    } else if (data.entries.length) {
-      $("logHint").textContent = "";
+    if (data.entries.length) {
+      logEntries.push(...data.entries);
+      if (logEntries.length > 600) logEntries = logEntries.slice(-600);  // 防内存无限膨胀
     }
-    for (const e of data.entries) {
-      const div = document.createElement("div");
-      div.className = "lg-" + e.level;
-      div.textContent = e.ts + " [" + e.level + "] " + e.text;
-      view.appendChild(div);
-    }
-    while (view.childElementCount > 600) view.removeChild(view.firstChild);  // 防 DOM 无限膨胀
     logSeq = data.seq;
+    $("logHint").textContent = logEntries.length ? "" :
+      "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「错误日志文件」。）";
   } else {
-    $("logHint").textContent = data.file ? "文件: " + data.file + "（末尾 300 行）" : "";
-    view.innerHTML = "";
-    for (const line of data.lines) {
-      const div = document.createElement("div");
-      if (line.includes("ERROR")) div.className = "lg-ERROR";
-      div.textContent = line;
-      view.appendChild(div);
-    }
-    if (!data.lines.length) $("logHint").textContent = "（日志文件为空或不存在）";
+    logLines = data.lines;
+    $("logHint").textContent = !data.lines.length ? "（日志文件为空或不存在）"
+      : (data.file ? "文件: " + data.file + "（末尾 300 行）" : "");
   }
-  if ($("logFollow").checked) view.scrollTop = view.scrollHeight;
+  renderLogs();
 }
 
 function startLogPolling() {
@@ -1271,6 +1337,37 @@ function stopLogPolling() {
 }
 
 // ── 配置历史 ─────────────────────────────────────
+async function restoreHistory(name, when) {
+  if (!confirm("恢复到 " + when + " 的配置？当前版本会先快照，之后可再撤销。")) return;
+  try {
+    const res = await api("/api/config/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name }),
+    });
+    if (!res.ok) { msg("❌ " + (res.errors || []).join("\n"), "err"); return; }
+    msg(res.reloaded ? "✅ 已恢复并热重载" : "⚠️ 已恢复，但热重载失败（详见日志）",
+        res.reloaded ? "ok" : "err");
+    await loadConfig();
+    document.querySelector('[data-tab="advanced"]').click();
+  } catch (e) {
+    msg("恢复失败：" + e.message, "err");
+  }
+}
+
+async function viewHistory(name, when) {
+  let data;
+  try { data = await api("/api/config/history?name=" + encodeURIComponent(name)); }
+  catch (e) { msg("读取快照失败：" + e.message, "err"); return; }
+  if (!data.ok) { msg("❌ " + (data.errors || []).join("；"), "err"); return; }
+  $("historyViewTitle").textContent = "历史快照 · " + when;
+  $("historyViewContent").textContent = data.content;
+  const restoreBtn = $("historyViewRestore");
+  restoreBtn.onclick = () => { $("historyViewDialog").close(); restoreHistory(name, when); };
+  $("historyViewDialog").showModal();
+}
+$("historyViewClose").addEventListener("click", () => $("historyViewDialog").close());
+
 async function refreshHistory() {
   let data;
   try { data = await api("/api/config/history"); } catch (e) { return; }
@@ -1283,23 +1380,11 @@ async function refreshHistory() {
     const when = new Date(h.mtime_epoch * 1000).toLocaleString();
     tr.innerHTML = "<td>" + esc(when) + "</td><td>" + (h.size / 1024).toFixed(1) + " KB</td>";
     const td = document.createElement("td");
-    td.appendChild(mkBtn("恢复", async () => {
-      if (!confirm("恢复到 " + when + " 的配置？当前版本会先快照，之后可再撤销。")) return;
-      try {
-        const res = await api("/api/config/restore", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: h.name }),
-        });
-        if (!res.ok) { msg("❌ " + (res.errors || []).join("\n"), "err"); return; }
-        msg(res.reloaded ? "✅ 已恢复并热重载" : "⚠️ 已恢复，但热重载失败（详见日志）",
-            res.reloaded ? "ok" : "err");
-        await loadConfig();
-        document.querySelector('[data-tab="advanced"]').click();
-      } catch (e) {
-        msg("恢复失败：" + e.message, "err");
-      }
-    }));
+    td.append(
+      mkBtn("查看", () => viewHistory(h.name, when)),
+      document.createTextNode(" "),
+      mkBtn("恢复", () => restoreHistory(h.name, when)),
+    );
     tr.appendChild(td);
     tbody.appendChild(tr);
   }

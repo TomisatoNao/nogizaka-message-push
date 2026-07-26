@@ -337,6 +337,11 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config/history")
         assert code == 200 and len(data["history"]) >= 2, f"两次成功 PUT 应产生 ≥2 份快照: {data}"
         newest = data["history"][0]["name"]
+        code, data = _http("GET", base + "/api/config/history?name=" + newest)
+        assert code == 200 and data["ok"] and json5.loads(data["content"]) == cfg_bots, \
+            "查看快照应返回可解析的原始内容"
+        code, data = _http("GET", base + "/api/config/history?name=../evil.json")
+        assert code == 400, "查看接口也应拒绝路径穿越名"
         code, data = _http("POST", base + "/api/config/restore", body={"name": newest})
         assert code == 200 and data["ok"] and data["restored"] == newest, f"恢复应成功: {data}"
         restored = json5.loads(tmp_config.read_text(encoding="utf-8"))

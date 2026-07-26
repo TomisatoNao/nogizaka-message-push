@@ -545,6 +545,19 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/config/history":
             if not self._check_auth():
                 return
+            from urllib.parse import parse_qs
+            name = (parse_qs(self.path.partition("?")[2]).get("name") or [""])[0]
+            if name:
+                # 查看单份快照内容
+                if not _HISTORY_NAME_RE.match(name):
+                    self._send_json({"ok": False, "errors": [f"非法历史版本名: {name!r}"]}, 400)
+                    return
+                f = _history_dir() / name
+                if not f.exists():
+                    self._send_json({"ok": False, "errors": [f"历史版本不存在: {name}"]}, 404)
+                    return
+                self._send_json({"ok": True, "name": name, "content": f.read_text(encoding="utf-8")})
+                return
             self._send_json({"ok": True, "history": list_config_history()})
             return
 
