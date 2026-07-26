@@ -293,6 +293,15 @@
       </div>
       <p class="hint">保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。</p>
     </div>
+    <div class="card">
+      <h2>历史版本（每次保存前自动快照，保留最近 10 份）</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>快照时间</th><th>大小</th><th></th></tr></thead>
+        <tbody id="historyRows"></tbody>
+      </table></div>
+      <div class="empty" id="historyEmpty" hidden>还没有历史快照（保存一次配置后出现）。</div>
+      <p class="hint">恢复前会把当前版本也快照一份，所以恢复操作本身可以再撤销。</p>
+    </div>
   </section>
 </main>
 
@@ -437,7 +446,7 @@ async function saveConfig() {
 // ── Tab 切换 ─────────────────────────────────────
 document.querySelectorAll("nav.tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (btn.dataset.tab === "advanced") { collectGeneral(); refreshRawJson(); }
+    if (btn.dataset.tab === "advanced") { collectGeneral(); refreshRawJson(); refreshHistory(); }
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
     document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
     if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
@@ -1081,6 +1090,41 @@ function startLogPolling() {
 }
 function stopLogPolling() {
   if (logTimer !== null) { clearInterval(logTimer); logTimer = null; }
+}
+
+// ── 配置历史 ─────────────────────────────────────
+async function refreshHistory() {
+  let data;
+  try { data = await api("/api/config/history"); } catch (e) { return; }
+  if (!data.ok) return;
+  const tbody = $("historyRows");
+  tbody.innerHTML = "";
+  $("historyEmpty").hidden = data.history.length > 0;
+  for (const h of data.history) {
+    const tr = document.createElement("tr");
+    const when = new Date(h.mtime_epoch * 1000).toLocaleString();
+    tr.innerHTML = "<td>" + esc(when) + "</td><td>" + (h.size / 1024).toFixed(1) + " KB</td>";
+    const td = document.createElement("td");
+    td.appendChild(mkBtn("恢复", async () => {
+      if (!confirm("恢复到 " + when + " 的配置？当前版本会先快照，之后可再撤销。")) return;
+      try {
+        const res = await api("/api/config/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: h.name }),
+        });
+        if (!res.ok) { msg("❌ " + (res.errors || []).join("\n"), "err"); return; }
+        msg(res.reloaded ? "✅ 已恢复并热重载" : "⚠️ 已恢复，但热重载失败（详见日志）",
+            res.reloaded ? "ok" : "err");
+        await loadConfig();
+        document.querySelector('[data-tab="advanced"]').click();
+      } catch (e) {
+        msg("恢复失败：" + e.message, "err");
+      }
+    }));
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
 }
 
 // ── 高级 JSON ────────────────────────────────────

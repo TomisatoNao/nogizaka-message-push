@@ -315,6 +315,19 @@ def main() -> None:
         code, data = _http("GET", base + "/api/logs?source=bogus")
         assert code == 400, "非法日志源应 400"
 
+        # 配置历史：每次 PUT 前都应有快照；可恢复；非法名被拒
+        code, data = _http("GET", base + "/api/config/history")
+        assert code == 200 and len(data["history"]) >= 2, f"两次成功 PUT 应产生 ≥2 份快照: {data}"
+        newest = data["history"][0]["name"]
+        code, data = _http("POST", base + "/api/config/restore", body={"name": newest})
+        assert code == 200 and data["ok"] and data["restored"] == newest, f"恢复应成功: {data}"
+        restored = json5.loads(tmp_config.read_text(encoding="utf-8"))
+        assert restored == cfg_bots, "最新快照应是 cfg_bots 版本（第二次 PUT 前的状态）"
+        code, data = _http("POST", base + "/api/config/restore", body={"name": "../evil.json"})
+        assert code == 400, "路径穿越名应被拒"
+        code, data = _http("POST", base + "/api/config/restore", body={"name": "config-19700101-000000-000.json"})
+        assert code == 404, "不存在的快照应 404"
+
         # Host 校验：伪造外部域名的 Host 头 → 403（DNS rebinding 防护）
         code, data = _http("GET", base + "/api/config", headers={"Host": "evil.example.com"})
         assert code == 403, f"非本机 Host 应 403，实际 {code}"

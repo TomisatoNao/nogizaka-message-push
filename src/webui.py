@@ -21,9 +21,11 @@ import hmac
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time as _time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -177,9 +179,48 @@ def serialize_config(raw: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+_HISTORY_KEEP = 10
+_HISTORY_NAME_RE = re.compile(r"^config-[0-9-]+\.json$")
+
+
+def _history_dir(path: Path | None = None) -> Path:
+    return (path or CONFIG_PATH).parent / "history"
+
+
+def _snapshot_config(path: Path) -> None:
+    """把当前 config.json 存进 history/（保留最近 _HISTORY_KEEP 份）。"""
+    if not path.exists():
+        return
+    hist = _history_dir(path)
+    hist.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+    shutil.copy2(path, hist / f"config-{stamp}.json")
+    for old in sorted(hist.glob("config-*.json"))[:-_HISTORY_KEEP]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
+def list_config_history(path: Path | None = None) -> list[dict]:
+    """历史版本列表（新的在前）。"""
+    hist = _history_dir(path)
+    if not hist.exists():
+        return []
+    out = []
+    for f in sorted(hist.glob("config-*.json"), reverse=True):
+        st = f.stat()
+        out.append({"name": f.name, "mtime_epoch": st.st_mtime, "size": st.st_size})
+    return out
+
+
 def save_config(raw: dict, path: Path | None = None) -> None:
-    """序列化并原子写回 config.json（临时文件 + os.replace）。"""
+    """序列化并原子写回 config.json（写入前把旧版本快照进 history/）。"""
     path = path or CONFIG_PATH
+    try:
+        _snapshot_config(path)
+    except OSError as e:
+        print(f"⚠️ 配置历史快照失败（继续保存）: {e}")
     text = serialize_config(raw)
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
@@ -497,6 +538,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_members()
             return
 
+        if path == "/api/config/history":
+            if not self._check_auth():
+                return
+            self._send_json({"ok": True, "history": list_config_history()})
+            return
+
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
     def _handle_members(self) -> None:
@@ -650,6 +697,40 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": [f"触发巡查失败: {e}"]}, 500)
                 return
             self._send_json({"ok": True})
+            return
+        if path == "/api/config/restore":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            name = body.get("name", "")
+            if not isinstance(name, str) or not _HISTORY_NAME_RE.match(name):
+                self._send_json({"ok": False, "errors": [f"非法历史版本名: {name!r}"]}, 400)
+                return
+            src = _history_dir() / name
+            if not src.exists():
+                self._send_json({"ok": False, "errors": [f"历史版本不存在: {name}"]}, 404)
+                return
+            try:
+                import json5
+                with open(src, "r", encoding="utf-8") as f:
+                    raw = json5.load(f)
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"历史版本解析失败: {e}"]}, 500)
+                return
+            errors = validate_config(raw)
+            if errors:
+                self._send_json({"ok": False, "errors": ["历史版本未通过当前校验:"] + errors}, 400)
+                return
+            with _mutation_lock:
+                try:
+                    save_config(raw)   # 会先把当前版本快照进 history，恢复也可再撤销
+                except Exception as e:
+                    self._send_json({"ok": False, "errors": [f"写入失败: {e}"]}, 500)
+                    return
+                reloaded = _trigger_reload()
+            self._send_json({"ok": True, "reloaded": reloaded, "restored": name})
             return
         if path == "/api/restart":
             if not self._check_auth():
