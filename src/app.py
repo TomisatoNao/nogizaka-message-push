@@ -81,6 +81,23 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     else:
         log_all("⏸️ TG Bot 推送未启用")
 
+    # ── 检查每个成员至少有一个可用推送目标 ──────────────────
+    # 官方 Bot 推送的是全局 TARGET_OPENID、不区分成员，所以只要有可用的官方 Bot，
+    # 所有成员都有推送目标，无需再看 groups / tg。
+    official_covers_all = cfg.ENABLE_QQ_OFFICIAL_BOT and qq_official.has_bots()
+    orphans = [] if official_covers_all else [
+        m["m_name"] for m in cfg.MONITOR_LIST
+        if not (cfg.ENABLE_NAPCAT_QQ and m.get("target_groups"))
+        and not (cfg.ENABLE_TG_BOT and (m.get("tg_chat_id") or "").strip())
+    ]
+    if orphans:
+        log_all(
+            f"🔴 以下成员没有任何可用推送目标（无生效的 QQ 群 / TG 频道 / 官方 Bot）："
+            f"{' · '.join(orphans)}",
+            is_error=True,
+        )
+        all_ok = False
+
     # ── 检查所有账号凭证已加载且内容完整 ────────────────────
     from config.credentials import ACCOUNT_CREDS, validate_account_cred
     needed = {m["account_id"] for m in cfg.MONITOR_LIST}
@@ -106,6 +123,15 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
                 health.get_tracker().record_token(acc_id, max(0, remaining))
 
     return all_ok
+
+
+def _alert_group_for_account(acc_id: str) -> int:
+    """该账号的告警目标群号。
+    账号下所有成员都没配 QQ 群（纯 TG 推送）时返回 0，告警将只走 TG / 官方 Bot。"""
+    for m in cfg.MONITOR_LIST:
+        if m["account_id"] == acc_id and m.get("target_groups"):
+            return m["target_groups"][0]
+    return 0
 
 
 def _get_jst_now() -> datetime:
@@ -141,11 +167,11 @@ async def _run_cycle() -> None:
     """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
     member_names = " · ".join(m["m_name"].replace(" ", "") for m in cfg.MONITOR_LIST)
 
-    # 每个账号取第一个关联成员的 target_group 作为报警目标
-    account_target_groups: dict[str, int] = {}
-    for m in cfg.MONITOR_LIST:
-        if m["account_id"] not in account_target_groups:
-            account_target_groups[m["account_id"]] = m["target_groups"][0]
+    # 每个账号取一个 target_group 作为报警目标
+    account_target_groups: dict[str, int] = {
+        m["account_id"]: _alert_group_for_account(m["account_id"])
+        for m in cfg.MONITOR_LIST
+    }
 
     # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
     await asyncio.gather(*[
@@ -232,6 +258,20 @@ async def _run_loop(http_client: httpx.AsyncClient) -> None:
         await asyncio.sleep(wait_time)
 
 
+def _on_config_reload(success: bool) -> None:
+    """config.json 热重载后的补偿动作（由 watchdog 线程调用）。
+
+    新增账号的凭证需要重新加载 —— load_all_accounts() 幂等，已加载的账号自动跳过。
+    注意：`.env` 只在进程启动时读取一次，新增或修改 `.env` 里的凭证仍需重启。
+    """
+    if not success:
+        return
+    try:
+        load_all_accounts()
+    except Exception:
+        log_all(f"🚨 热重载后加载账号凭证失败:\n{traceback.format_exc()}", is_error=True)
+
+
 async def _init_mobile_accounts() -> None:
     """启动时为所有 mobile 账号做初始 Token 刷新（仿照 nogizaka-monitor 的 init_tokens）。
     若已有有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
@@ -242,12 +282,7 @@ async def _init_mobile_accounts() -> None:
         if remaining is not None and remaining > 60:
             log_all(f"🔑 移动端账号 {acc_id} Token 有效（剩余 {int(remaining)}s），跳过初始化")
             continue
-        # 找到该账号关联的第一个成员的目标群（用于报警）
-        target_group = 0
-        for m in cfg.MONITOR_LIST:
-            if m["account_id"] == acc_id:
-                target_group = m["target_groups"][0]
-                break
+        target_group = _alert_group_for_account(acc_id)
         log_all(f"🔑 移动端账号 {acc_id} 执行初始 Token 刷新...")
         await refresh_mobile_token(acc_id, target_group)
 
@@ -299,7 +334,7 @@ async def main() -> None:
 
     # 7. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
-    observer = start_watcher(config_path)
+    observer = start_watcher(config_path, on_reload=_on_config_reload)
 
     try:
         await _run_loop(http_client)

@@ -35,9 +35,9 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     napcat_ok = True
 
     if cfg.ENABLE_NAPCAT_QQ:
-        for gid in member["target_groups"]:
+        for gid in member.get("target_groups") or []:
             ok = await send_qq_message(gid, message_chain)
-            health.get_tracker().record_channel(f"napcat:{gid}", ok)
+            health.get_tracker().record_channel("napcat", ok, f"群 {gid} 发送失败")
             if not ok:
                 napcat_ok = False
                 log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
@@ -71,8 +71,8 @@ async def send_alert_message(target_group: int, text: str) -> bool:
 
     any_ok = False
 
-    # NapCat 群告警
-    if cfg.ENABLE_NAPCAT_QQ:
+    # NapCat 群告警（target_group 为 0 表示该账号无关联 QQ 群，跳过）
+    if cfg.ENABLE_NAPCAT_QQ and target_group:
         from src.platforms.napcat import send_qq_message
         alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
         ok = await send_qq_message(target_group, alert_chain)
@@ -105,11 +105,13 @@ async def send_alert_message(target_group: int, text: str) -> bool:
     if cfg.ENABLE_TG_BOT:
         tg_chat_id = ""
         for m in cfg.MONITOR_LIST:
-            if target_group in m["target_groups"]:
-                cid = (m.get("tg_chat_id") or "").strip()
-                if cid:
-                    tg_chat_id = cid
-                    break
+            cid = (m.get("tg_chat_id") or "").strip()
+            if not cid:
+                continue
+            # target_group 为 0（无关联 QQ 群）时取第一个可用频道
+            if not target_group or target_group in (m.get("target_groups") or []):
+                tg_chat_id = cid
+                break
         if tg_chat_id:
             ok = await tgbot.send_alert(tg_chat_id, text)
             if ok:

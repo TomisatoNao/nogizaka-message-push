@@ -54,13 +54,22 @@ _DEFAULTS: dict = {
     "error_log_file":           "logs/error_debug.log",
     "response_log_file":        "logs/response_debug.log",
     "sent_ids_max":             500,
+    # 账号与成员（必须由 config.json 提供，这里仅为缺失时的安全兜底）
+    "accounts":                 {},
+    "monitor_list":             [],
     # 并发 / 反爬
     "http_semaphore_limit":     3,
     "qq_send_interval":         1.5,
     "token_refresh_before_seconds": 300,
     "backtrack_hours":          24,
+    # 轮询节奏（config.json 的 day_interval / night_interval / sleep_hours 可覆盖）
     "day_start_hour":           7,
     "night_start_hour":         0,
+    "sleep_start_hour":         2,
+    "sleep_end_hour":           7,
+    "day_interval":             [120, 180],
+    "night_interval":           [1500, 1800],
+    "enable_translation":       True,
     # 消息过滤
     "skip_publish_types":       ["birthday"],
     "media_type_map":           {"video": "video", "voice": "record", "image": "image", "picture": "image"},
@@ -74,7 +83,8 @@ _DEFAULTS: dict = {
     "health_token_warn_seconds": 600,
     # 告警
     "alert_cooldown_seconds":   3600,
-    # 通道（默认值，config.json 的 channels 可覆盖）
+    # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
+    "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
     "enable_napcat_qq":         True,
     "enable_qq_official_bot":   False,
     "enable_tg_bot":            False,
@@ -116,7 +126,7 @@ def _normalize_config(raw: dict) -> dict:
         cfg["enable_napcat_qq"]       = channels.get("napcat", True)
         cfg["enable_qq_official_bot"] = channels.get("qq_official", False)
         cfg["enable_tg_bot"]          = channels.get("tg", False)
-        cfg["tg_bot_token"]           = _env("TG_BOT_TOKEN", "")
+        # tg_bot_token 由 _load_config 统一从 .env 读取（步骤 7），此处不重复赋值
 
         if "napcat_api" in cfg:
             cfg["qq_bot_api"] = cfg.pop("napcat_api")
@@ -142,7 +152,7 @@ def _normalize_config(raw: dict) -> dict:
                     "group_type":    acc.get("group", ""),
                     "m_id":          str(m["id"]),
                     "m_name":        m["name"],
-                    "target_groups": m.get("groups", []),
+                    "target_groups": m.get("groups") or [],
                     "tg_chat_id":    m.get("tg", ""),
                     "post_to_bilibili": m.get("post_to_bilibili", False),
                 })

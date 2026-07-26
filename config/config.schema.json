@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "坂道联合监控系统配置（精简版）",
   "type": "object",
-  "required": ["accounts", "monitor", "day_interval", "night_interval", "sleep_hours"],
+  "required": ["accounts", "monitor"],
   "properties": {
     "channels": {
       "type": "object",
@@ -32,12 +32,12 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "name", "account", "groups"],
+        "required": ["id", "name", "account"],
         "properties": {
           "id":              { "type": "string" },
           "name":            { "type": "string" },
           "account":         { "type": "string" },
-          "groups":          { "type": "array", "minItems": 1, "items": { "type": "integer" } },
+          "groups":          { "type": "array", "items": { "type": "integer" }, "default": [] },
           "tg":              { "type": "string" },
           "post_to_bilibili": { "type": "boolean", "default": false }
         }

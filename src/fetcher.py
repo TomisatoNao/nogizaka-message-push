@@ -124,7 +124,9 @@ async def _fetch_member_messages(member: dict):
     group_type   = member["group_type"]
     m_id         = member["m_id"]
     m_name       = member["m_name"]
-    target_group = member["target_groups"][0]
+    # 只推 TG 的成员可以没有 QQ 群；0 表示告警不走 NapCat
+    target_groups = member.get("target_groups") or []
+    target_group  = target_groups[0] if target_groups else 0
 
     cred = ACCOUNT_CREDS.get(account_id)
     if not cred:
