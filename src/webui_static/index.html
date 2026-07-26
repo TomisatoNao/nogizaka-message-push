@@ -822,7 +822,6 @@ function renderAccounts() {
   for (const id of ids) {
     const acc = accounts[id];
     const tr = document.createElement("tr");
-    const usedBy = (config.monitor || []).filter((m) => m.account === id).length;
     tr.innerHTML =
       "<td><b>" + esc(id) + "</b></td>" +
       "<td>" + esc(acc.group || "") + "</td>" +
@@ -833,10 +832,17 @@ function renderAccounts() {
     const btnCred = mkBtn("填凭证", () => openAccountCredDialog(id));
     const btnEdit = mkBtn("编辑", () => openAccountDialog(id));
     const btnDel = mkBtn("删除", () => {
-      if (usedBy > 0) { alert("该账号还有 " + usedBy + " 个成员在使用，请先改掉成员的账号。"); return; }
-      if (!confirm("删除账号 " + id + "？")) return;
+      const used = (config.monitor || []).filter((m) => m.account === id);
+      if (used.length > 0) {
+        const names = used.map((m) => m.name || m.id).join("、");
+        if (!confirm("账号 " + id + " 下还有 " + used.length + " 个监控成员：\n" + names +
+                     "\n\n将连同这些成员一起删除，确定？")) return;
+        config.monitor = config.monitor.filter((m) => m.account !== id);
+      } else {
+        if (!confirm("删除账号 " + id + "？")) return;
+      }
       delete config.accounts[id];
-      setDirty(true); renderAccounts();
+      setDirty(true); renderAccounts(); renderMembers();
     }, "danger");
     tdOps.append(btnCred, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
     tr.appendChild(tdOps);
