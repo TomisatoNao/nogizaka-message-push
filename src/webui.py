@@ -604,6 +604,25 @@ class _Handler(BaseHTTPRequestHandler):
         return obj
 
     # ── 路由 ─────────────────────────────────────────────
+    def _send_static(self, name: str) -> None:
+        """主题 CSS / JS —— 白名单文件名，不接受任意路径。"""
+        allowed = {"theme.css": "text/css", "theme.js": "application/javascript"}
+        ctype = allowed.get(name)
+        if ctype is None:
+            self._send_json({"ok": False, "errors": ["未知静态资源"]}, 404)
+            return
+        try:
+            body = (_STATIC_PATH.parent / name).read_bytes()
+        except OSError:
+            self._send_json({"ok": False, "errors": ["静态资源缺失"]}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")   # 改版即时生效
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_html(self, file_path: Path) -> None:
         try:
             body = file_path.read_bytes()
@@ -621,6 +640,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
+        # 共享静态资源（主题 token / 切换脚本）：登录页也要用，故不设鉴权
+        if path in ("/static/theme.css", "/static/theme.js"):
+            self._send_static(path.rsplit("/", 1)[1])
+            return
         if path == "/login":
             self._send_html(_LOGIN_HTML_PATH)
             return

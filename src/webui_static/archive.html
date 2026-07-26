@@ -5,26 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📚</text></svg>">
 <title>坂道监控 · 消息归档</title>
+<link rel="stylesheet" href="/static/theme.css">
+<script src="/static/theme.js"></script>
 <style>
-  :root {
-    --bg: #f5f6f8; --card: #ffffff; --text: #1c2333; --muted: #6b7280;
-    --border: #e3e6eb; --accent: #6d5bd0; --accent-soft: #ece9fa;
-    --bubble: #ffffff; --trans-bg: #f0f7f2; --trans-text: #1a6b40; --err: #d23f3f;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14161c; --card: #1d2027; --text: #e8eaf0; --muted: #9aa1af;
-      --border: #2e323c; --accent: #9c8cf0; --accent-soft: #2a2740;
-      --bubble: #23262e; --trans-bg: #1d2b22; --trans-text: #6fd39a; --err: #ef6a6a;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif;
-         background: var(--bg); color: var(--text); font-size: 14px; }
-  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
-           background: var(--card); border-bottom: 1px solid var(--border);
+  :root { --bubble: var(--card); --trans-bg: var(--ok-soft); --trans-text: var(--ok); }
+  header { display: flex; align-items: center; gap: 12px; padding: 11px 20px;
+           background: color-mix(in srgb, var(--card) 82%, transparent);
+           backdrop-filter: blur(14px) saturate(1.3);
+           -webkit-backdrop-filter: blur(14px) saturate(1.3);
+           border-bottom: 1px solid var(--border);
            position: sticky; top: 0; z-index: 10; flex-wrap: wrap; }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header h1 { font-size: 15.5px; margin: 0; font-weight: 650; color: var(--text-strong); }
   header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: 12px; }
   header a:hover { color: var(--accent); }
   .layout { display: flex; gap: 18px; max-width: 1060px; margin: 0 auto; padding: 16px 16px 60px; }
@@ -55,8 +46,11 @@
   .day-sep.flash span { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { padding: 6px 13px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
-          background: var(--card); color: var(--text); font-size: 13px; font-family: inherit; }
-  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+          background: var(--card); color: var(--text); font-size: 13px; font-family: inherit;
+          transition: border-color var(--tr), background var(--tr), color var(--tr); }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
+                 font-weight: 650; box-shadow: 0 1px 6px var(--accent-ring); }
   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
   select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
            background: var(--card); color: var(--text); font-size: 13.5px; font-family: inherit; }
@@ -68,9 +62,11 @@
   .day-sep { text-align: center; margin: 18px 0 10px; color: var(--muted); font-size: 12px; }
   .day-sep span { background: var(--card); border: 1px solid var(--border);
                   border-radius: 999px; padding: 3px 14px; }
-  .bubble { background: var(--bubble); border: 1px solid var(--border); border-radius: 14px;
-            padding: 11px 14px; margin: 8px 0; max-width: 92%;
-            box-shadow: 0 1px 2px rgba(0,0,0,.04); overflow-wrap: break-word; }
+  .bubble { background: var(--bubble); border: 1px solid var(--border);
+            border-radius: 16px 16px 16px 5px; padding: 12px 15px; margin: 9px 0; max-width: 92%;
+            box-shadow: var(--shadow-sm); overflow-wrap: break-word;
+            transition: box-shadow var(--tr); }
+  .bubble:hover { box-shadow: var(--shadow-md); }
   .bubble .time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
   .bubble .text { white-space: pre-wrap; line-height: 1.7; }
   .bubble .trans { margin-top: 8px; padding: 8px 11px; background: var(--trans-bg);
@@ -104,6 +100,7 @@
   <h1>📚 消息归档</h1>
   <div class="chips" id="memberChips"></div>
   <span id="whoami" style="margin-left:auto; font-size:12.5px; color:var(--muted)"></span>
+  <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
   <a href="/" id="adminLink" hidden>⚙️ 管理端</a>
   <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
 </header>

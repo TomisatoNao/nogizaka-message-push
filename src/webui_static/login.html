@@ -5,38 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🔐</text></svg>">
 <title>登录 · 坂道监控</title>
+<link rel="stylesheet" href="/static/theme.css">
+<script src="/static/theme.js"></script>
 <style>
-  :root {
-    --card: rgba(255,255,255,.82); --text: #1c2333; --muted: #6b7280;
-    --border: rgba(255,255,255,.6); --field: rgba(255,255,255,.75);
-    --accent: #6d5bd0; --accent2: #b07de0; --err: #d23f3f; --ok: #1a9e5c;
-    --g1: #e8e4fb; --g2: #f6e6f2; --g3: #e2ecfa; --shadow: rgba(90,70,160,.16);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --card: rgba(30,33,42,.78); --text: #e8eaf0; --muted: #9aa1af;
-      --border: rgba(255,255,255,.09); --field: rgba(255,255,255,.06);
-      --accent: #9c8cf0; --accent2: #c79bf0; --err: #ef6a6a; --ok: #3ecf8e;
-      --g1: #191c26; --g2: #221d2c; --g3: #161c28; --shadow: rgba(0,0,0,.45);
-    }
-  }
-  * { box-sizing: border-box; }
+  :root { --accent2: var(--accent-2); }
   html, body { height: 100%; }
-  body {
-    margin: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--text); font-size: 14px; padding: 20px;
-    font-family: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", sans-serif;
-    background: linear-gradient(125deg, var(--g1), var(--g2), var(--g3), var(--g1));
-    background-size: 400% 400%; animation: drift 24s ease-in-out infinite;
-  }
-  @keyframes drift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-  @media (prefers-reduced-motion: reduce) { body { animation: none; } }
+  body { display: flex; align-items: center; justify-content: center; padding: 20px;
+         position: relative; }
+  .theme-toggle { position: fixed; top: 18px; right: 18px; z-index: 5; }
 
   .card {
     width: min(400px, 100%); padding: 40px 38px 34px; border-radius: 20px;
-    background: var(--card); border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card) 86%, transparent);
+    border: 1px solid var(--border);
     backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
-    box-shadow: 0 18px 50px var(--shadow);
+    box-shadow: var(--shadow-lg);
     animation: rise .45s cubic-bezier(.2,.8,.3,1) both;
   }
   @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
@@ -63,7 +46,7 @@
   .field input:-webkit-autofill,
   .field input:-webkit-autofill:focus {
     -webkit-text-fill-color: var(--text);
-    box-shadow: 0 0 0 60px var(--g1) inset;
+    box-shadow: 0 0 0 60px var(--card) inset;
     transition: background-color 100000s ease-in-out 0s;
   }
   .field label {
@@ -103,6 +86,7 @@
 </style>
 </head>
 <body>
+<button class="theme-toggle" type="button" title="切换主题">🖥️</button>
 <div class="card">
   <div class="brand">
     <div class="logo">⛩️</div>

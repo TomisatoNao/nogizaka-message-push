@@ -156,6 +156,15 @@ def main() -> None:
             assert code == 302, "归档页未登录应重定向"
             code, _, _ = _http("GET", base + "/api/archive/members")
             assert code == 401, "归档 API 未登录应 401"
+            # 主题静态资源对未登录也开放（登录页要用），且限定白名单
+            code, body, h = _http("GET", base + "/static/theme.css")
+            assert code == 200 and b"--accent" in body, "主题 CSS 应可匿名获取"
+            assert "text/css" in h.get("Content-Type", "")
+            code, body, _ = _http("GET", base + "/static/theme.js")
+            assert code == 200 and b"data-theme" in body
+            code, body, _ = _http("GET", base + "/static/../webui.py")
+            assert code in (404, 400), f"静态路由不应接受任意路径: {code}"
+
             # 登录页与身份接口始终可访问
             code, body, _ = _http("GET", base + "/login")
             assert code == 200 and b"login" in body.lower()

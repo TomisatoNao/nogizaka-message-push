@@ -1,0 +1,164 @@
+/* ============================================================
+   theme.css — 三个页面（管理端 / 归档 / 登录）共用的设计系统
+   ============================================================
+   主题优先级: data-theme 属性 > 系统偏好
+   页面各自的组件样式仍在自己的 <style> 里，但一律引用这里的 token。
+   ============================================================ */
+
+/* ── 设计 token：浅色（默认） ───────────────────────── */
+:root {
+  --bg:          #f4f5f9;
+  --bg-grad-1:   #eceafb;
+  --bg-grad-2:   #f7ecf5;
+  --bg-grad-3:   #e9f0fb;
+  --card:        #ffffff;
+  --card-soft:   #fafbfd;
+  --text:        #1b2231;
+  --text-strong: #0e1420;
+  --muted:       #6b7280;
+  --border:      #e5e8ef;
+  --border-soft: #eef0f5;
+  --field:       #f5f6fa;
+
+  --accent:      #6d5bd0;
+  --accent-2:    #a97ae0;
+  --accent-soft: #ece9fa;
+  --accent-ring: rgba(109, 91, 208, .18);
+
+  --ok:          #12925a;
+  --ok-soft:     #e6f6ee;
+  --warn:        #b8720a;
+  --warn-soft:   #fdf1de;
+  --err:         #d23f3f;
+  --err-soft:    #fdecec;
+
+  --shadow-sm:   0 1px 2px rgba(24, 28, 48, .05);
+  --shadow-md:   0 4px 14px rgba(24, 28, 48, .07);
+  --shadow-lg:   0 16px 44px rgba(70, 55, 130, .14);
+
+  --radius:      14px;
+  --radius-sm:   9px;
+  --font: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, Menlo, monospace;
+  --tr: .16s cubic-bezier(.3, .8, .4, 1);
+}
+
+/* ── 设计 token：深色 ─────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:          #12141b;
+    --bg-grad-1:   #171a24;
+    --bg-grad-2:   #1d1a28;
+    --bg-grad-3:   #141a26;
+    --card:        #1c1f28;
+    --card-soft:   #21252f;
+    --text:        #e7eaf1;
+    --text-strong: #f4f6fa;
+    --muted:       #98a0b0;
+    --border:      #2c313d;
+    --border-soft: #262b35;
+    --field:       #242833;
+
+    --accent:      #9c8cf0;
+    --accent-2:    #c79bf0;
+    --accent-soft: #2a2740;
+    --accent-ring: rgba(156, 140, 240, .22);
+
+    --ok:          #3ecf8e;
+    --ok-soft:     #16302a;
+    --warn:        #e8a13c;
+    --warn-soft:   #33280f;
+    --err:         #ef6a6a;
+    --err-soft:    #3a2426;
+
+    --shadow-sm:   0 1px 2px rgba(0, 0, 0, .3);
+    --shadow-md:   0 4px 16px rgba(0, 0, 0, .36);
+    --shadow-lg:   0 16px 44px rgba(0, 0, 0, .5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:          #12141b;
+  --bg-grad-1:   #171a24;
+  --bg-grad-2:   #1d1a28;
+  --bg-grad-3:   #141a26;
+  --card:        #1c1f28;
+  --card-soft:   #21252f;
+  --text:        #e7eaf1;
+  --text-strong: #f4f6fa;
+  --muted:       #98a0b0;
+  --border:      #2c313d;
+  --border-soft: #262b35;
+  --field:       #242833;
+
+  --accent:      #9c8cf0;
+  --accent-2:    #c79bf0;
+  --accent-soft: #2a2740;
+  --accent-ring: rgba(156, 140, 240, .22);
+
+  --ok:          #3ecf8e;
+  --ok-soft:     #16302a;
+  --warn:        #e8a13c;
+  --warn-soft:   #33280f;
+  --err:         #ef6a6a;
+  --err-soft:    #3a2426;
+
+  --shadow-sm:   0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-md:   0 4px 16px rgba(0, 0, 0, .36);
+  --shadow-lg:   0 16px 44px rgba(0, 0, 0, .5);
+}
+
+/* ── 基础 ─────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(1100px 620px at 8% -12%, var(--bg-grad-1), transparent 62%),
+    radial-gradient(900px 540px at 96% 4%, var(--bg-grad-2), transparent 58%),
+    radial-gradient(1000px 700px at 46% 108%, var(--bg-grad-3), transparent 62%),
+    var(--bg);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+::selection { background: var(--accent-ring); }
+
+/* 滚动条（Chromium / WebKit） */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 32%, transparent);
+  border-radius: 8px; border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 55%, transparent); }
+
+/* ── 主题切换按钮（三页共用） ───────────────────────── */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex: none; padding: 0;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card); color: var(--text);
+  cursor: pointer; font-size: 15px; line-height: 1;
+  transition: border-color var(--tr), transform .07s, background var(--tr);
+}
+.theme-toggle:hover { border-color: var(--accent); background: var(--accent-soft); }
+.theme-toggle:active { transform: scale(.93); }
+
+/* 主题切换时的整体柔和过渡（首帧不过渡，避免闪烁） */
+.theme-ready,
+.theme-ready header,
+.theme-ready .card,
+.theme-ready aside,
+.theme-ready input,
+.theme-ready select,
+.theme-ready textarea,
+.theme-ready button { transition: background-color var(--tr), color var(--tr), border-color var(--tr); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
