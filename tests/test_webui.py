@@ -179,6 +179,16 @@ def main() -> None:
     _json.dumps(snap)   # 必须可 JSON 序列化
     print("✅ Test 2.7 通过\n")
 
+    # ── Test 2.8: 成员目录响应解析 ───────────────────
+    print("=== Test 2.8: member_directory.normalize_groups ===")
+    from src.member_directory import normalize_groups
+    assert normalize_groups([{"id": 1}]) == [{"id": 1}], "裸数组应原样返回"
+    assert normalize_groups({"groups": [{"id": 2}]}) == [{"id": 2}]
+    assert normalize_groups({"items": [{"id": 3}]}) == [{"id": 3}]
+    assert normalize_groups({"data": [{"id": 4}]}) == [{"id": 4}]
+    assert normalize_groups({"foo": 1}) is None and normalize_groups("x") is None
+    print("✅ Test 2.8 通过\n")
+
     # ── Test 3: HTTP 端点 ────────────────────────────
     print("=== Test 3: HTTP 端点 ===")
     tmpdir = tempfile.mkdtemp(prefix="webui_test_")
@@ -269,6 +279,10 @@ def main() -> None:
         assert code == 200 and data["ok"], f"状态接口应可用: {code}"
         assert data["channels"]["napcat"]["total"] == 2, "应包含 Test 2.7 记录的通道数据"
         assert not data["embedded"], "独立模式 embedded 应为 false"
+
+        # GET /api/members：未知账号 → 400（凭证/网络路径不在单测覆盖）
+        code, data = _http("GET", base + "/api/members?account=ghost")
+        assert code == 400 and any("未知账号" in e for e in data["errors"]), f"未知账号应 400: {data}"
 
         # POST /api/poll：独立模式 → 400；注入回调后 → 触发
         code, data = _http("POST", base + "/api/poll")

@@ -261,7 +261,10 @@
         <tbody id="memberRows"></tbody>
       </table></div>
       <div class="empty" id="memberEmpty" hidden>还没有监控成员。</div>
-      <div style="margin-top:12px"><button class="btn" id="btnAddMember">＋ 添加成员</button></div>
+      <div style="margin-top:12px; display:flex; gap:10px">
+        <button class="btn" id="btnAddMember">＋ 手动添加</button>
+        <button class="btn" id="btnPickMember">📋 从账号拉取成员列表</button>
+      </div>
       <p class="hint">成员 ID 可用 <code>python tools/list_members.py &lt;账号ID&gt;</code> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。</p>
     </div>
   </section>
@@ -297,6 +300,20 @@
   <button class="btn primary" id="btnSave">💾 保存并热重载</button>
   <span class="msg" id="saveMsg"></span>
 </footer>
+
+<!-- 成员选择对话框 -->
+<dialog id="memberPickDialog">
+  <h3>从账号拉取成员列表</h3>
+  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
+    <div class="chips" id="pickAccountChips"></div>
+    <button class="btn small" id="btnFetchMembers">拉取</button>
+  </div>
+  <div id="memberPickList" style="max-height:50vh; overflow-y:auto; min-width:420px"></div>
+  <p class="hint" id="memberPickHint">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
+  <div class="actions">
+    <button class="btn" id="memberPickClose">关闭</button>
+  </div>
+</dialog>
 
 <!-- 凭证填写对话框 -->
 <dialog id="secretDialog">
@@ -929,6 +946,60 @@ function renderMembers() {
     tbody.appendChild(tr);
   });
 }
+// ── 成员选择器 ───────────────────────────────────
+$("btnPickMember").addEventListener("click", () => {
+  const ids = Object.keys(config.accounts || {});
+  if (!ids.length) { alert("先在账号池添加账号"); return; }
+  chipGroup("pickAccountChips", ids.map((id) => [id, id]), ids[0]);
+  $("memberPickList").innerHTML = "";
+  $("memberPickHint").textContent = "选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。";
+  $("memberPickDialog").showModal();
+});
+$("memberPickClose").addEventListener("click", () => $("memberPickDialog").close());
+
+$("btnFetchMembers").addEventListener("click", async () => {
+  const account = $("pickAccountChips").dataset.value;
+  const list = $("memberPickList");
+  list.innerHTML = "";
+  $("memberPickHint").textContent = "拉取中…";
+  let data;
+  try {
+    data = await api("/api/members?account=" + encodeURIComponent(account));
+  } catch (e) {
+    $("memberPickHint").textContent = "拉取失败：" + e.message;
+    return;
+  }
+  if (!data.ok) {
+    $("memberPickHint").textContent = "❌ " + (data.errors || []).join("；");
+    return;
+  }
+  const open = data.members.filter((m) => m.state === "open").length;
+  $("memberPickHint").textContent = "共 " + data.members.length + " 项，" + open + " 个在籍（🟢）。点「添加」后记得回到列表保存。";
+  const already = () => new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
+  const sorted = data.members.slice().sort((a, b) => {
+    const an = /^\d+$/.test(a.id) ? parseInt(a.id, 10) : 1e9;
+    const bn = /^\d+$/.test(b.id) ? parseInt(b.id, 10) : 1e9;
+    return (a.state === "open" ? 0 : 1) - (b.state === "open" ? 0 : 1) || an - bn;
+  });
+  for (const m of sorted) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; gap:10px; padding:5px 4px; border-bottom:1px solid var(--border)";
+    const label = document.createElement("span");
+    label.style.flex = "1";
+    label.textContent = "[" + m.id + "] " + (m.state === "open" ? "🟢" : "⚫") + " " + m.name +
+      (m.tags.length ? "（" + m.tags.join(" · ") + "）" : "");
+    const btn = mkBtn("添加", () => {
+      config.monitor = config.monitor || [];
+      config.monitor.push({ id: m.id, name: m.name, account: account, groups: [] });
+      setDirty(true); renderMembers();
+      btn.textContent = "✓ 已添加"; btn.disabled = true;
+    });
+    if (already().has(account + ":" + m.id)) { btn.textContent = "✓ 已添加"; btn.disabled = true; }
+    row.append(label, btn);
+    list.appendChild(row);
+  }
+});
+
 $("btnAddMember").addEventListener("click", () => {
   config.monitor = config.monitor || [];
   const firstAccount = Object.keys(config.accounts || {})[0] || "";

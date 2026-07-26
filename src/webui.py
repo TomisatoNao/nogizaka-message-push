@@ -491,7 +491,59 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_status()
             return
 
+        if path == "/api/members":
+            if not self._check_auth():
+                return
+            self._handle_members()
+            return
+
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _handle_members(self) -> None:
+        """拉取账号可见的成员目录（网页选择器用）。?account=<账号ID>"""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.partition("?")[2])
+        account = (qs.get("account") or [""])[0]
+
+        import config.config as cfg
+        if account not in cfg.ACCOUNTS:
+            self._send_json({"ok": False, "errors": [f"未知账号: {account!r}"]}, 400)
+            return
+
+        from config.credentials import load_all_accounts, validate_account_cred
+        load_all_accounts()   # 幂等；独立模式下补加载磁盘凭证
+        ok, reason = validate_account_cred(account)
+        if not ok:
+            self._send_json({"ok": False, "errors": [f"账号凭证不可用: {reason}"]}, 400)
+            return
+
+        import asyncio
+
+        import httpx
+
+        from src.member_directory import fetch_member_directory
+
+        async def _run():
+            async with httpx.AsyncClient(timeout=20) as client:
+                return await fetch_member_directory(client, account)
+
+        try:
+            members, err = asyncio.run(_run())
+        except Exception as e:
+            self._send_json({"ok": False, "errors": [f"拉取失败: {type(e).__name__}: {e}"]}, 500)
+            return
+        if err:
+            self._send_json({"ok": False, "errors": [err]}, 502)
+            return
+
+        slim = [{
+            "id": str(m.get("id", "")),
+            "name": m.get("name") or "(无名)",
+            "state": m.get("state", "?"),
+            "tags": [str(t) for t in (m.get("tags") or [])],
+            "subscription": (m.get("subscription") or {}).get("type", ""),
+        } for m in members]
+        self._send_json({"ok": True, "account": account, "members": slim})
 
     def _handle_status(self) -> None:
         """运行状态快照：健康追踪数据 + 各账号实时 Token 剩余时间。"""
