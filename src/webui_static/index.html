@@ -85,6 +85,28 @@
            color: var(--text); padding: 20px 22px; min-width: 320px; max-width: 92vw; }
   dialog::backdrop { background: rgba(0,0,0,.45); }
   dialog h3 { margin: 0 0 14px; font-size: 15px; }
+  #secretDialog { width: min(600px, 94vw); }
+  .dialog-note { background: var(--accent-soft); color: var(--text); border-radius: 8px;
+                 padding: 10px 14px; font-size: 12.5px; line-height: 1.65; margin-bottom: 16px; }
+  .dialog-note code { background: var(--card); padding: 1px 5px; border-radius: 4px; }
+  .secret-field { margin-bottom: 16px; }
+  .secret-field .flabel { display: flex; justify-content: space-between; align-items: baseline;
+                          gap: 10px; margin-bottom: 6px; }
+  .secret-field .fname { font-size: 13.5px; font-weight: 600; }
+  .secret-field .fname .req { color: var(--err); margin-left: 2px; }
+  .secret-field .fenv { font-family: Consolas, Menlo, monospace; font-size: 11px;
+                        color: var(--muted); background: var(--bg); border: 1px solid var(--border);
+                        padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+  .input-group { display: flex; }
+  .input-group input { flex: 1; border-radius: 8px 0 0 8px; border-right: none;
+                       font-family: Consolas, Menlo, monospace; font-size: 13px; }
+  /* 用 CSS 掩码代替 type=password：密码管理器（Bitwarden 等）不会识别为登录框 */
+  .input-group input.masked { -webkit-text-security: disc; }
+  .input-group .eye { border: 1px solid var(--border); border-radius: 0 8px 8px 0;
+                      background: var(--bg); color: var(--muted); cursor: pointer;
+                      padding: 0 13px; font-size: 14px; flex: none; }
+  .input-group .eye:hover { color: var(--accent); border-color: var(--accent); }
+  .secret-field .fhelp { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.55; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
           background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
@@ -327,11 +349,11 @@
 <!-- 凭证填写对话框 -->
 <dialog id="secretDialog">
   <h3 id="secretDialogTitle">填写凭证</h3>
-  <p class="hint" id="secretDialogHint" style="margin-top:-6px"></p>
-  <div id="secretFields" style="display:flex; flex-direction:column; gap:10px; min-width:420px"></div>
+  <div class="dialog-note" id="secretDialogHint"></div>
+  <div id="secretFields"></div>
   <div class="actions">
     <button class="btn" id="secretCancel">取消</button>
-    <button class="btn primary" id="secretSave">保存到 .env</button>
+    <button class="btn primary" id="secretSave">🔐 保存到 .env</button>
   </div>
 </dialog>
 
@@ -641,8 +663,9 @@ function renderQqBots() {
       if (st && st.secret_env === secretVar) {
         tdSecret.appendChild(document.createTextNode(" "));
         tdSecret.appendChild(mkBtn("填写", () => openSecretDialog(
-          "填写 " + secretVar, "写入 <code>.env</code>，热重载后立即生效。",
-          [{ env: secretVar, label: "Client Secret", required: true }], null)));
+          "填写官方 Bot 密钥：" + (bot.name || ""), "保存并热重载后立即生效。",
+          [{ env: secretVar, label: "Client Secret", required: true,
+             help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
       }
 
       const tdState = document.createElement("td");
@@ -677,8 +700,9 @@ function renderQqBots() {
         "<td>" + badge(bot.client_secret) + " </td>" +
         "<td>" + state + "</td><td></td>";
       tr.cells[3].appendChild(mkBtn("填写", () => openSecretDialog(
-        "填写 " + bot.secret_env, "写入 <code>.env</code>，热重载后立即生效。",
-        [{ env: bot.secret_env, label: "Client Secret", required: true }], null)));
+        "填写官方 Bot 密钥：" + bot.name, "保存并热重载后立即生效。",
+        [{ env: bot.secret_env, label: "Client Secret", required: true,
+           help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
       tbody.appendChild(tr);
     }
   }
@@ -728,21 +752,76 @@ function openSecretDialog(title, hint, fields, account) {
   secretCtx = { fields, account };
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
+  $("secretDialogHint").hidden = !hint;
   const box = $("secretFields");
   box.innerHTML = "";
   for (const f of fields) {
-    const lab = document.createElement("label");
-    lab.className = "field";
-    lab.textContent = f.label + (f.required ? "" : "（可选）");
+    const wrap = document.createElement("div");
+    wrap.className = "secret-field";
+
+    const labelRow = document.createElement("div");
+    labelRow.className = "flabel";
+    const name = document.createElement("span");
+    name.className = "fname";
+    name.innerHTML = esc(f.label) + (f.required ? '<span class="req">*</span>'
+                                                : ' <span style="color:var(--muted);font-weight:400">（可选）</span>');
+    const envChip = document.createElement("span");
+    envChip.className = "fenv";
+    envChip.textContent = ".env · " + f.env;
+    labelRow.append(name, envChip);
+
+    const group = document.createElement("div");
+    group.className = "input-group";
     const input = document.createElement("input");
-    input.type = "password";
-    input.autocomplete = "new-password";  // 阻止浏览器把保存的密码自动填进来
+    // 不用 type=password：Bitwarden 等密码管理器会把它当登录框弹自动填充。
+    // 改用 type=text + CSS 掩码（不支持 -webkit-text-security 的浏览器退回 password）。
+    const cssMask = CSS.supports("-webkit-text-security", "disc");
+    if (cssMask) {
+      input.type = "text";
+      input.classList.add("masked");
+    } else {
+      input.type = "password";
+    }
+    input.autocomplete = "off";
+    input.setAttribute("data-bwignore", "true");   // Bitwarden
+    input.setAttribute("data-1p-ignore", "true");  // 1Password
+    input.setAttribute("data-lpignore", "true");   // LastPass
     input.placeholder = f.placeholder || "";
     input.dataset.env = f.env;
-    lab.appendChild(input);
-    box.appendChild(lab);
+    // 粘贴自动清理：去掉换行和 Bearer 前缀（从 DevTools 复制常带这些）
+    input.addEventListener("input", () => {
+      let v = input.value.replace(/[\r\n]+/g, " ");
+      if (f.stripBearer) v = v.replace(/^\s*Bearer\s+/i, "");
+      if (v !== input.value) input.value = v;
+    });
+    const eye = document.createElement("button");
+    eye.type = "button";
+    eye.className = "eye";
+    eye.textContent = "👁";
+    eye.title = "显示 / 隐藏";
+    eye.addEventListener("click", () => {
+      if (cssMask) {
+        eye.textContent = input.classList.toggle("masked") ? "👁" : "🚫";
+      } else {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        eye.textContent = show ? "🚫" : "👁";
+      }
+    });
+    group.append(input, eye);
+
+    wrap.append(labelRow, group);
+    if (f.help) {
+      const help = document.createElement("div");
+      help.className = "fhelp";
+      help.textContent = f.help;
+      wrap.appendChild(help);
+    }
+    box.appendChild(wrap);
   }
   $("secretDialog").showModal();
+  const first = box.querySelector("input");
+  if (first) first.focus();
 }
 $("secretCancel").addEventListener("click", () => $("secretDialog").close());
 $("secretSave").addEventListener("click", async () => {
@@ -756,6 +835,10 @@ $("secretSave").addEventListener("click", async () => {
   }
   if (missing) { alert("请填写：" + missing); return; }
   if (!Object.keys(values).length) { alert("没有填写任何值"); return; }
+  const saveBtn = $("secretSave");
+  saveBtn.disabled = true;
+  const origText = saveBtn.textContent;
+  saveBtn.textContent = "写入中…";
   try {
     msg("写入 .env 中…", "");
     const data = await api("/api/secrets", {
@@ -775,6 +858,9 @@ $("secretSave").addEventListener("click", async () => {
         data.reloaded ? "ok" : "err");
   } catch (e) {
     msg("写入失败：" + e.message, "err");
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = origText;
   }
 });
 
@@ -786,20 +872,30 @@ function openAccountCredDialog(accId) {
   const acc = (config.accounts || {})[accId] || {};
   const prefix = accId.toUpperCase();
   const fields = acc.auth === "mobile"
-    ? [{ env: prefix + "_REFRESH_TOKEN", label: "Refresh Token（UUID）", required: true, placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
-       { env: prefix + "_TOKEN", label: "Access Token（JWT）", required: false, placeholder: "eyJ...（留空自动获取）" }]
-    : [{ env: prefix + "_TOKEN", label: "Token（JWT）", required: true, placeholder: "eyJ..." },
-       { env: prefix + "_COOKIE", label: "Cookie", required: true, placeholder: "session=xxx; other=yyy" }];
+    ? [{ env: prefix + "_REFRESH_TOKEN", label: "Refresh Token", required: true,
+         placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+         help: "手机抓包（Charles / Proxyman）拦截 update_token 请求，取请求体里的 refresh_token（UUID 格式）。" },
+       { env: prefix + "_TOKEN", label: "Access Token", required: false, stripBearer: true,
+         placeholder: "eyJ...",
+         help: "留空即可，首次巡查时会用 Refresh Token 自动获取。" }]
+    : [{ env: prefix + "_TOKEN", label: "Token（JWT）", required: true, stripBearer: true,
+         placeholder: "eyJ...",
+         help: "浏览器 DevTools → Network → 任意 API 请求 → Request Headers 的 authorization。粘贴时 Bearer 前缀会自动去掉。" },
+       { env: prefix + "_COOKIE", label: "Cookie", required: true,
+         placeholder: "session=xxx; other=yyy",
+         help: "同一个请求的 Request Headers 里 cookie 整串复制（分号分隔的完整内容）。" }];
   openSecretDialog("填写账号凭证：" + accId,
-    "保存后写入 <code>.env</code>，同时删除旧的磁盘凭证并热重载 —— 新凭证立即生效，无需重启。",
+    "保存后写入 <code>.env</code>，同时删除旧的磁盘凭证并热重载 —— 新凭证<b>立即生效，无需重启</b>。值只写入不回显。",
     fields, accId);
 }
 $("btnFillTgToken").addEventListener("click", () => openSecretDialog(
-  "填写 TG Bot Token", "写入 <code>.env</code> 的 <code>TG_BOT_TOKEN</code>；⚠️ 需重启主程序生效。",
-  [{ env: "TG_BOT_TOKEN", label: "Bot Token", required: true, placeholder: "123456:ABC-DEF" }], null));
+  "填写 TG Bot Token", "⚠️ TG Bot 实例在启动时创建，保存后需点右上角「⟳ 重启主程序」生效。",
+  [{ env: "TG_BOT_TOKEN", label: "Bot Token", required: true, placeholder: "123456:ABC-DEF...",
+     help: "Telegram 找 @BotFather → /newbot 创建后获得，格式如 123456789:AAE0abc...。" }], null));
 $("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
-  "填写 Gemini API Key", "写入 <code>.env</code> 的 <code>GEMINI_API_KEY</code>，热重载后立即生效。",
-  [{ env: "GEMINI_API_KEY", label: "API Key", required: true, placeholder: "AIza..." }], null));
+  "填写 Gemini API Key", "保存并热重载后立即生效（翻译每次调用时读取最新值）。",
+  [{ env: "GEMINI_API_KEY", label: "API Key", required: true, placeholder: "AIza...",
+     help: "Google AI Studio（aistudio.google.com/apikey）创建，免费额度即可用。" }], null));
 
 // ── 账号池 ───────────────────────────────────────
 function credBadge(accId) {

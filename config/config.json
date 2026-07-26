@@ -2,7 +2,7 @@
   // ── 推送通道 ──
   "channels": {
     "napcat": false,
-    "tg": false,
+    "tg": true,
     "qq_official": false
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
@@ -17,23 +17,12 @@
 
   // ── 账号池 ──
   "accounts": {
-    "nogizaka_main": {"group": "nogizaka46", "auth": "mobile"},
-    "nogizaka_shared": {"group": "nogizaka46"},
-    "hinata_shared": {"group": "hinatazaka46"},
-    "yodel_grad": {"group": "hinatazaka46", "app_tag": "yodel", "api_base": "https://api.service.yodel-app.com", "web_origin": "https://service.yodel-app.com"}
+    "nogizaka_main": {"group": "nogizaka46"}
   },
 
   // ── 监控成员 ──
   "monitor": [
-    {"id": "55", "name": "冨里奈央", "account": "nogizaka_main", "groups": [533072575], "tg": "-1004219007326"},
-    {"id": "30", "name": "賀喜遥香", "account": "nogizaka_shared", "groups": [752269366]},
-    {"id": "34", "name": "金村美玖", "account": "hinata_shared", "groups": [752269366]},
-    {"id": "36", "name": "小坂菜绪", "account": "hinata_shared", "groups": [752269366]},
-    {"id": "84", "name": "大野愛実", "account": "hinata_shared", "groups": [752269366]},
-    {"id": "88", "name": "佐藤優羽", "account": "hinata_shared", "groups": [752269366]},
-    {"id": "77", "name": "松田好花", "account": "yodel_grad", "groups": [752269366]},
-    {"id": "81", "name": "松田好花 Staff", "account": "yodel_grad", "groups": [752269366]},
-    {"id": "47", "name": "丹生明里", "account": "yodel_grad", "groups": [752269366]}
+    {"id": "55", "name": "冨里奈央", "account": "nogizaka_main", "groups": [533072575], "tg": "-1004219007326"}
   ],
 
   // ── 推送节奏 ──
