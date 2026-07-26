@@ -26,6 +26,9 @@ _ANSI_SUPPORTED: bool = (
 error_logger:    logging.Logger | None = None
 response_logger: logging.Logger | None = None
 
+# 终端单行最大长度（超出部分截断，多行内容逐行判断）
+_MAX_LINE_LENGTH = 120
+
 
 def _make_rotating_logger(name: str, filepath: str) -> logging.Logger:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -74,7 +77,11 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
         tag, color = "INFO ", "\033[32m"
 
     safe_content = redact_sensitive(content)
-    safe = safe_content if len(safe_content) <= 120 else safe_content[:120] + "...[TRUNCATED]"
+    # 逐行截断：多行内容（如状态摘要）每行独立判断，不会被整体切掉
+    safe = "\n".join(
+        line if len(line) <= _MAX_LINE_LENGTH else line[:_MAX_LINE_LENGTH] + "...[TRUNCATED]"
+        for line in safe_content.split("\n")
+    )
     if _ANSI_SUPPORTED:
         print(f"{ts} {color}[{tag}]\033[0m {safe}")
     else:

@@ -4,6 +4,7 @@
 import asyncio
 import os
 import random
+import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -136,71 +137,91 @@ def _next_interval() -> tuple[int, str]:
     return max(1, base + jitter), tag
 
 
-async def _run_loop(http_client: httpx.AsyncClient) -> None:
-    while True:
-        member_names = " · ".join(m["m_name"].replace(" ", "") for m in cfg.MONITOR_LIST)
+async def _run_cycle() -> None:
+    """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
+    member_names = " · ".join(m["m_name"].replace(" ", "") for m in cfg.MONITOR_LIST)
 
-        # 每个账号取第一个关联成员的 target_group 作为报警目标
-        account_target_groups: dict[str, int] = {}
-        for m in cfg.MONITOR_LIST:
-            if m["account_id"] not in account_target_groups:
-                account_target_groups[m["account_id"]] = m["target_groups"][0]
+    # 每个账号取第一个关联成员的 target_group 作为报警目标
+    account_target_groups: dict[str, int] = {}
+    for m in cfg.MONITOR_LIST:
+        if m["account_id"] not in account_target_groups:
+            account_target_groups[m["account_id"]] = m["target_groups"][0]
 
-        # ── 改进 3：休眠时段暂停轮询 ──
-        sleep_sec = _calc_sleep_seconds()
-        if sleep_sec > 0:
-            jst = _get_jst_now()
-            log_all(
-                f"😴 休眠时段（{cfg.SLEEP_START_HOUR}:00-{cfg.SLEEP_END_HOUR}:00 JST），"
-                f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
-                is_debug=True,
-            )
-            await asyncio.sleep(sleep_sec)
+    # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
+    await asyncio.gather(*[
+        proactive_refresh_if_expiring(acc_id, grp)
+        for acc_id, grp in account_target_groups.items()
+    ])
+
+    # ── 改进 4：随机打乱成员轮询顺序 ──
+    shuffled = list(cfg.MONITOR_LIST)
+    random.shuffle(shuffled)
+
+    # Phase 1: 并发抓取所有成员的消息
+    fetch_results = await asyncio.gather(
+        *[fetcher.fetch_member_messages(m) for m in shuffled],
+        return_exceptions=True,
+    )
+
+    # Phase 2: 按 shuffled 顺序逐个成员串行推送
+    error_members = []
+    for i, result in enumerate(fetch_results):
+        member = shuffled[i]
+        name = member['m_name'].replace(" ", "")
+
+        if isinstance(result, Exception):
+            log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
+            error_members.append(name)
             continue
 
-        # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
-        await asyncio.gather(*[
-            proactive_refresh_if_expiring(acc_id, grp)
-            for acc_id, grp in account_target_groups.items()
-        ])
+        if result is None:
+            log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
+            error_members.append(name)
+            continue
 
-        # ── 改进 4：随机打乱成员轮询顺序 ──
-        shuffled = list(cfg.MONITOR_LIST)
-        random.shuffle(shuffled)
-
-        # Phase 1: 并发抓取所有成员的消息
-        fetch_results = await asyncio.gather(
-            *[fetcher.fetch_member_messages(m) for m in shuffled],
-            return_exceptions=True,
-        )
-
-        # Phase 2: 按 shuffled 顺序逐个成员串行推送
-        error_members = []
-        for i, result in enumerate(fetch_results):
-            member = shuffled[i]
-            name = member['m_name'].replace(" ", "")
-
-            if isinstance(result, Exception):
-                log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
-                error_members.append(name)
-                continue
-
-            if result is None:
-                log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
-                error_members.append(name)
-                continue
-
-            new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
+        new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
+        # 单个成员的推送异常不应波及其他成员（record_member_push 内部已记 TRANSIENT 错误）
+        try:
             ok = await fetcher.push_member_messages(
                 member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
             )
-            if not ok:
-                error_members.append(name)
+        except Exception:
+            log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
+            health.get_tracker().record_member_push(name, False)
+            error_members.append(name)
+            continue
 
-        if not error_members:
-            log_all(f"🔍 巡查完毕 [{member_names}]")
-        else:
-            log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
+        if not ok:
+            error_members.append(name)
+
+    if not error_members:
+        log_all(f"🔍 巡查完毕 [{member_names}]")
+    else:
+        log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
+
+
+async def _run_loop(http_client: httpx.AsyncClient) -> None:
+    while True:
+        try:
+            # ── 改进 3：休眠时段暂停轮询 ──
+            sleep_sec = _calc_sleep_seconds()
+            if sleep_sec > 0:
+                jst = _get_jst_now()
+                log_all(
+                    f"😴 休眠时段（{cfg.SLEEP_START_HOUR}:00-{cfg.SLEEP_END_HOUR}:00 JST），"
+                    f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
+                    is_debug=True,
+                )
+                await asyncio.sleep(sleep_sec)
+                continue
+
+            await _run_cycle()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # 任何未预料的异常都不该终止长驻循环：记录后照常等待下一轮
+            log_all(f"💥 巡查轮次异常，跳过本轮:\n{traceback.format_exc()}", is_error=True)
+            health.get_tracker().record_error("巡查轮次异常", health.ErrorTier.TRANSIENT)
 
         summary = health.get_tracker().cycle_complete()
         if summary:
@@ -244,7 +265,6 @@ async def main() -> None:
         error_buffer=cfg.HEALTH_ERROR_BUFFER,
         token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
     )
-    await _init_mobile_accounts()
 
     # 2. 在事件循环内创建需要 asyncio 的锁（translator / bilibili / tgbot）
     translator.initialize()
@@ -268,11 +288,16 @@ async def main() -> None:
     qq_official.initialize(qq_client)
     fetcher.initialize(http_client, semaphore)
 
-    # 5. 启动健康检查（改进 3）
+    # 5. 移动端账号初始 Token 刷新
+    #    必须放在通道注入（步骤 2/4）之后：刷新失败时 refresh_mobile_token 会走
+    #    send_alert_message，此时 napcat._client / tgbot._bot 必须已就绪，否则告警静默丢失。
+    await _init_mobile_accounts()
+
+    # 6. 启动健康检查（改进 3）
     await _health_check(qq_client)
     print()
 
-    # 6. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
+    # 7. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
     observer = start_watcher(config_path)
 

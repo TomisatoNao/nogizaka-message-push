@@ -6,15 +6,37 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
+from src.logger import log_all
+
+_JST = timezone(timedelta(hours=9))
+
+
+def _parse_utc(raw: str) -> datetime | None:
+    """解析 API 返回的时间字符串，失败返回 None（不抛异常）。
+    优先 ISO 8601（兼容小数秒和 ±HH:MM 偏移），回退到 '%Y-%m-%dT%H:%M:%SZ'。"""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    # Python 3.10 的 fromisoformat 不认结尾的 Z，先换成显式偏移
+    iso = s[:-1] + "+00:00" if s.endswith(("Z", "z")) else s
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        try:
+            dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
 
 def utc_to_jst(utc_str: str, fmt: str = "%m/%d %H:%M:%S") -> str:
-    """将 UTC 时间字符串（%Y-%m-%dT%H:%M:%SZ）转换为 JST 格式化字符串。"""
-    return (
-        datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
-        .replace(tzinfo=timezone.utc)
-        .astimezone(timezone(timedelta(hours=9)))
-        .strftime(fmt)
-    )
+    """将 UTC 时间字符串转换为 JST 格式化字符串。
+    无法解析时原样返回入参 —— 单条畸形时间戳不应中断整轮推送。"""
+    dt = _parse_utc(utc_str)
+    if dt is None:
+        log_all(f"⚠️ 无法解析时间戳 {utc_str!r}，原样输出", is_debug=True)
+        return utc_str
+    return dt.astimezone(_JST).strftime(fmt)
 
 
 def in_hour_range(hour: int, start: int, end: int) -> bool:
