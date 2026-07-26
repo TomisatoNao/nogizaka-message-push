@@ -3,7 +3,7 @@
   "channels": {
     "napcat": false,
     "tg": true,
-    "qq_official": false
+    "qq_official": true
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
   "qq_official_bots": [

@@ -16,6 +16,65 @@ ME = "OWNER_OPENID_123"
 STRANGER = "SOMEONE_ELSE_456"
 
 
+async def _check_listener_sync(cfg) -> None:
+    """_sync_command_listeners() 应按配置增删任务，不必重启进程。"""
+    from src import app, qq_openid
+
+    started: list[tuple[str, str]] = []
+
+    async def fake_listen(app_id, secret, _on_message):
+        started.append((app_id, secret))
+        await asyncio.sleep(3600)
+
+    real_listen = qq_openid.listen_forever
+    qq_openid.listen_forever = fake_listen
+    bots = cfg.QQ_OFFICIAL_BOTS
+    try:
+        bots.clear()
+        cfg.QQ_COMMANDS_ENABLED = False
+        app._sync_command_listeners()
+        assert not app._command_listeners, "开关关闭时不该有监听"
+
+        # 热重载：打开开关并加一个 Bot
+        cfg.QQ_COMMANDS_ENABLED = True
+        bots.append({"name": "b1", "app_id": "A1", "client_secret": "s1", "target_openid": "O1"})
+        app._sync_command_listeners()
+        await asyncio.sleep(0)
+        assert list(app._command_listeners) == ["A1"], app._command_listeners
+
+        app._sync_command_listeners()      # 再次重载不应重复启动
+        await asyncio.sleep(0)
+        assert len(started) == 1, f"重复启动: {started}"
+
+        bots.append({"name": "b2", "app_id": "A2", "client_secret": "s2", "target_openid": "O2"})
+        app._sync_command_listeners()
+        await asyncio.sleep(0)
+        assert sorted(app._command_listeners) == ["A1", "A2"], app._command_listeners
+
+        bots[0]["client_secret"] = "s1new"  # 改 secret 应重挂该 Bot
+        app._sync_command_listeners()
+        await asyncio.sleep(0)
+        assert started[-1] == ("A1", "s1new"), started
+
+        removed = app._command_listeners["A2"][1]
+        bots.pop()
+        app._sync_command_listeners()
+        await asyncio.sleep(0)
+        assert list(app._command_listeners) == ["A1"], app._command_listeners
+        assert removed.cancelled() or removed.done(), "删掉的 Bot 监听应被取消"
+
+        cfg.QQ_COMMANDS_ENABLED = False    # 关总开关应全部停掉
+        app._sync_command_listeners()
+        await asyncio.sleep(0)
+        assert not app._command_listeners, app._command_listeners
+    finally:
+        for _, task in list(app._command_listeners.values()):
+            task.cancel()
+        app._command_listeners.clear()
+        qq_openid.listen_forever = real_listen
+        cfg.QQ_COMMANDS_ENABLED = False
+
+
 def main() -> None:
     import config.config as cfg
     from src import archive, qq_commands
@@ -113,6 +172,13 @@ def main() -> None:
         finally:
             qq_commands._COMMANDS["stats"] = orig
         print("✅ Test 4 通过\n")
+
+        # ── Test 5: 热重载增删监听 ───────────────────────
+        # 曾经的 bug：监听只在进程启动时挂载，管理端热重载加的 Bot 要等重启才上线，
+        # 表现为 QQ 那边一直回"机器人灵魂不在线"
+        print("=== Test 5: 热重载同步监听 ===")
+        asyncio.run(_check_listener_sync(cfg))
+        print("✅ Test 5 通过\n")
 
     finally:
         cfg.ARCHIVE_DIR = saved["archive_dir"]

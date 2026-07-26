@@ -450,6 +450,60 @@ def _install_stop_handlers(stop_event: asyncio.Event) -> None:
                 pass  # 非主线程等场景注册失败：保底仍有 KeyboardInterrupt
 
 
+# 官方 Bot 指令监听：app_id → (client_secret, 任务)。
+# 由 _sync_command_listeners() 按当前配置增删，启动时和每次热重载后都会调一次，
+# 所以在管理端加 Bot / 删 Bot / 开关指令开关都不用重启进程。
+_command_listeners: dict[str, tuple[str, asyncio.Task]] = {}
+_main_loop: asyncio.AbstractEventLoop | None = None
+_last_command_status: str = ""
+
+
+def _sync_command_listeners() -> None:
+    """按当前配置增删官方 Bot 指令监听任务（必须在事件循环里调用）。
+
+    不依赖 qq_official 推送通道：只想用 Bot 查信息、不想让它推消息也是合理配置，
+    监听只需要 Bot 自己的 app_id + client_secret。
+    """
+    global _last_command_status
+    from src import qq_commands
+    from src.qq_openid import listen_forever
+
+    enabled = getattr(cfg, "QQ_COMMANDS_ENABLED", False)
+    desired: dict[str, str] = {}
+    if enabled:
+        desired = {b["app_id"]: b["client_secret"] for b in cfg.QQ_OFFICIAL_BOTS
+                   if b.get("app_id") and b.get("client_secret")}
+
+    # 撤掉：已删除的 Bot、换了 secret 的 Bot、以及已经自行退出的任务
+    for app_id, (secret, task) in list(_command_listeners.items()):
+        if desired.get(app_id) != secret or task.done():
+            task.cancel()
+            del _command_listeners[app_id]
+
+    started = [aid for aid in desired if aid not in _command_listeners]
+    for app_id in started:
+        _command_listeners[app_id] = (
+            desired[app_id],
+            asyncio.create_task(listen_forever(app_id, desired[app_id], qq_commands.handle)),
+        )
+
+    if not enabled:
+        status, is_error = "", False
+    elif not desired:
+        status, is_error = ("⚠️ Bot 指令已启用，但没有任何填好 App ID + Client Secret 的"
+                            "官方 Bot，指令监听未启动"), True
+    elif not qq_commands.allowed_senders():
+        status, is_error = ("⚠️ Bot 指令已启用，但白名单为空（既无 target_openid 也无 "
+                            "qq_commands.allow_openids），将不响应任何人的指令"), True
+    else:
+        status, is_error = f"🤖 官方 Bot 指令监听运行中（{len(desired)} 个 Bot）", False
+
+    # 只在状态变化时写日志，避免每次热重载都刷一条重复的
+    if status and status != _last_command_status:
+        log_all(status, is_error=is_error)
+    _last_command_status = status
+
+
 def _on_config_reload(success: bool) -> None:
     """config.json 热重载后的补偿动作（由 watchdog 线程调用）。
 
@@ -462,6 +516,9 @@ def _on_config_reload(success: bool) -> None:
         load_all_accounts()
     except Exception:
         log_all(f"🚨 热重载后加载账号凭证失败:\n{traceback.format_exc()}", is_error=True)
+    # 指令监听要跟着新配置走，否则在管理端新加的 Bot 得等到下次重启才会上线
+    if _main_loop is not None:
+        _main_loop.call_soon_threadsafe(_sync_command_listeners)
 
 
 async def _init_mobile_accounts() -> None:
@@ -599,25 +656,10 @@ async def main() -> None:
         asyncio.create_task(_daily_summary_loop()) if cfg.DAILY_SUMMARY_ENABLED else None
     )
 
-    # 官方 Bot 指令监听（私聊 Bot 查状态 / 归档）。
-    # 不依赖 qq_official 推送通道：只想用 Bot 查信息、不想让它推消息也是合理配置，
-    # 监听只需要 Bot 自己的 app_id + client_secret。
-    command_tasks: list[asyncio.Task] = []
-    if getattr(cfg, "QQ_COMMANDS_ENABLED", False):
-        from src import qq_commands
-        from src.qq_openid import listen_forever
-        for bot_cfg in cfg.QQ_OFFICIAL_BOTS:
-            if bot_cfg.get("app_id") and bot_cfg.get("client_secret"):
-                command_tasks.append(asyncio.create_task(listen_forever(
-                    bot_cfg["app_id"], bot_cfg["client_secret"], qq_commands.handle)))
-        if not command_tasks:
-            log_all("⚠️ Bot 指令已启用，但没有任何填好 App ID + Client Secret 的官方 Bot，"
-                    "指令监听未启动", is_error=True)
-        elif not qq_commands.allowed_senders():
-            log_all("⚠️ Bot 指令已启用，但白名单为空（既无 target_openid 也无 "
-                    "qq_commands.allow_openids），将不响应任何人的指令", is_error=True)
-        else:
-            log_all(f"🤖 官方 Bot 指令监听已启动（{len(command_tasks)} 个 Bot）")
+    # 官方 Bot 指令监听（私聊 Bot 查状态 / 归档）
+    global _main_loop
+    _main_loop = loop
+    _sync_command_listeners()
 
     try:
         loop_task = asyncio.create_task(_run_loop(http_client, poll_event, stop_event))
@@ -638,10 +680,13 @@ async def main() -> None:
         if summary_task is not None:
             summary_task.cancel()
             await asyncio.gather(summary_task, return_exceptions=True)
-        for task in command_tasks:
+        _main_loop = None
+        listener_tasks = [task for _, task in _command_listeners.values()]
+        _command_listeners.clear()
+        for task in listener_tasks:
             task.cancel()
-        if command_tasks:
-            await asyncio.gather(*command_tasks, return_exceptions=True)
+        if listener_tasks:
+            await asyncio.gather(*listener_tasks, return_exceptions=True)
         if webui_server is not None:
             webui_server.shutdown()
             webui_server.server_close()
