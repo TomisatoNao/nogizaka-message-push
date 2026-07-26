@@ -214,6 +214,20 @@ data/archive/{成员名}/{YYYY}/{MM}/
 - **写入语义**：按消息 id 幂等合并、原子写；先落 JSON 再补媒体文件，进程中断最多丢媒体不丢消息
 - 媒体文件较占空间（参考：单成员三年约 3-4 GB），`archive.media` 设为 `false` 可只存文字
 
+### 每日摘要与开机自启
+
+**每日运行摘要**（`config.json` 的 `daily_summary`，默认每天 JST 23:00）：通过已启用的推送通道发一条当日报告——各成员今日消息数、巡查轮次、Token 状态、待处理错误。它同时是**反向监控（死人开关）**：系统挂了不会有报错通知，但"今天没收到摘要"本身就是告警。
+
+**开机自启 / 崩溃自拉起**（Windows）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1            # 安装
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status    # 状态
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall # 卸载
+```
+
+注册一个计划任务：登录时自动启动 `python main.py`（后台无窗口运行），进程崩溃后 1 分钟自动重启（最多连续 10 次）。日志照常写 `logs/`，管理端照常在 http://127.0.0.1:8787/ 。
+
 ### 常见操作
 
 **加一个成员：** 在 `config.json` 的 `monitor` 数组末尾添加一项：

@@ -89,6 +89,9 @@ _DEFAULTS: dict = {
     "archive_enabled":          False,
     "archive_dir":              "data/archive",
     "archive_media":            True,
+    # 每日运行摘要（config.json 的 daily_summary 可覆盖；hour 为 JST 小时）
+    "daily_summary_enabled":    False,
+    "daily_summary_hour":       23,
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
     "enable_napcat_qq":         True,
@@ -162,6 +165,13 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["archive_dir"] = ar["dir"]
             if "media" in ar:
                 cfg["archive_media"] = ar["media"]
+
+        if "daily_summary" in cfg:
+            ds = cfg.pop("daily_summary")
+            if "enabled" in ds:
+                cfg["daily_summary_enabled"] = ds["enabled"]
+            if "hour" in ds:
+                cfg["daily_summary_hour"] = ds["hour"]
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
@@ -312,6 +322,8 @@ _KEY_TO_VAR: dict[str, str] = {
     "archive_enabled":              "ARCHIVE_ENABLED",
     "archive_dir":                  "ARCHIVE_DIR",
     "archive_media":                "ARCHIVE_MEDIA",
+    "daily_summary_enabled":        "DAILY_SUMMARY_ENABLED",
+    "daily_summary_hour":           "DAILY_SUMMARY_HOUR",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",

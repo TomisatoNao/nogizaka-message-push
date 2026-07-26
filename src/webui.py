@@ -116,6 +116,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 推送通道 ──",  ["channels", "napcat_api", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 消息归档 ──",  ["archive"]),
+    ("── 每日摘要 ──",  ["daily_summary"]),
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
@@ -137,7 +138,7 @@ def _render_value(key: str, val) -> str:
     if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin", "archive") and isinstance(val, dict) and val:
+    if key in ("channels", "web_admin", "archive", "daily_summary") and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
     return _dump(val)

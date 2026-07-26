@@ -22,6 +22,12 @@
     "media": true
   },
 
+  // ── 每日摘要 ──（JST 时间；同时是"没收到摘要 = 系统挂了"的反向监控）
+  "daily_summary": {
+    "enabled": true,
+    "hour": 23
+  },
+
   // ── 账号池 ──
   "accounts": {
     "nogizaka_main": {"group": "nogizaka46"}

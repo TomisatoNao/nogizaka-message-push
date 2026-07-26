@@ -257,6 +257,19 @@
       <p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
     </div>
     <div class="card">
+      <h2>消息归档与每日摘要</h2>
+      <div class="grid">
+        <label class="switch"><input type="checkbox" id="archiveOn"><span class="track"></span>归档新消息（含媒体文件）</label>
+        <label class="switch"><input type="checkbox" id="archiveMedia"><span class="track"></span>下载媒体文件</label>
+        <label class="switch"><input type="checkbox" id="summaryOn"><span class="track"></span>每日运行摘要</label>
+        <label class="field">摘要时间（JST 整点）
+          <input type="number" id="summaryHour" min="0" max="23">
+        </label>
+      </div>
+      <p class="hint">归档内容在 <a href="/archive">📚 消息归档</a> 页浏览，历史消息用 <code>python tools/backfill_archive.py</code> 回填。
+      每日摘要通过已启用的推送通道发送——<b>哪天没收到摘要，就说明系统挂了</b>（反向监控）。</p>
+    </div>
+    <div class="card">
       <h2>网页管理端</h2>
       <div class="grid">
         <label class="switch"><input type="checkbox" id="webAdminOn"><span class="track"></span>启用（下次重启生效）</label>
@@ -812,6 +825,12 @@ function renderGeneral() {
   $("webAdminOn").checked = wa.enabled !== false;
   $("webAdminHost").value = wa.host || "127.0.0.1";
   $("webAdminPort").value = wa.port || 8787;
+  const ar = config.archive || {};
+  $("archiveOn").checked = !!ar.enabled;
+  $("archiveMedia").checked = ar.media !== false;
+  const ds = config.daily_summary || {};
+  $("summaryOn").checked = !!ds.enabled;
+  $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
@@ -933,6 +952,15 @@ function collectGeneral() {
     enabled: $("webAdminOn").checked,
     host: $("webAdminHost").value.trim() || "127.0.0.1",
     port: num("webAdminPort", 8787),
+  };
+  config.archive = {
+    enabled: $("archiveOn").checked,
+    dir: (config.archive || {}).dir || "data/archive",
+    media: $("archiveMedia").checked,
+  };
+  config.daily_summary = {
+    enabled: $("summaryOn").checked,
+    hour: Math.min(23, Math.max(0, num("summaryHour", 23))),
   };
 }
 document.querySelectorAll("#tab-general input").forEach(() => {});

@@ -41,6 +41,13 @@
         "media":   { "type": "boolean", "default": true }
       }
     },
+    "daily_summary": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "hour":    { "type": "integer", "minimum": 0, "maximum": 23 }
+      }
+    },
     "accounts": {
       "type": "object",
       "additionalProperties": {

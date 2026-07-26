@@ -143,6 +143,83 @@ def _get_jst_now() -> datetime:
     return datetime.now(timezone(timedelta(hours=9)))
 
 
+# ──────────────────────────────────────────────
+# 每日运行摘要（同时是"死人开关"：哪天没收到摘要 = 系统挂了）
+# ──────────────────────────────────────────────
+def _build_daily_summary() -> str:
+    from config.credentials import get_token_remaining_seconds
+
+    jst = _get_jst_now()
+    lines = [f"📅 每日运行摘要 · {jst:%Y-%m-%d}（JST）"]
+
+    # 今日各成员消息数（数据来自归档；未开归档则跳过本段）
+    if cfg.ARCHIVE_ENABLED:
+        today = jst.strftime("%Y-%m-%d")
+        parts = []
+        for m in cfg.MONITOR_LIST:
+            msgs = archive.load_month(m["m_name"], jst.year, jst.month)
+            count = sum(
+                1 for msg in msgs
+                if (_to_jst_date(msg.get("published_at") or msg.get("updated_at", ""))) == today
+            )
+            if count:
+                parts.append(f"{m['m_name'].replace(' ', '')} {count} 条")
+        lines.append("今日消息: " + ("、".join(parts) if parts else "无"))
+
+    snap = health.get_tracker().snapshot()
+    lines.append(f"巡查: 第 {snap['cycle_count']} 轮 · 运行 {int(snap['uptime_seconds'] // 3600)}h"
+                 f"{int(snap['uptime_seconds'] % 3600 // 60)}m")
+
+    token_parts = []
+    for acc_id in cfg.ACCOUNTS:
+        remaining = get_token_remaining_seconds(acc_id)
+        if remaining is None:
+            token_parts.append(f"{acc_id} 未知")
+        elif remaining <= 0:
+            token_parts.append(f"{acc_id} 失效🔴")
+        else:
+            token_parts.append(f"{acc_id} 正常")
+    if token_parts:
+        lines.append("Token: " + " · ".join(token_parts))
+
+    persistent = [e for e in snap["errors"] if e["tier"] == "PERSISTENT"]
+    if persistent:
+        lines.append(f"⚠️ 待处理错误 {len(persistent)} 条（最近: {persistent[-1]['msg'][:60]}）")
+    else:
+        lines.append("无待处理错误")
+
+    lines.append("（收到本摘要即代表系统在正常运行）")
+    return "\n".join(lines)
+
+
+def _to_jst_date(utc_str: str) -> str:
+    try:
+        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+
+
+async def _daily_summary_loop() -> None:
+    from src.notifier import send_report_message
+
+    while True:
+        jst = _get_jst_now()
+        target = jst.replace(hour=cfg.DAILY_SUMMARY_HOUR, minute=0, second=0, microsecond=0)
+        if target <= jst:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - jst).total_seconds())
+        try:
+            text = _build_daily_summary()
+            ok = await send_report_message(text)
+            log_all("📅 每日摘要已发送" if ok else "⚠️ 每日摘要发送失败（所有通道均未成功）",
+                    is_error=not ok)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log_all(f"⚠️ 每日摘要异常:\n{traceback.format_exc()}", is_error=True)
+
+
 def _calc_sleep_seconds() -> int:
     """若当前在休眠时段内，返回距离休眠结束的秒数；否则返回 0。
     支持跨午夜休眠窗口（如 SLEEP_START=22, SLEEP_END=6）。"""
@@ -419,6 +496,10 @@ async def main() -> None:
         if cfg.WEB_ADMIN_ENABLED else None
     )
 
+    summary_task = (
+        asyncio.create_task(_daily_summary_loop()) if cfg.DAILY_SUMMARY_ENABLED else None
+    )
+
     try:
         loop_task = asyncio.create_task(_run_loop(http_client, poll_event))
         stop_task = asyncio.create_task(stop_event.wait())
@@ -435,6 +516,9 @@ async def main() -> None:
     except KeyboardInterrupt:
         print("\n🛑 安全退出中...")
     finally:
+        if summary_task is not None:
+            summary_task.cancel()
+            await asyncio.gather(summary_task, return_exceptions=True)
         if webui_server is not None:
             webui_server.shutdown()
             webui_server.server_close()

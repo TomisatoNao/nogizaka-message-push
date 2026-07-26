@@ -251,12 +251,18 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     return ok
 
 
-async def send_alert(chat_id: str, text: str) -> bool:
-    """发送系统警报消息到指定 TG 频道。"""
+async def send_text(chat_id: str, text: str, title: str = "") -> bool:
+    """发送纯文本消息到指定 TG 频道（可选加粗标题行）。"""
     if _bot is None or not chat_id:
         return False
     body = _to_html(text, _TELEGRAM_MAX_LENGTH - 64)
-    return await _send_html(chat_id, f"<b>📢 系统警报</b>\n{body}")
+    prefix = f"<b>{_escape_html(title)}</b>\n" if title else ""
+    return await _send_html(chat_id, prefix + body)
+
+
+async def send_alert(chat_id: str, text: str) -> bool:
+    """发送系统警报消息到指定 TG 频道。"""
+    return await send_text(chat_id, text, title="📢 系统警报")
 
 
 async def health_check() -> bool:

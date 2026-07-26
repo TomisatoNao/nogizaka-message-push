@@ -134,6 +134,32 @@ def main() -> None:
             server.server_close()
         print("✅ Test 3 通过\n")
 
+        # ── Test 4: 每日摘要构建 ─────────────────────────
+        print("=== Test 4: 每日摘要 ===")
+        from datetime import datetime, timedelta, timezone
+
+        from src.app import _build_daily_summary
+
+        # 造一条"今天"的消息（JST），确保今日计数能统计到
+        jst_now = datetime.now(timezone(timedelta(hours=9)))
+        utc_now = (jst_now - timedelta(hours=9)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        member2 = dict(member, m_name="摘要 测试")
+        asyncio.run(archive.archive_message(
+            member2, {"id": 201, "type": "text", "text": "today",
+                      "published_at": utc_now, "updated_at": utc_now}))
+        orig_monitor = cfg.MONITOR_LIST[:]
+        cfg.MONITOR_LIST.clear()
+        cfg.MONITOR_LIST.append({"m_name": "摘要 测试", "m_id": "1",
+                                 "group_type": "nogizaka46", "account_id": "x"})
+        try:
+            text = _build_daily_summary()
+        finally:
+            cfg.MONITOR_LIST.clear()
+            cfg.MONITOR_LIST.extend(orig_monitor)
+        assert "每日运行摘要" in text and "摘要测试 1 条" in text, f"摘要应含今日计数:\n{text}"
+        assert "正常运行" in text
+        print("✅ Test 4 通过\n")
+
     finally:
         cfg.ARCHIVE_DIR = orig_dir
         cfg.ARCHIVE_ENABLED = orig_enabled
