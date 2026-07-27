@@ -24,3 +24,6 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 *.tar
+
+# Git worktrees
+.worktrees/
