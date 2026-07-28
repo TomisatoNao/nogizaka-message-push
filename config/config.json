@@ -61,7 +61,7 @@
 
   // ── 可选覆盖 ──（不写则用内置默认值）
   "qq_send_interval": 1.5,
-  "translate": false,
+  "translate": true,
   "gemini_models": [
     {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
     {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},

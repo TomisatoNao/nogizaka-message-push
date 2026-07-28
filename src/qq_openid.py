@@ -197,8 +197,15 @@ async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
                     }))
                     log_all("🤖 官方 Bot 指令监听已连接")
                     backoff = 5
+                    # QQ WebSocket 网关约 30 分钟强制踢人（4009 Session timed out），
+                    # 被动等掉线再重连会有几秒~几十秒断口。主动在 25 分钟时
+                    # 平滑断开重连，保证指令监听始终在线。
+                    reconnect_at = time.monotonic() + 1500  # 25 分钟
                     while True:
-                        event = json.loads(await ws.recv())
+                        event = await asyncio.wait_for(
+                            ws.recv(), timeout=max(reconnect_at - time.monotonic(), 1))
+                        if time.monotonic() >= reconnect_at:
+                            break
                         if event.get("s") is not None:
                             seq_ref["seq"] = event["s"]
                         if event.get("op") == 11 or event.get("t") != "C2C_MESSAGE_CREATE":
