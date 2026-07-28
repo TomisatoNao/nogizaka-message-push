@@ -276,7 +276,8 @@ data/archive/{成员名}/{年}/{月}/
 - **左侧日历**：每天显示消息条数（热力深浅），点某天直接跳到时间线对应位置
 - **时间线**：聊天气泡样式，按天分隔，JST 时间，日文原文 + 中文译文对照
 - **筛选**：全部 / 文字 / 图片 / 视频 / 语音（日历会跟着筛选变化）
-- **搜索**：跨全部月份，原文和译文都匹配，空格分词为「与」关系
+- **搜索**：跨全部月份，原文、译文和标签都匹配，空格分词为「与」关系
+- **标签**：图片自动打标签（Gemini Vision 识别 10 个类目：自拍/合照/舞台/外出/美食/玩偶/动物/花草/风景/截图），点击标签即搜索；管理员可手动补充自定义标签，有全局显示开关
 - **媒体**：图片灯箱（键盘翻页），视频/语音在线播放并支持拖进度
 - **深链**：URL 带 `#member=&y=&m=&t=`，可复制分享给别人直达某月某筛选
 
@@ -447,6 +448,7 @@ bash tools/install_systemd.sh --uninstall
 | `sleep_hours` | 休眠时段 `[起, 止]` JST 小时 |
 | `alert_cooldown` | 告警冷却秒数，防刷屏 |
 | `translate` `gemini_models` `gemini_min_interval` `translate_timeout` | 翻译相关 |
+| `image_tagging` `gemini_tag_models` `gemini_tag_min_interval` | 图片自动打标签（Gemini Flash Lite，10 类目分类） |
 | `qq_send_interval` | QQ 消息发送间隔秒数 |
 
 未列出的项（文件路径、超时、并发数、调试开关等）用内置默认值，见 `config/config.py` 的 `_DEFAULTS`。
@@ -469,6 +471,7 @@ bash tools/install_systemd.sh --uninstall
 | `python -m src.webui` | 只起管理端（主程序没跑时也能改配置） |
 | `python tools/list_members.py [账号ID]` | 列出账号可见的成员及 ID |
 | `python tools/backfill_archive.py [成员] [--from 日期]` | 回填历史消息 |
+| `python tools/tag_images.py [--member 成员] [--year Y] [--month M] [--dry-run]` | 批量图片打标签（幂等，只补没标签的） |
 | `python tools/manage_users.py add/list/passwd/role/del` | 网页账号管理 |
 | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 获取 QQ 用户 OpenID（网页端也有「🎯 自动获取」） |
 | `python tools/test_models.py` | Gemini 模型连通性诊断 |
@@ -489,6 +492,7 @@ nogizaka-message-push/
 │   ├── app.py                   # 主循环：健康检查、轮询编排、每日摘要
 │   ├── fetcher.py               # 抓取：API 轮询、过滤、分发
 │   ├── translator.py            # Gemini 翻译（多模型容错、串行限速）
+│   ├── tagger.py                 # Gemini 图片打标签（Vision，10 类目分类）
 │   ├── notifier.py              # 多通道推送路由 + 系统警报
 │   ├── archive.py               # 消息归档：落地、媒体下载、搜索、日历统计
 │   ├── auth.py                  # 账号系统：scrypt 哈希、会话、登录限流

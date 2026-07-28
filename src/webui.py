@@ -1102,11 +1102,8 @@ class _Handler(BaseHTTPRequestHandler):
             if member not in _archive.list_members():
                 self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
                 return
-            try:
-                body = self._read_body_json()
-                if body is None: return
-            except (json.JSONDecodeError, ValueError):
-                self._send_json({"ok": False, "errors": ["请求体必须是 JSON"]}, 400)
+            body = self._read_body_json()
+            if body is None:
                 return
             msg_id = str(body.get("id") or "")
             tags = (body.get("custom_tags") or "").strip()
@@ -1115,9 +1112,6 @@ class _Handler(BaseHTTPRequestHandler):
             if not msg_id or not year or not month:
                 self._send_json({"ok": False, "errors": ["缺少 id/year/month"]}, 400)
                 return
-            from datetime import datetime
-            import asyncio as _asyncio
-            dt = datetime(year, month, 1)
             # 只读合并 — 不碰其它字段
             msgs = _archive.load_month(member, year, month)
             found = None

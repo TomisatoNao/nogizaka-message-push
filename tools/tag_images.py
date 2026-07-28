@@ -25,9 +25,8 @@ _HERE = Path(__file__).resolve().parent
 _PROJECT_ROOT = _HERE.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-import config.config as cfg
-from src.archive import archive_root, list_members, load_month, _merge_write
-from src.tagger import tag_image, initialize as init_tagger
+from src.archive import archive_root, list_members, load_month, _merge_write  # noqa: E402
+from src.tagger import tag_image, initialize as init_tagger  # noqa: E402
 
 
 async def main():

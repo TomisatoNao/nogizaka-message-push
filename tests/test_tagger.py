@@ -28,7 +28,7 @@ def test_tag_image_file_not_found() -> None:
     """文件不存在时返回空字符串"""
     print("=== tag_image 文件不存在 ===")
     import asyncio
-    from src.tagger import initialize, tag_image, wait_pending
+    from src.tagger import initialize, tag_image
     setup_test()
     initialize()
 
