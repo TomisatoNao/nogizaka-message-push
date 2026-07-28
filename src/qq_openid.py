@@ -202,10 +202,14 @@ async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
                     # 平滑断开重连，保证指令监听始终在线。
                     reconnect_at = time.monotonic() + 1500  # 25 分钟
                     while True:
-                        event = await asyncio.wait_for(
-                            ws.recv(), timeout=max(reconnect_at - time.monotonic(), 1))
+                        try:
+                            raw = await asyncio.wait_for(
+                                ws.recv(), timeout=max(reconnect_at - time.monotonic(), 1))
+                        except asyncio.TimeoutError:
+                            break  # 25 分钟到了，主动重连
+                        event = json.loads(raw)
                         if time.monotonic() >= reconnect_at:
-                            break
+                            break  # 收到消息后刚好到时间，也重连
                         if event.get("s") is not None:
                             seq_ref["seq"] = event["s"]
                         if event.get("op") == 11 or event.get("t") != "C2C_MESSAGE_CREATE":
