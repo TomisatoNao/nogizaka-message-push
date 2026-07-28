@@ -2,7 +2,7 @@
   // ── 推送通道 ──
   "channels": {
     "napcat": false,
-    "tg": true,
+    "tg": false,
     "qq_official": true
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
@@ -61,7 +61,7 @@
 
   // ── 可选覆盖 ──（不写则用内置默认值）
   "qq_send_interval": 1.5,
-  "translate": true,
+  "translate": false,
   "gemini_models": [
     {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
     {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
@@ -69,5 +69,8 @@
     {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"}
   ],
   "gemini_min_interval": 7,
-  "translate_timeout": 30
+  "translate_timeout": 30,
+  "gemini_tag_min_interval": 5,
+  "gemini_tag_models": [{"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"}, {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"}],
+  "image_tagging": true
 }

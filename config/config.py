@@ -45,6 +45,13 @@ _DEFAULTS: dict = {
     "gemini_min_interval":      7.0,
     "translate_max_length":     2500,
     "translate_timeout":        30,
+    # 图片打标签
+    "enable_image_tagging":     False,
+    "gemini_tag_models": [
+        {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
+        {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
+    ],
+    "gemini_tag_min_interval":  5.0,
     # 文件路径
     "cred_dir":                 "data/web_credentials",
     "time_record_dir":          "data/time_records",
@@ -200,6 +207,10 @@ def _normalize_config(raw: dict) -> dict:
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
+
+        # 图片打标签（image_tagging → enable_image_tagging）
+        if "image_tagging" in cfg:
+            cfg["enable_image_tagging"] = cfg.pop("image_tagging")
 
         if "monitor" in cfg:
             accounts = cfg.get("accounts", {})
@@ -373,13 +384,17 @@ _KEY_TO_VAR: dict[str, str] = {
     "health_summary_interval":      "HEALTH_SUMMARY_INTERVAL",
     "health_error_buffer":          "HEALTH_ERROR_BUFFER",
     "health_token_warn_seconds":    "HEALTH_TOKEN_WARN_SECONDS",
+    "enable_image_tagging":         "ENABLE_IMAGE_TAGGING",
+    "gemini_tag_models":            "GEMINI_TAG_MODELS",
+    "gemini_tag_min_interval":      "GEMINI_TAG_MIN_INTERVAL",
 }
 
 # 可在热重载时通过 in-place mutation 更新的容器类型 key
 # 注意：tuple 不可变（如 day_interval），不在其中
 _CONTAINER_KEYS = frozenset({
     "accounts", "monitor_list", "qq_official_bots",
-    "gemini_models", "skip_publish_types", "media_type_map",
+    "gemini_models", "gemini_tag_models",
+    "skip_publish_types", "media_type_map",
 })
 
 # 需要特殊类型转换的 key（JSON 类型 → Python 类型）

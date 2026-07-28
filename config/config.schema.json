@@ -110,6 +110,19 @@
       }
     },
     "gemini_min_interval": { "type": "number", "minimum": 0 },
-    "translate_timeout":   { "type": "integer", "minimum": 1 }
+    "translate_timeout":   { "type": "integer", "minimum": 1 },
+    "image_tagging":              { "type": "boolean" },
+    "gemini_tag_models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "url"],
+        "properties": {
+          "name": { "type": "string" },
+          "url":  { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "gemini_tag_min_interval":    { "type": "number", "minimum": 0 }
   }
 }

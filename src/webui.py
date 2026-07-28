@@ -1017,6 +1017,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "type": m.get("type"),
                 "text": m.get("text", ""),
                 "translation": m.get("_translation", ""),
+                "tags": m.get("_tags", ""),
+                "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
@@ -1077,6 +1079,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "type": m.get("type"),
                 "text": m.get("text", ""),
                 "translation": m.get("_translation", ""),
+                "tags": m.get("_tags", ""),
+                "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
@@ -1091,6 +1095,47 @@ class _Handler(BaseHTTPRequestHandler):
                 "page": page, "total_pages": max(1, -(-total // per_page)),
                 "capped": total >= 500, "messages": slim,
             })
+            return
+
+        if sub == "tags":
+            member = qp("member")
+            if member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+                return
+            try:
+                body = self._read_body_json()
+                if body is None: return
+            except (json.JSONDecodeError, ValueError):
+                self._send_json({"ok": False, "errors": ["请求体必须是 JSON"]}, 400)
+                return
+            msg_id = str(body.get("id") or "")
+            tags = (body.get("custom_tags") or "").strip()
+            year = body.get("year")
+            month = body.get("month")
+            if not msg_id or not year or not month:
+                self._send_json({"ok": False, "errors": ["缺少 id/year/month"]}, 400)
+                return
+            from datetime import datetime
+            import asyncio as _asyncio
+            dt = datetime(year, month, 1)
+            # 只读合并 — 不碰其它字段
+            msgs = _archive.load_month(member, year, month)
+            found = None
+            for m in msgs:
+                if str(m.get("id", "")) == msg_id:
+                    m["_custom_tags"] = tags
+                    found = True
+                    break
+            if not found:
+                self._send_json({"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
+                return
+            # 写回 — 同步简化版（单字段修改可以同步，风险低）
+            json_path = (_archive.archive_root() / member / f"{year:04d}" / f"{month:02d}" / "messages.json")
+            tmp = json_path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(msgs, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, json_path)
+            self._send_json({"ok": True, "id": int(msg_id), "custom_tags": tags})
             return
 
         if sub.startswith("media/"):
@@ -1297,6 +1342,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/secrets":
             self._handle_secrets()
+            return
+        if path.startswith("/api/archive/"):
+            if not self._check_auth():
+                return
+            self._handle_archive(path[len("/api/archive/"):])
             return
         if path == "/api/test_push":
             if not self._check_auth():

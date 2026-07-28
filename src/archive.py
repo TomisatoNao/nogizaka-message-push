@@ -240,9 +240,15 @@ async def archive_message(member: dict, msg: dict, translated: str = "") -> None
         record["_translation"] = translated
     try:
         await _merge_write(m_name, dt, record)
+        _local_file = ""
         if cfg.ARCHIVE_MEDIA and msg.get("file") and msg.get("type") in _MEDIA_TYPES:
             delta = await _download_media(m_name, dt, msg)
             await _merge_write(m_name, dt, delta)
+            _local_file = delta.get("_local_file", "")
+        # ── 图片后台打标签 ──
+        if msg.get("type") in ("picture", "image") and msg.get("file") and _local_file:
+            from src.tagger import schedule_tag as _schedule_tag
+            _schedule_tag(m_name, dict(msg, _local_file=_local_file))
     except Exception:
         import traceback
         log_all(f"⚠️ 归档失败 [{m_name}] id={msg.get('id')}:\n{traceback.format_exc()}", is_error=True)
@@ -378,7 +384,12 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
         for msg in reversed(msgs):             # 月内也按新→旧
             if type_filter and msg.get("type") not in type_filter:
                 continue
-            haystack = ((msg.get("text") or "") + "\n" + (msg.get("_translation") or "")).lower()
+            haystack = (
+                (msg.get("text") or "") + "\n" +
+                (msg.get("_translation") or "") + "\n" +
+                (msg.get("_tags") or "") + "\n" +
+                (msg.get("_custom_tags") or "")
+            ).lower()
             if all(t in haystack for t in terms):
                 results.append({**msg, "_year": m["year"], "_month": m["month"]})
                 if len(results) >= limit:

@@ -15,6 +15,7 @@ import httpx
 
 from src import archive
 from src import fetcher
+from src import tagger
 from src import translator
 from src.platforms import napcat
 from src.platforms import qq_official
@@ -572,6 +573,7 @@ async def main() -> None:
     init_credentials(http_client)
     translator.initialize(http_client)
     archive.initialize(http_client)
+    tagger.initialize(http_client)
     tgbot.initialize()
     napcat.initialize(qq_client)
     qq_official.initialize(qq_client)
@@ -693,6 +695,7 @@ async def main() -> None:
         if observer is not None:
             observer.stop()
             observer.join()
+        await tagger.wait_pending(timeout=30)
         await archive.wait_pending(timeout=30)   # 归档后台任务收尾（媒体下载中途别掐）
         await asyncio.gather(http_client.aclose(), qq_client.aclose())
         print("✅ 资源清理完毕")

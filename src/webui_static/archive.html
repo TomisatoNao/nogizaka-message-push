@@ -72,15 +72,44 @@
   .bubble .trans { margin-top: 8px; padding: 8px 11px; background: var(--trans-bg);
                    color: var(--trans-text); border-radius: 9px; font-size: 13.5px;
                    white-space: pre-wrap; line-height: 1.65; }
-  /* height:auto + width/height 属性 = 加载前按纵横比预留占位，消除布局位移（日历跳转定位依赖） */
-  .bubble img { max-width: 100%; height: auto; max-height: 420px; object-fit: contain;
+  /* height:auto + width/height 属性 = 加载前按纵横比预留占位，消除布局位移 */
+  .bubble img { max-width: 100%; height: auto; max-height: 600px; object-fit: contain;
                 object-position: left; border-radius: 10px; cursor: zoom-in; display: block; }
-  .bubble video { max-width: 100%; height: auto; max-height: 420px; border-radius: 10px; display: block; }
+  .bubble video { max-width: 100%; height: auto; max-height: 560px;
+                  border-radius: 10px; display: block; }
   .bubble audio { max-width: 100%; display: block; }
   .bubble .miss { color: var(--err); font-size: 12.5px; }
   .center { text-align: center; padding: 28px 0; color: var(--muted); }
   #loadMore { display: block; margin: 18px auto; }
   #loadMore[hidden] { display: none; }
+  .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .tag-chip { display: inline-block; padding: 2px 10px; border-radius: 999px;
+              background: var(--accent-soft); color: var(--accent); font-size: 12px;
+              cursor: pointer; border: 1px solid transparent; transition: all var(--tr); }
+  .tag-chip:hover { border-color: var(--accent); box-shadow: 0 1px 6px var(--accent-ring); }
+  .tag-chip.custom { background: color-mix(in srgb, var(--warn) 12%, transparent);
+                     color: var(--warn); border-style: dashed; }
+  .tag-chip.custom:hover { border-color: var(--warn); box-shadow: 0 1px 6px
+    color-mix(in srgb, var(--warn) 30%, transparent); }
+  .tag-edit { display: inline-block; padding: 2px 9px; border-radius: 999px;
+              border: 1px dashed var(--border); background: transparent;
+              color: var(--muted); font-size: 12px; cursor: pointer; transition: all var(--tr); }
+  .tag-edit:hover { border-color: var(--accent); color: var(--accent); }
+  .tag-input { font-size: 12px; padding: 2px 8px; border: 1px solid var(--accent);
+               border-radius: 999px; background: var(--bg); color: var(--text);
+               width: 120px; outline: none; }
+  .toggle-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .toggle-row input[type=checkbox] { accent-color: var(--accent); }
+  body.hide-tags .tags { display: none !important; }
+  /* 灯箱 */
+  #backTop { position: fixed; bottom: 32px; right: 28px; z-index: 50; display: none;
+    width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card) 85%, transparent);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    color: var(--text); font-size: 18px; cursor: pointer; line-height: 38px;
+    text-align: center; box-shadow: var(--shadow-sm); transition: opacity var(--tr), visibility var(--tr); }
+  #backTop:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
+  #backTop.show { display: block; }
   /* 灯箱 */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none;
               align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
@@ -130,12 +159,15 @@
            style="flex:1; min-width:220px; padding:7px 12px; border:1px solid var(--border);
                   border-radius:8px; background:var(--card); color:var(--text); font-size:13.5px">
     <button class="nav" id="searchClear" hidden>✕ 清除搜索</button>
+    <label class="toggle-row"><input type="checkbox" id="tagToggle" checked> 显示标签</label>
   </div>
   <div id="timeline"></div>
   <button class="nav" id="loadMore" hidden>加载更多 ↓</button>
   <div class="center" id="emptyHint" hidden></div>
 </main>
 </div>
+
+<button id="backTop" title="回到顶部">⬆</button>
 
 <div id="lightbox">
   <span id="lbCounter"></span>
@@ -166,7 +198,10 @@ function esc(s) { const d = document.createElement("div"); d.textContent = Strin
 function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
 
 async function api(path) {
-  const resp = await fetch(path, { headers: authToken ? { "X-Auth-Token": authToken } : {} });
+  const resp = await fetch(path, {
+    headers: authToken ? { "X-Auth-Token": authToken } : {},
+    cache: "no-store",
+  });
   return resp.json();
 }
 
@@ -250,8 +285,7 @@ async function jumpToDay(dateKey) {
   // 加载全月（最多几页），保证目标日期的分隔条已渲染
   while (page < totalPages) { page++; await loadPage(); }
   $("loadMore").hidden = true;
-  // 兜底：当前类型筛选下该日期没有消息（理论上日历已按类型过滤，防边角）
-  // → 自动切回「全部」重载，保证跳转永远有落点
+  // 兜底：当前类型筛选下该日期没有消息 → 自动切回「全部」重载
   if (!document.querySelector('.day-sep[data-date="' + dateKey + '"]') && curType) {
     curType = "";
     $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
@@ -261,23 +295,44 @@ async function jumpToDay(dateKey) {
     while (page < totalPages) { page++; await loadPage(); }
     $("loadMore").hidden = true;
   }
-  // 懒加载图片会持续撑高上方内容、把目标位置往下推，
-  // 因此瞬时定位后再校正几次，最后一次才闪烁提示
+
+  // ── 滚动定位 + 校正 ──
+  // 全月消息加载完成后，图片是 lazy 的，加载时会撑高 DOM 把目标位置
+  // 往下推，所以需要定时校正几次。但一旦用户主动操作（滚轮 / 触摸 /
+  // 键盘），说明不需要这个位置了，立即停掉所有后续校正。
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
+  window.addEventListener("wheel", cancel, { once: true, passive: true });
+  window.addEventListener("touchstart", cancel, { once: true, passive: true });
+  window.addEventListener("keydown", cancel, { once: true, passive: true });
+
   const pin = () => {
+    if (cancelled) return false;
     const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
-    if (sep) sep.scrollIntoView({ block: "start" });
-    return sep;
+    if (!sep) return false;
+    sep.scrollIntoView({ block: "start", behavior: "instant" });
+    return true;
   };
+
   pin();
-  setTimeout(pin, 400);
-  setTimeout(pin, 1000);
+  setTimeout(pin, 350);
+  setTimeout(pin, 900);
   setTimeout(() => {
-    const sep = pin();
-    if (sep) {
-      sep.classList.add("flash");
-      setTimeout(() => sep.classList.remove("flash"), 2500);
+    if (pin()) {
+      const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
+      if (sep) {
+        sep.classList.add("flash");
+        setTimeout(() => sep.classList.remove("flash"), 2500);
+      }
     }
-  }, 2000);
+  }, 2200);
+
+  // 清理监听器（最多保留 5 秒）
+  setTimeout(() => {
+    window.removeEventListener("wheel", cancel);
+    window.removeEventListener("touchstart", cancel);
+    window.removeEventListener("keydown", cancel);
+  }, 5000);
 }
 
 // ── 数据加载 ─────────────────────────────────────
@@ -431,6 +486,16 @@ function clearSearch() {
 }
 $("searchClear").addEventListener("click", clearSearch);
 
+// ── 标签开关 ─────────────────────────────────────
+let showTags = localStorage.getItem("archiveShowTags") !== "false";
+$("tagToggle").checked = showTags;
+if (!showTags) document.body.classList.add("hide-tags");
+$("tagToggle").addEventListener("change", () => {
+  showTags = $("tagToggle").checked;
+  localStorage.setItem("archiveShowTags", showTags ? "true" : "false");
+  document.body.classList.toggle("hide-tags", !showTags);
+});
+
 function showEmpty(text) {
   $("emptyHint").textContent = text;
   $("emptyHint").hidden = false;
@@ -463,7 +528,7 @@ function renderBubble(msg) {
     // width/height 属性让浏览器在加载前按纵横比预留空间（防布局位移）
     const dim = (msg.w && msg.h) ? ' width="' + msg.w + '" height="' + msg.h + '"' : "";
     if (msg.type === "video") {
-      html += '<video controls preload="metadata"' + dim + ' src="' + esc(url) + '"></video>';
+      html += '<video controls preload="metadata" src="' + esc(url) + '"></video>';
     } else if (msg.type === "voice") {
       html += '<audio controls preload="metadata" src="' + esc(url) + '"></audio>';
     } else {
@@ -476,6 +541,94 @@ function renderBubble(msg) {
   if (msg.text) html += '<div class="text">' + esc(msg.text) + "</div>";
   if (msg.translation) html += '<div class="trans">' + esc(msg.translation) + "</div>";
   b.innerHTML = html;
+  // ── 标签 ──
+  const allTags = [];
+  if (msg.tags) for (const t of msg.tags.split(" ").filter(Boolean)) allTags.push({ text: t, type: "auto" });
+  if (msg.custom_tags) for (const t of msg.custom_tags.split(" ").filter(Boolean)) allTags.push({ text: t, type: "custom" });
+
+  if (allTags.length > 0 || !searchQuery) {
+    const tagsDiv = document.createElement("div");
+    tagsDiv.className = "tags";
+    for (const { text, type } of allTags) {
+      const chip = document.createElement("span");
+      chip.className = "tag-chip" + (type === "custom" ? " custom" : "");
+      chip.textContent = (type === "auto" ? "🔍 " : "🏷 ") + text;
+      chip.title = type === "auto" ? "搜索「" + text + "」" : "自定义标签「" + text + "」";
+      if (type === "auto") {
+        chip.addEventListener("click", () => { $("searchBox").value = text; startSearch(text); });
+      }
+      tagsDiv.appendChild(chip);
+    }
+
+    // 编辑自定义标签（仅管理员可见）
+    if (window._isArchiveAdmin) {
+    const editBtn = document.createElement("span");
+    editBtn.className = "tag-edit";
+    editBtn.textContent = msg.custom_tags ? "✎ 编辑" : "+ 加标签";
+    editBtn.title = "添加或编辑自定义标签";
+    const input = document.createElement("input");
+    input.className = "tag-input";
+    input.value = msg.custom_tags || "";
+    input.placeholder = "自定义标签，空格分隔";
+    input.hidden = true;
+
+    const msgId = msg.id;
+    const msgYear = msg.year || curYM.year;
+    const msgMonth = msg.month || curYM.month;
+
+    editBtn.addEventListener("click", () => {
+      if (input.hidden) {
+        input.hidden = false; editBtn.hidden = true; input.focus();
+      }
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveTags();
+      if (e.key === "Escape") { input.hidden = true; editBtn.hidden = false; input.value = msg.custom_tags || ""; }
+    });
+    input.addEventListener("blur", () => {
+      setTimeout(() => { if (!input.matches(":focus")) { input.hidden = true; editBtn.hidden = false; } }, 150);
+    });
+
+    async function saveTags() {
+      const val = input.value.trim();
+      try {
+        const resp = await fetch("/api/archive/tags?member=" + encodeURIComponent(curMember), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: msgId, year: msgYear, month: msgMonth, custom_tags: val }),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          msg.custom_tags = val;
+          // 重建标签区
+          while (tagsDiv.firstChild) tagsDiv.removeChild(tagsDiv.firstChild);
+          const tags = [];
+          if (msg.tags) for (const t of msg.tags.split(" ").filter(Boolean)) tags.push({ text: t, type: "auto" });
+          if (msg.custom_tags) for (const t of msg.custom_tags.split(" ").filter(Boolean)) tags.push({ text: t, type: "custom" });
+          for (const { text, type } of tags) {
+            const chip = document.createElement("span");
+            chip.className = "tag-chip" + (type === "custom" ? " custom" : "");
+            chip.textContent = (type === "auto" ? "🔍 " : "🏷 ") + text;
+            chip.title = type === "auto" ? "搜索「" + text + "」" : "自定义标签「" + text + "」";
+            if (type === "auto") chip.addEventListener("click", () => { $("searchBox").value = text; startSearch(text); });
+            tagsDiv.appendChild(chip);
+          }
+          tagsDiv.appendChild(editBtn);
+          tagsDiv.appendChild(input);
+          editBtn.textContent = val ? "✎ 编辑" : "+ 加标签";
+          editBtn.hidden = false; input.hidden = true;
+        } else {
+          alert("保存失败：" + (data.errors || []).join("；"));
+        }
+      } catch (e) { alert("保存失败：" + e.message); }
+    }
+
+    tagsDiv.appendChild(editBtn);
+    tagsDiv.appendChild(input);
+    }
+    b.appendChild(tagsDiv);
+  }
+
   const img = b.querySelector("img[data-lb]");
   if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10)));
   const jump = b.querySelector("a.jump");
@@ -545,15 +698,22 @@ $("nextMonth").addEventListener("click", () => {
 });
 $("loadMore").addEventListener("click", () => { page++; loadPage(); });
 
+// ── 回到顶部 ─────────────────────────────────────
+const backTop = $("backTop");
+window.addEventListener("scroll", () => {
+  backTop.classList.toggle("show", window.scrollY > 400);
+}, { passive: true });
+backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
 // ── 登录状态 ─────────────────────────────────────
 (async function initAuth() {
   try {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
-    if (!me.auth_enabled) { $("adminLink").hidden = false; return; }   // 未启用账号系统：照旧
+    if (!me.auth_enabled) { window._isArchiveAdmin = true; $("adminLink").hidden = false; return; }  // 未启用账号系统：照旧
     if (me.user) {
       $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
       $("logoutLink").hidden = false;
-      if (me.user.role === "admin") $("adminLink").hidden = false;
+      if (me.user.role === "admin") { window._isArchiveAdmin = true; $("adminLink").hidden = false; }
     } else if (me.archive_public) {
       $("whoami").innerHTML = '<a href="/login">登录</a>';
     }
@@ -567,13 +727,16 @@ $("logoutLink").addEventListener("click", async (e) => {
 });
 
 // ── 入口（支持 #member=&y=&m=&t= 深链）────────────
-(function boot() {
+function boot() {
   const p = new URLSearchParams(location.hash.slice(1));
   curMember = p.get("member") || "";
   curType = p.get("t") || "";
   initTypeChips();
   loadMembers();
-})();
+}
+boot();
+// 从浏览器 bfcache 恢复时重新加载内容
+window.addEventListener("pageshow", (e) => { if (e.persisted) boot(); });
 </script>
 </body>
 </html>
