@@ -327,6 +327,16 @@ function fmtTime(utc) {
   const d = toJst(utc);
   return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
 }
+function fmtCopyTime(utc) {
+  const d = toJst(utc);
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return m + "/" + day + " " + hh + ":" + mm + ":" + ss;
+}
+
 function fmtDateKey(utc) {
   const d = toJst(utc);
   return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") +
@@ -675,8 +685,13 @@ function renderBubble(msg) {
     html += ' · <a href="#" class="jump" data-date="' + dateKey +
             '" style="color:var(--accent); text-decoration:none">查看当日 →</a>';
   }
-  html += '<button type="button" class="copy-btn" title="复制整条消息与译文">📋 复制</button>';
+  const hasText = Boolean((msg.text && msg.text.trim()) || (msg.translation && msg.translation.trim()));
+  if (hasText) {
+    html += '<button type="button" class="copy-btn" title="复制整条消息与译文">📋 复制</button>';
+  }
   html += "</div>";
+
+
 
   if (msg.media_url) {
     const url = mediaUrl(msg.media_url);
@@ -794,18 +809,29 @@ function renderBubble(msg) {
   const copyBtn = b.querySelector(".copy-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
-      let lines = [];
-      lines.push("【" + (curMember || "成员") + "】" + fmtTime(msg.published_at));
-      if (msg.text) lines.push("原文：" + msg.text);
-      if (msg.translation) lines.push("译文：" + msg.translation);
-      const textToCopy = lines.join("\n");
+      let parts = [];
+      const mName = curMember || "成员";
+      const timeStr = fmtCopyTime(msg.published_at);
+      parts.push(mName + " " + timeStr);
+
+      if (msg.text && msg.text.trim()) {
+        parts.push(msg.text.trim());
+      }
+
+      if (msg.translation && msg.translation.trim()) {
+        parts.push("----------------------------------------");
+        parts.push(msg.translation.trim());
+      }
+
+      const textToCopy = parts.join("\n\n");
       navigator.clipboard.writeText(textToCopy).then(() => {
-        showToast("📋 已复制消息与译文到剪贴板");
+        showToast("📋 已复制整条消息与译文");
       }).catch(err => {
         showToast("⚠️ 复制失败：" + err.message);
       });
     });
   }
+
 
   const img = b.querySelector("img[data-lb]");
   if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10), img));
