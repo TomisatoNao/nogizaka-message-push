@@ -87,19 +87,36 @@ def verify_password(password: str, record: dict) -> bool:
 # ================================================================
 
 def load_users() -> dict:
-    """读取用户库 {username: {role, password: {...}, created_at}}。"""
+    """读取用户库 {username: {role, password: {...}, created_at}}。
+
+    权威数据源始终为 USERS_PATH (data/users.json)，确保密码校验 100% 准确。
+    """
     if not USERS_PATH.exists():
         return {}
     try:
         with open(USERS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
+        users = data if isinstance(data, dict) else {}
+        # 顺带同步给 SQLite
+        try:
+            from src.archive import init_db
+            conn = init_db()
+            if conn and users:
+                with conn:
+                    for uname, info in users.items():
+                        conn.execute(
+                            "INSERT OR REPLACE INTO users (username, role, password_json, created_at) VALUES (?, ?, ?, ?);",
+                            (uname, info.get("role", "viewer"), json.dumps(info.get("password", {})), info.get("created_at", 0))
+                        )
+        except Exception:
+            pass
+        return users
     except (OSError, ValueError):
         return {}
 
 
 def save_users(users: dict) -> None:
-    """原子写用户库，权限 600。"""
+    """写入用户库（写 data/users.json 并同步 SQLite DB）。"""
     USERS_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = USERS_PATH.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -109,6 +126,22 @@ def save_users(users: dict) -> None:
         os.chmod(USERS_PATH, 0o600)
     except OSError:
         pass
+
+    try:
+        from src.archive import init_db
+        conn = init_db()
+        if conn:
+            with conn:
+                conn.execute("DELETE FROM users;")
+                for uname, info in users.items():
+                    conn.execute(
+                        "INSERT OR REPLACE INTO users (username, role, password_json, created_at) VALUES (?, ?, ?, ?);",
+                        (uname, info.get("role", "viewer"), json.dumps(info.get("password", {})), info.get("created_at", 0))
+                    )
+    except Exception:
+        pass
+
+
 
 
 def has_users() -> bool:

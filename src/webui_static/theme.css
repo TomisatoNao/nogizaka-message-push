@@ -162,3 +162,25 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ── 搜索高亮与卡片虚拟化 ───────────────────────── */
+.search-highlight {
+  background: color-mix(in srgb, #ffeb3b 70%, transparent);
+  color: #111;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme="dark"] .search-highlight {
+  background: color-mix(in srgb, #ffd54f 60%, transparent);
+  color: #fff;
+}
+
+/* 原生 CSS 视口卡片虚拟化：屏外卡片自动跳过 Layout/Reflow 计算 */
+.msg-card, .virtual-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 260px;
+}
+

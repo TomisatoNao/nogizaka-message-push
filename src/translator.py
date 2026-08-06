@@ -1,7 +1,8 @@
-﻿# ============================================================
+# ============================================================
 # translator.py — Gemini 翻译（串行化速率控制）
 # ============================================================
 import asyncio
+import hashlib
 
 import httpx
 
@@ -12,6 +13,8 @@ from src.utils import RateLimiter
 # ---- 模块级状态（由 initialize() 在事件循环内创建） ----
 _limiter: RateLimiter = None   # type: ignore
 _http_client: httpx.AsyncClient | None = None   # 共享连接池；未注入时按需临时创建
+_trans_cache: dict[tuple[str, str], str] = {}   # (member_name, text_hash) -> translated
+_MAX_CACHE_SIZE = 1000
 
 _GROUP_DISPLAY: dict[str, str] = {
     "nogizaka46": "乃木坂46",
@@ -30,6 +33,9 @@ _PROMPT_TEMPLATE = (
     "- 只输出翻译结果\n\n"
     "原文：\n{text}"
 )
+
+def _get_text_hash(text: str) -> str:
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 def initialize(client: httpx.AsyncClient | None = None) -> None:
     """在事件循环内调用，创建 RateLimiter 并注入共享 HTTP 客户端。
@@ -111,6 +117,11 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
         log_all(f"⚠️ 文本过长 ({len(text)} 字符)，跳过翻译", is_debug=True)
         return "[消息过长，暂不翻译]"
 
+    cache_key = (member_name, _get_text_hash(text))
+    if cache_key in _trans_cache:
+        log_all(f"⚡ 命中翻译内存缓存 ({member_name})", is_debug=True)
+        return _trans_cache[cache_key]
+
     group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
     prompt = _PROMPT_TEMPLATE.format(
         group_name=group_name,
@@ -118,9 +129,6 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
         text=text,
     )
 
-    # 注：这里没有显式设置 thinkingConfig —— 并非所有模型端点都接受该字段，
-    # 传错会让整条链路 400。是否需要关闭/限制思考预算，请先用
-    # `python tools/test_models.py` 实测 finishReason 与 thoughtsTokenCount 再决定。
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
@@ -136,6 +144,9 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
                     if resp.status_code == 200:
                         result = _extract_text(resp.json(), model["name"])
                         if result:
+                            if len(_trans_cache) >= _MAX_CACHE_SIZE:
+                                _trans_cache.pop(next(iter(_trans_cache)))
+                            _trans_cache[cache_key] = result
                             return result
                         break   # 响应结构异常，换下一个模型
                     elif resp.status_code == 429:
@@ -155,3 +166,4 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
                     break
 
     return "[翻译失败]"
+

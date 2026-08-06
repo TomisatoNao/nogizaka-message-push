@@ -435,6 +435,8 @@ def main() -> None:
             assert code == 200 and j["total"] == 2 and j["messages"][0]["year"] == 2026, f"搜索: {j}"
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=")
             assert code == 400, "缺关键词应 400"
+            code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=" + "x" * 101)
+            assert code == 400 and "100" in json.loads(body)["errors"][0], "超长关键词应被拒绝"
             code, body, _ = _http("GET", base + "/api/archive/search?member=ghost&q=x")
             assert code == 404
 

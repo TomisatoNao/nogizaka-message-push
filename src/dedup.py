@@ -15,13 +15,44 @@ def _id_file(group_type: str, m_id: str) -> str:
     return os.path.join(cfg.SENT_IDS_DIR, f"sent_{group_type}_{m_id}.json")
 
 
+def _db_save_sent_id(group_type: str, m_id: str, msg_id: str) -> None:
+    from src.archive import init_db
+    conn = init_db()
+    if not conn:
+        return
+    import time
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO sent_ids (group_type, m_id, msg_id, created_at) VALUES (?, ?, ?, ?);",
+                (group_type, m_id, msg_id, time.time())
+            )
+    except Exception as e:
+        log_all(f"⚠️ SQLite 保存 sent_id 失败: {e}", is_debug=True)
+
+
 def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
     """
-    从磁盘加载已发送 ID。
-    返回 (有序列表, 快速查找集合)：
-      - 列表保留插入顺序（旧→新），用于超限时精准淘汰最旧条目
-      - 集合用于 O(1) 查重
+    优先从 SQLite 数据库加载已发送 ID，退回磁盘旧 JSON 文件。
+    返回 (有序列表, 快速查找集合)。
     """
+    from src.archive import init_db
+    conn = init_db()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT msg_id FROM sent_ids WHERE group_type = ? AND m_id = ? ORDER BY created_at ASC",
+                (group_type, m_id)
+            )
+            rows = cursor.fetchall()
+            if rows:
+                ids = [r[0] for r in rows]
+                trimmed = ids[-cfg.SENT_IDS_MAX:]
+                return trimmed, set(trimmed)
+        except Exception:
+            pass
+
     path = _id_file(group_type, m_id)
     if not os.path.exists(path):
         return [], set()
@@ -29,9 +60,20 @@ def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
         with open(path, "r", encoding="utf-8") as f:
             ids: list[str] = json.load(f)
         trimmed = ids[-cfg.SENT_IDS_MAX:]
+        # 迁移旧数据至 SQLite
+        if conn and trimmed:
+            import time
+            now = time.time()
+            try:
+                with conn:
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO sent_ids (group_type, m_id, msg_id, created_at) VALUES (?, ?, ?, ?);",
+                        [(group_type, m_id, mid, now) for mid in trimmed]
+                    )
+            except Exception:
+                pass
         return trimmed, set(trimmed)
     except Exception:
-        # 文件损坏时保留备份，避免静默丢弃全部去重历史
         bak = path + ".bak"
         try:
             shutil.copy2(path, bak)
@@ -39,6 +81,20 @@ def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
         except OSError:
             pass
         return [], set()
+
+
+def _do_write_sent_ids(path: str, tmp: str, data: list[str], group_type: str, m_id: str, msg_id: str) -> None:
+    _db_save_sent_id(group_type, m_id, msg_id)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        log_all(f"🚨 已发送 ID 写入失败: {e}", is_error=True)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def save_sent_id(
@@ -49,9 +105,7 @@ def save_sent_id(
     id_set: set[str],
 ) -> None:
     """
-    记录新 ID 并持久化。
-    同步更新传入的 id_list / id_set，超出 SENT_IDS_MAX 时
-    从列表头部（最旧）淘汰，保证截断结果始终是最新的 N 条。
+    记录新 ID 并持久化（自动双写至 SQLite DB）。
     """
     if msg_id in id_set:
         return
@@ -65,13 +119,17 @@ def save_sent_id(
 
     path = _id_file(group_type, m_id)
     tmp  = path + ".tmp"
+    snapshot = list(id_list)
+
+    import asyncio
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(id_list, f)
-        os.replace(tmp, path)
-    except Exception as e:
-        log_all(f"🚨 已发送 ID 写入失败: {e}", is_error=True)
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        loop.create_task(asyncio.to_thread(_do_write_sent_ids, path, tmp, snapshot, group_type, m_id, msg_id))
+    else:
+        _do_write_sent_ids(path, tmp, snapshot, group_type, m_id, msg_id)
+
+

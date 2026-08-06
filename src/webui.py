@@ -633,12 +633,22 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send_json({"ok": False, "errors": ["静态资源缺失"]}, 404)
             return
+        import hashlib
+        etag = f'"{hashlib.md5(body).hexdigest()}"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")   # 改版即时生效
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", "public, max-age=86400")
         self.end_headers()
         self.wfile.write(body)
+
 
     def _send_html(self, file_path: Path) -> None:
         try:
@@ -1057,6 +1067,9 @@ class _Handler(BaseHTTPRequestHandler):
             query = qp("q").strip()
             if not query:
                 self._send_json({"ok": False, "errors": ["缺少搜索关键词 q"]}, 400)
+                return
+            if len(query) > 100:
+                self._send_json({"ok": False, "errors": ["搜索关键词不能超过 100 个字符"]}, 400)
                 return
             try:
                 page = max(1, int(qp("page", "1")))

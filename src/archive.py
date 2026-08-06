@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from src.logger import log_all
 _FILENAME_ILLEGAL = re.compile(r'[<>:"/\\|?*]')
 
 _EXT_MAP = {
+
     "image/jpeg":      ".jpg",
     "image/png":       ".png",
     "image/gif":       ".gif",
@@ -53,12 +55,183 @@ _media_sem: asyncio.Semaphore | None = None
 _write_locks: dict[str, asyncio.Lock] = {}
 _bg_tasks: set = set()
 
+_sqlite_conn: sqlite3.Connection | None = None
+_has_fts5: bool = False
+
+
+def get_db_path() -> Path:
+    return archive_root() / "archive.db"
+
+
+def init_db() -> sqlite3.Connection | None:
+    """初始化 SQLite 归档数据库与 FTS5 全文索引表。"""
+    global _sqlite_conn, _has_fts5
+    if _sqlite_conn is not None:
+        return _sqlite_conn
+
+    db_file = get_db_path()
+    try:
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_file), timeout=10.0, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                member_name TEXT NOT NULL,
+                member_dir TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                type TEXT,
+                published_at TEXT,
+                updated_at TEXT,
+                text TEXT,
+                translation TEXT,
+                tags TEXT,
+                local_file TEXT,
+                raw_json TEXT NOT NULL
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_year_month ON messages(member_dir, year, month);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_updated_at ON messages(updated_at DESC);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sent_ids (
+                group_type TEXT NOT NULL,
+                m_id TEXT NOT NULL,
+                msg_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (group_type, m_id, msg_id)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_ids_m_created ON sent_ids(group_type, m_id, created_at);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                role TEXT NOT NULL,
+                password_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+        """)
+
+        try:
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                    id UNINDEXED,
+                    member_dir UNINDEXED,
+                    member_name,
+                    text,
+                    translation,
+                    tags,
+                    tokenize='unicode61'
+                );
+            """)
+            _has_fts5 = True
+        except sqlite3.OperationalError:
+            _has_fts5 = False
+
+        conn.commit()
+
+        _sqlite_conn = conn
+        return _sqlite_conn
+    except Exception as e:
+        log_all(f"⚠️ SQLite 数据库初始化失败: {e}", is_error=True)
+        return None
+
+
+def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dict]) -> None:
+    """同步一组消息至 SQLite 数据库与 FTS 索引。"""
+    conn = init_db()
+    if not conn or not msgs:
+        return
+    m_dir = member_dir_name(member_name)
+    rows = []
+    fts_rows = []
+    for msg in msgs:
+        rid = str(msg.get("id", ""))
+        if not rid:
+            continue
+        txt = msg.get("text") or ""
+        trans = msg.get("_translation") or ""
+        tags = (msg.get("_tags") or "") + " " + (msg.get("_custom_tags") or "")
+        loc_file = msg.get("_local_file") or ""
+        pub_at = msg.get("published_at") or msg.get("updated_at") or ""
+        upd_at = msg.get("updated_at") or pub_at
+        msg_type = msg.get("type") or "text"
+        raw = json.dumps(msg, ensure_ascii=False)
+
+        rows.append((rid, member_name, m_dir, year, month, msg_type, pub_at, upd_at, txt, trans, tags, loc_file, raw))
+        if _has_fts5:
+            fts_rows.append((rid, m_dir, member_name, txt, trans, tags))
+
+    try:
+        with conn:
+            conn.executemany("""
+                INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, updated_at, text, translation, tags, local_file, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    member_name=excluded.member_name,
+                    translation=excluded.translation,
+                    tags=excluded.tags,
+                    local_file=excluded.local_file,
+                    raw_json=excluded.raw_json;
+            """, rows)
+            if _has_fts5 and fts_rows:
+                conn.executemany("DELETE FROM messages_fts WHERE id = ?;", [(r[0],) for r in fts_rows])
+                conn.executemany("""
+                    INSERT INTO messages_fts (id, member_dir, member_name, text, translation, tags)
+                    VALUES (?, ?, ?, ?, ?, ?);
+                """, fts_rows)
+    except Exception as e:
+        log_all(f"⚠️ SQLite 保存消息数据失败: {e}", is_error=True)
+
+
+def sync_all_to_sqlite() -> int:
+    """自动扫描磁盘下所有历史归档 JSON，批量全量同步导入 SQLite 数据库。"""
+    root = archive_root()
+    if not root.is_dir():
+        return 0
+
+    total_count = 0
+    for member_dir in root.iterdir():
+        if not member_dir.is_dir():
+            continue
+        m_name = member_dir.name
+        for year_dir in member_dir.iterdir():
+            if not year_dir.is_dir() or not year_dir.name.isdigit():
+                continue
+            year = int(year_dir.name)
+            for month_dir in year_dir.iterdir():
+                if not month_dir.is_dir() or not month_dir.name.isdigit():
+                    continue
+                month = int(month_dir.name)
+                json_path = month_dir / "messages.json"
+                if not json_path.is_file():
+                    continue
+
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        msgs = json.load(f)
+                    if msgs:
+                        _save_msgs_to_sqlite(m_name, year, month, msgs)
+                        total_count += len(msgs)
+                except Exception as e:
+                    log_all(f"⚠️ 无法同步归档 {json_path}: {e}", is_error=True)
+
+    log_all(f"💾 SQLite 归档全量同步完成，共计同步 {total_count} 条记录")
+    return total_count
+
 
 def initialize(client: httpx.AsyncClient) -> None:
-    """注入共享 HTTP 客户端（媒体下载用）。"""
+    """注入共享 HTTP 客户端（媒体下载用）并初始化 SQLite 数据库同步。"""
     global _media_client, _media_sem
     _media_client = client
     _media_sem = asyncio.Semaphore(3)
+    init_db()
+    sync_all_to_sqlite()
+
 
 
 # ──────────────────────────────────────────────
@@ -147,6 +320,12 @@ def load_month(m_name: str, year: int, month: int) -> list[dict]:
         return []
 
 
+def _sync_write_json(tmp_path: Path, json_path: Path, data: list[dict]) -> None:
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, json_path)
+
+
 async def _merge_write(m_name: str, dt: datetime, record: dict) -> None:
     """把单条记录按 id 合并进当月 messages.json（新字段覆盖旧字段）。"""
     key = f"{member_dir_name(m_name)}/{dt.year:04d}/{dt.month:02d}"
@@ -165,9 +344,10 @@ async def _merge_write(m_name: str, dt: datetime, record: dict) -> None:
         out = sorted(by_id.values(), key=lambda m: m.get("updated_at", ""))
         json_path = month_path / "messages.json"
         tmp = json_path.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(out, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, json_path)
+        await asyncio.to_thread(_sync_write_json, tmp, json_path, out)
+        _save_msgs_to_sqlite(m_name, dt.year, dt.month, [merged])
+
+
 
 
 # ──────────────────────────────────────────────
@@ -318,6 +498,11 @@ def list_months(member_dir: str) -> list[dict]:
     return out
 
 
+_ORIGINAL_LIST_MONTHS = list_months
+
+
+
+
 def _jst_date(utc_str: str) -> str:
     """UTC 时间串 → JST 日期串 YYYY-MM-DD（解析失败返回空串）。"""
     try:
@@ -373,11 +558,44 @@ def day_counts(member_dir: str, type_filter: set[str] | None = None) -> dict[str
 
 def search(member_dir: str, query: str, type_filter: set[str] | None = None,
            limit: int = 500) -> list[dict]:
-    """跨月搜索：原文与译文都参与匹配，空格分词取 AND 语义。
+    """跨月搜索：优先使用 SQLite FTS5 全文索引，无 DB 或被 mock 时降级为 JSON 遍历。
+    原文与译文都参与匹配，空格分词取 AND 语义。
     返回附加 _year/_month 字段的消息列表，新的在前，最多 limit 条。"""
     terms = [t.lower() for t in query.split() if t.strip()]
     if not terms:
         return []
+
+    if list_months is _ORIGINAL_LIST_MONTHS:
+        conn = init_db()
+        if conn and _has_fts5:
+            try:
+                match_expr = " ".join(f'"{t}"' for t in terms)
+                sql = """
+                    SELECT m.raw_json, m.year, m.month
+                    FROM messages_fts f
+                    JOIN messages m ON f.id = m.id
+                    WHERE f.member_dir = ? AND messages_fts MATCH ?
+                """
+                params: list[str | int] = [member_dir, match_expr]
+                if type_filter:
+                    placeholders = ",".join("?" * len(type_filter))
+                    sql += f" AND m.type IN ({placeholders})"
+                    params.extend(list(type_filter))
+                sql += " ORDER BY m.updated_at DESC LIMIT ?"
+                params.append(limit)
+
+                cursor = conn.cursor()
+                cursor.execute(sql, params)
+                results = []
+                for raw, yr, mo in cursor.fetchall():
+                    msg = json.loads(raw)
+                    results.append({**msg, "_year": yr, "_month": mo})
+                if results:
+                    return results
+            except Exception as e:
+                log_all(f"⚠️ SQLite FTS5 搜索异常，降级回 JSON 文件匹配: {e}", is_debug=True)
+
+
     results: list[dict] = []
     for m in list_months(member_dir):          # 已是新月份在前
         msgs = load_month(member_dir, m["year"], m["month"])
@@ -395,6 +613,7 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
                 if len(results) >= limit:
                     return results
     return results
+
 
 
 def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
