@@ -307,10 +307,12 @@ function initInfiniteScroll() {
     const scrollBottom = window.innerHeight + window.scrollY;
     const docHeight = document.documentElement.scrollHeight;
     if (docHeight - scrollBottom < 350) {
+      page++;
       loadPage();
     }
   }, { passive: true });
 }
+
 
 function setPageLoading(loading) {
   pageLoading = loading;
