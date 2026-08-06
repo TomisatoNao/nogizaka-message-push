@@ -130,9 +130,45 @@
   #lbPrev { left: 14px; } #lbNext { right: 14px; }
   #lbClose { position: absolute; right: 14px; top: 12px; background: transparent; color: #fff;
              border: 1px solid rgba(255,255,255,.45); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
-  #lbCounter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-               color: #ddd; font-size: 13px; }
+  /* 一键复制与 Toast 浮窗 */
+  .copy-btn {
+    float: right;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-ring);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .copy-btn:hover {
+    background: var(--accent);
+    color: #ffffff;
+  }
+  .toast-msg {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--text-strong);
+    color: var(--card);
+    padding: 9px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: var(--shadow-lg);
+    z-index: 99999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s cubic-bezier(.3, .8, .4, 1), transform 0.25s cubic-bezier(.3, .8, .4, 1);
+  }
+  .toast-msg.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>
+
 </head>
 <body>
 <header>
@@ -639,7 +675,9 @@ function renderBubble(msg) {
     html += ' · <a href="#" class="jump" data-date="' + dateKey +
             '" style="color:var(--accent); text-decoration:none">查看当日 →</a>';
   }
+  html += '<button type="button" class="copy-btn" title="复制整条消息与译文">📋 复制</button>';
   html += "</div>";
+
   if (msg.media_url) {
     const url = mediaUrl(msg.media_url);
     const dim = (msg.w && msg.h) ? ' width="' + msg.w + '" height="' + msg.h + '"' : "";
@@ -753,6 +791,22 @@ function renderBubble(msg) {
     b.appendChild(tagsDiv);
   }
 
+  const copyBtn = b.querySelector(".copy-btn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => {
+      let lines = [];
+      lines.push("【" + (curMember || "成员") + "】" + fmtTime(msg.published_at));
+      if (msg.text) lines.push("原文：" + msg.text);
+      if (msg.translation) lines.push("译文：" + msg.translation);
+      const textToCopy = lines.join("\n");
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        showToast("📋 已复制消息与译文到剪贴板");
+      }).catch(err => {
+        showToast("⚠️ 复制失败：" + err.message);
+      });
+    });
+  }
+
   const img = b.querySelector("img[data-lb]");
   if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10), img));
   const jump = b.querySelector("a.jump");
@@ -764,6 +818,22 @@ function renderBubble(msg) {
   });
   tl.appendChild(b);
 }
+
+let toastTimer = null;
+function showToast(text) {
+  let el = $("toastMsg");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toastMsg";
+    el.className = "toast-msg";
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove("show"); }, 2400);
+}
+
 
 // ── 灯箱 ─────────────────────────────────────────
 let lbIndex = 0;
@@ -798,17 +868,46 @@ $("lbClose").addEventListener("click", closeLightbox);
 $("lbPrev").addEventListener("click", (e) => { e.stopPropagation(); lbMove(-1); });
 $("lbNext").addEventListener("click", (e) => { e.stopPropagation(); lbMove(1); });
 document.addEventListener("keydown", (e) => {
-  if (!$("lightbox").classList.contains("open")) return;
-  if (e.key === "Escape") closeLightbox();
-  if (e.key === "ArrowLeft") lbMove(-1);
-  if (e.key === "ArrowRight") lbMove(1);
-  if (e.key === "Tab") {
-    const focusable = [$("lbClose"), $("lbPrev"), $("lbNext")];
-    const index = focusable.indexOf(document.activeElement);
+  // 1. 灯箱模式优先处理
+  if ($("lightbox").classList.contains("open")) {
+    if (e.key === "Escape") closeLightbox();
+    if (e.key === "ArrowLeft") lbMove(-1);
+    if (e.key === "ArrowRight") lbMove(1);
+    if (e.key === "Tab") {
+      const focusable = [$("lbClose"), $("lbPrev"), $("lbNext")];
+      const index = focusable.indexOf(document.activeElement);
+      e.preventDefault();
+      focusable[(index + (e.shiftKey ? focusable.length - 1 : 1)) % focusable.length].focus();
+    }
+    return;
+  }
+
+  // 2. 如果焦点在输入框/文本域，不触发全局热键（Esc 除外）
+  const isInput = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
+  if (isInput) {
+    if (e.key === "Escape") {
+      document.activeElement.blur();
+    }
+    return;
+  }
+
+  // 3. 全局键盘热键
+  if (e.key === "[") {
     e.preventDefault();
-    focusable[(index + (e.shiftKey ? focusable.length - 1 : 1)) % focusable.length].focus();
+    $("prevMonth").click();
+    showToast("📅 切换至上一月");
+  } else if (e.key === "]") {
+    e.preventDefault();
+    $("nextMonth").click();
+    showToast("📅 切换至下一月");
+  } else if (e.key === "/") {
+    e.preventDefault();
+    $("searchBox").focus();
+    $("searchBox").select();
+    showToast("🔍 聚焦搜索框 (按 Esc 退出)");
   }
 });
+
 
 // ── 控件 ─────────────────────────────────────────
 function initTypeChips() {
