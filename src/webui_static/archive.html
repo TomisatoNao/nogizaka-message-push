@@ -1250,15 +1250,57 @@ function renderHome(m) {
 }
 
 function renderMultiMemberHome(members) {
-  $("archiveHome").innerHTML = '<div style="max-width:600px;margin:0 auto"><div class="member-cards">' + members.map(m =>
-    '<div class="member-card" data-member="' + esc(m.name) + '">' +
-      '<img class="mcover" src="' + mediaUrl(m.stats.pics && m.pics[0]?.url || '') + '" alt="" loading="lazy">' +
-      '<div class="mmeta"><div class="mname">' + esc(m.display) + '</div>' +
-        '<div class="mstats">📨 ' + m.stats.total.toLocaleString() + ' 条 · ' + m.stats.months + ' 个月</div></div>' +
-    '</div>'
-  ).join('') + '</div></div>';
-  document.querySelectorAll('.member-card').forEach(card =>
-    card.addEventListener('click', () => { hideHome(); curMember = card.dataset.member; loadMembers(); }));
+  // 多成员：每个成员一个区块，布局与单成员一致
+  let html = '';
+  for (const m of members) {
+    const s = m.stats;
+    html += '<div class="home-member">' +
+      '<div class="hm-name">' + esc(m.display) + '</div>' +
+      '<div class="hm-stats">📨 ' + s.total.toLocaleString() + ' 条消息 · ' + s.months + ' 个月 · ' + (s.first_date||'') + ' → ' + (s.last_date||'') + '</div>' +
+      '</div>';
+    html += '<h2 class="home-label">最新写真</h2>';
+    if (m.pics.length) {
+      html += '<div class="photo-strip">' + m.pics.map(p =>
+        '<div class="photo-card" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
+          '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
+          (p.text ? '<div class="pc-cap">' + esc(p.text) + '</div>' : '') +
+        '</div>'
+      ).join('') + '</div>';
+    } else {
+      html += '<div style="color:var(--muted);padding:20px 10px">暂无图片</div>';
+    }
+    html += '<h2 class="home-label">最近消息</h2>';
+    if (m.latest_msgs.length) {
+      html += '<div class="msg-list">' + m.latest_msgs.map(msg =>
+        '<div class="msg-preview">' +
+          '<div class="mp-time">' + fmtDate(msg.published_at) + '</div>' +
+          '<div class="mp-text">' + esc(msg.text) + '</div>' +
+          (msg.translation ? '<div class="mp-trans">' + esc(msg.translation) + '</div>' : '') +
+        '</div>'
+      ).join('') + '</div>';
+    } else {
+      html += '<div style="text-align:center;color:var(--muted);padding:16px">暂无文字消息</div>';
+    }
+    html += '<div style="text-align:center;margin:16px 0 36px">' +
+      '<button class="ha-btn primary" data-member="' + esc(m.name) + '">📂 进入 ' + esc(m.display) + ' 的归档</button>' +
+      '</div>';
+  }
+  $("archiveHome").innerHTML = html;
+  // 绑定事件
+  $("archiveHome").querySelectorAll('.photo-card').forEach(el => {
+    el.addEventListener('click', () => {
+      $("lbImg").src = el.dataset.url;
+      $("lbCounter").textContent = el.dataset.text || "";
+      $("lightbox").classList.add("open");
+      $("lightbox").setAttribute("aria-hidden", "false");
+      $("lbClose").focus();
+      $("lbPrev").style.display = "none";
+      $("lbNext").style.display = "none";
+    });
+  });
+  $("archiveHome").querySelectorAll('.ha-btn.primary').forEach(btn => {
+    btn.addEventListener('click', () => { hideHome(); curMember = btn.dataset.member; loadMembers(); });
+  });
 }
 
 function goHome() {
