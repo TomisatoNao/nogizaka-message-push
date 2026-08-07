@@ -318,13 +318,23 @@
   .home-actions .ha-btn:hover { border-color: var(--accent); box-shadow: var(--shadow-md);
                                 background: var(--accent-soft); color: var(--accent); }
 
+  /* 移动端触控优化 */
+  .photo-card, .msg-preview { touch-action: manipulation; }
+
   @media (max-width: 640px) {
     .home-hero { padding: 14px 10px 48px; }
     .hero-card { padding: 22px 14px 18px; border-radius: 16px; }
     .hero-card .hc-name { font-size: 19px; }
+    .hero-card .hc-stats { gap: 12px; }
     .photo-card { width: 148px; }
-    .msg-preview .mp-left { min-width: 62px; }
+    .msg-preview { padding: 12px 4px; }
+    .msg-preview .mp-left { min-width: 56px; }
     .msg-preview .mp-date { font-size: 11px; }
+    .msg-preview .mp-text { font-size: 13px; }
+    .msg-preview .mp-trans { font-size: 12px; }
+    .home-actions .ha-btn { padding: 10px 18px; font-size: 13px; }
+    /* 首页链接触控加大 */
+    #homeNavLink { padding: 8px 4px; font-size: 15px; }
   }
 </style>
 
