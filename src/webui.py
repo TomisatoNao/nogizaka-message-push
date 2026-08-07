@@ -1282,7 +1282,7 @@ class _Handler(BaseHTTPRequestHandler):
             # 本周 / 上周统计
             from datetime import datetime as _dt, timedelta
             now = _dt.now()
-            today = now_utc.strftime("%Y-%m-%d")
+            today_str = now.strftime("%Y-%m-%d")
             this_week = 0; last_week = 0
             for m in members:
                 dm = _archive.day_counts(m["name"])
