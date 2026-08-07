@@ -815,7 +815,7 @@ async function loadPage() {
         target.style.contentVisibility = "visible";
         target.style.scrollMarginTop = "80px";  // 避开 sticky header
         void target.offsetHeight;  // 强制同步布局
-        target.scrollIntoView({ behavior: "instant", block: "center" });
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
         // 高亮动画
         target.style.boxShadow = "0 0 0 4px var(--accent), 0 0 20px var(--accent-ring)";
         target.style.borderRadius = "16px";
