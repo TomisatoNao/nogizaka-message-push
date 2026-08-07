@@ -249,9 +249,12 @@
   .hero-card .hc-stat { font-size: 13px; color: var(--muted); }
   .hero-card .hc-stat b { color: var(--text-strong); font-weight: 650; }
   .hero-card .hc-range { font-size: 12px; color: var(--muted); margin-top: 8px; }
-  .hero-card .hc-today { display: inline-block; margin-top: 10px; padding: 3px 10px;
-      background: var(--accent-soft); color: var(--accent); border-radius: 999px;
-      font-size: 12px; font-weight: 650; }
+  .hero-card .hc-today { display: inline-block; margin-top: 10px; padding: 5px 14px;
+      background: var(--accent-soft); color: var(--accent); border: 1px solid transparent;
+      border-radius: 999px; font-size: 12px; font-weight: 650; cursor: pointer;
+      font-family: inherit; transition: all .15s; }
+  .hero-card .hc-today:hover { border-color: var(--accent); box-shadow: 0 2px 8px var(--accent-ring); }
+  .hero-card .hc-today:active { transform: scale(.95); background: var(--accent); color: #fff; }
 
   /* Section 标题 */
   .home-sec { display: flex; align-items: center; gap: 8px; margin: 24px 0 10px;
