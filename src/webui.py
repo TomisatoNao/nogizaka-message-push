@@ -643,14 +643,14 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Cache-Control", "public, max-age=60")
             self.end_headers()
             return
         self.send_response(200)
         self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
-        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Cache-Control", "public, max-age=60")
         self.end_headers()
         self.wfile.write(body)
 
