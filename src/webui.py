@@ -1145,6 +1145,38 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "id": int(msg_id), "custom_tags": tags})
             return
 
+        if sub == "home":
+            members = []
+            for name in _archive.list_members():
+                months = _archive.list_months(name)
+                total = sum(m["count"] for m in months)
+                pics: list[dict] = []
+                # 从最近月份往前找，最多收集 10 张图片
+                for mo in months:
+                    if len(pics) >= 10:
+                        break
+                    msgs = _archive.load_month(name, mo["year"], mo["month"])
+                    for m in reversed(msgs):
+                        if len(pics) >= 10:
+                            break
+                        if m.get("type") in ("picture", "image") and m.get("_local_file"):
+                            pics.append({
+                                "id": m["id"],
+                                "text": m.get("text", ""),
+                                "url": f"/api/archive/media/{name}/{m['_local_file']}",
+                                "w": m.get("thumbnail_width"),
+                                "h": m.get("thumbnail_height"),
+                            })
+                members.append({
+                    "name": name,
+                    "display": name.replace("_", " "),
+                    "total": total,
+                    "months": len(months),
+                    "pics": pics,
+                })
+            self._send_json({"ok": True, "members": members, "count": len(members)})
+            return
+
         if sub.startswith("media/"):
             rest = unquote(sub[len("media/"):])
             member, _, rel = rest.partition("/")

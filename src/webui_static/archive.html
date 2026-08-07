@@ -239,6 +239,59 @@
     }
     #lbCounter { top: max(12px, env(safe-area-inset-top)); font-size: 12px; }
   }
+
+  /* ── 首页 ── */
+  .home { display: none; max-width: 600px; margin: 0 auto; padding: 20px 16px 60px; }
+  .home.active { display: block; }
+  .hero-carousel { position: relative; overflow: hidden; border-radius: 16px;
+                   background: var(--card); border: 1px solid var(--border);
+                   box-shadow: var(--shadow-md); margin-bottom: 20px; }
+  .carousel-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+                    -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .carousel-track::-webkit-scrollbar { display: none; }
+  .carousel-slide { flex: none; width: 100%; scroll-snap-align: start;
+                    position: relative; display: flex; align-items: center;
+                    justify-content: center; background: var(--bg); }
+  .carousel-slide img { width: 100%; height: auto; max-height: 60vh; object-fit: contain; display: block; }
+  .carousel-slide .slide-caption { position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 40px 16px 12px; background: linear-gradient(transparent, rgba(0,0,0,.6));
+      color: #fff; font-size: 13px; text-align: center; }
+  .carousel-dots { display: flex; justify-content: center; gap: 8px; padding: 12px; }
+  .carousel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border);
+                  border: none; cursor: pointer; transition: background .2s, transform .2s; }
+  .carousel-dot.active { background: var(--accent); transform: scale(1.3); }
+
+  /* 多成员卡片 */
+  .member-cards { display: flex; flex-direction: column; gap: 14px; }
+  .member-card { display: flex; gap: 14px; padding: 14px; border-radius: var(--radius);
+                 background: var(--card); border: 1px solid var(--border);
+                 cursor: pointer; transition: box-shadow var(--tr), border-color var(--tr); }
+  .member-card:hover { box-shadow: var(--shadow-md); border-color: var(--accent); }
+  .member-card .mcover { width: 80px; height: 80px; border-radius: 12px; object-fit: cover;
+                         flex: none; background: var(--bg); }
+  .member-card .mmeta { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .member-card .mmeta .mname { font-size: 17px; font-weight: 650; color: var(--text-strong); }
+  .member-card .mmeta .mstats { font-size: 13px; color: var(--muted); }
+
+  /* 单成员信息 */
+  .home-info { text-align: center; margin-bottom: 18px; }
+  .home-info .hname { font-size: 22px; font-weight: 700; color: var(--text-strong); }
+  .home-info .hstats { font-size: 14px; color: var(--muted); margin-top: 4px; }
+  .home-enter { text-align: center; }
+  .home-enter .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; font-size: 15px; padding: 10px 28px; border: none;
+    border-radius: var(--radius-sm); cursor: pointer; font-weight: 650;
+    box-shadow: 0 5px 16px var(--accent-ring);
+  }
+  .home-enter .btn.primary:hover { box-shadow: 0 8px 24px var(--accent-ring); }
+  .home-enter .btn.primary:active { transform: translateY(1px) scale(.98); }
+
+  @media (max-width: 640px) {
+    .home { padding: 12px 10px 48px; }
+    .hero-carousel { border-radius: 12px; }
+    .carousel-slide img { max-height: 50vh; }
+  }
 </style>
 
 </head>
@@ -251,6 +304,17 @@
   <a href="/" id="adminLink" hidden>⚙️ 管理端</a>
   <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
 </header>
+
+<div id="archiveHome" class="home">
+  <div class="hero-carousel" id="homeCarousel">
+    <div class="carousel-track" id="carouselTrack"></div>
+    <div class="carousel-dots" id="carouselDots"></div>
+  </div>
+  <div class="home-info" id="homeInfo"></div>
+  <div class="home-enter">
+    <button class="btn primary" id="homeEnter">📂 进入归档</button>
+  </div>
+</div>
 
 <div class="layout">
 <aside class="side" id="archiveSide">
@@ -1078,6 +1142,118 @@ $("logoutLink").addEventListener("click", async (e) => {
   location.href = "/login";
 });
 
+// ── 首页 ─────────────────────────────────────────
+let carouselTimer = null;
+function stopCarousel() { if (carouselTimer) { clearInterval(carouselTimer); carouselTimer = null; } }
+
+function updateCarouselDots(idx) {
+  $("carouselDots").querySelectorAll(".carousel-dot").forEach((d, i) =>
+    d.classList.toggle("active", i === idx));
+}
+
+function startCarousel() {
+  stopCarousel();
+  const track = $("carouselTrack");
+  const slides = track.querySelectorAll(".carousel-slide");
+  if (slides.length <= 1) return;
+  carouselTimer = setInterval(() => {
+    const w = slides[0].offsetWidth;
+    if (!w) return;
+    const idx = Math.round(track.scrollLeft / w);
+    const next = (idx + 1) % slides.length;
+    track.scrollTo({ left: next * w, behavior: "smooth" });
+    updateCarouselDots(next);
+  }, 4000);
+}
+
+// 滚动停止后同步 dot
+let carouselScrollTimer = null;
+$("carouselTrack").addEventListener("scroll", () => {
+  if (carouselScrollTimer) clearTimeout(carouselScrollTimer);
+  carouselScrollTimer = setTimeout(() => {
+    const track = $("carouselTrack");
+    const slides = track.querySelectorAll(".carousel-slide");
+    if (!slides.length) return;
+    const w = slides[0].offsetWidth;
+    if (!w) return;
+    const idx = Math.round(track.scrollLeft / w);
+    updateCarouselDots(idx);
+  }, 150);
+}, { passive: true });
+
+function renderSingleMemberHome(m) {
+  const track = $("carouselTrack");
+  const dots = $("carouselDots");
+  if (!m.pics.length) {
+    track.innerHTML = '<div class="carousel-slide" style="height:200px;color:var(--muted);font-size:14px">暂无图片</div>';
+    dots.innerHTML = "";
+  } else {
+    track.innerHTML = m.pics.map((p, i) =>
+      '<div class="carousel-slide"><img src="' + mediaUrl(p.url) + '" alt="" loading="' + (i === 0 ? 'eager' : 'lazy') + '"><div class="slide-caption">' + esc(p.text || '') + '</div></div>'
+    ).join('');
+    dots.innerHTML = m.pics.map((_, i) =>
+      '<button class="carousel-dot' + (i === 0 ? ' active' : '') + '" data-idx="' + i + '" aria-label="第' + (i + 1) + '张"></button>'
+    ).join('');
+    dots.querySelectorAll('.carousel-dot').forEach(d =>
+      d.addEventListener('click', () => {
+        const idx = parseInt(d.dataset.idx);
+        const slides = track.querySelectorAll('.carousel-slide');
+        if (slides[idx]) track.scrollTo({ left: slides[idx].offsetLeft, behavior: 'smooth' });
+      }));
+  }
+
+  $("homeInfo").innerHTML = '<div class="hname">' + esc(m.display) + '</div>' +
+    '<div class="hstats">📨 ' + m.total + ' 条消息 · ' + m.months + ' 个月</div>';
+  $("homeCarousel").style.display = "";
+  $("homeEnter").style.display = "";
+  $("homeEnter").onclick = () => { enterMember(m.name); };
+  startCarousel();
+}
+
+function renderMultiMemberHome(members) {
+  $("homeCarousel").style.display = "none";
+  $("homeEnter").style.display = "none";
+  $("homeInfo").innerHTML = '<div class="member-cards">' + members.map(m =>
+    '<div class="member-card" data-member="' + esc(m.name) + '">' +
+      '<img class="mcover" src="' + mediaUrl(m.pics[0]?.url || '') + '" alt="" loading="lazy">' +
+      '<div class="mmeta"><div class="mname">' + esc(m.display) + '</div>' +
+        '<div class="mstats">📨 ' + m.total + ' 条 · ' + m.months + ' 个月</div></div>' +
+    '</div>'
+  ).join('') + '</div>';
+  $("homeInfo").querySelectorAll('.member-card').forEach(card =>
+    card.addEventListener('click', () => enterMember(card.dataset.member)));
+}
+
+async function showHome() {
+  stopCarousel();
+  document.querySelector('.layout').style.display = 'none';
+  $('backTop').style.display = 'none';
+  $('archiveHome').classList.add('active');
+  try {
+    const data = await api("/api/archive/home");
+    if (data.count === 1) {
+      renderSingleMemberHome(data.members[0]);
+    } else {
+      renderMultiMemberHome(data.members);
+    }
+  } catch (e) {
+    $("homeInfo").innerHTML = '<div style="text-align:center;color:var(--err);padding:40px 0">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+function hideHome() {
+  stopCarousel();
+  $('archiveHome').classList.remove('active');
+  document.querySelector('.layout').style.display = '';
+}
+
+function enterMember(name) {
+  stopCarousel();
+  hideHome();
+  curMember = name;
+  loadMembers();
+}
+
 // ── 入口（支持 #member=&y=&m=&t= 深链）────────────
 function boot() {
   const p = new URLSearchParams(location.hash.slice(1));
@@ -1086,11 +1262,27 @@ function boot() {
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();
   initTypeChips();
-  loadMembers();
+  if (!curMember) {
+    showHome();
+  } else {
+    hideHome();
+    loadMembers();
+  }
 }
 boot();
 // 从浏览器 bfcache 恢复时重新加载内容
 window.addEventListener("pageshow", (e) => { if (e.persisted) boot(); });
+
+// hash 变化：无 member 回到首页
+window.addEventListener("hashchange", () => {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const newMember = p.get("member") || "";
+  if (!newMember && curMember) {
+    // 从浏览页回到首页
+    curMember = "";
+    showHome();
+  }
+});
 </script>
 </body>
 </html>
