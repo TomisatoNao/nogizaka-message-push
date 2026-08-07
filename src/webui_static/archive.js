@@ -1043,6 +1043,7 @@ function goHome() {
 
 function hideHome() {
   $('archiveHome').classList.remove('active');
+  $('backTop').style.display = '';
   document.querySelector('.layout').style.display = '';
 }
 
