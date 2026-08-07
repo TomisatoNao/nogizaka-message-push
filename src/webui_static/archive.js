@@ -906,7 +906,8 @@ function renderHome(agg, members) {
     const latestMonth = members[0].monthly && members[0].monthly[0];
     const ty = latestMonth ? latestMonth.year : today.getFullYear();
     const tm = latestMonth ? latestMonth.month : (today.getMonth() + 1);
-    todayBtn.onclick = () => {
+    const goToday = (e) => {
+      e.preventDefault();
       hideHome();
       curMember = defaultMember;
       curType = "";
@@ -918,6 +919,8 @@ function renderHome(agg, members) {
       setTimeout(() => { selfHashUpdate = false; }, 100);
       loadMembers();
     };
+    todayBtn.addEventListener("click", goToday);
+    todayBtn.addEventListener("touchend", goToday);
   }
 
   // ── Section: 最新写真 ──

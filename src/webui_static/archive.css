@@ -250,6 +250,7 @@
   .hero-card .hc-stat b { color: var(--text-strong); font-weight: 650; }
   .hero-card .hc-range { font-size: 12px; color: var(--muted); margin-top: 8px; }
   .hero-card .hc-today { display: inline-block; margin-top: 10px; padding: 5px 14px;
+      touch-action: manipulation;
       background: var(--accent-soft); color: var(--accent); border: 1px solid transparent;
       border-radius: 999px; font-size: 12px; font-weight: 650; cursor: pointer;
       font-family: inherit; transition: all .15s; }
