@@ -241,69 +241,50 @@
   }
 
   /* ── 首页 ── */
-  .home { display: none; max-width: 1100px; margin: 0 auto; padding: 20px 20px 60px; }
+  .home { display: none; max-width: 800px; margin: 0 auto; padding: 20px 20px 60px; }
   .home.active { display: block; }
-  .home-section-title { font-size: 14px; font-weight: 650; color: var(--muted);
-                        margin: 28px 0 12px; letter-spacing: .04em; }
-  .home-section-title:first-of-type { margin-top: 8px; }
+  .home-label { font-size: 13.5px; font-weight: 650; color: var(--muted);
+                margin: 24px 0 10px; letter-spacing: .04em; }
+  .home-label:first-of-type { margin-top: 0; }
 
-  /* 统计卡片行 */
-  .home-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
-               padding: 18px 16px; text-align: center; box-shadow: var(--shadow-sm); }
-  .stat-card .sv { font-size: 28px; font-weight: 700; color: var(--text-strong); line-height: 1.2; }
-  .stat-card .sl { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  /* 成员信息行 */
+  .home-member { text-align: center; margin-bottom: 8px; }
+  .home-member .hm-name { font-size: 20px; font-weight: 700; color: var(--text-strong); }
+  .home-member .hm-stats { font-size: 13px; color: var(--muted); margin-top: 2px; }
 
-  /* 图片网格 */
-  .home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-  .home-grid .gi { position: relative; aspect-ratio: 3/4; overflow: hidden; border-radius: 12px;
-                    background: var(--bg); cursor: pointer; border: 1px solid var(--border-soft);
-                    transition: transform .18s, box-shadow .18s; }
-  .home-grid .gi:hover { transform: scale(1.02); box-shadow: var(--shadow-md); }
-  .home-grid .gi img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .home-grid .gi .gc { position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 20px 10px 8px; background: linear-gradient(transparent, rgba(0,0,0,.55));
-      color: #fff; font-size: 11.5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 横向滚动图片卡片条 */
+  .photo-strip { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+                 -webkit-overflow-scrolling: touch; scrollbar-width: none;
+                 padding: 4px 0 14px; }
+  .photo-strip::-webkit-scrollbar { display: none; }
+  .photo-card { flex: none; width: 180px; scroll-snap-align: start;
+                border-radius: 14px; overflow: hidden; background: var(--card);
+                border: 1px solid var(--border); cursor: pointer;
+                transition: transform .16s, box-shadow .16s; }
+  .photo-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+  .photo-card img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
+  .photo-card .pc-cap { padding: 8px 10px; font-size: 12px; color: var(--text);
+                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* 热力图 */
-  .home-heatmap { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 14px; }
-  .heat-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--border-soft);
-               position: relative; cursor: default; }
-  .heat-cell.h1 { background: color-mix(in srgb, var(--accent) 25%, transparent); }
-  .heat-cell.h2 { background: color-mix(in srgb, var(--accent) 50%, transparent); }
-  .heat-cell.h3 { background: color-mix(in srgb, var(--accent) 75%, transparent); }
-  .heat-cell.h4 { background: var(--accent); }
-  .heat-cell:hover { outline: 2px solid var(--accent); outline-offset: 1px; z-index: 1; }
-  .heat-legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-bottom: 14px; }
-  .heat-legend span { display: flex; gap: 2px; }
-
-  /* 首页搜索 */
-  .home-search { display: flex; gap: 8px; margin-bottom: 6px; }
-  .home-search input { flex: 1; padding: 9px 13px; border: 1px solid var(--border);
-                       border-radius: var(--radius-sm); background: var(--card);
-                       color: var(--text); font-size: 14px; }
-  .home-search input:focus { border-color: var(--accent); outline: none;
-                              box-shadow: 0 0 0 3px var(--accent-ring); }
-
-  /* 最新消息 */
-  .home-messages { display: flex; flex-direction: column; gap: 10px; }
+  /* 消息列表 */
+  .msg-list { display: flex; flex-direction: column; gap: 8px; }
   .msg-preview { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-                 padding: 14px 16px; cursor: pointer; transition: box-shadow var(--tr), border-color var(--tr); }
+                 padding: 12px 15px; cursor: pointer; transition: box-shadow var(--tr), border-color var(--tr); }
   .msg-preview:hover { box-shadow: var(--shadow-md); border-color: var(--accent); }
-  .msg-preview .mp-time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
-  .msg-preview .mp-text { font-size: 14px; color: var(--text); line-height: 1.6;
+  .msg-preview .mp-time { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+  .msg-preview .mp-text { font-size: 13.5px; color: var(--text); line-height: 1.55;
                            white-space: pre-wrap; overflow: hidden; display: -webkit-box;
-                           -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-  .msg-preview .mp-trans { font-size: 13px; color: var(--ok); margin-top: 6px; line-height: 1.5;
+                           -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .msg-preview .mp-trans { font-size: 12.5px; color: var(--ok); margin-top: 4px; line-height: 1.5;
                             overflow: hidden; display: -webkit-box;
                             -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
   /* 快捷入口 */
-  .home-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; justify-content: center; }
+  .home-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; justify-content: center; }
   .home-actions .ha-btn {
-    padding: 10px 22px; border-radius: var(--radius-sm); cursor: pointer;
+    padding: 9px 20px; border-radius: var(--radius-sm); cursor: pointer;
     border: 1px solid var(--border); background: var(--card); color: var(--text);
-    font-size: 14px; font-family: inherit; font-weight: 600;
+    font-size: 13.5px; font-family: inherit; font-weight: 600;
     transition: all var(--tr);
   }
   .home-actions .ha-btn:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); }
@@ -326,15 +307,8 @@
 
   @media (max-width: 640px) {
     .home { padding: 12px 10px 48px; }
-    .home-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
-    .home-grid .gi { border-radius: 8px; }
-    .home-stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-    .stat-card { padding: 14px 10px; }
-    .stat-card .sv { font-size: 22px; }
-    .home-actions { gap: 8px; }
+    .photo-card { width: 150px; }
     .home-actions .ha-btn { padding: 10px 16px; font-size: 13px; }
-    .heat-cell { width: 10px; height: 10px; }
-    .home-search input { font-size: 16px; }
   }
 </style>
 
@@ -343,30 +317,22 @@
 <header>
   <h1>📚 消息归档</h1>
   <div class="chips" id="memberChips"></div>
-  <span id="whoami" style="margin-left:auto; font-size:12.5px; color:var(--muted)"></span>
+  <span id="whoami" style="font-size:12.5px; color:var(--muted)"></span>
+  <a href="#" id="homeNavLink" onclick="goHome();return false" style="margin-left:auto;color:var(--muted);text-decoration:none;font-size:13px" title="回到首页">🏠 首页</a>
   <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
   <a href="/" id="adminLink" hidden>⚙️ 管理端</a>
   <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
 </header>
 
 <div id="archiveHome" class="home">
-  <!-- 统计卡片 -->
-  <div class="home-stats" id="homeStats"></div>
-  <!-- 图片网格 -->
-  <h2 class="home-section-title">🖼️ 精选图片</h2>
-  <div class="home-grid" id="homeGrid"></div>
-  <!-- 热力图 + 搜索 -->
-  <h2 class="home-section-title">📅 活跃日历</h2>
-  <div class="home-heatmap" id="homeHeatmap"></div>
-  <div class="home-search">
-    <input type="search" id="homeSearchBox" maxlength="100" placeholder="🔍 快速搜索…" aria-label="快速搜索">
-    <button class="nav" id="homeSearchBtn">搜索</button>
+  <div class="home-hero">
+    <div class="home-member" id="homeMember"></div>
+    <h2 class="home-label">最新写真</h2>
+    <div class="photo-strip" id="photoStrip"></div>
+    <h2 class="home-label">最近消息</h2>
+    <div class="msg-list" id="homeMsgList"></div>
+    <div class="home-actions" id="homeActions"></div>
   </div>
-  <!-- 最新消息 -->
-  <h2 class="home-section-title">💬 最新消息</h2>
-  <div class="home-messages" id="homeMessages"></div>
-  <!-- 快捷入口 -->
-  <div class="home-actions" id="homeActions"></div>
 </div>
 
 <div class="layout">
@@ -1204,13 +1170,11 @@ function fmtDate(utc) {
     String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
 }
 
-function homeEnterMember(name, ym) {
-  hideHome();
-  curMember = name;
-  if (ym) {
-    location.hash = "member=" + encodeURIComponent(name) + "&y=" + ym.y + "&m=" + ym.m;
-  }
-  loadMembers();
+function fmtDateShort(utc) {
+  if (!utc) return "";
+  const d = new Date(utc + "Z");
+  if (isNaN(d.getTime())) return utc.slice(0, 10);
+  return (d.getMonth()+1) + "/" + d.getDate();
 }
 
 async function showHome() {
@@ -1231,69 +1195,37 @@ async function showHome() {
 
 function renderHome(m) {
   const s = m.stats;
-  // 统计卡片
-  $("homeStats").innerHTML =
-    '<div class="stat-card"><div class="sv">' + s.total.toLocaleString() + '</div><div class="sl">📨 总消息</div></div>' +
-    '<div class="stat-card"><div class="sv">' + s.months + '</div><div class="sl">📅 个月 · ' + (s.first_date||'') + ' → ' + (s.last_date||'') + '</div></div>' +
-    '<div class="stat-card"><div class="sv">' + (s.pictures||0).toLocaleString() + '</div><div class="sl">🖼️ 图片</div></div>' +
-    '<div class="stat-card"><div class="sv">' + ((s.videos||0)+(s.voices||0)) + '</div><div class="sl">🎬 视频+语音</div></div>';
+  // 成员信息
+  $("homeMember").innerHTML =
+    '<div class="hm-name">' + esc(m.display) + '</div>' +
+    '<div class="hm-stats">📨 ' + s.total.toLocaleString() + ' 条消息 · ' + s.months + ' 个月 · ' + (s.first_date||'') + ' → ' + (s.last_date||'') + '</div>';
 
-  // 图片网格
-  const grid = $("homeGrid");
+  // 图片横向卡片条
+  const strip = $("photoStrip");
   if (m.pics.length) {
-    grid.innerHTML = m.pics.map(p =>
-      '<div class="gi" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
+    strip.innerHTML = m.pics.map(p =>
+      '<div class="photo-card" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
         '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
-        (p.text ? '<div class="gc">' + esc(p.text) + '</div>' : '') +
+        (p.text ? '<div class="pc-cap">' + esc(p.text) + '</div>' : '') +
       '</div>'
     ).join('');
-    grid.querySelectorAll('.gi').forEach(el => {
+    strip.querySelectorAll('.photo-card').forEach(el => {
       el.addEventListener('click', () => {
-        // 简易灯箱预览
-        const lb = $("lightbox");
         $("lbImg").src = el.dataset.url;
         $("lbCounter").textContent = el.dataset.text || "";
-        lb.classList.add("open");
-        lb.setAttribute("aria-hidden", "false");
+        $("lightbox").classList.add("open");
+        $("lightbox").setAttribute("aria-hidden", "false");
         $("lbClose").focus();
         $("lbPrev").style.display = "none";
         $("lbNext").style.display = "none";
       });
     });
   } else {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px">暂无图片</div>';
+    strip.innerHTML = '<div style="color:var(--muted);padding:30px 10px">暂无图片</div>';
   }
-
-  // 热力图 — 最近约 26 周
-  const heat = $("homeHeatmap");
-  const days = m.days || {};
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const start = new Date(today);
-  start.setDate(start.getDate() - start.getDay() - 25*7); // 26 周前周一
-  const cells = [];
-  let maxCount = 0;
-  for (const c of Object.values(days)) { if (c > maxCount) maxCount = c; }
-  for (let d = new Date(start); d <= today; d.setDate(d.getDate()+1)) {
-    const key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-    const count = days[key] || 0;
-    let level = 0;
-    if (count > 0) { level = maxCount <= 1 ? 1 : count <= maxCount*0.25 ? 1 : count <= maxCount*0.5 ? 2 : count <= maxCount*0.75 ? 3 : 4; }
-    cells.push('<span class="heat-cell h' + level + '" title="' + key + ' · ' + count + ' 条消息" ' +
-      'data-date="' + key + '" data-count="' + count + '"></span>');
-  }
-  heat.innerHTML = cells.join('') +
-    '<div class="heat-legend"><span>少</span><span class="heat-cell"></span><span class="heat-cell h1"></span><span class="heat-cell h2"></span><span class="heat-cell h3"></span><span class="heat-cell h4"></span><span>多</span></div>';
-
-  // 首页搜索
-  $("homeSearchBtn").onclick = () => {
-    const q = $("homeSearchBox").value.trim();
-    if (q) { hideHome(); curMember = m.name; searchQuery = q; loadMembers(); }
-  };
-  $("homeSearchBox").addEventListener("keydown", (e) => { if (e.key === "Enter") $("homeSearchBtn").click(); });
 
   // 最新消息
-  const msgDiv = $("homeMessages");
+  const msgDiv = $("homeMsgList");
   if (m.latest_msgs.length) {
     msgDiv.innerHTML = m.latest_msgs.map(msg =>
       '<div class="msg-preview">' +
@@ -1307,28 +1239,36 @@ function renderHome(m) {
   }
 
   // 快捷入口
-  const latestYM = m.monthly.length ? { y: m.monthly[0].year, m: m.monthly[0].month } : null;
+  const latestYM = m.monthly && m.monthly.length ? { y: m.monthly[0].year, m: m.monthly[0].month } : null;
   $("homeActions").innerHTML =
-    '<button class="ha-btn" id="haLatest">🆕 最新消息</button>' +
     '<button class="ha-btn" id="haPics">📸 最新图片</button>' +
-    '<button class="ha-btn primary" id="haFull">📂 完整归档</button>';
+    '<button class="ha-btn primary" id="haFull">📂 进入完整归档</button>';
   if (latestYM) {
-    $("haLatest").onclick = () => homeEnterMember(m.name, latestYM);
     $("haPics").onclick = () => { hideHome(); curMember = m.name; curType = "picture"; loadMembers(); };
   }
-  $("haFull").onclick = () => homeEnterMember(m.name, null);
+  $("haFull").onclick = () => { hideHome(); curMember = m.name; loadMembers(); };
 }
 
 function renderMultiMemberHome(members) {
-  $("archiveHome").innerHTML = '<div class="member-cards">' + members.map(m =>
+  $("archiveHome").innerHTML = '<div style="max-width:600px;margin:0 auto"><div class="member-cards">' + members.map(m =>
     '<div class="member-card" data-member="' + esc(m.name) + '">' +
-      '<img class="mcover" src="' + mediaUrl(m.pics[0]?.url || '') + '" alt="" loading="lazy">' +
+      '<img class="mcover" src="' + mediaUrl(m.stats.pics && m.pics[0]?.url || '') + '" alt="" loading="lazy">' +
       '<div class="mmeta"><div class="mname">' + esc(m.display) + '</div>' +
         '<div class="mstats">📨 ' + m.stats.total.toLocaleString() + ' 条 · ' + m.stats.months + ' 个月</div></div>' +
     '</div>'
-  ).join('') + '</div>';
-  $("archiveHome").querySelectorAll('.member-card').forEach(card =>
+  ).join('') + '</div></div>';
+  document.querySelectorAll('.member-card').forEach(card =>
     card.addEventListener('click', () => { hideHome(); curMember = card.dataset.member; loadMembers(); }));
+}
+
+function goHome() {
+  stopCarousel && stopCarousel();
+  curMember = "";
+  curType = "";
+  searchQuery = "";
+  syncSearchInput();
+  location.hash = "";
+  showHome();
 }
 
 function hideHome() {
