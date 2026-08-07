@@ -1236,17 +1236,26 @@ class _Handler(BaseHTTPRequestHandler):
                     "latest_msgs": latest_msgs,
                 })
             # ── 聚合：合并所有成员的图片和文字消息 ──
+            def _ym(utc_str: str) -> tuple[int, int]:
+                try:
+                    return (int(utc_str[:4]), int(utc_str[5:7]))
+                except (ValueError, IndexError):
+                    return (2026, 1)
             agg_pics = sorted(
                 ({"member": m["name"], "member_display": m["display"],
                   "id": p["id"], "text": p["text"], "url": p["url"],
                   "w": p.get("w"), "h": p.get("h"),
-                  "published_at": p.get("published_at", "")}
+                  "published_at": p.get("published_at", ""),
+                  "year": _ym(p.get("published_at", ""))[0],
+                  "month": _ym(p.get("published_at", ""))[1]}
                  for m in members for p in m["pics"]),
                 key=lambda x: x["published_at"], reverse=True)[:30]
             agg_msgs = sorted(
                 ({"member": m["name"], "member_display": m["display"],
                   "id": msg["id"], "text": msg["text"], "translation": msg["translation"],
-                  "published_at": msg.get("published_at", "")}
+                  "published_at": msg.get("published_at", ""),
+                  "year": _ym(msg.get("published_at", ""))[0],
+                  "month": _ym(msg.get("published_at", ""))[1]}
                  for m in members for msg in m["latest_msgs"]),
                 key=lambda x: x["published_at"], reverse=True)[:10]
             agg_total = sum(m["stats"]["total"] for m in members)

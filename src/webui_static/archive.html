@@ -781,6 +781,22 @@ async function loadPage() {
   }
   for (const msg of data.messages) renderBubble(msg);
   $("loadMore").hidden = page >= totalPages;
+
+  // 首页跳转：滚动到目标消息
+  if (page === 1) {
+    const targetId = (new URLSearchParams(location.hash.slice(1))).get("msg");
+    if (targetId) {
+      setTimeout(() => {
+        const target = document.querySelector('.bubble[data-msg-id="' + targetId + '"]');
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.style.boxShadow = "0 0 0 3px var(--accent)";
+          target.style.transition = "box-shadow .3s";
+          setTimeout(() => { target.style.boxShadow = ""; }, 2000);
+        }
+      }, 300);
+    }
+  }
 }
 
 function startSearch(q, updateHash = true) {
@@ -838,6 +854,7 @@ function renderBubble(msg) {
   }
   const b = document.createElement("div");
   b.className = "bubble virtual-card";
+  if (msg.id) b.dataset.msgId = String(msg.id);
   let html = '<div class="time">' + fmtTime(msg.published_at) + " · " + esc(msg.type);
   if (searchQuery && msg.year) {
     const dateKey = fmtDateKey(msg.published_at);
@@ -1204,7 +1221,7 @@ function renderHome(agg, members) {
   const strip = $("photoStrip");
   if (agg.pics.length) {
     strip.innerHTML = agg.pics.map(p =>
-      '<div class="photo-card" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
+      '<div class="photo-card" data-member="' + esc(p.member) + '" data-year="' + p.year + '" data-month="' + p.month + '" data-id="' + p.id + '">' +
         (members.length > 1 ? '<span class="pc-member">' + esc(p.member_display) + '</span>' : '') +
         '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
         (p.text ? '<div class="pc-cap">' + esc(p.text) + '</div>' : '') +
@@ -1212,13 +1229,15 @@ function renderHome(agg, members) {
     ).join('');
     strip.querySelectorAll('.photo-card').forEach(el => {
       el.addEventListener('click', () => {
-        $("lbImg").src = el.dataset.url;
-        $("lbCounter").textContent = el.dataset.text || "";
-        $("lightbox").classList.add("open");
-        $("lightbox").setAttribute("aria-hidden", "false");
-        $("lbClose").focus();
-        $("lbPrev").style.display = "none";
-        $("lbNext").style.display = "none";
+        const m = el.dataset.member;
+        const y = el.dataset.year;
+        const mo = el.dataset.month;
+        const mid = el.dataset.id;
+        hideHome();
+        curMember = m;
+        curType = "picture";
+        location.hash = "member=" + encodeURIComponent(m) + "&y=" + y + "&m=" + mo + "&msg=" + mid;
+        loadMembers();
       });
     });
   } else {
@@ -1229,12 +1248,20 @@ function renderHome(agg, members) {
   const msgDiv = $("homeMsgList");
   if (agg.latest_msgs.length) {
     msgDiv.innerHTML = agg.latest_msgs.map(msg =>
-      '<div class="msg-preview">' +
+      '<div class="msg-preview" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">' +
         '<div class="mp-time">' + (members.length > 1 ? '<b>' + esc(msg.member_display) + '</b> · ' : '') + fmtDate(msg.published_at) + '</div>' +
         '<div class="mp-text">' + esc(msg.text) + '</div>' +
         (msg.translation ? '<div class="mp-trans">' + esc(msg.translation) + '</div>' : '') +
       '</div>'
     ).join('');
+    msgDiv.querySelectorAll('.msg-preview').forEach(el => {
+      el.addEventListener('click', () => {
+        hideHome();
+        curMember = el.dataset.member;
+        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month + "&msg=" + el.dataset.id;
+        loadMembers();
+      });
+    });
   } else {
     msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无文字消息</div>';
   }
