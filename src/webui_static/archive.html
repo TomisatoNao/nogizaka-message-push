@@ -406,6 +406,7 @@ let calendarVersion = 0;
 let calendarAbort = null;
 let lightboxOpener = null;
 let memberVersion = 0;
+let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲掉）
 
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
@@ -783,19 +784,18 @@ async function loadPage() {
   $("loadMore").hidden = page >= totalPages;
 
   // 首页跳转：滚动到目标消息
-  if (page === 1) {
-    const targetId = (new URLSearchParams(location.hash.slice(1))).get("msg");
-    if (targetId) {
-      setTimeout(() => {
-        const target = document.querySelector('.bubble[data-msg-id="' + targetId + '"]');
-        if (target) {
-          target.scrollIntoView({ behavior: "smooth", block: "center" });
-          target.style.boxShadow = "0 0 0 3px var(--accent)";
-          target.style.transition = "box-shadow .3s";
-          setTimeout(() => { target.style.boxShadow = ""; }, 2000);
-        }
-      }, 300);
-    }
+  if (page === 1 && targetMsgId) {
+    const tid = targetMsgId;
+    targetMsgId = "";   // 只触发一次
+    setTimeout(() => {
+      const target = document.querySelector('.bubble[data-msg-id="' + tid + '"]');
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.style.boxShadow = "0 0 0 3px var(--accent)";
+        target.style.transition = "box-shadow .3s";
+        setTimeout(() => { target.style.boxShadow = ""; }, 2000);
+      }
+    }, 500);
   }
 }
 
@@ -1229,14 +1229,13 @@ function renderHome(agg, members) {
     ).join('');
     strip.querySelectorAll('.photo-card').forEach(el => {
       el.addEventListener('click', () => {
-        const m = el.dataset.member;
-        const y = el.dataset.year;
-        const mo = el.dataset.month;
-        const mid = el.dataset.id;
         hideHome();
-        curMember = m;
+        curMember = el.dataset.member;
         curType = "picture";
-        location.hash = "member=" + encodeURIComponent(m) + "&y=" + y + "&m=" + mo + "&msg=" + mid;
+        targetMsgId = el.dataset.id;
+        selfHashUpdate = true;
+        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
+        setTimeout(() => { selfHashUpdate = false; }, 0);
         loadMembers();
       });
     });
@@ -1258,7 +1257,10 @@ function renderHome(agg, members) {
       el.addEventListener('click', () => {
         hideHome();
         curMember = el.dataset.member;
-        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month + "&msg=" + el.dataset.id;
+        targetMsgId = el.dataset.id;
+        selfHashUpdate = true;
+        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
+        setTimeout(() => { selfHashUpdate = false; }, 0);
         loadMembers();
       });
     });
