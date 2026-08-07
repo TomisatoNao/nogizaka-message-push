@@ -1249,7 +1249,7 @@ class _Handler(BaseHTTPRequestHandler):
                   "year": _ym(p.get("published_at", ""))[0],
                   "month": _ym(p.get("published_at", ""))[1]}
                  for m in members for p in m["pics"]),
-                key=lambda x: x["published_at"], reverse=True)[:30]
+                key=lambda x: x["published_at"], reverse=True)[:10]
             agg_msgs = sorted(
                 ({"member": m["name"], "member_display": m["display"],
                   "id": msg["id"], "text": msg["text"], "translation": msg["translation"],

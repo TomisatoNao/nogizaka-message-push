@@ -243,7 +243,6 @@
   /* ── 首页 ── */
   .home { display: none; }
   .home.active { display: block; }
-  @keyframes homeFadeUp { from { opacity: 0; transform: translateY(16px); } }
   .home-hero { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
 
   /* Hero 卡片 */
@@ -300,10 +299,12 @@
   .msg-preview .mp-mem { font-size: 10.5px; color: var(--accent); font-weight: 650; margin-top: 1px; }
   .msg-preview .mp-body { min-width: 0; }
   .msg-preview .mp-text { font-size: 13.5px; color: var(--text); line-height: 1.55;
-                           white-space: pre-wrap; overflow: hidden;
-                           max-height: 4.65em; }  /* ~3 行 */
+                           white-space: pre-wrap; overflow: hidden; max-height: 4.7em; }
   .msg-preview .mp-trans { font-size: 12.5px; color: var(--ok); margin-top: 3px; line-height: 1.45;
-                            overflow: hidden; max-height: 2.9em; }  /* ~2 行 */
+                            overflow: hidden; max-height: 2.9em; }
+  /* 确保动画的 to 帧存在 */
+  @keyframes homeFadeUp { from { opacity: 0; transform: translateY(16px); }
+                           to { opacity: 1; transform: translateY(0); } }
 
   /* 快捷入口 */
   .home-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 28px; justify-content: center;
@@ -1229,10 +1230,10 @@ function renderHome(agg, members) {
   if (members.length > 1) {
     heroHTML += '<div class="hc-sub">' + members.map(m => esc(m.display)).join(' · ') + '</div>';
   }
+  const totalMonths = members.reduce((s, m) => s + m.stats.months, 0);
   heroHTML += '<div class="hc-stats">';
-  heroHTML += '<span class="hc-stat">📨 <b>' + agg.total_msgs.toLocaleString() + '</b> 条</span>';
-  heroHTML += '<span class="hc-stat">📅 <b>' + (single ? members[0].stats.months : '-') + '</b> 个月</span>';
-  heroHTML += '<span class="hc-stat">🖼️ <b>' + agg.pics.length.toLocaleString() + '</b> 张图</span>';
+  heroHTML += '<span class="hc-stat">📨 <b>' + agg.total_msgs.toLocaleString() + '</b> 条消息</span>';
+  heroHTML += '<span class="hc-stat">📅 跨越 <b>' + totalMonths + '</b> 个月</span>';
   heroHTML += '</div>';
   heroHTML += '<div class="hc-range">' + (agg.first_date || '?') + ' — ' + (agg.last_date || '?') + '</div>';
   // 今日动态
@@ -1269,6 +1270,26 @@ function renderHome(agg, members) {
   } else {
     strip.innerHTML = '<div style="color:var(--muted);padding:30px 10px;text-align:center">暂无图片</div>';
   }
+
+  // 图片条自动滚动
+  let photoScrollTimer = null;
+  function autoScrollPhotos() {
+    if (strip.scrollWidth <= strip.clientWidth) return;
+    const cardW = strip.querySelector('.photo-card')?.offsetWidth || 172;
+    const gap = 10;
+    const step = cardW + gap;
+    if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - step) {
+      strip.scrollTo({ left: 0, behavior: "smooth" });
+    } else {
+      strip.scrollBy({ left: step, behavior: "smooth" });
+    }
+  }
+  photoScrollTimer = setInterval(autoScrollPhotos, 3000);
+  strip.addEventListener("touchstart", () => { clearInterval(photoScrollTimer); }, { once: true });
+  strip.addEventListener("wheel", () => { clearInterval(photoScrollTimer); }, { once: true });
+  // 鼠标悬停暂停，离开恢复
+  strip.addEventListener("mouseenter", () => clearInterval(photoScrollTimer));
+  strip.addEventListener("mouseleave", () => { photoScrollTimer = setInterval(autoScrollPhotos, 3000); });
 
   // ── Section: 最近动态 ──
   const msgDiv = $("homeMsgList");
