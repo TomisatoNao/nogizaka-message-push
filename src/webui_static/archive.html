@@ -805,19 +805,31 @@ async function loadPage() {
   for (const msg of data.messages) renderBubble(msg);
   $("loadMore").hidden = page >= totalPages;
 
-  // 首页跳转：滚动到目标消息
-  if (page === 1 && targetMsgId) {
+  // 首页跳转：滚动到目标消息（跨页查找）
+  if (targetMsgId) {
     const tid = targetMsgId;
-    targetMsgId = "";   // 只触发一次
-    setTimeout(() => {
+    const findAndScroll = () => {
       const target = document.querySelector('.bubble[data-msg-id="' + tid + '"]');
       if (target) {
         target.scrollIntoView({ behavior: "smooth", block: "center" });
         target.style.boxShadow = "0 0 0 3px var(--accent)";
         target.style.transition = "box-shadow .3s";
         setTimeout(() => { target.style.boxShadow = ""; }, 2000);
+        return true;
       }
-    }, 500);
+      return false;
+    };
+    // 渲染完成后稍等一下再查找（content-visibility 延迟渲染）
+    setTimeout(async () => {
+      if (findAndScroll()) { targetMsgId = ""; return; }
+      // 没找到，继续加载后续页
+      while (page < totalPages) {
+        page++;
+        await loadPage();
+        if (findAndScroll()) { targetMsgId = ""; return; }
+      }
+      targetMsgId = "";
+    }, 400);
   }
 }
 
