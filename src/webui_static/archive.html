@@ -1269,11 +1269,13 @@ function renderHome(agg, members) {
       el.addEventListener('click', () => {
         hideHome();
         curMember = el.dataset.member;
-        curType = "picture";
+        curType = "";
+        searchQuery = "";
+        syncSearchInput();
         targetMsgId = el.dataset.id;
         selfHashUpdate = true;
         location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
-        setTimeout(() => { selfHashUpdate = false; }, 0);
+        setTimeout(() => { selfHashUpdate = false; }, 100);
         loadMembers();
       });
     });
@@ -1325,10 +1327,13 @@ function renderHome(agg, members) {
       el.addEventListener('click', () => {
         hideHome();
         curMember = el.dataset.member;
+        curType = "";
+        searchQuery = "";
+        syncSearchInput();
         targetMsgId = el.dataset.id;
         selfHashUpdate = true;
         location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
-        setTimeout(() => { selfHashUpdate = false; }, 0);
+        setTimeout(() => { selfHashUpdate = false; }, 100);
         loadMembers();
       });
     });
@@ -1341,7 +1346,18 @@ function renderHome(agg, members) {
     '<button class="ha-btn" data-member="' + esc(m.name) + '">📂 ' + esc(m.display) + ' 的归档</button>'
   ).join('');
   $("homeActions").querySelectorAll('.ha-btn').forEach(btn => {
-    btn.addEventListener('click', () => { hideHome(); curMember = btn.dataset.member; loadMembers(); });
+    btn.addEventListener('click', () => {
+      hideHome();
+      curMember = btn.dataset.member;
+      curType = "";
+      searchQuery = "";
+      syncSearchInput();
+      targetMsgId = "";
+      selfHashUpdate = true;
+      location.hash = "member=" + encodeURIComponent(btn.dataset.member);
+      setTimeout(() => { selfHashUpdate = false; }, 100);
+      loadMembers();
+    });
   });
 }
 
