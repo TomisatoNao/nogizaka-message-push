@@ -244,7 +244,7 @@
   .home { display: none; }
   .home.active { display: block; }
   @keyframes homeFadeUp { from { opacity: 0; transform: translateY(16px); } }
-  .home-hero { max-width: 780px; margin: 0 auto; padding: 28px 20px 60px; }
+  .home-hero { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
 
   /* Hero 卡片 */
   .hero-card { text-align: center; padding: 32px 20px 24px; margin-bottom: 28px;
@@ -300,11 +300,10 @@
   .msg-preview .mp-mem { font-size: 10.5px; color: var(--accent); font-weight: 650; margin-top: 1px; }
   .msg-preview .mp-body { min-width: 0; }
   .msg-preview .mp-text { font-size: 13.5px; color: var(--text); line-height: 1.55;
-                           white-space: pre-wrap; overflow: hidden; display: -webkit-box;
-                           -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+                           white-space: pre-wrap; overflow: hidden;
+                           max-height: 4.65em; }  /* ~3 行 */
   .msg-preview .mp-trans { font-size: 12.5px; color: var(--ok); margin-top: 3px; line-height: 1.45;
-                            overflow: hidden; display: -webkit-box;
-                            -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+                            overflow: hidden; max-height: 2.9em; }  /* ~2 行 */
 
   /* 快捷入口 */
   .home-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 28px; justify-content: center;
