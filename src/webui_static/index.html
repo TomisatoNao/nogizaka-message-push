@@ -675,6 +675,13 @@ async function api(path, opts = {}) {
   let data = null;
   try { data = await resp.json(); } catch (_) { /* 保底 */ }
   if (resp.status === 401) {
+    const errMsg = (data && data.errors && data.errors[0]) || "";
+    // 账号系统未登录（session 过期/重启丢失）→ 跳登录页
+    if (errMsg === "未登录") {
+      window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname + window.location.search);
+      throw new Error("未登录");
+    }
+    // WEB_ADMIN_TOKEN 模式 → 弹出令牌输入框
     const t = prompt("需要访问令牌（.env 的 WEB_ADMIN_TOKEN）：");
     if (t !== null && t !== "") {
       authToken = t.trim();
