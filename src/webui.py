@@ -1146,33 +1146,94 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "home":
+            from collections import Counter
+            from datetime import timedelta
+
             members = []
             for name in _archive.list_members():
                 months = _archive.list_months(name)
                 total = sum(m["count"] for m in months)
                 pics: list[dict] = []
-                # 从最近月份往前找，最多收集 10 张图片
+                latest_msgs: list[dict] = []
+                type_counts: dict[str, int] = {}
+                # 从最近月份往前找，收集图片和文字消息
                 for mo in months:
-                    if len(pics) >= 10:
-                        break
                     msgs = _archive.load_month(name, mo["year"], mo["month"])
                     for m in reversed(msgs):
-                        if len(pics) >= 10:
-                            break
-                        if m.get("type") in ("picture", "image") and m.get("_local_file"):
+                        rid = m.get("id")
+                        mtype = m.get("type", "text")
+                        type_counts[mtype] = type_counts.get(mtype, 0) + 1
+                        if len(pics) < 30 and mtype in ("picture", "image") and m.get("_local_file"):
                             pics.append({
-                                "id": m["id"],
+                                "id": rid,
                                 "text": m.get("text", ""),
                                 "url": f"/api/archive/media/{name}/{m['_local_file']}",
-                                "w": m.get("thumbnail_width"),
-                                "h": m.get("thumbnail_height"),
+                                "w": m.get("thumbnail_width"), "h": m.get("thumbnail_height"),
+                                "published_at": m.get("published_at") or m.get("updated_at", ""),
                             })
+                        if len(latest_msgs) < 8 and mtype == "text" and (m.get("text") or "").strip():
+                            latest_msgs.append({
+                                "id": rid,
+                                "text": m.get("text", ""),
+                                "translation": m.get("_translation", ""),
+                                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                            })
+                    if len(pics) >= 30 and len(latest_msgs) >= 8:
+                        break
+
+                # 月度分布
+                monthly = [{"year": mo["year"], "month": mo["month"], "count": mo["count"]} for mo in months[:24]]
+
+                # 近 6 个月每日计数（热力图用）
+                days: dict[str, int] = {}
+                if months:
+                    cutoff_y, cutoff_m = months[0]["year"], months[0]["month"]
+                    # 回溯 6 个月
+                    for _ in range(6):
+                        dm = _archive.day_counts(name)
+                        for d, c in dm.items():
+                            parts = d.split("-")
+                            if len(parts) == 3:
+                                dy, dm_num = int(parts[0]), int(parts[1])
+                                if dy > cutoff_y or (dy == cutoff_y and dm_num >= cutoff_m):
+                                    days[d] = days.get(d, 0) + c
+                        cutoff_m -= 1
+                        if cutoff_m < 1:
+                            cutoff_m = 12
+                            cutoff_y -= 1
+                    # 简化：直接返回最近 6 个月所有 day_counts（去重按天）
+                    days = _archive.day_counts(name)
+
+                # 统计概要
+                first_date, last_date = "", ""
+                if months:
+                    last = months[0]
+                    first = months[-1]
+                    first_date = f"{first['year']:04d}/{first['month']:02d}"
+                    last_date = f"{last['year']:04d}/{last['month']:02d}"
+
+                stats = {
+                    "total": total,
+                    "months": len(months),
+                    "pictures": type_counts.get("picture", 0) + type_counts.get("image", 0),
+                    "videos": type_counts.get("video", 0),
+                    "voices": type_counts.get("voice", 0),
+                    "texts": type_counts.get("text", 0),
+                    "first_date": first_date,
+                    "last_date": last_date,
+                }
+                # 本月消息数
+                if months:
+                    stats["this_month"] = months[0]["count"]
+
                 members.append({
                     "name": name,
                     "display": name.replace("_", " "),
-                    "total": total,
-                    "months": len(months),
+                    "stats": stats,
+                    "monthly": monthly,
+                    "days": days,
                     "pics": pics,
+                    "latest_msgs": latest_msgs,
                 })
             self._send_json({"ok": True, "members": members, "count": len(members)})
             return

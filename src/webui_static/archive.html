@@ -241,25 +241,76 @@
   }
 
   /* ── 首页 ── */
-  .home { display: none; max-width: 600px; margin: 0 auto; padding: 20px 16px 60px; }
+  .home { display: none; max-width: 1100px; margin: 0 auto; padding: 20px 20px 60px; }
   .home.active { display: block; }
-  .hero-carousel { position: relative; overflow: hidden; border-radius: 16px;
-                   background: var(--card); border: 1px solid var(--border);
-                   box-shadow: var(--shadow-md); margin-bottom: 20px; }
-  .carousel-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
-                    -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  .carousel-track::-webkit-scrollbar { display: none; }
-  .carousel-slide { flex: none; width: 100%; scroll-snap-align: start;
-                    position: relative; display: flex; align-items: center;
-                    justify-content: center; background: var(--bg); }
-  .carousel-slide img { width: 100%; height: auto; max-height: 60vh; object-fit: contain; display: block; }
-  .carousel-slide .slide-caption { position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 40px 16px 12px; background: linear-gradient(transparent, rgba(0,0,0,.6));
-      color: #fff; font-size: 13px; text-align: center; }
-  .carousel-dots { display: flex; justify-content: center; gap: 8px; padding: 12px; }
-  .carousel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border);
-                  border: none; cursor: pointer; transition: background .2s, transform .2s; }
-  .carousel-dot.active { background: var(--accent); transform: scale(1.3); }
+  .home-section-title { font-size: 14px; font-weight: 650; color: var(--muted);
+                        margin: 28px 0 12px; letter-spacing: .04em; }
+  .home-section-title:first-of-type { margin-top: 8px; }
+
+  /* 统计卡片行 */
+  .home-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+               padding: 18px 16px; text-align: center; box-shadow: var(--shadow-sm); }
+  .stat-card .sv { font-size: 28px; font-weight: 700; color: var(--text-strong); line-height: 1.2; }
+  .stat-card .sl { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* 图片网格 */
+  .home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .home-grid .gi { position: relative; aspect-ratio: 3/4; overflow: hidden; border-radius: 12px;
+                    background: var(--bg); cursor: pointer; border: 1px solid var(--border-soft);
+                    transition: transform .18s, box-shadow .18s; }
+  .home-grid .gi:hover { transform: scale(1.02); box-shadow: var(--shadow-md); }
+  .home-grid .gi img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .home-grid .gi .gc { position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 20px 10px 8px; background: linear-gradient(transparent, rgba(0,0,0,.55));
+      color: #fff; font-size: 11.5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 热力图 */
+  .home-heatmap { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 14px; }
+  .heat-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--border-soft);
+               position: relative; cursor: default; }
+  .heat-cell.h1 { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+  .heat-cell.h2 { background: color-mix(in srgb, var(--accent) 50%, transparent); }
+  .heat-cell.h3 { background: color-mix(in srgb, var(--accent) 75%, transparent); }
+  .heat-cell.h4 { background: var(--accent); }
+  .heat-cell:hover { outline: 2px solid var(--accent); outline-offset: 1px; z-index: 1; }
+  .heat-legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+  .heat-legend span { display: flex; gap: 2px; }
+
+  /* 首页搜索 */
+  .home-search { display: flex; gap: 8px; margin-bottom: 6px; }
+  .home-search input { flex: 1; padding: 9px 13px; border: 1px solid var(--border);
+                       border-radius: var(--radius-sm); background: var(--card);
+                       color: var(--text); font-size: 14px; }
+  .home-search input:focus { border-color: var(--accent); outline: none;
+                              box-shadow: 0 0 0 3px var(--accent-ring); }
+
+  /* 最新消息 */
+  .home-messages { display: flex; flex-direction: column; gap: 10px; }
+  .msg-preview { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+                 padding: 14px 16px; cursor: pointer; transition: box-shadow var(--tr), border-color var(--tr); }
+  .msg-preview:hover { box-shadow: var(--shadow-md); border-color: var(--accent); }
+  .msg-preview .mp-time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+  .msg-preview .mp-text { font-size: 14px; color: var(--text); line-height: 1.6;
+                           white-space: pre-wrap; overflow: hidden; display: -webkit-box;
+                           -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .msg-preview .mp-trans { font-size: 13px; color: var(--ok); margin-top: 6px; line-height: 1.5;
+                            overflow: hidden; display: -webkit-box;
+                            -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+  /* 快捷入口 */
+  .home-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; justify-content: center; }
+  .home-actions .ha-btn {
+    padding: 10px 22px; border-radius: var(--radius-sm); cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 14px; font-family: inherit; font-weight: 600;
+    transition: all var(--tr);
+  }
+  .home-actions .ha-btn:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); }
+  .home-actions .ha-btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; border: none; box-shadow: 0 5px 16px var(--accent-ring);
+  }
 
   /* 多成员卡片 */
   .member-cards { display: flex; flex-direction: column; gap: 14px; }
@@ -273,24 +324,17 @@
   .member-card .mmeta .mname { font-size: 17px; font-weight: 650; color: var(--text-strong); }
   .member-card .mmeta .mstats { font-size: 13px; color: var(--muted); }
 
-  /* 单成员信息 */
-  .home-info { text-align: center; margin-bottom: 18px; }
-  .home-info .hname { font-size: 22px; font-weight: 700; color: var(--text-strong); }
-  .home-info .hstats { font-size: 14px; color: var(--muted); margin-top: 4px; }
-  .home-enter { text-align: center; }
-  .home-enter .btn.primary {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    color: #fff; font-size: 15px; padding: 10px 28px; border: none;
-    border-radius: var(--radius-sm); cursor: pointer; font-weight: 650;
-    box-shadow: 0 5px 16px var(--accent-ring);
-  }
-  .home-enter .btn.primary:hover { box-shadow: 0 8px 24px var(--accent-ring); }
-  .home-enter .btn.primary:active { transform: translateY(1px) scale(.98); }
-
   @media (max-width: 640px) {
     .home { padding: 12px 10px 48px; }
-    .hero-carousel { border-radius: 12px; }
-    .carousel-slide img { max-height: 50vh; }
+    .home-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .home-grid .gi { border-radius: 8px; }
+    .home-stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .stat-card { padding: 14px 10px; }
+    .stat-card .sv { font-size: 22px; }
+    .home-actions { gap: 8px; }
+    .home-actions .ha-btn { padding: 10px 16px; font-size: 13px; }
+    .heat-cell { width: 10px; height: 10px; }
+    .home-search input { font-size: 16px; }
   }
 </style>
 
@@ -306,14 +350,23 @@
 </header>
 
 <div id="archiveHome" class="home">
-  <div class="hero-carousel" id="homeCarousel">
-    <div class="carousel-track" id="carouselTrack"></div>
-    <div class="carousel-dots" id="carouselDots"></div>
+  <!-- 统计卡片 -->
+  <div class="home-stats" id="homeStats"></div>
+  <!-- 图片网格 -->
+  <h2 class="home-section-title">🖼️ 精选图片</h2>
+  <div class="home-grid" id="homeGrid"></div>
+  <!-- 热力图 + 搜索 -->
+  <h2 class="home-section-title">📅 活跃日历</h2>
+  <div class="home-heatmap" id="homeHeatmap"></div>
+  <div class="home-search">
+    <input type="search" id="homeSearchBox" maxlength="100" placeholder="🔍 快速搜索…" aria-label="快速搜索">
+    <button class="nav" id="homeSearchBtn">搜索</button>
   </div>
-  <div class="home-info" id="homeInfo"></div>
-  <div class="home-enter">
-    <button class="btn primary" id="homeEnter">📂 进入归档</button>
-  </div>
+  <!-- 最新消息 -->
+  <h2 class="home-section-title">💬 最新消息</h2>
+  <div class="home-messages" id="homeMessages"></div>
+  <!-- 快捷入口 -->
+  <div class="home-actions" id="homeActions"></div>
 </div>
 
 <div class="layout">
@@ -1143,115 +1196,144 @@ $("logoutLink").addEventListener("click", async (e) => {
 });
 
 // ── 首页 ─────────────────────────────────────────
-let carouselTimer = null;
-function stopCarousel() { if (carouselTimer) { clearInterval(carouselTimer); carouselTimer = null; } }
-
-function updateCarouselDots(idx) {
-  $("carouselDots").querySelectorAll(".carousel-dot").forEach((d, i) =>
-    d.classList.toggle("active", i === idx));
+function fmtDate(utc) {
+  if (!utc) return "";
+  const d = new Date(utc + "Z");
+  if (isNaN(d.getTime())) return utc.slice(0, 10);
+  return (d.getMonth()+1) + "/" + d.getDate() + " " +
+    String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
 }
 
-function startCarousel() {
-  stopCarousel();
-  const track = $("carouselTrack");
-  const slides = track.querySelectorAll(".carousel-slide");
-  if (slides.length <= 1) return;
-  carouselTimer = setInterval(() => {
-    const w = slides[0].offsetWidth;
-    if (!w) return;
-    const idx = Math.round(track.scrollLeft / w);
-    const next = (idx + 1) % slides.length;
-    track.scrollTo({ left: next * w, behavior: "smooth" });
-    updateCarouselDots(next);
-  }, 4000);
-}
-
-// 滚动停止后同步 dot
-let carouselScrollTimer = null;
-$("carouselTrack").addEventListener("scroll", () => {
-  if (carouselScrollTimer) clearTimeout(carouselScrollTimer);
-  carouselScrollTimer = setTimeout(() => {
-    const track = $("carouselTrack");
-    const slides = track.querySelectorAll(".carousel-slide");
-    if (!slides.length) return;
-    const w = slides[0].offsetWidth;
-    if (!w) return;
-    const idx = Math.round(track.scrollLeft / w);
-    updateCarouselDots(idx);
-  }, 150);
-}, { passive: true });
-
-function renderSingleMemberHome(m) {
-  const track = $("carouselTrack");
-  const dots = $("carouselDots");
-  if (!m.pics.length) {
-    track.innerHTML = '<div class="carousel-slide" style="height:200px;color:var(--muted);font-size:14px">暂无图片</div>';
-    dots.innerHTML = "";
-  } else {
-    track.innerHTML = m.pics.map((p, i) =>
-      '<div class="carousel-slide"><img src="' + mediaUrl(p.url) + '" alt="" loading="' + (i === 0 ? 'eager' : 'lazy') + '"><div class="slide-caption">' + esc(p.text || '') + '</div></div>'
-    ).join('');
-    dots.innerHTML = m.pics.map((_, i) =>
-      '<button class="carousel-dot' + (i === 0 ? ' active' : '') + '" data-idx="' + i + '" aria-label="第' + (i + 1) + '张"></button>'
-    ).join('');
-    dots.querySelectorAll('.carousel-dot').forEach(d =>
-      d.addEventListener('click', () => {
-        const idx = parseInt(d.dataset.idx);
-        const slides = track.querySelectorAll('.carousel-slide');
-        if (slides[idx]) track.scrollTo({ left: slides[idx].offsetLeft, behavior: 'smooth' });
-      }));
+function homeEnterMember(name, ym) {
+  hideHome();
+  curMember = name;
+  if (ym) {
+    location.hash = "member=" + encodeURIComponent(name) + "&y=" + ym.y + "&m=" + ym.m;
   }
-
-  $("homeInfo").innerHTML = '<div class="hname">' + esc(m.display) + '</div>' +
-    '<div class="hstats">📨 ' + m.total + ' 条消息 · ' + m.months + ' 个月</div>';
-  $("homeCarousel").style.display = "";
-  $("homeEnter").style.display = "";
-  $("homeEnter").onclick = () => { enterMember(m.name); };
-  startCarousel();
-}
-
-function renderMultiMemberHome(members) {
-  $("homeCarousel").style.display = "none";
-  $("homeEnter").style.display = "none";
-  $("homeInfo").innerHTML = '<div class="member-cards">' + members.map(m =>
-    '<div class="member-card" data-member="' + esc(m.name) + '">' +
-      '<img class="mcover" src="' + mediaUrl(m.pics[0]?.url || '') + '" alt="" loading="lazy">' +
-      '<div class="mmeta"><div class="mname">' + esc(m.display) + '</div>' +
-        '<div class="mstats">📨 ' + m.total + ' 条 · ' + m.months + ' 个月</div></div>' +
-    '</div>'
-  ).join('') + '</div>';
-  $("homeInfo").querySelectorAll('.member-card').forEach(card =>
-    card.addEventListener('click', () => enterMember(card.dataset.member)));
+  loadMembers();
 }
 
 async function showHome() {
-  stopCarousel();
   document.querySelector('.layout').style.display = 'none';
   $('backTop').style.display = 'none';
   $('archiveHome').classList.add('active');
   try {
     const data = await api("/api/archive/home");
     if (data.count === 1) {
-      renderSingleMemberHome(data.members[0]);
+      renderHome(data.members[0]);
     } else {
       renderMultiMemberHome(data.members);
     }
   } catch (e) {
-    $("homeInfo").innerHTML = '<div style="text-align:center;color:var(--err);padding:40px 0">加载失败：' + esc(e.message) + '</div>';
+    $("archiveHome").innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
   }
 }
 
-function hideHome() {
-  stopCarousel();
-  $('archiveHome').classList.remove('active');
-  document.querySelector('.layout').style.display = '';
+function renderHome(m) {
+  const s = m.stats;
+  // 统计卡片
+  $("homeStats").innerHTML =
+    '<div class="stat-card"><div class="sv">' + s.total.toLocaleString() + '</div><div class="sl">📨 总消息</div></div>' +
+    '<div class="stat-card"><div class="sv">' + s.months + '</div><div class="sl">📅 个月 · ' + (s.first_date||'') + ' → ' + (s.last_date||'') + '</div></div>' +
+    '<div class="stat-card"><div class="sv">' + (s.pictures||0).toLocaleString() + '</div><div class="sl">🖼️ 图片</div></div>' +
+    '<div class="stat-card"><div class="sv">' + ((s.videos||0)+(s.voices||0)) + '</div><div class="sl">🎬 视频+语音</div></div>';
+
+  // 图片网格
+  const grid = $("homeGrid");
+  if (m.pics.length) {
+    grid.innerHTML = m.pics.map(p =>
+      '<div class="gi" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
+        '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
+        (p.text ? '<div class="gc">' + esc(p.text) + '</div>' : '') +
+      '</div>'
+    ).join('');
+    grid.querySelectorAll('.gi').forEach(el => {
+      el.addEventListener('click', () => {
+        // 简易灯箱预览
+        const lb = $("lightbox");
+        $("lbImg").src = el.dataset.url;
+        $("lbCounter").textContent = el.dataset.text || "";
+        lb.classList.add("open");
+        lb.setAttribute("aria-hidden", "false");
+        $("lbClose").focus();
+        $("lbPrev").style.display = "none";
+        $("lbNext").style.display = "none";
+      });
+    });
+  } else {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px">暂无图片</div>';
+  }
+
+  // 热力图 — 最近约 26 周
+  const heat = $("homeHeatmap");
+  const days = m.days || {};
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const start = new Date(today);
+  start.setDate(start.getDate() - start.getDay() - 25*7); // 26 周前周一
+  const cells = [];
+  let maxCount = 0;
+  for (const c of Object.values(days)) { if (c > maxCount) maxCount = c; }
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate()+1)) {
+    const key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    const count = days[key] || 0;
+    let level = 0;
+    if (count > 0) { level = maxCount <= 1 ? 1 : count <= maxCount*0.25 ? 1 : count <= maxCount*0.5 ? 2 : count <= maxCount*0.75 ? 3 : 4; }
+    cells.push('<span class="heat-cell h' + level + '" title="' + key + ' · ' + count + ' 条消息" ' +
+      'data-date="' + key + '" data-count="' + count + '"></span>');
+  }
+  heat.innerHTML = cells.join('') +
+    '<div class="heat-legend"><span>少</span><span class="heat-cell"></span><span class="heat-cell h1"></span><span class="heat-cell h2"></span><span class="heat-cell h3"></span><span class="heat-cell h4"></span><span>多</span></div>';
+
+  // 首页搜索
+  $("homeSearchBtn").onclick = () => {
+    const q = $("homeSearchBox").value.trim();
+    if (q) { hideHome(); curMember = m.name; searchQuery = q; loadMembers(); }
+  };
+  $("homeSearchBox").addEventListener("keydown", (e) => { if (e.key === "Enter") $("homeSearchBtn").click(); });
+
+  // 最新消息
+  const msgDiv = $("homeMessages");
+  if (m.latest_msgs.length) {
+    msgDiv.innerHTML = m.latest_msgs.map(msg =>
+      '<div class="msg-preview">' +
+        '<div class="mp-time">' + fmtDate(msg.published_at) + '</div>' +
+        '<div class="mp-text">' + esc(msg.text) + '</div>' +
+        (msg.translation ? '<div class="mp-trans">' + esc(msg.translation) + '</div>' : '') +
+      '</div>'
+    ).join('');
+  } else {
+    msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无文字消息</div>';
+  }
+
+  // 快捷入口
+  const latestYM = m.monthly.length ? { y: m.monthly[0].year, m: m.monthly[0].month } : null;
+  $("homeActions").innerHTML =
+    '<button class="ha-btn" id="haLatest">🆕 最新消息</button>' +
+    '<button class="ha-btn" id="haPics">📸 最新图片</button>' +
+    '<button class="ha-btn primary" id="haFull">📂 完整归档</button>';
+  if (latestYM) {
+    $("haLatest").onclick = () => homeEnterMember(m.name, latestYM);
+    $("haPics").onclick = () => { hideHome(); curMember = m.name; curType = "picture"; loadMembers(); };
+  }
+  $("haFull").onclick = () => homeEnterMember(m.name, null);
 }
 
-function enterMember(name) {
-  stopCarousel();
-  hideHome();
-  curMember = name;
-  loadMembers();
+function renderMultiMemberHome(members) {
+  $("archiveHome").innerHTML = '<div class="member-cards">' + members.map(m =>
+    '<div class="member-card" data-member="' + esc(m.name) + '">' +
+      '<img class="mcover" src="' + mediaUrl(m.pics[0]?.url || '') + '" alt="" loading="lazy">' +
+      '<div class="mmeta"><div class="mname">' + esc(m.display) + '</div>' +
+        '<div class="mstats">📨 ' + m.stats.total.toLocaleString() + ' 条 · ' + m.stats.months + ' 个月</div></div>' +
+    '</div>'
+  ).join('') + '</div>';
+  $("archiveHome").querySelectorAll('.member-card').forEach(card =>
+    card.addEventListener('click', () => { hideHome(); curMember = card.dataset.member; loadMembers(); }));
+}
+
+function hideHome() {
+  $('archiveHome').classList.remove('active');
+  document.querySelector('.layout').style.display = '';
 }
 
 // ── 入口（支持 #member=&y=&m=&t= 深链）────────────
