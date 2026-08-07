@@ -627,7 +627,8 @@ class _Handler(BaseHTTPRequestHandler):
     # ── 路由 ─────────────────────────────────────────────
     def _send_static(self, name: str) -> None:
         """主题 CSS / JS —— 白名单文件名，不接受任意路径。"""
-        allowed = {"theme.css": "text/css", "theme.js": "application/javascript"}
+        allowed = {"theme.css": "text/css", "theme.js": "application/javascript",
+                   "archive.css": "text/css", "archive.js": "application/javascript"}
         ctype = allowed.get(name)
         if ctype is None:
             self._send_json({"ok": False, "errors": ["未知静态资源"]}, 404)
