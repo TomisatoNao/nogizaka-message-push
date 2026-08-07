@@ -643,7 +643,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "public, max-age=60")
+            self.send_header("Cache-Control", "public, no-cache")
             self.end_headers()
             return
         self.send_response(200)
