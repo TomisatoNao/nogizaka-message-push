@@ -1274,10 +1274,35 @@ class _Handler(BaseHTTPRequestHandler):
             agg_total = sum(m["stats"]["total"] for m in members)
             agg_first = min((m["stats"]["first_date"] for m in members if m["stats"]["first_date"]), default="")
             agg_last = max((m["stats"]["last_date"] for m in members if m["stats"]["last_date"]), default="")
+            # 最后更新时间
+            last_pub = max((p.get("published_at", "") for p in agg_pics), default="")
+            last_msg = max((msg.get("published_at", "") for msg in agg_msgs), default="")
+            last_updated = max(last_pub, last_msg)
+
+            # 本周 / 上周统计
+            from datetime import datetime as _dt, timedelta
+            now = _dt.now()
+            today = now_utc.strftime("%Y-%m-%d")
+            this_week = 0; last_week = 0
+            for m in members:
+                dm = _archive.day_counts(m["name"])
+                for d, c in dm.items():
+                    try:
+                        dd = _dt.strptime(d, "%Y-%m-%d")
+                        days_ago = (now - dd).days
+                        if 0 <= days_ago < 7:
+                            this_week += c
+                        elif 7 <= days_ago < 14:
+                            last_week += c
+                    except ValueError:
+                        pass
+
             aggregated = {
                 "total_msgs": agg_total,
                 "first_date": agg_first,
                 "last_date": agg_last,
+                "last_updated": last_updated,
+                "week_stats": {"this_week": this_week, "last_week": last_week},
                 "pics": agg_pics,
                 "latest_msgs": agg_msgs,
             }

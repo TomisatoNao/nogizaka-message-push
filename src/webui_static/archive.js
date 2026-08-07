@@ -838,11 +838,28 @@ async function showHome() {
   document.querySelector('.layout').style.display = 'none';
   $('backTop').style.display = 'none';
   $('archiveHome').classList.add('active');
+  $('homeSearchBar').classList.add('active');
+  // 骨架屏
+  $('homeSkeleton').classList.add('active');
+  $('archiveHome').querySelector('.home-hero').style.display = 'none';
   try {
     const data = await api("/api/archive/home");
+    if (!data.members.length) {
+      // 空状态
+      $('homeSkeleton').classList.remove('active');
+      $('homeSearchBar').classList.remove('active');
+      $('archiveHome').innerHTML =
+        '<div class="home-empty active"><div class="ee-icon">📭</div>' +
+        '<div class="ee-title">还没有归档数据</div>' +
+        '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
+      return;
+    }
     renderHome(data.aggregated, data.members);
+    $('homeSkeleton').classList.remove('active');
+    $('archiveHome').querySelector('.home-hero').style.display = '';
   } catch (e) {
-    $("archiveHome").innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
+    $('homeSkeleton').classList.remove('active');
+    $('archiveHome').innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
   }
 }
 
@@ -855,19 +872,55 @@ function renderHome(agg, members) {
     heroHTML += '<div class="hc-sub">' + members.map(m => esc(m.display)).join(' · ') + '</div>';
   }
   const totalMonths = members.reduce((s, m) => s + m.stats.months, 0);
+  const ws = agg.week_stats || {};
   heroHTML += '<div class="hc-stats">';
   heroHTML += '<span class="hc-stat">📨 <b>' + agg.total_msgs.toLocaleString() + '</b> 条消息</span>';
   heroHTML += '<span class="hc-stat">📅 跨越 <b>' + totalMonths + '</b> 个月</span>';
+  if (ws.this_week > 0) {
+    let weekStr = '本周 <b>' + ws.this_week + '</b> 条';
+    if (ws.last_week > 0 && ws.this_week !== ws.last_week) {
+      const diff = ws.this_week - ws.last_week;
+      weekStr += ' · 较上周 ' + (diff > 0 ? '↑' : '↓') + Math.abs(diff);
+    }
+    heroHTML += '<span class="hc-stat">📊 ' + weekStr + '</span>';
+  }
   heroHTML += '</div>';
   heroHTML += '<div class="hc-range">' + (agg.first_date || '?') + ' — ' + (agg.last_date || '?') + '</div>';
-  // 今日动态
+  // 今日动态 + 最后更新
   const today = new Date();
   const todayKey = today.getFullYear() + "-" + String(today.getMonth()+1).padStart(2,"0") + "-" + String(today.getDate()).padStart(2,"0");
   const todayCount = members.reduce((s, m) => s + ((m.days || {})[todayKey] || 0), 0);
+  const lu = agg.last_updated ? fmtDate(agg.last_updated) : '';
+  let badgeHTML = '';
   if (todayCount > 0) {
-    heroHTML += '<div class="hc-today">🆕 今日 ' + todayCount + ' 条新消息</div>';
+    badgeHTML += '<button class="hc-today" id="hcTodayBtn">🆕 今日 ' + todayCount + ' 条</button> ';
   }
+  if (lu) {
+    badgeHTML += '<span style="font-size:11.5px;color:var(--muted)">最近更新 ' + lu + '</span>';
+  }
+  if (badgeHTML) heroHTML += '<div style="margin-top:10px">' + badgeHTML + '</div>';
   $("homeMember").innerHTML = heroHTML;
+
+  // 今日按钮点��
+  const todayBtn = $("hcTodayBtn");
+  if (todayBtn) {
+    const defaultMember = members[0].name;
+    const latestMonth = members[0].monthly && members[0].monthly[0];
+    const ty = latestMonth ? latestMonth.year : today.getFullYear();
+    const tm = latestMonth ? latestMonth.month : (today.getMonth() + 1);
+    todayBtn.onclick = () => {
+      hideHome();
+      curMember = defaultMember;
+      curType = "";
+      searchQuery = "";
+      syncSearchInput();
+      targetMsgId = "";
+      selfHashUpdate = true;
+      location.hash = "member=" + encodeURIComponent(defaultMember) + "&y=" + ty + "&m=" + tm;
+      setTimeout(() => { selfHashUpdate = false; }, 100);
+      loadMembers();
+    };
+  }
 
   // ── Section: 最新写真 ──
   const strip = $("photoStrip");
@@ -989,6 +1042,7 @@ function goHome() {
 
 function hideHome() {
   $('archiveHome').classList.remove('active');
+  $('homeSearchBar').classList.remove('active');
   document.querySelector('.layout').style.display = '';
 }
 
@@ -1016,8 +1070,25 @@ window.addEventListener("hashchange", () => {
   const p = new URLSearchParams(location.hash.slice(1));
   const newMember = p.get("member") || "";
   if (!newMember && curMember) {
-    // 从浏览页回到首页
     curMember = "";
     showHome();
   }
+});
+
+// ── 首页搜索栏 ──
+$("homeSearchSubmit").addEventListener("click", () => {
+  const q = $("homeSearchInput").value.trim();
+  if (!q) return;
+  hideHome();
+  curMember = members.length ? members[0].name : "";
+  curType = "";
+  searchQuery = q;
+  syncSearchInput();
+  selfHashUpdate = true;
+  location.hash = "member=" + encodeURIComponent(curMember);
+  setTimeout(() => { selfHashUpdate = false; }, 100);
+  loadMembers();
+});
+$("homeSearchInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("homeSearchSubmit").click();
 });

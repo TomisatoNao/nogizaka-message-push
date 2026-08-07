@@ -21,7 +21,18 @@
   <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
 </header>
 
+<div id="homeSearchBar" class="home-search-bar">
+  <input type="search" id="homeSearchInput" maxlength="100" placeholder="🔍 搜索所有归档消息…" aria-label="搜索归档">
+  <button class="nav" id="homeSearchSubmit">搜索</button>
+</div>
+
 <div id="archiveHome" class="home">
+  <!-- 骨架屏 -->
+  <div class="home-skeleton" id="homeSkeleton">
+    <div class="sk-hero"></div>
+    <div class="sk-strip"><div></div><div></div><div></div><div></div></div>
+    <div class="sk-msg"><div></div><div></div><div></div></div>
+  </div>
   <div class="home-hero">
     <div class="hero-card" id="homeMember"></div>
     <div class="home-sec">&#x1F4F8; 最新写真</div>

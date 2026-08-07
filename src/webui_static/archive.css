@@ -315,6 +315,44 @@
   /* 移动端触控优化 */
   .photo-card, .msg-preview { touch-action: manipulation; }
 
+  /* ── 顶部搜索栏（首页模式） ── */
+  .home-search-bar { display: none; position: sticky; top: 0; z-index: 9;
+      padding: 10px 16px; gap: 8px; align-items: center;
+      background: color-mix(in srgb, var(--card) 85%, transparent);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border); }
+  .home-search-bar.active { display: flex; }
+  .home-search-bar input { flex: 1; padding: 9px 13px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--card); color: var(--text);
+      font-size: 15px; }
+  .home-search-bar input:focus { border-color: var(--accent); outline: none;
+      box-shadow: 0 0 0 3px var(--accent-ring); }
+
+  /* ── 骨架屏 ── */
+  .home-skeleton { display: none; max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
+  .home-skeleton.active { display: block; }
+  .home-skeleton > div { animation: skPulse 1.5s ease-in-out infinite; }
+  @keyframes skPulse { 0%,100% { opacity: .4; } 50% { opacity: .8; } }
+  .sk-hero { height: 140px; border-radius: 20px; background: var(--border-soft); margin-bottom: 28px; }
+  .sk-strip { display: flex; gap: 10px; }
+  .sk-strip > div { flex: none; width: 172px; aspect-ratio: 3/4; border-radius: 14px; background: var(--border-soft); }
+  .sk-msg { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; }
+  .sk-msg > div { height: 24px; border-radius: 6px; background: var(--border-soft); }
+  .sk-msg > div:nth-child(2) { width: 70%; }
+  .sk-msg > div:nth-child(3) { width: 50%; }
+
+  /* ── 空状态 ── */
+  .home-empty { display: none; max-width: 500px; margin: 80px auto; text-align: center;
+                padding: 60px 30px; border-radius: 20px;
+                background: color-mix(in srgb, var(--card) 78%, transparent);
+                border: 1px solid var(--border);
+                backdrop-filter: blur(12px); }
+  .home-empty.active { display: block; }
+  .home-empty .ee-icon { font-size: 48px; }
+  .home-empty .ee-title { font-size: 18px; font-weight: 650; color: var(--text-strong); margin: 12px 0 6px; }
+  .home-empty .ee-desc { font-size: 13.5px; color: var(--muted); line-height: 1.7; }
+  .home-empty .ee-desc a { color: var(--accent); }
+
   @media (max-width: 640px) {
     .home-hero { padding: 14px 10px 48px; }
     .hero-card { padding: 22px 14px 18px; border-radius: 16px; }
@@ -327,6 +365,7 @@
     .msg-preview .mp-text { font-size: 13px; }
     .msg-preview .mp-trans { font-size: 12px; }
     .home-actions .ha-btn { padding: 10px 18px; font-size: 13px; }
-    /* 首页链接触控加大 */
     #homeNavLink { padding: 8px 4px; font-size: 15px; }
+    .home-search-bar { padding: 8px 10px; }
+    .sk-strip > div { width: 148px; }
   }
