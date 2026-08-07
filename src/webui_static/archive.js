@@ -405,19 +405,18 @@ async function loadPage() {
     const findAndScroll = () => {
       const target = document.querySelector('.bubble[data-msg-id="' + tid + '"]');
       if (target) {
-        // content-visibility:auto 阻止了屏外元素的布局计算，scrollIntoView 无效
+        // content-visibility:auto 阻止了屏外元素的布局计算，先强制渲染
         target.style.contentVisibility = "visible";
-        target.style.scrollMarginTop = "80px";  // 避开 sticky header
-        void target.offsetHeight;  // 强制同步布局
-        target.scrollIntoView({ behavior: "instant", block: "center" });
+        void target.offsetHeight;
+        // 手动计算居中位置：元素顶部 - 视口一半 + 元素一半 = 居中
+        const rect = target.getBoundingClientRect();
+        const top = rect.top + window.scrollY - (window.innerHeight / 2) + (rect.height / 2);
+        window.scrollTo({ top: Math.max(0, top), behavior: "instant" });
         // 高亮动画
         target.style.boxShadow = "0 0 0 4px var(--accent), 0 0 20px var(--accent-ring)";
         target.style.borderRadius = "16px";
         target.style.transition = "box-shadow 0.3s ease-out";
-        setTimeout(() => {
-          target.style.boxShadow = "";
-          target.style.scrollMarginTop = "";
-        }, 2500);
+        setTimeout(() => { target.style.boxShadow = ""; }, 2500);
         return true;
       }
       return false;
