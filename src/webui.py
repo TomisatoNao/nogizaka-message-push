@@ -41,6 +41,10 @@ _LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.htm
 
 _SESSION_COOKIE = "sakamichi_session"
 
+# 首页 API 缓存（基于 archive.db 的 mtime 判是否过期）
+_home_cache: dict | None = None
+_home_cache_mtime: float = 0
+
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
 
@@ -668,7 +672,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         # 共享静态资源（主题 token / 切换脚本）：登录页也要用，故不设鉴权
-        if path in ("/static/theme.css", "/static/theme.js"):
+        if path in ("/static/theme.css", "/static/theme.js",
+                    "/static/archive.css", "/static/archive.js"):
             self._send_static(path.rsplit("/", 1)[1])
             return
         if path == "/login":
@@ -1146,8 +1151,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "home":
-            from collections import Counter
-            from datetime import timedelta
+            # ── 缓存：基于 archive.db 的 mtime，数据未变则直接返回 ──
+            global _home_cache, _home_cache_mtime
+            try:
+                db_mtime = _archive.get_db_path().stat().st_mtime
+            except OSError:
+                db_mtime = 0
+            if _home_cache is not None and db_mtime == _home_cache_mtime:
+                self._send_json(_home_cache)
+                return
 
             members = []
             for name in _archive.list_members():
@@ -1268,8 +1280,11 @@ class _Handler(BaseHTTPRequestHandler):
                 "pics": agg_pics,
                 "latest_msgs": agg_msgs,
             }
-            self._send_json({"ok": True, "members": members, "count": len(members),
-                             "aggregated": aggregated})
+            result = {"ok": True, "members": members, "count": len(members),
+                       "aggregated": aggregated}
+            _home_cache = result
+            _home_cache_mtime = db_mtime
+            self._send_json(result)
             return
 
         if sub.startswith("media/"):
