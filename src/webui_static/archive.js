@@ -838,7 +838,6 @@ async function showHome() {
   document.querySelector('.layout').style.display = 'none';
   $('backTop').style.display = 'none';
   $('archiveHome').classList.add('active');
-  $('homeSearchBar').classList.add('active');
   // 骨架屏
   $('homeSkeleton').classList.add('active');
   $('archiveHome').querySelector('.home-hero').style.display = 'none';
@@ -847,7 +846,6 @@ async function showHome() {
     if (!data.members.length) {
       // 空状态
       $('homeSkeleton').classList.remove('active');
-      $('homeSearchBar').classList.remove('active');
       $('archiveHome').innerHTML =
         '<div class="home-empty active"><div class="ee-icon">📭</div>' +
         '<div class="ee-title">还没有归档数据</div>' +
@@ -1042,7 +1040,6 @@ function goHome() {
 
 function hideHome() {
   $('archiveHome').classList.remove('active');
-  $('homeSearchBar').classList.remove('active');
   document.querySelector('.layout').style.display = '';
 }
 
@@ -1075,20 +1072,3 @@ window.addEventListener("hashchange", () => {
   }
 });
 
-// ── 首页搜索栏 ──
-$("homeSearchSubmit").addEventListener("click", () => {
-  const q = $("homeSearchInput").value.trim();
-  if (!q) return;
-  hideHome();
-  curMember = members.length ? members[0].name : "";
-  curType = "";
-  searchQuery = q;
-  syncSearchInput();
-  selfHashUpdate = true;
-  location.hash = "member=" + encodeURIComponent(curMember);
-  setTimeout(() => { selfHashUpdate = false; }, 100);
-  loadMembers();
-});
-$("homeSearchInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") $("homeSearchSubmit").click();
-});

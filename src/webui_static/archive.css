@@ -315,19 +315,6 @@
   /* 移动端触控优化 */
   .photo-card, .msg-preview { touch-action: manipulation; }
 
-  /* ── 顶部搜索栏（首页模式） ── */
-  .home-search-bar { display: none; position: sticky; top: 0; z-index: 9;
-      padding: 10px 16px; gap: 8px; align-items: center;
-      background: color-mix(in srgb, var(--card) 85%, transparent);
-      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-      border-bottom: 1px solid var(--border); }
-  .home-search-bar.active { display: flex; }
-  .home-search-bar input { flex: 1; padding: 9px 13px; border: 1px solid var(--border);
-      border-radius: var(--radius-sm); background: var(--card); color: var(--text);
-      font-size: 15px; }
-  .home-search-bar input:focus { border-color: var(--accent); outline: none;
-      box-shadow: 0 0 0 3px var(--accent-ring); }
-
   /* ── 骨架屏 ── */
   .home-skeleton { display: none; max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
   .home-skeleton.active { display: block; }
@@ -366,6 +353,5 @@
     .msg-preview .mp-trans { font-size: 12px; }
     .home-actions .ha-btn { padding: 10px 18px; font-size: 13px; }
     #homeNavLink { padding: 8px 4px; font-size: 15px; }
-    .home-search-bar { padding: 8px 10px; }
     .sk-strip > div { width: 148px; }
   }
