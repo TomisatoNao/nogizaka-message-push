@@ -898,24 +898,23 @@ function renderHome(agg, members) {
   }
 
   // 图片条自动滚动
-  let photoScrollTimer = null;
-  function autoScrollPhotos() {
+  let photoTimer = null;
+  function photoAdvance() {
     if (strip.scrollWidth <= strip.clientWidth) return;
-    const cardW = strip.querySelector('.photo-card')?.offsetWidth || 172;
-    const gap = 10;
-    const step = cardW + gap;
-    if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - step) {
-      strip.scrollTo({ left: 0, behavior: "smooth" });
+    const step = (strip.querySelector('.photo-card')?.offsetWidth || 172) + 10;
+    if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 10) {
+      strip.scrollLeft = 0;
     } else {
-      strip.scrollBy({ left: step, behavior: "smooth" });
+      strip.scrollLeft += step;
     }
   }
-  photoScrollTimer = setInterval(autoScrollPhotos, 3000);
-  strip.addEventListener("touchstart", () => { clearInterval(photoScrollTimer); }, { once: true });
-  strip.addEventListener("wheel", () => { clearInterval(photoScrollTimer); }, { once: true });
-  // 鼠标悬停暂停，离开恢复
-  strip.addEventListener("mouseenter", () => clearInterval(photoScrollTimer));
-  strip.addEventListener("mouseleave", () => { photoScrollTimer = setInterval(autoScrollPhotos, 3000); });
+  function startPhotoScroll() { if (!photoTimer) photoTimer = setInterval(photoAdvance, 2200); }
+  function stopPhotoScroll() { clearInterval(photoTimer); photoTimer = null; }
+  startPhotoScroll();
+  strip.addEventListener("touchstart", stopPhotoScroll, { once: true });
+  strip.addEventListener("wheel", stopPhotoScroll, { once: true });
+  strip.addEventListener("mouseenter", stopPhotoScroll);
+  strip.addEventListener("mouseleave", startPhotoScroll);
 
   // ── Section: 最近动态 ──
   const msgDiv = $("homeMsgList");

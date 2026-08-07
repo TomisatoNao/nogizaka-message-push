@@ -261,7 +261,7 @@
   /* 横向滚动图片卡片条 */
   .photo-strip { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
                  -webkit-overflow-scrolling: touch; scrollbar-width: none;
-                 padding: 4px 0 14px; }
+                 scroll-behavior: smooth; padding: 4px 0 14px; }
   .photo-strip::-webkit-scrollbar { display: none; }
   .photo-card { flex: none; width: 172px; scroll-snap-align: start; position: relative;
                 border-radius: 14px; overflow: hidden; cursor: pointer;
