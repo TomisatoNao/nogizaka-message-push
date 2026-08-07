@@ -257,7 +257,7 @@
                  -webkit-overflow-scrolling: touch; scrollbar-width: none;
                  padding: 4px 0 14px; }
   .photo-strip::-webkit-scrollbar { display: none; }
-  .photo-card { flex: none; width: 180px; scroll-snap-align: start;
+  .photo-card { flex: none; width: 180px; scroll-snap-align: start; position: relative;
                 border-radius: 14px; overflow: hidden; background: var(--card);
                 border: 1px solid var(--border); cursor: pointer;
                 transition: transform .16s, box-shadow .16s; }
@@ -265,6 +265,10 @@
   .photo-card img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
   .photo-card .pc-cap { padding: 8px 10px; font-size: 12px; color: var(--text);
                          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .photo-card .pc-member { position: absolute; top: 8px; left: 8px; z-index: 2;
+      background: rgba(0,0,0,.55); color: #fff; font-size: 10.5px; font-weight: 650;
+      padding: 2px 7px; border-radius: 6px; pointer-events: none;
+      backdrop-filter: blur(4px); }
 
   /* 消息列表 */
   .msg-list { display: flex; flex-direction: column; gap: 8px; }
@@ -1183,28 +1187,25 @@ async function showHome() {
   $('archiveHome').classList.add('active');
   try {
     const data = await api("/api/archive/home");
-    if (data.count === 1) {
-      renderHome(data.members[0]);
-    } else {
-      renderMultiMemberHome(data.members);
-    }
+    renderHome(data.aggregated, data.members);
   } catch (e) {
     $("archiveHome").innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
   }
 }
 
-function renderHome(m) {
-  const s = m.stats;
-  // 成员信息
+function renderHome(agg, members) {
+  // 统计行
+  const memberLabel = members.length === 1 ? esc(members[0].display) : members.length + ' 位成员';
   $("homeMember").innerHTML =
-    '<div class="hm-name">' + esc(m.display) + '</div>' +
-    '<div class="hm-stats">📨 ' + s.total.toLocaleString() + ' 条消息 · ' + s.months + ' 个月 · ' + (s.first_date||'') + ' → ' + (s.last_date||'') + '</div>';
+    '<div class="hm-name">' + memberLabel + '</div>' +
+    '<div class="hm-stats">📨 ' + agg.total_msgs.toLocaleString() + ' 条消息 · ' + (agg.first_date||'?') + ' → ' + (agg.last_date||'?') + '</div>';
 
-  // 图片横向卡片条
+  // 聚合图片横向卡片条
   const strip = $("photoStrip");
-  if (m.pics.length) {
-    strip.innerHTML = m.pics.map(p =>
+  if (agg.pics.length) {
+    strip.innerHTML = agg.pics.map(p =>
       '<div class="photo-card" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
+        (members.length > 1 ? '<span class="pc-member">' + esc(p.member_display) + '</span>' : '') +
         '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
         (p.text ? '<div class="pc-cap">' + esc(p.text) + '</div>' : '') +
       '</div>'
@@ -1224,12 +1225,12 @@ function renderHome(m) {
     strip.innerHTML = '<div style="color:var(--muted);padding:30px 10px">暂无图片</div>';
   }
 
-  // 最新消息
+  // 聚合消息列表
   const msgDiv = $("homeMsgList");
-  if (m.latest_msgs.length) {
-    msgDiv.innerHTML = m.latest_msgs.map(msg =>
+  if (agg.latest_msgs.length) {
+    msgDiv.innerHTML = agg.latest_msgs.map(msg =>
       '<div class="msg-preview">' +
-        '<div class="mp-time">' + fmtDate(msg.published_at) + '</div>' +
+        '<div class="mp-time">' + (members.length > 1 ? '<b>' + esc(msg.member_display) + '</b> · ' : '') + fmtDate(msg.published_at) + '</div>' +
         '<div class="mp-text">' + esc(msg.text) + '</div>' +
         (msg.translation ? '<div class="mp-trans">' + esc(msg.translation) + '</div>' : '') +
       '</div>'
@@ -1238,69 +1239,16 @@ function renderHome(m) {
     msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无文字消息</div>';
   }
 
-  // 快捷入口
-  const latestYM = m.monthly && m.monthly.length ? { y: m.monthly[0].year, m: m.monthly[0].month } : null;
-  $("homeActions").innerHTML =
-    '<button class="ha-btn" id="haPics">📸 最新图片</button>' +
-    '<button class="ha-btn primary" id="haFull">📂 进入完整归档</button>';
-  if (latestYM) {
-    $("haPics").onclick = () => { hideHome(); curMember = m.name; curType = "picture"; loadMembers(); };
-  }
-  $("haFull").onclick = () => { hideHome(); curMember = m.name; loadMembers(); };
-}
-
-function renderMultiMemberHome(members) {
-  // 多成员：每个成员一个区块，布局与单成员一致
-  let html = '';
-  for (const m of members) {
-    const s = m.stats;
-    html += '<div class="home-member">' +
-      '<div class="hm-name">' + esc(m.display) + '</div>' +
-      '<div class="hm-stats">📨 ' + s.total.toLocaleString() + ' 条消息 · ' + s.months + ' 个月 · ' + (s.first_date||'') + ' → ' + (s.last_date||'') + '</div>' +
-      '</div>';
-    html += '<h2 class="home-label">最新写真</h2>';
-    if (m.pics.length) {
-      html += '<div class="photo-strip">' + m.pics.map(p =>
-        '<div class="photo-card" data-url="' + mediaUrl(p.url) + '" data-text="' + esc(p.text||'') + '">' +
-          '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
-          (p.text ? '<div class="pc-cap">' + esc(p.text) + '</div>' : '') +
-        '</div>'
-      ).join('') + '</div>';
-    } else {
-      html += '<div style="color:var(--muted);padding:20px 10px">暂无图片</div>';
-    }
-    html += '<h2 class="home-label">最近消息</h2>';
-    if (m.latest_msgs.length) {
-      html += '<div class="msg-list">' + m.latest_msgs.map(msg =>
-        '<div class="msg-preview">' +
-          '<div class="mp-time">' + fmtDate(msg.published_at) + '</div>' +
-          '<div class="mp-text">' + esc(msg.text) + '</div>' +
-          (msg.translation ? '<div class="mp-trans">' + esc(msg.translation) + '</div>' : '') +
-        '</div>'
-      ).join('') + '</div>';
-    } else {
-      html += '<div style="text-align:center;color:var(--muted);padding:16px">暂无文字消息</div>';
-    }
-    html += '<div style="text-align:center;margin:16px 0 36px">' +
-      '<button class="ha-btn primary" data-member="' + esc(m.name) + '">📂 进入 ' + esc(m.display) + ' 的归档</button>' +
-      '</div>';
-  }
-  $("archiveHome").innerHTML = html;
-  // 绑定事件
-  $("archiveHome").querySelectorAll('.photo-card').forEach(el => {
-    el.addEventListener('click', () => {
-      $("lbImg").src = el.dataset.url;
-      $("lbCounter").textContent = el.dataset.text || "";
-      $("lightbox").classList.add("open");
-      $("lightbox").setAttribute("aria-hidden", "false");
-      $("lbClose").focus();
-      $("lbPrev").style.display = "none";
-      $("lbNext").style.display = "none";
-    });
-  });
-  $("archiveHome").querySelectorAll('.ha-btn.primary').forEach(btn => {
+  // 快捷入口：每个成员一个按钮
+  $("homeActions").innerHTML = members.map(m =>
+    '<button class="ha-btn" data-member="' + esc(m.name) + '">📸 ' + esc(m.display) + '</button>'
+  ).join('') + '<button class="ha-btn primary" id="haFull">📂 完整归档</button>';
+  $("homeActions").querySelectorAll('.ha-btn[data-member]').forEach(btn => {
     btn.addEventListener('click', () => { hideHome(); curMember = btn.dataset.member; loadMembers(); });
   });
+  // "完整归档"进第一个成员（多成员时 header 成员 chips 会显示所有）
+  const defaultMember = members.length ? members[0].name : "";
+  $("haFull").onclick = () => { hideHome(); curMember = defaultMember; loadMembers(); };
 }
 
 function goHome() {

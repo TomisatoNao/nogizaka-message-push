@@ -1235,7 +1235,32 @@ class _Handler(BaseHTTPRequestHandler):
                     "pics": pics,
                     "latest_msgs": latest_msgs,
                 })
-            self._send_json({"ok": True, "members": members, "count": len(members)})
+            # ── 聚合：合并所有成员的图片和文字消息 ──
+            agg_pics = sorted(
+                ({"member": m["name"], "member_display": m["display"],
+                  "id": p["id"], "text": p["text"], "url": p["url"],
+                  "w": p.get("w"), "h": p.get("h"),
+                  "published_at": p.get("published_at", "")}
+                 for m in members for p in m["pics"]),
+                key=lambda x: x["published_at"], reverse=True)[:30]
+            agg_msgs = sorted(
+                ({"member": m["name"], "member_display": m["display"],
+                  "id": msg["id"], "text": msg["text"], "translation": msg["translation"],
+                  "published_at": msg.get("published_at", "")}
+                 for m in members for msg in m["latest_msgs"]),
+                key=lambda x: x["published_at"], reverse=True)[:10]
+            agg_total = sum(m["stats"]["total"] for m in members)
+            agg_first = min((m["stats"]["first_date"] for m in members if m["stats"]["first_date"]), default="")
+            agg_last = max((m["stats"]["last_date"] for m in members if m["stats"]["last_date"]), default="")
+            aggregated = {
+                "total_msgs": agg_total,
+                "first_date": agg_first,
+                "last_date": agg_last,
+                "pics": agg_pics,
+                "latest_msgs": agg_msgs,
+            }
+            self._send_json({"ok": True, "members": members, "count": len(members),
+                             "aggregated": aggregated})
             return
 
         if sub.startswith("media/"):
