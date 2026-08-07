@@ -811,6 +811,9 @@ async function loadPage() {
     const findAndScroll = () => {
       const target = document.querySelector('.bubble[data-msg-id="' + tid + '"]');
       if (target) {
+        // content-visibility:auto 阻止了屏外元素的布局计算，scrollIntoView 无效
+        target.style.contentVisibility = "visible";
+        void target.offsetHeight;  // 强制同步布局
         target.scrollIntoView({ behavior: "smooth", block: "center" });
         target.style.boxShadow = "0 0 0 3px var(--accent)";
         target.style.transition = "box-shadow .3s";
