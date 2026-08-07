@@ -821,7 +821,7 @@ $("logoutLink").addEventListener("click", async (e) => {
 // ── 首页 ─────────────────────────────────────────
 function fmtDate(utc) {
   if (!utc) return "";
-  const d = new Date(utc + "Z");
+  const d = new Date(utc.endsWith("Z") ? utc : utc + "Z");
   if (isNaN(d.getTime())) return utc.slice(0, 10);
   return (d.getMonth()+1) + "/" + d.getDate() + " " +
     String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
