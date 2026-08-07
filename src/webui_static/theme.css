@@ -184,3 +184,26 @@ body {
   contain-intrinsic-size: 260px;
 }
 
+/* ════════════ 移动端全局（三页共用） ════════════ */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { min-height: 100vh; min-height: 100dvh; }
+
+@media (hover: none) {
+  * { -webkit-tap-highlight-color: transparent; }
+}
+
+/* iOS 聚焦防缩放：触控宽度下所有表单控件 ≥16px */
+@media (max-width: 900px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* 手机端共享 chrome */
+@media (max-width: 640px) {
+  .theme-toggle { width: 44px; height: 44px; font-size: 17px; }
+  header {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  img, video, audio { max-width: 100%; }
+}
+

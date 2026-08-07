@@ -37,7 +37,7 @@
   .field { position: relative; margin-bottom: 16px; }
   .field input {
     width: 100%; padding: 25px 13px 9px; border: 1px solid transparent; border-radius: 11px;
-    background: var(--field); color: var(--text); font-size: 14.5px; font-family: inherit;
+    background: var(--field); color: var(--text); font-size: 16px; font-family: inherit;
     transition: border-color .15s, background .15s;
   }
   .field input:focus { outline: none; border-color: var(--accent);
@@ -86,10 +86,17 @@
 
   /* ── 手机端适配 ────────────────────────────────── */
   @media (max-width: 640px) {
-    .field input { font-size: 16px; }                       /* 防止 iOS 聚焦缩放 */
+    body { padding: 14px; }
+    .card { padding: 28px 20px 26px; border-radius: 16px; }
+    .theme-toggle {
+      top: max(12px, env(safe-area-inset-top));
+      right: max(12px, env(safe-area-inset-right));
+    }
+    .field .toggle { padding: 8px 10px; }
+    button.submit { padding: 13px; font-size: 15.5px; }
   }
   @media (max-width: 400px) {
-    .theme-toggle { top: 8px; right: 8px; }                 /* 窄屏不遮挡卡片 */
+    .theme-toggle { top: 8px; right: 8px; }
   }
 </style>
 </head>

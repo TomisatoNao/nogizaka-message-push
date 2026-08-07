@@ -146,24 +146,48 @@
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
   @media (max-width: 640px) {
-    header { flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
+    /* 顶栏换行，spacer 隐藏，按钮紧凑 */
+    header { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
     header h1 { font-size: 14px; }
-    main { padding: 14px 10px 100px; }
-    nav.tabs { gap: 3px; }
-    nav.tabs button { padding: 6px 10px; font-size: 12.5px; }
-    .card { padding: 14px 15px; }
-    .grid { grid-template-columns: 1fr; }
+    header .spacer { display: none; }
+    header .hint#whoami { font-size: 11.5px; }
+    header .btn { padding: 6px 10px; font-size: 12.5px; }
+
+    main { padding: 14px 12px 84px; }
+
+    nav.tabs { gap: 5px; margin-bottom: 14px; }
+    nav.tabs button { padding: 8px 12px; font-size: 13px; }
+
+    .card { padding: 14px; margin-bottom: 12px; }
+    .card h2 { font-size: 12px; margin-bottom: 12px; }
+    .grid { grid-template-columns: 1fr; gap: 12px; }
+
     .pair { flex-wrap: wrap; }
     .pair input { width: 100%; min-width: 0; }
-    input, select, textarea { font-size: 16px; }           /* 防止 iOS 聚焦缩放 */
-    dialog { min-width: 0; max-width: 98vw; padding: 16px; }
+
+    button.btn { padding: 8px 12px; font-size: 13.5px; }
+    button.btn.small { padding: 6px 10px; font-size: 12.5px; }
+
+    /* 表格横向滚动 */
+    .table-wrap { -webkit-overflow-scrolling: touch; }
+    th, td { padding: 8px 9px; font-size: 13px; }
+    td input, td select { min-width: 0; width: 100%; }
+
+    /* 弹窗不溢出窄屏 */
+    dialog { min-width: 0; width: min(92vw, 600px); padding: 16px 14px; }
+    #secretDialog { width: min(92vw, 600px); }
     dialog .grid { grid-template-columns: 1fr; }
     #memberPickList { min-width: 0; }
-    footer.savebar { padding: 8px 12px; }
-    footer.savebar button { font-size: 13px; }
-    td input, td select { min-width: 0; width: 100%; }
-    /* 日志查看器降低高度 */
-    #logView { height: 45vh; }
+
+    /* 底部保存条 + 安全区 */
+    footer.savebar {
+      padding: 10px 12px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+    }
+    footer.savebar .msg { font-size: 12.5px; }
+
+    textarea#rawJson { min-height: 46vh; }
+    #logView { height: 58vh; font-size: 12px; }
   }
 </style>
 </head>

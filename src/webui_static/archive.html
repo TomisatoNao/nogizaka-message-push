@@ -60,6 +60,12 @@
   .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
                  font-weight: 650; box-shadow: 0 1px 6px var(--accent-ring); }
   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  #searchBox {
+    flex: 1; min-width: 220px; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--card); color: var(--text); font-size: 16px;
+  }
+  #searchBox:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
   select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
            background: var(--card); color: var(--text); font-size: 13.5px; font-family: inherit; }
   button.nav { border: 1px solid var(--border); background: var(--card); color: var(--text);
@@ -173,44 +179,65 @@
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
   @media (max-width: 640px) {
-    /* header 收紧 */
-    header { padding: 8px 10px; gap: 6px; }
+    /* header：标题 + 成员 chips 横滑一行 */
+    header { padding: 8px 12px; gap: 8px; }
     header h1 { font-size: 14px; }
+    header a { margin-left: 8px; font-size: 12px; }
+    #memberChips {
+      flex-wrap: nowrap; overflow-x: auto; order: 20; flex-basis: 100%;
+      -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    #memberChips::-webkit-scrollbar { display: none; }
+    #memberChips .chip { flex: none; min-height: 38px; padding: 6px 12px; font-size: 12.5px; }
 
-    /* 日历格子加大触控面积 */
+    /* 布局留白收窄 */
+    .layout { padding: 12px 12px 64px; }
+
+    /* 日历：单元格 44px 触控高度 */
+    .cal { padding: 10px; }
     .cal-grid { gap: 2px; }
-    .cal-day { aspect-ratio: auto; min-height: 36px; font-size: 12.5px; }
-    .cal-head button { padding: 5px 10px; font-size: 13px; }
+    .cal-day { aspect-ratio: auto; height: 44px; font-size: 14px; }
+    .cal-day .n { font-size: 11px; }
+    .cal-dow { font-size: 11.5px; }
+    .cal-head button { padding: 6px 10px; min-height: 40px; font-size: 13px; }
 
-    /* 搜索栏不设最小宽度 */
-    #searchBox { min-width: 0; flex: 1 1 120px; }
+    /* 搜索栏满宽独占一行 */
+    #searchBox { flex-basis: 100%; min-width: 0; }
+    .stats { flex-basis: 100%; margin-left: 0; font-size: 12px; }
+    .toolbar { gap: 8px; }
+    .chip { padding: 8px 12px; font-size: 13px; }
+    select, button.nav { padding: 8px 12px; font-size: 14px; }
 
-    /* 统计信息独占一行居中 */
-    .stats { margin-left: 0; width: 100%; text-align: center; }
-
-    /* 工具栏收紧间距 */
-    .toolbar { gap: 5px; }
-
-    /* 消息气泡满宽 */
-    .bubble { max-width: 98%; padding: 10px 12px; }
-
-    /* 标签 touch target 加大 */
+    /* 消息气泡 */
+    .bubble { max-width: 100%; padding: 10px 12px; }
+    .bubble img { max-height: min(50vh, 480px); }
     .tag-chip { padding: 3px 12px; font-size: 13px; }
-    .chip { font-size: 13px; padding: 7px 12px; }
+    .copy-btn { padding: 7px 12px; font-size: 12.5px; }
 
-    /* 复制按钮 */
-    .copy-btn { padding: 4px 10px; font-size: 12px; }
-
-    /* 灯箱控制靠边缩小 */
-    #lbPrev { left: 4px; padding: 10px 12px; font-size: 22px; }
-    #lbNext { right: 4px; padding: 10px 12px; font-size: 22px; }
-    #lbClose { font-size: 14px; padding: 6px 12px; }
-
-    /* 回到顶部避开 toast */
-    #backTop { bottom: 80px; }
+    /* 回到顶部：44px + 底部安全区 */
+    #backTop {
+      width: 44px; height: 44px; line-height: 42px; font-size: 18px;
+      bottom: max(14px, env(safe-area-inset-bottom));
+      right: max(14px, env(safe-area-inset-right));
+    }
 
     /* 日历折叠按钮 */
     .calendar-toggle { font-size: 14px; padding: 10px; }
+
+    /* 灯箱：导航移到底部两角，避开刘海 */
+    #lightbox .nav-btn {
+      top: auto; bottom: max(16px, env(safe-area-inset-bottom));
+      transform: none; padding: 12px 16px; font-size: 24px;
+      min-width: 48px; min-height: 48px;
+    }
+    #lbPrev  { left: max(10px, env(safe-area-inset-left)); }
+    #lbNext  { right: max(10px, env(safe-area-inset-right)); }
+    #lbClose {
+      right: max(10px, env(safe-area-inset-right));
+      top: max(10px, env(safe-area-inset-top));
+      padding: 8px 12px; min-height: 40px;
+    }
+    #lbCounter { top: max(12px, env(safe-area-inset-top)); font-size: 12px; }
   }
 </style>
 
@@ -247,9 +274,7 @@
     <span class="stats" id="stats"></span>
   </div>
   <div class="toolbar">
-    <input type="search" id="searchBox" maxlength="100" placeholder="🔍 搜索原文 / 译文（空格分词）"
-           style="flex:1; min-width:220px; padding:7px 12px; border:1px solid var(--border);
-                   border-radius:8px; background:var(--card); color:var(--text); font-size:13.5px">
+    <input type="search" id="searchBox" maxlength="100" placeholder="🔍 搜索原文 / 译文（空格分词）">
     <button class="nav" id="searchSubmit" type="button">搜索</button>
     <button class="nav" id="searchClear" hidden>✕ 清除搜索</button>
     <label class="toggle-row"><input type="checkbox" id="tagToggle" checked> 显示标签</label>
