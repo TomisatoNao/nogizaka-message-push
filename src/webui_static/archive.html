@@ -170,6 +170,48 @@
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
+
+  /* ── 手机端适配（≤640px） ──────────────────────── */
+  @media (max-width: 640px) {
+    /* header 收紧 */
+    header { padding: 8px 10px; gap: 6px; }
+    header h1 { font-size: 14px; }
+
+    /* 日历格子加大触控面积 */
+    .cal-grid { gap: 2px; }
+    .cal-day { aspect-ratio: auto; min-height: 36px; font-size: 12.5px; }
+    .cal-head button { padding: 5px 10px; font-size: 13px; }
+
+    /* 搜索栏不设最小宽度 */
+    #searchBox { min-width: 0; flex: 1 1 120px; }
+
+    /* 统计信息独占一行居中 */
+    .stats { margin-left: 0; width: 100%; text-align: center; }
+
+    /* 工具栏收紧间距 */
+    .toolbar { gap: 5px; }
+
+    /* 消息气泡满宽 */
+    .bubble { max-width: 98%; padding: 10px 12px; }
+
+    /* 标签 touch target 加大 */
+    .tag-chip { padding: 3px 12px; font-size: 13px; }
+    .chip { font-size: 13px; padding: 7px 12px; }
+
+    /* 复制按钮 */
+    .copy-btn { padding: 4px 10px; font-size: 12px; }
+
+    /* 灯箱控制靠边缩小 */
+    #lbPrev { left: 4px; padding: 10px 12px; font-size: 22px; }
+    #lbNext { right: 4px; padding: 10px 12px; font-size: 22px; }
+    #lbClose { font-size: 14px; padding: 6px 12px; }
+
+    /* 回到顶部避开 toast */
+    #backTop { bottom: 80px; }
+
+    /* 日历折叠按钮 */
+    .calendar-toggle { font-size: 14px; padding: 10px; }
+  }
 </style>
 
 </head>

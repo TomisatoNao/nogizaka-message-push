@@ -143,6 +143,28 @@
   dialog .grid { grid-template-columns: 1fr 1fr; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
+
+  /* ── 手机端适配（≤640px） ──────────────────────── */
+  @media (max-width: 640px) {
+    header { flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
+    header h1 { font-size: 14px; }
+    main { padding: 14px 10px 100px; }
+    nav.tabs { gap: 3px; }
+    nav.tabs button { padding: 6px 10px; font-size: 12.5px; }
+    .card { padding: 14px 15px; }
+    .grid { grid-template-columns: 1fr; }
+    .pair { flex-wrap: wrap; }
+    .pair input { width: 100%; min-width: 0; }
+    input, select, textarea { font-size: 16px; }           /* 防止 iOS 聚焦缩放 */
+    dialog { min-width: 0; max-width: 98vw; padding: 16px; }
+    dialog .grid { grid-template-columns: 1fr; }
+    #memberPickList { min-width: 0; }
+    footer.savebar { padding: 8px 12px; }
+    footer.savebar button { font-size: 13px; }
+    td input, td select { min-width: 0; width: 100%; }
+    /* 日志查看器降低高度 */
+    #logView { height: 45vh; }
+  }
 </style>
 </head>
 <body>
