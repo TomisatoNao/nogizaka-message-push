@@ -9,6 +9,9 @@
   header h1 { font-size: 15.5px; margin: 0; font-weight: 650; color: var(--text-strong); }
   header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: 12px; }
   header a:hover { color: var(--accent); }
+  #memberSelect { max-width: 200px; padding: 5px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--field); color: var(--text);
+    font-size: 13px; font-family: inherit; }
   .layout { display: flex; gap: 18px; max-width: 1060px; margin: 0 auto; padding: 16px 16px 60px; }
   aside.side { width: 258px; flex: none; position: sticky; top: 64px; align-self: flex-start; }
   main { flex: 1; min-width: 0; margin: 0; padding: 0; }
@@ -174,12 +177,7 @@
     header { padding: 8px 12px; gap: 8px; }
     header h1 { font-size: 14px; }
     header a { margin-left: 8px; font-size: 12px; }
-    #memberChips {
-      flex-wrap: nowrap; overflow-x: auto; order: 20; flex-basis: 100%;
-      -webkit-overflow-scrolling: touch; scrollbar-width: none;
-    }
-    #memberChips::-webkit-scrollbar { display: none; }
-    #memberChips .chip { flex: none; min-height: 38px; padding: 6px 12px; font-size: 12.5px; }
+    #memberSelect { max-width: 160px; font-size: 12.5px; }
 
     /* 布局留白收窄 */
     .layout { padding: 12px 12px 64px; }
@@ -265,7 +263,8 @@
   /* 横向滚动图片卡片条 */
   .photo-strip { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
                  -webkit-overflow-scrolling: touch; scrollbar-width: none;
-                 scroll-behavior: smooth; padding: 4px 0 14px; }
+                 scroll-behavior: smooth; padding: 4px 0 14px; cursor: grab;
+                 user-select: none; }
   .photo-strip::-webkit-scrollbar { display: none; }
   .photo-card { flex: none; width: 172px; scroll-snap-align: start; position: relative;
                 border-radius: 14px; overflow: hidden; cursor: pointer;
@@ -304,17 +303,10 @@
   @keyframes homeFadeUp { from { opacity: 0; transform: translateY(16px); }
                            to { opacity: 1; transform: translateY(0); } }
 
-  /* 快捷入口 */
-  .home-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 28px; justify-content: center;
-                  opacity: 0; animation: homeFadeUp .35s .15s ease forwards; }
-  .home-actions .ha-btn {
-    padding: 10px 22px; border-radius: 999px; cursor: pointer;
-    border: 1px solid var(--border); background: var(--card); color: var(--text);
-    font-size: 13.5px; font-family: inherit; font-weight: 600;
-    transition: all var(--tr); box-shadow: var(--shadow-sm);
-  }
-  .home-actions .ha-btn:hover { border-color: var(--accent); box-shadow: var(--shadow-md);
-                                background: var(--accent-soft); color: var(--accent); }
+  /* 时光隧道：左侧琥珀色竖线区分最近动态 */
+  .msg-preview.tunnel { border-left: 3px solid transparent; padding-left: 5px;
+    transition: background .15s, border-color .15s; }
+  .msg-preview.tunnel:hover { border-left-color: var(--warn); }
 
   /* 移动端触控优化 */
   .photo-card, .msg-preview { touch-action: manipulation; }
@@ -355,7 +347,6 @@
     .msg-preview .mp-date { font-size: 11px; }
     .msg-preview .mp-text { font-size: 13px; }
     .msg-preview .mp-trans { font-size: 12px; }
-    .home-actions .ha-btn { padding: 10px 18px; font-size: 13px; }
     #homeNavLink { padding: 8px 4px; font-size: 15px; }
     .sk-strip > div { width: 148px; }
   }

@@ -20,6 +20,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import random
 import re
 import shutil
 import sys
@@ -41,9 +42,9 @@ _LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.htm
 
 _SESSION_COOKIE = "sakamichi_session"
 
-# 首页 API 缓存（基于 archive.db 的 mtime 判是否过期）
+# 首页 API 缓存（基于 archive.db 的 mtime + 日期，保证每天随机结果不同）
 _home_cache: dict | None = None
-_home_cache_mtime: float = 0
+_home_cache_key: tuple[float, str] | None = None
 
 # 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
@@ -1152,21 +1153,25 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "home":
-            # ── 缓存：基于 archive.db 的 mtime，数据未变则直接返回 ──
-            global _home_cache, _home_cache_mtime
+            # ── 缓存：基于 archive.db 的 mtime + 日期，跨天自动失效（随机种子每天不同）──
+            global _home_cache, _home_cache_key
             try:
                 db_mtime = _archive.get_db_path().stat().st_mtime
             except OSError:
                 db_mtime = 0
-            if _home_cache is not None and db_mtime == _home_cache_mtime:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            cache_key = (db_mtime, today_str)
+            if _home_cache is not None and _home_cache_key == cache_key:
                 self._send_json(_home_cache)
                 return
+
+            # 以日期为随机种子，保证同一天内"随机 6 张"结果稳定
+            random.seed(today_str)
 
             members = []
             for name in _archive.list_members():
                 months = _archive.list_months(name)
                 total = sum(m["count"] for m in months)
-                pics: list[dict] = []
                 latest_msgs: list[dict] = []
                 type_counts: dict[str, int] = {}
                 # 从最近月份往前找，收集图片和文字消息
@@ -1176,14 +1181,6 @@ class _Handler(BaseHTTPRequestHandler):
                         rid = m.get("id")
                         mtype = m.get("type", "text")
                         type_counts[mtype] = type_counts.get(mtype, 0) + 1
-                        if len(pics) < 30 and mtype in ("picture", "image") and m.get("_local_file"):
-                            pics.append({
-                                "id": rid,
-                                "text": m.get("text", ""),
-                                "url": f"/api/archive/media/{name}/{m['_local_file']}",
-                                "w": m.get("thumbnail_width"), "h": m.get("thumbnail_height"),
-                                "published_at": m.get("published_at") or m.get("updated_at", ""),
-                            })
                         if len(latest_msgs) < 8 and mtype == "text" and (m.get("text") or "").strip():
                             latest_msgs.append({
                                 "id": rid,
@@ -1191,7 +1188,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 "translation": m.get("_translation", ""),
                                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                             })
-                    if len(pics) >= 30 and len(latest_msgs) >= 8:
+                    if len(latest_msgs) >= 8:
                         break
 
                 # 月度分布
@@ -1245,24 +1242,45 @@ class _Handler(BaseHTTPRequestHandler):
                     "stats": stats,
                     "monthly": monthly,
                     "days": days,
-                    "pics": pics,
                     "latest_msgs": latest_msgs,
                 })
-            # ── 聚合：合并所有成员的图片和文字消息 ──
+            # ── 聚合：SQL 直查全量图片 → 最近 6 + 随机 6（不重复，种子=日期）──
             def _ym(utc_str: str) -> tuple[int, int]:
                 try:
                     return (int(utc_str[:4]), int(utc_str[5:7]))
                 except (ValueError, IndexError):
                     return (2026, 1)
-            agg_pics = sorted(
-                ({"member": m["name"], "member_display": m["display"],
-                  "id": p["id"], "text": p["text"], "url": p["url"],
-                  "w": p.get("w"), "h": p.get("h"),
-                  "published_at": p.get("published_at", ""),
-                  "year": _ym(p.get("published_at", ""))[0],
-                  "month": _ym(p.get("published_at", ""))[1]}
-                 for m in members for p in m["pics"]),
-                key=lambda x: x["published_at"], reverse=True)[:10]
+            db = _archive.init_db()
+            recent_pics = []
+            rand_pics = []
+            if db:
+                pic_rows = db.execute("""
+                    SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
+                    FROM messages
+                    WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
+                    ORDER BY published_at DESC
+                """).fetchall()
+                if pic_rows:
+                    pic_map = {r[0]: r for r in pic_rows}
+                    all_ids = [r[0] for r in pic_rows]
+                    recent_ids = all_ids[:6]
+                    rest_ids = [i for i in all_ids if i not in set(recent_ids)]
+                    random.seed(today_str)
+                    rand_ids = random.sample(rest_ids, min(6, len(rest_ids)))
+                    def _build_pic(row) -> dict:
+                        rj = json.loads(row[6])
+                        pub = row[4] or row[5] or ""
+                        return {
+                            "member": row[1], "member_display": row[1].replace("_", " "),
+                            "id": row[0], "text": row[2] or "",
+                            "url": f"/api/archive/media/{row[1]}/{row[3]}",
+                            "w": rj.get("thumbnail_width"), "h": rj.get("thumbnail_height"),
+                            "published_at": pub,
+                            "year": _ym(pub)[0], "month": _ym(pub)[1],
+                        }
+                    recent_pics = [_build_pic(pic_map[i]) for i in recent_ids]
+                    rand_pics = [_build_pic(pic_map[i]) for i in rand_ids]
+            agg_pics = recent_pics + rand_pics
             agg_msgs = sorted(
                 ({"member": m["name"], "member_display": m["display"],
                   "id": msg["id"], "text": msg["text"], "translation": msg["translation"],
@@ -1270,7 +1288,32 @@ class _Handler(BaseHTTPRequestHandler):
                   "year": _ym(msg.get("published_at", ""))[0],
                   "month": _ym(msg.get("published_at", ""))[1]}
                  for m in members for msg in m["latest_msgs"]),
-                key=lambda x: x["published_at"], reverse=True)[:10]
+                key=lambda x: x["published_at"], reverse=True)[:6]
+            # ── 时光隧道：从全量历史中随机抽取 4 条文字消息（排除最近 6 条）──
+            recent_msg_ids = {m["id"] for m in agg_msgs}
+            rand_msgs = []
+            if db:
+                txt_rows = db.execute("""
+                    SELECT id, member_name, text, translation, published_at, updated_at
+                    FROM messages
+                    WHERE type='text' AND text IS NOT NULL AND trim(text)!=''
+                    ORDER BY published_at DESC
+                """).fetchall()
+                if txt_rows:
+                    txt_map = {r[0]: r for r in txt_rows}
+                    rest_txt_ids = [r[0] for r in txt_rows if r[0] not in recent_msg_ids]
+                    random.seed(today_str)
+                    n_rand = min(4, len(rest_txt_ids))
+                    rand_txt_ids = random.sample(rest_txt_ids, n_rand) if n_rand > 0 else []
+                    for rid in rand_txt_ids:
+                        r = txt_map[rid]
+                        pub = r[4] or r[5] or ""
+                        rand_msgs.append({
+                            "member": r[1], "member_display": r[1].replace("_", " "),
+                            "id": r[0], "text": r[2] or "", "translation": r[3] or "",
+                            "published_at": pub,
+                            "year": _ym(pub)[0], "month": _ym(pub)[1],
+                        })
             agg_total = sum(m["stats"]["total"] for m in members)
             agg_first = min((m["stats"]["first_date"] for m in members if m["stats"]["first_date"]), default="")
             agg_last = max((m["stats"]["last_date"] for m in members if m["stats"]["last_date"]), default="")
@@ -1280,10 +1323,10 @@ class _Handler(BaseHTTPRequestHandler):
             last_updated = max(last_pub, last_msg)
 
             # 本周 / 上周统计
-            from datetime import datetime as _dt, timedelta
+            from datetime import datetime as _dt
             now = _dt.now()
-            today_str = now.strftime("%Y-%m-%d")
-            this_week = 0; last_week = 0
+            this_week = 0
+            last_week = 0
             for m in members:
                 dm = _archive.day_counts(m["name"])
                 for d, c in dm.items():
@@ -1305,11 +1348,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "week_stats": {"this_week": this_week, "last_week": last_week},
                 "pics": agg_pics,
                 "latest_msgs": agg_msgs,
+                "random_msgs": rand_msgs,
             }
             result = {"ok": True, "members": members, "count": len(members),
                        "aggregated": aggregated}
             _home_cache = result
-            _home_cache_mtime = db_mtime
+            _home_cache_key = cache_key
             self._send_json(result)
             return
 

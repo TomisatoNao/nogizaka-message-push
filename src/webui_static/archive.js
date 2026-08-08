@@ -249,27 +249,45 @@ async function jumpToDay(dateKey) {
   }, 5000);
 }
 
+// ── 成员选择器（header 下拉框，主页和归档页共用）──
+function populateMemberSelect(memberList) {
+  const sel = $("memberSelect");
+  sel.innerHTML = '<option value="">📂 选择成员…</option>';
+  for (const m of memberList) {
+    const opt = document.createElement("option");
+    opt.value = m.name;
+    opt.textContent = m.display + "（" + (m.total || (m.stats && m.stats.total) || "") + "）";
+    sel.appendChild(opt);
+  }
+}
+$("memberSelect").addEventListener("change", () => {
+  const name = $("memberSelect").value;
+  if (!name) return;
+  if ($("archiveHome").classList.contains("active")) {
+    // 从主页跳转到成员归档
+    hideHome();
+    curMember = name; curType = ""; searchQuery = "";
+    syncSearchInput(); targetMsgId = "";
+    selfHashUpdate = true;
+    location.hash = "member=" + encodeURIComponent(name);
+    setTimeout(() => { selfHashUpdate = false; }, 100);
+    loadMembers();
+  } else {
+    selectMember(name);
+  }
+});
+
 // ── 数据加载 ─────────────────────────────────────
 async function loadMembers() {
   const data = await api("/api/archive/members");
   if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
   members = data.members;
-  const box = $("memberChips");
-  box.innerHTML = "";
   if (!members.length) {
     showEmpty("还没有任何归档。确认 config.json 的 archive.enabled 已开启，" +
               "新消息会自动归档；历史消息用 python tools/backfill_archive.py 回填。");
     return;
   }
-  for (const m of members) {
-    const b = document.createElement("button");
-    b.className = "chip" + (m.name === curMember ? " active" : "");
-    b.textContent = m.display + "（" + m.total + "）";
-    b.addEventListener("click", () => { selectMember(m.name); });
-    box.appendChild(b);
-  }
-  // 无论 hash 是否指定成员都要真正加载一次：
-  // 早先只在"成员缺失或无效"时才调用，导致带 member= 的深链打开后一片空白
+  populateMemberSelect(members);
   const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
   await selectMember(wanted, true);
 }
@@ -279,8 +297,7 @@ async function selectMember(name, keepHash) {
   curMember = name;
   if (!keepHash) searchQuery = "";
   syncSearchInput();
-  $("memberChips").querySelectorAll(".chip").forEach((c, i) =>
-    c.classList.toggle("active", members[i] && members[i].name === name));
+  $("memberSelect").value = name;
   const data = await api("/api/archive/months?member=" + encodeURIComponent(name));
   if (version !== memberVersion) return;
   months = data.ok ? data.months : [];
@@ -852,6 +869,8 @@ async function showHome() {
         '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
       return;
     }
+    populateMemberSelect(data.members);
+    $("memberSelect").value = "";
     renderHome(data.aggregated, data.members);
     $('homeSkeleton').classList.remove('active');
     $('archiveHome').querySelector('.home-hero').style.display = '';
@@ -953,22 +972,80 @@ function renderHome(agg, members) {
 
   // 图片条自动滚动
   let photoTimer = null;
+  let photoScrolling = false;
   function photoAdvance() {
+    if (photoScrolling) return;
     if (strip.scrollWidth <= strip.clientWidth) return;
     const step = (strip.querySelector('.photo-card')?.offsetWidth || 172) + 10;
+    let target;
     if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 10) {
-      strip.scrollLeft = 0;
+      target = 0;
     } else {
-      strip.scrollLeft += step;
+      target = strip.scrollLeft + step;
     }
+    photoScrolling = true;
+    strip.scrollTo({ left: target, behavior: 'smooth' });
+    setTimeout(() => { photoScrolling = false; }, 700);
   }
   function startPhotoScroll() { if (!photoTimer) photoTimer = setInterval(photoAdvance, 2200); }
-  function stopPhotoScroll() { clearInterval(photoTimer); photoTimer = null; }
+  function stopPhotoScroll() { clearInterval(photoTimer); photoTimer = null; photoScrolling = false; }
   startPhotoScroll();
   strip.addEventListener("touchstart", stopPhotoScroll, { once: true });
   strip.addEventListener("wheel", stopPhotoScroll, { once: true });
   strip.addEventListener("mouseenter", stopPhotoScroll);
   strip.addEventListener("mouseleave", startPhotoScroll);
+
+  // 桌面端鼠标拖拽滑动（带惯性）
+  let dragOn = false, dragStartX = 0, dragStartScroll = 0;
+  let dragTrail = [];
+  let dragMoved = false;
+  let inertiaRaf = null;
+  function cancelInertia() { if (inertiaRaf) { cancelAnimationFrame(inertiaRaf); inertiaRaf = null; } }
+  function startInertia(pxPerFrame) {
+    cancelInertia();
+    if (Math.abs(pxPerFrame) < 0.3) return;
+    let v = pxPerFrame;
+    const friction = 0.94;
+    function step() {
+      v *= friction;
+      strip.scrollLeft -= v;
+      if (Math.abs(v) > 0.25 && strip.scrollLeft > 0 &&
+          strip.scrollLeft < strip.scrollWidth - strip.clientWidth) {
+        inertiaRaf = requestAnimationFrame(step);
+      } else { cancelInertia(); }
+    }
+    inertiaRaf = requestAnimationFrame(step);
+  }
+  strip.addEventListener("mousedown", (e) => {
+    dragOn = true; dragStartX = e.clientX; dragStartScroll = strip.scrollLeft;
+    dragTrail = []; dragMoved = false;
+    cancelInertia(); stopPhotoScroll();
+    strip.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragOn) return;
+    strip.scrollLeft = dragStartScroll + (dragStartX - e.clientX);
+    if (Math.abs(e.clientX - dragStartX) > 4) dragMoved = true;
+    dragTrail.push({ t: performance.now(), x: e.clientX });
+    const cutoff = performance.now() - 100;
+    dragTrail = dragTrail.filter(p => p.t > cutoff);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragOn) return;
+    dragOn = false;
+    strip.style.cursor = "";
+    if (dragTrail.length >= 2) {
+      const a = dragTrail[0], b = dragTrail[dragTrail.length - 1];
+      const dt = b.t - a.t;
+      if (dt > 5) startInertia((b.x - a.x) / dt * 16);
+    }
+    dragTrail = [];
+    setTimeout(() => { if (!dragOn) startPhotoScroll(); }, 3000);
+  });
+  strip.addEventListener("click", (e) => {
+    if (dragMoved) { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
 
   // ── Section: 最近动态 ──
   const msgDiv = $("homeMsgList");
@@ -1012,24 +1089,48 @@ function renderHome(agg, members) {
     msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无文字消息</div>';
   }
 
-  // ── 快捷入口 ──
-  $("homeActions").innerHTML = members.map(m =>
-    '<button class="ha-btn" data-member="' + esc(m.name) + '">📂 ' + esc(m.display) + ' 的归档</button>'
-  ).join('');
-  $("homeActions").querySelectorAll('.ha-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      hideHome();
-      curMember = btn.dataset.member;
-      curType = "";
-      searchQuery = "";
-      syncSearchInput();
-      targetMsgId = "";
-      selfHashUpdate = true;
-      location.hash = "member=" + encodeURIComponent(btn.dataset.member);
-      setTimeout(() => { selfHashUpdate = false; }, 100);
-      loadMembers();
+  // ── Section: 时光隧道 ──
+  const tunnelDiv = $("homeTimeTunnel");
+  if (agg.random_msgs && agg.random_msgs.length) {
+    let html = '';
+    const multi = members.length > 1;
+    agg.random_msgs.forEach((msg, i) => {
+      const d = new Date(msg.published_at + "Z");
+      const dateStr = isNaN(d.getTime()) ? '' : (d.getFullYear()) + '/' + (d.getMonth()+1) + '/' + d.getDate();
+      const timeStr = isNaN(d.getTime()) ? '' : String(d.getHours()).padStart(2,"0") + ':' + String(d.getMinutes()).padStart(2,"0");
+      html += '<div class="msg-preview tunnel' + (multi ? '' : ' msg-single') + '" style="animation-delay:' + (i * .08) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
+      if (multi) {
+        html += '<div class="mp-left">';
+        html += '<div class="mp-date">' + dateStr + '</div>';
+        html += '<div class="mp-date" style="font-weight:600">' + timeStr + '</div>';
+        html += '<div class="mp-mem">' + esc(msg.member_display) + '</div>';
+        html += '</div>';
+      }
+      html += '<div class="mp-body">';
+      if (!multi) html += '<div class="mp-date">' + dateStr + ' ' + timeStr + '</div>';
+      html += '<div class="mp-text">' + esc(msg.text) + '</div>';
+      if (msg.translation) html += '<div class="mp-trans">' + esc(msg.translation) + '</div>';
+      html += '</div></div>';
     });
-  });
+    tunnelDiv.innerHTML = html;
+    tunnelDiv.querySelectorAll('.msg-preview').forEach(el => {
+      el.addEventListener('click', () => {
+        hideHome();
+        curMember = el.dataset.member;
+        curType = "";
+        searchQuery = "";
+        syncSearchInput();
+        targetMsgId = el.dataset.id;
+        selfHashUpdate = true;
+        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
+        setTimeout(() => { selfHashUpdate = false; }, 100);
+        loadMembers();
+      });
+    });
+  } else {
+    tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无历史消息</div>';
+  }
+
 }
 
 function goHome() {
@@ -1037,6 +1138,7 @@ function goHome() {
   curType = "";
   searchQuery = "";
   syncSearchInput();
+  $("memberSelect").value = "";
   location.hash = "";
   showHome();
 }
