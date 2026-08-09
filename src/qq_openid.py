@@ -34,6 +34,7 @@ class OpenIdSession:
         self.openid = ""
         self.sender = ""           # 附带的用户昵称（若事件里有）
         self.error = ""
+        self.mode = "user"         # "user" | "group"
         self.started_at = 0.0
         self.task: asyncio.Task | None = None
 
@@ -47,6 +48,7 @@ class OpenIdSession:
             "sender": self.sender,
             "error": self.error,
             "seconds_left": remaining,
+            "mode": self.mode,
         }
 
 
@@ -107,8 +109,11 @@ async def _heartbeat(ws, interval_ms: int, seq_ref: dict) -> None:
 
 
 async def listen_once(app_id: str, client_secret: str,
-                      on_event=None, timeout: float = SESSION_TIMEOUT) -> dict:
-    """连接网关并等待第一个带 openid 的事件。
+                      on_event=None, timeout: float = SESSION_TIMEOUT,
+                      mode: str = "user") -> dict:
+    """连接网关并等待匹配的事件。
+    mode='user': 监听 C2C_MESSAGE_CREATE → 返回 user openid
+    mode='group': 监听 GROUP_AT_MESSAGE_CREATE → 返回 group_openid
     返回 {"openid": ..., "sender": ..., "raw": {...}}；超时抛 TimeoutError。"""
     try:
         import websockets
@@ -148,14 +153,25 @@ async def listen_once(app_id: str, client_secret: str,
                     continue
                 if on_event:
                     on_event(event)
-                hits = find_openid_values(event)
-                if hits:
-                    author = (event.get("d") or {}).get("author") or {}
-                    return {
-                        "openid": hits[0][1],
-                        "sender": author.get("username", "") or author.get("user_openid", ""),
-                        "raw": event,
-                    }
+                t = event.get("t", "")
+                d = event.get("d") or {}
+                if mode == "group":
+                    if t == "GROUP_AT_MESSAGE_CREATE" and d.get("group_openid"):
+                        author = d.get("author") or {}
+                        return {
+                            "openid": d["group_openid"],
+                            "sender": author.get("username", "") or author.get("user_openid", ""),
+                            "raw": event,
+                        }
+                else:
+                    hits = find_openid_values(event)
+                    if hits:
+                        author = d.get("author") or {}
+                        return {
+                            "openid": hits[0][1],
+                            "sender": author.get("username", "") or author.get("user_openid", ""),
+                            "raw": event,
+                        }
         finally:
             hb.cancel()
 
@@ -253,15 +269,16 @@ async def _reply(data: dict, sender_openid: str, text: str,
         log_all(f"⚠️ Bot 指令回复异常: {type(e).__name__}: {e}", is_error=True)
 
 
-async def _run_session(app_id: str, client_secret: str) -> None:
+async def _run_session(app_id: str, client_secret: str, mode: str = "user") -> None:
     from src.logger import log_all
     try:
         _session.state = "connecting"
-        result = await listen_once(app_id, client_secret)
+        result = await listen_once(app_id, client_secret, mode=mode)
         _session.openid = result["openid"]
         _session.sender = result.get("sender", "")
         _session.state = "captured"
-        log_all(f"🎯 已捕获 QQ 官方 Bot 目标 openid（来自 {_session.sender or '未知用户'}）")
+        label = "群 openid" if mode == "group" else "目标 openid"
+        log_all(f"🎯 已捕获 QQ 官方 Bot {label}（来自 {_session.sender or '未知用户'}）")
     except asyncio.CancelledError:
         _session.state = "stopped"
         raise
@@ -274,20 +291,22 @@ async def _run_session(app_id: str, client_secret: str) -> None:
         log_all(f"⚠️ openid 监听失败: {_session.error}", is_error=True)
 
 
-def start_session(app_id: str, client_secret: str) -> tuple[bool, str]:
-    """启动监听（需在事件循环内调用）。返回 (是否启动, 说明)。"""
+def start_session(app_id: str, client_secret: str, mode: str = "user") -> tuple[bool, str]:
+    """启动监听（需在事件循环内调用）。mode: 'user' | 'group'。返回 (是否启动, 说明)。"""
     if _session.state in ("connecting", "waiting"):
         return False, "已有监听在进行中，请先停止"
     _session.__init__()          # 重置状态
+    _session.mode = mode
     _session.state = "connecting"
     _session.started_at = time.time()
-    _session.task = asyncio.create_task(_run_session(app_id, client_secret))
+    _session.task = asyncio.create_task(_run_session(app_id, client_secret, mode))
 
     def _mark_waiting(_task=None):
         if _session.state == "connecting":
             _session.state = "waiting"
     asyncio.get_running_loop().call_later(2, _mark_waiting)
-    return True, "已开始监听，请让目标用户现在给 Bot 发一条私聊消息"
+    hint = "请把 Bot 拉进目标群，然后 @机器人 发一条消息" if mode == "group" else "请让目标用户现在给 Bot 发一条私聊消息"
+    return True, "已开始监听，" + hint
 
 
 def stop_session() -> None:

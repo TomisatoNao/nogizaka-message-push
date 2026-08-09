@@ -24,11 +24,14 @@ _MEDIA_FILE_TYPES = {
 class QQOfficialBot:
     """单个 QQ 官方 Bot 实例，独立管理 token 和发送状态。"""
 
-    def __init__(self, name: str, app_id: str, client_secret: str, target_openid: str):
+    def __init__(self, name: str, app_id: str, client_secret: str, target_openid: str,
+                 group_openid: str = "", member_filter: list[str] | None = None):
         self.name = name
         self.app_id = app_id
         self.client_secret = client_secret
         self.target_openid = target_openid
+        self.group_openid = group_openid
+        self.member_filter: list[str] = member_filter or []
 
         # 实例级状态
         self._client: httpx.AsyncClient = None
@@ -43,13 +46,14 @@ class QQOfficialBot:
         self._lock = asyncio.Lock()
 
     def is_configured(self) -> bool:
-        return bool(self.app_id and self.client_secret and self.target_openid)
+        """凭证完整即可（target_openid 允许为空——群推送专用 Bot 不需要单聊目标）。"""
+        return bool(self.app_id and self.client_secret)
 
     async def ensure_access_token(self) -> bool:
         """获取并缓存 access_token。"""
         if not self.is_configured():
             log_all(
-                f"🚨 官方 QQ Bot [{self.name}] 配置不完整，请检查 APP_ID / CLIENT_SECRET / TARGET_OPENID",
+                f"🚨 官方 QQ Bot [{self.name}] 配置不完整，请检查 APP_ID / CLIENT_SECRET",
                 is_error=True,
             )
             return False
@@ -172,7 +176,12 @@ class QQOfficialBot:
             }
             return await self._post_json(url, payload, max_retries) is not None
 
-    async def _upload_media(self, media_type: str, content: bytes) -> str | None:
+    def _target_base(self, scope: str, target_openid: str) -> str:
+        """scope: 'users' | 'groups'。构造 v2 目标基础 URL。"""
+        return f"{cfg.QQ_OFFICIAL_API_BASE}/v2/{scope}/{target_openid}"
+
+    async def _upload_media(self, media_type: str, content: bytes,
+                            *, scope: str = "users", target_openid: str | None = None) -> str | None:
         if not await self.ensure_access_token():
             return None
 
@@ -180,7 +189,8 @@ class QQOfficialBot:
         if not file_type:
             return None
 
-        url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/files"
+        openid = target_openid or self.target_openid
+        url = f"{self._target_base(scope, openid)}/files"
         payload = {
             "file_type": file_type,
             "file_data": base64.b64encode(content).decode("ascii"),
@@ -205,8 +215,10 @@ class QQOfficialBot:
             return None
         return file_info
 
-    async def _send_uploaded_media(self, file_info: str) -> bool:
-        url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
+    async def _send_uploaded_media(self, file_info: str,
+                                    *, scope: str = "users", target_openid: str | None = None) -> bool:
+        openid = target_openid or self.target_openid
+        url = f"{self._target_base(scope, openid)}/messages"
         payload = {
             "msg_type": 7,
             "media": {
@@ -215,14 +227,10 @@ class QQOfficialBot:
         }
         return await self._post_json(url, payload) is not None
 
-    async def send_message_chain(self, member: dict, message_chain: list[dict],
-                                 media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
-        """
-        发送完整消息链。
-        文本单独发送；图片/视频/语音先下载私有资源，再上传到 QQ 官方 Bot 后发送。
-        media_payloads 可传入预先下载好的媒体内容（多 Bot 时由 notifier 下载一次共用，
-        上传仍须按 Bot 各自进行 —— file_info 与 app_id 绑定）；None 表示自行下载。
-        """
+    async def _send_chain(self, scope: str, target_openid: str, member: dict,
+                          message_chain: list[dict],
+                          media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
+        """共享的链式发送核心：文字 + 媒体。scope='users'|'groups'。"""
         async with self._lock:
             if not await self.ensure_access_token():
                 return False
@@ -230,7 +238,7 @@ class QQOfficialBot:
             ok = True
             text = chain_to_text(message_chain)
             if text:
-                url = f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{self.target_openid}/messages"
+                url = f"{self._target_base(scope, target_openid)}/messages"
                 if await self._post_json(url, {"content": text[:1900], "msg_type": 0}) is None:
                     ok = False
 
@@ -238,13 +246,34 @@ class QQOfficialBot:
                 media_payloads = await download_media_payloads(member, message_chain)
             for media_type, content in media_payloads:
                 if content is None:
-                    ok = False   # 下载阶段已失败并记录日志
+                    ok = False
                     continue
-                file_info = await self._upload_media(media_type, content)
-                if not file_info or not await self._send_uploaded_media(file_info):
+                file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid)
+                if not file_info or not await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid):
                     ok = False
 
             return ok
+
+    async def send_message_chain(self, member: dict, message_chain: list[dict],
+                                 media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
+        """向配置的目标 openid 发送单聊完整消息链。"""
+        return await self._send_chain("users", self.target_openid, member, message_chain, media_payloads)
+
+    async def send_message_chain_to_group(self, group_openid: str, member: dict,
+                                          message_chain: list[dict],
+                                          media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
+        """向指定群聊发送完整消息链。"""
+        return await self._send_chain("groups", group_openid, member, message_chain, media_payloads)
+
+    async def send_group_text(self, group_openid: str, text: str, max_retries: int = 3) -> bool:
+        """向指定群聊发送纯文本消息。"""
+        if not text.strip():
+            return False
+        async with self._lock:
+            if not await self.ensure_access_token():
+                return False
+            url = f"{self._target_base('groups', group_openid)}/messages"
+            return await self._post_json(url, {"content": text[:1900], "msg_type": 0}, max_retries) is not None
 
 
 # ──────────────────────────────────────────────
@@ -308,6 +337,8 @@ def initialize(client: httpx.AsyncClient) -> None:
             app_id=bot_cfg["app_id"],
             client_secret=bot_cfg.get("client_secret", ""),
             target_openid=bot_cfg.get("target_openid", ""),
+            group_openid=bot_cfg.get("group_openid", ""),
+            member_filter=bot_cfg.get("member_filter") or [],
         )
         bot.initialize(client)
         _bots.append(bot)

@@ -396,9 +396,11 @@ def _qq_bot_status(raw: dict) -> list[dict]:
                 "app_id": bool(b.get("app_id") or os.getenv(f"{prefix}_APP_ID")),
                 "client_secret": bool(os.getenv(f"{prefix}_CLIENT_SECRET")),
                 "target_openid": bool(b.get("target_openid") or os.getenv(f"{prefix}_TARGET_OPENID")),
+                "group_openid": bool(b.get("group_openid") or os.getenv(f"{prefix}_GROUP_OPENID")),
+                "member_filter": b.get("member_filter") or [],
                 "secret_env": f"{prefix}_CLIENT_SECRET",
             }
-            entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
+            entry["ok"] = entry["app_id"] and entry["client_secret"]
             bots.append(entry)
         return bots
 
@@ -414,7 +416,7 @@ def _qq_bot_status(raw: dict) -> list[dict]:
             "target_openid": bool(os.getenv(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID")),
             "secret_env": f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET",
         }
-        entry["ok"] = entry["app_id"] and entry["client_secret"] and entry["target_openid"]
+        entry["ok"] = entry["app_id"] and entry["client_secret"]
         # 必须有 APP_ID 才算一个真实的旧槽位：app_id 才是 Bot 的身份，
         # 只剩 SECRET 的多半是删除 Bot 后的残留，不该再显示成槽位
         if entry["app_id"]:
@@ -909,6 +911,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_openid(self, action: str) -> None:
         """openid 捕获会话：start 需要 app_id + client_secret，
+        mode: 'user'（单聊）| 'group'（群聊）。
         secret 只用于本次连接，不落盘、不回显。"""
         if _on_openid_cb is None:
             self._send_json({"ok": False, "errors": [
@@ -916,7 +919,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if action == "stop":
-            ok, msg = _on_openid_cb("stop", "", "")
+            ok, msg = _on_openid_cb("stop", "", "", "")
             self._send_json({"ok": ok, "message": msg})
             return
 
@@ -925,7 +928,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         app_id = str(body.get("app_id", "")).strip()
         secret = str(body.get("client_secret", "")).strip()
-        # secret 允许留空 → 用 .env 里该 Bot 已配置的值
+        mode = str(body.get("mode", "user")).strip() or "user"
         if not app_id:
             self._send_json({"ok": False, "errors": ["缺少 App ID"]}, 400)
             return
@@ -937,7 +940,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "缺少 Client Secret（.env 里也没有该 Bot 的密钥）"]}, 400)
                 return
 
-        ok, msg = _on_openid_cb("start", app_id, secret)
+        ok, msg = _on_openid_cb("start", app_id, secret, mode)
         self._send_json({"ok": ok, "message": msg} if ok
                         else {"ok": False, "errors": [msg]}, 200 if ok else 409)
 
@@ -1582,7 +1585,7 @@ class _Handler(BaseHTTPRequestHandler):
                 f"🧪 坂道监控 · 测试推送\n发送时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                 "（来自网页管理端，收到即代表该通道配置正确）"
             )
-            if channel not in ("tg", "napcat"):
+            if channel not in ("tg", "napcat", "official"):
                 self._send_json({"ok": False, "errors": [f"不支持的通道: {channel!r}"]}, 400)
                 return
             if not target:

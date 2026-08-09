@@ -621,6 +621,13 @@ async def main() -> None:
                     return False, "NapCat 通道未启用（channels.napcat）"
                 chain = [{"type": "text", "data": {"text": text}}]
                 coro = napcat.send_qq_message(int(target), chain)
+            elif channel == "official":
+                if not cfg.ENABLE_QQ_OFFICIAL_BOT:
+                    return False, "QQ 官方 Bot 通道未启用（channels.qq_official）"
+                bots = qq_official.get_configured_bots()
+                if not bots:
+                    return False, "没有已配置的官方 Bot"
+                coro = bots[0].send_group_text(target, text)
             else:
                 return False, f"不支持的通道: {channel}"
             fut = asyncio.run_coroutine_threadsafe(coro, loop)
@@ -632,15 +639,16 @@ async def main() -> None:
         health.get_tracker().record_channel(channel, ok, err or None)
         return ok, err
 
-    def _openid_action(action: str, app_id: str, secret: str) -> tuple[bool, str]:
-        """网页端的 openid 监听控制（HTTP 线程调用，调度到主事件循环）。"""
+    def _openid_action(action: str, app_id: str, secret: str, mode: str = "user") -> tuple[bool, str]:
+        """网页端的 openid 监听控制（HTTP 线程调用，调度到主事件循环）。
+        mode: 'user'（单聊）| 'group'（群聊）。"""
         from src import qq_openid
 
         async def _do():
             if action == "stop":
                 qq_openid.stop_session()
                 return True, "已停止监听"
-            return qq_openid.start_session(app_id, secret)
+            return qq_openid.start_session(app_id, secret, mode)
 
         try:
             return asyncio.run_coroutine_threadsafe(_do(), loop).result(timeout=20)

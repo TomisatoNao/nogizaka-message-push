@@ -45,15 +45,40 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
         bots = get_configured_bots()
-        # 媒体只下载一次，分发给所有 Bot（上传仍按 Bot 各自进行）
         media_payloads = None
         if bots:
             media_payloads = await qq_official.download_media_payloads(member, message_chain)
+
+        def _resolve_bot(name: str):
+            if name:
+                for b in bots:
+                    if b.name == name:
+                        return b
+                return None
+            return bots[0] if bots else None
+
+        # 单聊目标（target_openid）—— 受 member_filter 过滤
         for bot in bots:
+            if not bot.target_openid:
+                continue
+            if bot.member_filter and member.get("m_name", "") not in bot.member_filter:
+                continue
             ok = await bot.send_message_chain(member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}", ok)
             if not ok:
-                log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 推送失败", is_error=True)
+                log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 单聊推送失败", is_error=True)
+
+        # 群聊目标（group_openid）—— 受 member_filter 过滤
+        for bot in bots:
+            if not bot.group_openid:
+                continue
+            if bot.member_filter and member.get("m_name", "") not in bot.member_filter:
+                continue
+            ok = await bot.send_message_chain_to_group(
+                bot.group_openid, member, message_chain, media_payloads=media_payloads)
+            health.get_tracker().record_channel(f"official:{bot.name}:group", ok)
+            if not ok:
+                log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 群推送失败 ({bot.group_openid[:16]}…)", is_error=True)
 
     # TG Bot 作为旁路推送，失败不影响 QQ 状态
     if cfg.ENABLE_TG_BOT:
@@ -80,6 +105,8 @@ async def send_report_message(text: str) -> bool:
 
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
         for bot in get_configured_bots():
+            if not bot.target_openid:
+                continue      # 群专用 Bot，跳过单聊报告
             if await bot.send_text(text):
                 any_ok = True
 
@@ -121,6 +148,8 @@ async def send_alert_message(target_group: int, text: str) -> bool:
             log_all(f"⏸️ 没有已配置的 QQ 官方 Bot，警报未发送: {text}", is_error=True)
         else:
             for bot in bots:
+                if not bot.target_openid:
+                    continue    # 群专用 Bot，跳过单聊告警
                 ok = await bot.send_text(f"📢 系统警报\n{text}")
                 if ok:
                     any_ok = True

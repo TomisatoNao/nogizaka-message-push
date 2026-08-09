@@ -277,7 +277,7 @@
     <div class="card">
       <h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>名称</th><th>App ID</th><th>目标 OpenID</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
+        <thead><tr><th>名称</th><th>App ID</th><th>个人 OpenID</th><th>群 OpenID</th><th>推送成员</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
         <tbody id="qqBotRows"></tbody>
       </table></div>
       <div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
@@ -547,9 +547,13 @@
 <!-- QQ openid 捕获对话框 -->
 <dialog id="openidDialog">
   <h3>自动获取目标 OpenID</h3>
-  <div class="dialog-note">
+  <div class="dialog-note" id="openidNote">
     官方 Bot 只能从「用户主动私聊 Bot」的事件里拿到 OpenID。点开始后，
     <b>让目标用户给 Bot 发一条私聊消息</b>，捕获成功会自动填回表格。
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">类型</span></div>
+    <div class="chips" id="openidMode"></div>
   </div>
   <div class="secret-field">
     <div class="flabel"><span class="fname">Bot</span>
@@ -910,7 +914,7 @@ function stopStatusPolling() {
 
 // ── 测试推送 ─────────────────────────────────────
 function testPushPrefill(channel) {
-  $("testPushTargetHint").textContent = channel === "tg" ? "TG chat_id" : "QQ 群号";
+  $("testPushTargetHint").textContent = channel === "tg" ? "TG chat_id" : channel === "official" ? "群 openid" : "QQ 群号";
   const monitor = config && config.monitor || [];
   // 收集配置里该通道的全部目标（去重）供下拉选择
   const targets = [];
@@ -937,7 +941,8 @@ $("btnTestPush").addEventListener("click", () => {
   const enabled = [];
   if (ch.tg) enabled.push(["tg", "Telegram"]);
   if (ch.napcat) enabled.push(["napcat", "NapCat QQ"]);
-  if (!enabled.length) { uiAlert("没有已启用的可测试通道（TG / NapCat），先在「基本设置」打开通道开关。"); return; }
+  if (ch.qq_official) enabled.push(["official", "QQ 官方 Bot"]);
+  if (!enabled.length) { uiAlert("没有已启用的可测试通道，先在「基本设置」打开通道开关。"); return; }
   chipGroup("testPushChannel", enabled, enabled[0][0]);
   // chip 切换时联动预填目标
   $("testPushChannel").querySelectorAll(".chip").forEach((c, i) => {
@@ -1063,6 +1068,9 @@ function renderGeneral() {
 let canCaptureOpenid = false;   // 独立模式下没有事件循环跑 WebSocket 监听
 
 function renderQqBots() {
+  // 清理上次渲染挂在 body 上的旧面板
+  document.querySelectorAll(".member-filter-panel").forEach(p => p.remove());
+  window._memberFilterPanels = [];
   const tbody = $("qqBotRows");
   tbody.innerHTML = "";
   const enabled = (config.channels || {}).qq_official;
@@ -1094,7 +1102,102 @@ function renderQqBots() {
       const openidInput = mkInput(bot.target_openid || "", (v) => {
         const t = v.trim(); if (t) bot.target_openid = t; else delete bot.target_openid;
       }, "ABCDEF0123...", "width:150px");
-      tdOpenid.appendChild(openidInput);   // 「自动获取」放在操作列，避免撑歪本列对齐
+      tdOpenid.appendChild(openidInput);
+
+      // 群 OpenID
+      const tdGroupOpenid = document.createElement("td");
+      const gidInput = mkInput(bot.group_openid || "", (v) => {
+        const t = v.trim(); if (t) bot.group_openid = t; else delete bot.group_openid;
+      }, "群 OpenID", "width:130px");
+      tdGroupOpenid.appendChild(gidInput);
+
+      // 推送成员（紧凑下拉面板，挂 body 避免表格裁剪）
+      const tdMemberFilter = document.createElement("td");
+      const monitor = config.monitor || [];
+      bot.member_filter = (bot.member_filter || []).filter(n => monitor.some(m => m.name === n));
+      const trigger = document.createElement("button");
+      trigger.type = "button"; trigger.className = "btn small";
+      trigger.style.whiteSpace = "nowrap";
+      const updateTrigger = () => {
+        const n = bot.member_filter.length;
+        trigger.textContent = n ? "已选 " + n + " 人 ▾" : (monitor.length ? "全部成员 ▾" : "无成员 ▾");
+      };
+      updateTrigger();
+      tdMemberFilter.appendChild(trigger);
+
+      // 面板挂到 body，用 getBoundingClientRect 定位
+      const panel = document.createElement("div");
+      panel.className = "member-filter-panel";
+      panel.style.cssText = "display:none;position:fixed;z-index:999;min-width:170px;"
+        + "background:var(--card);border:1px solid var(--border);border-radius:8px;"
+        + "box-shadow:var(--shadow-lg);padding:8px;max-height:260px;overflow-y:auto";
+      panel.addEventListener("click", (e) => { e.stopPropagation(); });
+      let panelOpen = false;
+      const openPanel = () => {
+        const r = trigger.getBoundingClientRect();
+        panel.style.top = (r.bottom + 4) + "px";
+        panel.style.left = Math.min(r.left, window.innerWidth - 190) + "px";
+        panel.style.display = "block"; panelOpen = true;
+      };
+      const closePanel = () => { panel.style.display = "none"; panelOpen = false; };
+      if (!monitor.length) {
+        panel.textContent = "还没有监控成员";
+      } else {
+        const allRow = document.createElement("div");
+        allRow.style.cssText = "display:flex;gap:6px;padding:2px 6px 6px;border-bottom:1px solid var(--border-soft);margin-bottom:4px";
+        const allBtn = document.createElement("button");
+        allBtn.type = "button"; allBtn.className = "btn small"; allBtn.textContent = "全选";
+        allBtn.addEventListener("click", () => {
+          const all = bot.member_filter.length === monitor.length;
+          bot.member_filter = all ? [] : [...monitor.map(m => m.name)].sort();
+          panel.querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = !all; });
+          updateTrigger(); markDirty();
+          allBtn.textContent = all ? "全选" : "取消全选";
+        });
+
+        // 统一排序，保证选中顺序与 monitor 一致
+        const sortMemberFilter = () => {
+          bot.member_filter = bot.member_filter.filter(n => monitor.some(m => m.name === n)).sort();
+        };
+        allRow.appendChild(allBtn);
+        panel.appendChild(allRow);
+        monitor.forEach(m => {
+          const lbl = document.createElement("label");
+          lbl.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 6px;"
+            + "cursor:pointer;font-size:13px;border-radius:4px;white-space:nowrap";
+          lbl.addEventListener("mouseenter", () => { lbl.style.background = "var(--card-soft)"; });
+          lbl.addEventListener("mouseleave", () => { lbl.style.background = ""; });
+          const cb = document.createElement("input");
+          cb.type = "checkbox"; cb.checked = bot.member_filter.includes(m.name); cb.style.accentColor = "var(--accent)";
+          cb.addEventListener("change", () => {
+            if (cb.checked) {
+              if (!bot.member_filter.includes(m.name)) bot.member_filter.push(m.name);
+            } else {
+              bot.member_filter = bot.member_filter.filter(n => n !== m.name);
+            }
+            sortMemberFilter();
+            updateTrigger(); markDirty();
+          });
+          lbl.append(cb, document.createTextNode(m.name));
+          panel.appendChild(lbl);
+        });
+      }
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();
+        panelOpen ? closePanel() : openPanel();
+      });
+      // 关闭面板的全局监听
+      if (!window._memberFilterPanels) { window._memberFilterPanels = []; }
+      window._memberFilterPanels.push({ panel, close: closePanel });
+      if (window._memberFilterPanels.length === 1) {
+        document.addEventListener("click", () => {
+          window._memberFilterPanels.forEach(p => p.close());
+        });
+        window.addEventListener("scroll", () => {
+          window._memberFilterPanels.forEach(p => p.close());
+        }, { passive: true });
+      }
+      document.body.appendChild(panel);
 
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
@@ -1120,8 +1223,9 @@ function renderQqBots() {
       else tdState.innerHTML = '<span class="cred" style="color:var(--muted)">未保存</span>';
 
       const tdOps = document.createElement("td");
+      tdOps.style.whiteSpace = "nowrap";
       if (canCaptureOpenid) {
-        tdOps.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput)));
+        tdOps.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput, gidInput)));
         tdOps.appendChild(document.createTextNode(" "));
       }
       tdOps.appendChild(mkBtn("删除", async () => {
@@ -1153,13 +1257,13 @@ function renderQqBots() {
         msg("已删除，点「保存并热重载」生效", "ok");
       }, "danger"));
 
-      tr.append(tdName, tdApp, tdOpenid, tdSecret, tdState, tdOps);
+      tr.append(tdName, tdApp, tdOpenid, tdGroupOpenid, tdMemberFilter, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
     });
   } else if (!qqBotStatus.filter((s) => !s.declared).length) {
     // 既没声明 Bot，.env 里也没有旧槽位 —— 明确的空态，不再挂占位行
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="6" class="empty">还没有配置官方 Bot。点下方「＋ 添加 Bot」，' +
+    tr.innerHTML = '<td colspan="8" class="empty">还没有配置官方 Bot。点下方「＋ 添加 Bot」，' +
       '在 QQ 开放平台拿到 App ID 和 Secret 即可。</td>';
     tbody.appendChild(tr);
   } else {
@@ -1659,6 +1763,8 @@ function renderMembers() {
     tr.append(tdId, tdName, tdAcc, tdGroups, tdTg, tdOps);
     tbody.appendChild(tr);
   });
+  // 成员变动后同步刷新 Bot 的推送成员选择面板
+  renderQqBots();
 }
 // ── 成员选择器 ───────────────────────────────────
 $("btnPickMember").addEventListener("click", () => {
@@ -1834,14 +1940,18 @@ let openidTimer = null;
 // 服务端返回的 qq_bot_status 里查不到它，只能前端自己记着。
 const secretsWritten = new Set();
 
-async function openOpenidDialog(bot, input) {
-  openidCtx = { bot: bot, input: input };
+async function openOpenidDialog(bot, personalInput, groupInput) {
+  openidCtx = { bot: bot, personalInput: personalInput, groupInput: groupInput || personalInput, mode: "user" };
   $("openidBotName").textContent = bot.name || "(未命名)";
   $("openidAppId").textContent = "App ID: " + (bot.app_id || "（未填，请先在表格里填写）");
   $("openidSecret").value = "";
   $("openidSecret").classList.add("masked");
   $("openidSecretEye").textContent = "👁";
-  // .env 里已有该 Bot 的 secret 就不必再输（含本次会话刚写入的）
+  chipGroup("openidMode", [["user", "单聊（用户 OpenID）→ 个人 OpenID"], ["group", "群聊（群 OpenID）→ 群 OpenID"]], "user");
+  $("openidMode").querySelectorAll(".chip").forEach(c => {
+    c.addEventListener("click", () => { openidCtx.mode = $("openidMode").dataset.value; });
+  });
+  $("openidNote").innerHTML = '选择「单聊」模式：<b>让目标用户给 Bot 发一条私聊消息</b>，结果填入个人 OpenID。<br>选择「群聊」模式：先把 Bot 拉进目标群，<b>在群里 @机器人 发一条消息</b>，结果填入群 OpenID。';
   const st = (qqBotStatus || []).find((s) => s.name === bot.name);
   const hasSecret = (st && st.client_secret) || secretsWritten.has(bot.name);
   $("openidSecretField").hidden = hasSecret;
@@ -1879,6 +1989,7 @@ $("openidStart").addEventListener("click", async () => {
         app_id: bot.app_id,
         client_secret: $("openidSecret").value,
         bot_name: bot.name || "",
+        mode: openidCtx.mode || "user",
       }),
     });
     if (!data.ok) { setOpenidStatus("❌ " + (data.errors || []).join("；"), "var(--err)"); return; }
@@ -1909,14 +2020,24 @@ function startOpenidPolling() {
     if (!st.ok) return;
     if (st.state === "captured") {
       stopOpenidPolling();
-      openidCtx.bot.target_openid = st.openid;
-      openidCtx.input.value = st.openid;
-      markDirty();
-      $("openidStart").hidden = false;
-      $("openidStop").hidden = true;
-      setOpenidStatus("✅ 已捕获" + (st.sender ? "（来自 " + esc(st.sender) + "）" : "") +
-        "<br><code>" + esc(st.openid) + "</code><br>已填入表格，别忘了点底部「保存并热重载」。", "var(--ok)");
-      msg("✅ 已获取 OpenID 并填入表格，记得保存", "ok");
+      const isGroup = (openidCtx.mode || "user") === "group";
+      if (isGroup) {
+        openidCtx.groupInput.value = st.openid;
+        if (openidCtx.groupInput.oninput) openidCtx.groupInput.dispatchEvent(new Event("input", { bubbles: true }));
+        markDirty();
+        $("openidStart").hidden = false; $("openidStop").hidden = true;
+        setOpenidStatus("✅ 已捕获群 OpenID" + (st.sender ? "（来自 " + esc(st.sender) + "）" : "") +
+          "<br><code>" + esc(st.openid) + "</code><br>已填入 <b>群 OpenID</b>，别忘了点底部「保存并热重载」。", "var(--ok)");
+        msg("✅ 已获取群 OpenID 并填入群 OpenID 列，记得保存", "ok");
+      } else {
+        openidCtx.bot.target_openid = st.openid;
+        openidCtx.personalInput.value = st.openid;
+        markDirty();
+        $("openidStart").hidden = false; $("openidStop").hidden = true;
+        setOpenidStatus("✅ 已捕获" + (st.sender ? "（来自 " + esc(st.sender) + "）" : "") +
+          "<br><code>" + esc(st.openid) + "</code><br>已填入 <b>个人 OpenID</b>，别忘了点底部「保存并热重载」。", "var(--ok)");
+        msg("✅ 已获取 OpenID 并填入个人 OpenID 列，记得保存", "ok");
+      }
     } else if (st.state === "error") {
       stopOpenidPolling();
       $("openidStart").hidden = false;

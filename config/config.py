@@ -295,6 +295,8 @@ def _build_qq_official_bots(cfg: dict) -> dict:
                 "app_id":        b.get("app_id") or _env(f"{prefix}_APP_ID", ""),
                 "client_secret": _env(f"{prefix}_CLIENT_SECRET", ""),
                 "target_openid": b.get("target_openid") or _env(f"{prefix}_TARGET_OPENID", ""),
+                "group_openid":  b.get("group_openid", ""),
+                "member_filter": b.get("member_filter") or [],
             })
     else:
         for i in range(1, 21):

@@ -21,7 +21,9 @@
         "properties": {
           "name":          { "type": "string", "pattern": "^[a-z0-9_]+$" },
           "app_id":        { "type": "string" },
-          "target_openid": { "type": "string" }
+          "target_openid": { "type": "string" },
+          "group_openid":  { "type": "string" },
+          "member_filter": { "type": "array", "items": { "type": "string" }, "default": [] }
         }
       }
     },
