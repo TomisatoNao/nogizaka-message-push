@@ -460,7 +460,31 @@ def _tail_file(path: Path, max_lines: int) -> list[str]:
     return [ln[:2000] for ln in lines[-max_lines:]]
 
 
+BLOG_IMAGE_DIR = Path("data/blog_images")
+
+
+def _get_blog_db() -> sqlite3.Connection:
+    """获取博客 DB 连接（惰性初始化）。"""
+    from src.blog_fetcher import init_blog_db
+    global _blog_db_conn
+    if "_blog_db_conn" not in globals() or _blog_db_conn is None:
+        _blog_db_conn = init_blog_db()
+    return _blog_db_conn
+
+
+_blog_db_conn: sqlite3.Connection | None = None
+
+
 class _Handler(BaseHTTPRequestHandler):
+
+    def _query_params(self) -> dict[str, str]:
+        """解析 URL 查询参数。"""
+        from urllib.parse import urlparse, parse_qs
+        qs = urlparse(self.path).query
+        result = {}
+        for k, v in parse_qs(qs).items():
+            result[k] = v[0] if v else ""
+        return result
     server_version = "SakamichiWebUI/1.0"
 
     # ── 工具 ─────────────────────────────────────────────
@@ -1358,6 +1382,89 @@ class _Handler(BaseHTTPRequestHandler):
             _home_cache = result
             _home_cache_key = cache_key
             self._send_json(result)
+            return
+
+        # ── 博客归档 API ──
+        if sub == "blog_groups":
+            groups = []
+            try:
+                db = _get_blog_db()
+                for r in db.execute("""
+                    SELECT group_key, COUNT(*), MIN(date), MAX(date)
+                    FROM blog_posts GROUP BY group_key ORDER BY group_key
+                """).fetchall():
+                    groups.append({
+                        "key": r[0], "total": r[1],
+                        "first_date": r[2] or "", "last_date": r[3] or "",
+                    })
+            except Exception:
+                pass
+            self._send_json({"ok": True, "groups": groups})
+            return
+
+        if sub == "blog_calendar":
+            qs = self._query_params()
+            group = qs.get("group", "hinatazaka")
+            days = {}
+            try:
+                db = _get_blog_db()
+                for r in db.execute("""
+                    SELECT substr(date,1,10) as d, COUNT(*)
+                    FROM blog_posts WHERE group_key=?
+                    GROUP BY d
+                """, (group,)).fetchall():
+                    days[r[0]] = r[1]
+            except Exception:
+                pass
+            self._send_json({"ok": True, "group": group, "days": days})
+            return
+
+        if sub == "blogs":
+            qs = self._query_params()
+            group = qs.get("group", "hinatazaka")
+            year = int(qs.get("year", "0") or "0")
+            month = int(qs.get("month", "0") or "0")
+            page = max(1, int(qs.get("page", "1") or "1"))
+            per_page = 30
+            posts = []
+            total = 0
+            try:
+                db = _get_blog_db()
+                where = "WHERE group_key=?"
+                params: list = [group]
+                if year and month:
+                    where += " AND substr(date,1,7)=?"
+                    params.append(f"{year:04d}-{month:02d}")
+                total = db.execute(
+                    f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]
+                rows = db.execute(
+                    f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?",
+                    params + [per_page, (page - 1) * per_page],
+                ).fetchall()
+                for r in rows:
+                    d = dict(r)
+                    d["images_json"] = d.get("images_json") or "[]"
+                    d["image_paths_json"] = d.get("image_paths_json") or "[]"
+                    posts.append(d)
+            except Exception:
+                pass
+            total_pages = max(1, (total + per_page - 1) // per_page)
+            self._send_json({
+                "ok": True, "group": group, "posts": posts,
+                "total": total, "page": page, "total_pages": total_pages,
+            })
+            return
+
+        if sub.startswith("blog_media/"):
+            rel = Path(unquote(sub[len("blog_media/"):]))
+            full = (BLOG_IMAGE_DIR / rel).resolve()
+            if BLOG_IMAGE_DIR.resolve() not in full.parents:
+                self._send_json({"ok": False, "errors": ["非法路径"]}, 403)
+                return
+            if not full.is_file():
+                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
+                return
+            self._serve_file_range(full)
             return
 
         if sub.startswith("media/"):
