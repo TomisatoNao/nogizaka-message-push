@@ -309,7 +309,10 @@ async function loadMembers() {
       const b = document.createElement("button");
       b.className = "chip" + (g.key === curBlogGroup ? " active" : "");
       b.textContent = (BLOG_NAMES[g.key] || g.key) + "（" + g.total + "）";
-}
+      b.addEventListener("click", () => { selectBlogGroup(g.key); });
+      box.appendChild(b);
+    }
+  } catch(e) {}
 
 async function selectBlogGroup(key) {
   curBlogGroup = key; curMember = "";
