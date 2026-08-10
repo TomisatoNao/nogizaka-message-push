@@ -48,6 +48,15 @@ async def fetch_images(client: httpx.AsyncClient, url: str) -> list[str]:
         return []
 
 
+async def fetch_html(client: httpx.AsyncClient, url: str) -> str:
+    """获取正文原始 HTML（保留 <img>、<br> 等结构标签）。"""
+    try:
+        body = await _get_article(client, url)
+        return str(body) if body else ""
+    except Exception:
+        return ""
+
+
 async def fetch_body(client: httpx.AsyncClient, url: str) -> str:
     """获取正文纯文本，保留 br 换行 + 图片占位符。"""
     try:

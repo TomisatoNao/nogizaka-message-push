@@ -7,6 +7,34 @@ from datetime import datetime, timezone, timedelta
 import httpx
 from src.logger import log_all
 from src.sources import hinatazaka, nogizaka, sakurazaka
+from pathlib import Path as _Path
+import re as _re
+import os as _os
+
+BLOG_IMAGE_DIR = _Path("data/blog_images")
+
+
+async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str],
+                           group_key: str, author: str, title: str) -> list[str]:
+    """下载博客图片到本地，返回本地相对路径列表。"""
+    safe_title = _re.sub(r'[\\/:*?"<>|]', '', title)[:40].strip()
+    safe_author = _re.sub(r'[\\/:*?"<>|]', '', author)[:20].strip()
+    dest_dir = BLOG_IMAGE_DIR / group_key / f"{safe_author}_{safe_title}"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for i, url in enumerate(image_urls):
+        try:
+            r = await http_client.get(url, timeout=30)
+            ext = url.rsplit(".", 1)[-1].split("?")[0]
+            if ext.lower() not in ("jpg", "jpeg", "png", "gif", "webp"):
+                ext = "jpg"
+            fname = f"{i+1:02d}.{ext}"
+            fpath = dest_dir / fname
+            fpath.write_bytes(r.content)
+            paths.append(str(fpath.relative_to(BLOG_IMAGE_DIR)))
+        except Exception:
+            paths.append("")  # 下载失败占位
+    return paths
 
 # ── 博客任务表 ──
 # (显示名, fetch_posts, fetch_images, record_key, need_detail)
@@ -36,14 +64,23 @@ def init_blog_db() -> sqlite3.Connection:
             title TEXT NOT NULL,
             url TEXT NOT NULL UNIQUE,
             date TEXT,
-            body TEXT,
+            body_html TEXT,
+            body_text TEXT,
+            translation TEXT,
             images_json TEXT,
+            image_paths_json TEXT,
             raw_json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_group_date ON blog_posts(group_key, date DESC);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_url ON blog_posts(url);")
+    # 增量升级：旧表可能没有这些列
+    for col in ["body_html", "body_text", "translation", "image_paths_json"]:
+        try:
+            conn.execute(f"ALTER TABLE blog_posts ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
     conn.commit()
     return conn
 
@@ -113,7 +150,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             post["group_key"] = key
             post["group_name"] = group_name
 
-            # 获取图片/正文
+            # 获取图片/正文/HTML
             if not post.get("images") and fetch_img_fn:
                 if need_detail:
                     imgs, detail_date, body = await sakurazaka.fetch_detail(client, post["url"])
@@ -121,19 +158,34 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                     if detail_date:
                         post["date"] = detail_date
                     post["body"] = body
+                    try:
+                        post["body_html"] = await sakurazaka.fetch_html(client, post["url"])
+                    except Exception:
+                        post["body_html"] = body
                 else:
                     post["images"] = await fetch_img_fn(client, post["url"])
                     post["body"] = await hinatazaka.fetch_body(client, post["url"])
+                    post["body_html"] = await hinatazaka.fetch_html(client, post["url"])
+
+            # 下载图片到本地
+            image_paths = []
+            if post.get("images"):
+                image_paths = await _download_images(
+                    client, post["images"], key,
+                    post.get("author", ""), post.get("title", ""))
 
             # 存档到 SQLite
             try:
                 db.execute("""
-                    INSERT OR IGNORE INTO blog_posts (group_key, author, title, url, date, body, images_json, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO blog_posts
+                    (group_key, author, title, url, date, body_html, body_text, images_json, image_paths_json, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     key, post.get("author", ""), post.get("title", ""), post["url"],
-                    post.get("date", ""), post.get("body", ""),
+                    post.get("date", ""),
+                    post.get("body_html", ""), post.get("body", ""),
                     json.dumps(post.get("images") or [], ensure_ascii=False),
+                    json.dumps(image_paths, ensure_ascii=False),
                     json.dumps(post, ensure_ascii=False, default=str),
                 ))
                 db.commit()

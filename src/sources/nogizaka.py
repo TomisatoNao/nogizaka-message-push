@@ -46,7 +46,8 @@ async def fetch_posts(client: httpx.AsyncClient, limit: int = 30) -> list[dict]:
             posts.append({
                 "url": url, "title": item.get("title", "无标题"),
                 "author": item.get("name", "乃木坂46成员"),
-                "images": images, "date": item.get("date", ""), "body": body_text,
+                "images": images, "date": item.get("date", ""),
+                "body": body_text, "body_html": raw_html,
             })
         return posts
     except Exception:

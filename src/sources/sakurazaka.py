@@ -52,6 +52,17 @@ async def fetch_images(client: httpx.AsyncClient, url: str) -> list[str]:
     return imgs
 
 
+async def fetch_html(client: httpx.AsyncClient, url: str) -> str:
+    """获取正文原始 HTML。"""
+    try:
+        r = await client.get(url)
+        soup = BeautifulSoup(r.text, "html.parser")
+        body = soup.find("div", class_="box-article") or soup
+        return str(body)
+    except Exception:
+        return ""
+
+
 async def fetch_detail(client: httpx.AsyncClient, url: str) -> tuple[list[str], str, str]:
     """返回 (图片列表, 精确发送时间, 正文纯文本)。"""
     try:
