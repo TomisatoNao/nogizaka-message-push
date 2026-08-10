@@ -125,6 +125,25 @@
         }
       }
     },
-    "gemini_tag_min_interval":    { "type": "number", "minimum": 0 }
+    "gemini_tag_min_interval":    { "type": "number", "minimum": 0 },
+    "blog_monitor": {
+      "type": "object",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "hinatazaka":  { "type": "boolean" },
+        "nogizaka":    { "type": "boolean" },
+        "sakurazaka":  { "type": "boolean" },
+        "day_interval":   { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1 } },
+        "night_interval": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "blog_records": {
+      "type": "object",
+      "properties": {
+        "hinatazaka": { "type": "string" },
+        "nogizaka":   { "type": "string" },
+        "sakurazaka": { "type": "string" }
+      }
+    }
   }
 }

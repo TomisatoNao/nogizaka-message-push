@@ -2,6 +2,7 @@
 # app.py — 程序入口：初始化所有模块、驱动主轮询循环
 # ============================================================
 import asyncio
+import json
 import os
 import random
 import signal
@@ -21,6 +22,7 @@ from src.platforms import napcat
 from src.platforms import qq_official
 from src.platforms import tgbot
 from src import health
+from src import blog_fetcher
 from src.platforms.qq_official import health_check as qq_official_health_check
 import config.config as cfg
 from config.credentials import (
@@ -364,6 +366,31 @@ async def _run_cycle() -> None:
     else:
         log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
 
+    # ── 博客巡查 ──
+    blog_cfg = cfg._config.get("blog_monitor") or {}
+    if blog_cfg.get("enabled", True) and cfg._config.get("blog_records") is not None:
+        try:
+            new_posts = await blog_fetcher.run_blog_cycle(
+                _blog_client, _blog_db, cfg._config)
+            if new_posts:
+                from src.notifier import send_blog_post
+                log_all(f"📝 博客更新：{len(new_posts)} 篇")
+                for post in new_posts:
+                    await send_blog_post(post)
+                    await asyncio.sleep(0.5)
+            # 水印变更后写回 config.json
+            if cfg._config.get("_blog_records_dirty"):
+                try:
+                    config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
+                    cfg_data = json.loads(config_path.read_text(encoding="utf-8"))
+                    cfg_data["blog_records"] = cfg._config["blog_records"]
+                    json.dump(cfg_data, open(str(config_path), "w", encoding="utf-8"),
+                              ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+        except Exception as e:
+            log_all(f"⚠️ 博客巡查异常: {e}", is_error=True)
+
 
 def _stop_requested() -> bool:
     """外部是否请求停止（存在停止信号文件）。"""
@@ -578,6 +605,14 @@ async def main() -> None:
     napcat.initialize(qq_client)
     qq_official.initialize(qq_client)
     fetcher.initialize(http_client, semaphore)
+
+    # 博客数据库初始化
+    global _blog_db
+    _blog_db = blog_fetcher.init_blog_db()
+
+    # 博客 http 客户端
+    global _blog_client
+    _blog_client = httpx.AsyncClient(timeout=30, follow_redirects=True)
 
     # 4. 移动端账号初始 Token 刷新
     #    必须放在通道注入（步骤 3）之后：刷新失败时 refresh_mobile_token 会走

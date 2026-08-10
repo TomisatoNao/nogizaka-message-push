@@ -181,3 +181,69 @@ async def send_alert_message(target_group: int, text: str) -> bool:
             log_all(f"⏸️ 群 {target_group} 无关联 TG 频道，TG 警报跳过", is_debug=True)
 
     return any_ok
+
+
+# ── 博客推送 ──
+
+EMOJI_MAP = {"hinatazaka": "☀️", "nogizaka": "💜", "sakurazaka": "🌸"}
+
+
+async def send_blog_post(post: dict) -> bool:
+    """向 QQ 官方 Bot 群推送一篇博客。"""
+    import asyncio
+    import httpx
+    from src.platforms.qq_official import get_configured_bots
+
+    group_key = post.get("group_key", "")
+    group_name = post.get("group_name", "")
+    emoji = EMOJI_MAP.get(group_key, "🤖")
+    blog_url = post.get("url", "")
+
+    intro = (
+        f"{emoji} {group_name} ブログ更新\n\n"
+        f"作者：{post.get('author', '')}\n"
+        f"标题：{post.get('title', '')}\n"
+        f"时间：{post.get('date', '')}\n"
+        f"照片：共 {len(post.get('images') or [])} 张\n\n"
+        f"👉 {blog_url}"
+    )
+
+    bots = get_configured_bots()
+    if not bots:
+        return False
+
+    media_urls = [img for img in (post.get("images") or [])
+                  if isinstance(img, str) and img.startswith("http")]
+    any_ok = False
+
+    for bot in bots:
+        if not bot.group_openid:
+            continue
+        try:
+            ok = await bot.send_group_text(bot.group_openid, intro)
+            if not ok:
+                short = f"{emoji} {post.get('author', '')} のブログ：{post.get('title', '')}\n{blog_url}"
+                ok = await bot.send_group_text(bot.group_openid, short)
+
+            for img_url in media_urls[:5]:
+                try:
+                    async with httpx.AsyncClient(timeout=30) as c:
+                        r = await c.get(img_url)
+                        img_bytes = r.content
+                    async with bot._lock:
+                        if await bot.ensure_access_token():
+                            fi = await bot._upload_media(
+                                "image", img_bytes, scope="groups",
+                                target_openid=bot.group_openid)
+                            if fi:
+                                await bot._send_uploaded_media(
+                                    fi, scope="groups",
+                                    target_openid=bot.group_openid)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.4)
+            any_ok = True
+        except Exception:
+            log_all(f"⚠️ 博客推送失败 [{bot.name}]", is_error=True)
+
+    return any_ok
