@@ -313,6 +313,9 @@ async function loadMembers() {
       box.appendChild(b);
     }
   } catch(e) {}
+  const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
+  await selectMember(wanted, true);
+}
 
 async function selectBlogGroup(key) {
   curBlogGroup = key; curMember = "";
