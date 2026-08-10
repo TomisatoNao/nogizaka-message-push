@@ -251,34 +251,6 @@ async function jumpToDay(dateKey) {
   }, 5000);
 }
 
-// ── 成员选择器（header 下拉框，主页和归档页共用）──
-function populateMemberSelect(memberList) {
-  const sel = $("memberSelect");
-  sel.innerHTML = '<option value="">📂 选择成员…</option>';
-  for (const m of memberList) {
-    const opt = document.createElement("option");
-    opt.value = m.name;
-    opt.textContent = m.display + "（" + (m.total || (m.stats && m.stats.total) || "") + "）";
-    sel.appendChild(opt);
-  }
-}
-$("memberSelect").addEventListener("change", () => {
-  const name = $("memberSelect").value;
-  if (!name) return;
-  if ($("archiveHome").classList.contains("active")) {
-    // 从主页跳转到成员归档
-    hideHome();
-    curMember = name; curType = ""; searchQuery = "";
-    syncSearchInput(); targetMsgId = "";
-    selfHashUpdate = true;
-    location.hash = "member=" + encodeURIComponent(name);
-    setTimeout(() => { selfHashUpdate = false; }, 100);
-    loadMembers();
-  } else {
-    selectMember(name);
-  }
-});
-
 // ── 数据加载 ─────────────────────────────────────
 async function loadMembers() {
   const data = await api("/api/archive/members");
@@ -289,7 +261,6 @@ async function loadMembers() {
               "新消息会自动归档；历史消息用 python tools/backfill_archive.py 回填。");
     return;
   }
-  populateMemberSelect(members);
   // 渲染成员 chips
   const box = $("memberChips");
   box.innerHTML = "";
@@ -432,7 +403,6 @@ async function selectMember(name, keepHash) {
   curMember = name;
   if (!keepHash) searchQuery = "";
   syncSearchInput();
-  $("memberSelect").value = name;
   const data = await api("/api/archive/months?member=" + encodeURIComponent(name));
   if (version !== memberVersion) return;
   months = data.ok ? data.months : [];
@@ -1005,8 +975,6 @@ async function showHome() {
         '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
       return;
     }
-    populateMemberSelect(data.members);
-    $("memberSelect").value = "";
     renderHome(data.aggregated, data.members);
     $('homeSkeleton').classList.remove('active');
     $('archiveHome').querySelector('.home-hero').style.display = '';
@@ -1273,7 +1241,6 @@ function goHome() {
   curMember = ""; curBlogGroup = "";
   curType = ""; searchQuery = "";
   syncSearchInput();
-  $("memberSelect").value = "";
   $("typeChips").style.display = "";
   $("tagToggle").parentElement.style.display = "";
   location.hash = "";
