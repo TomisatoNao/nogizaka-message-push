@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 import httpx
+from src.logger import log_all
 from src.sources import hinatazaka, nogizaka, sakurazaka
 
 # ── 博客任务表 ──
@@ -94,6 +95,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
         # 首轮不做推送，只记水印
         if not last_url:
             records[key] = posts[0]["url"]
+            log_all(f"📝 [{group_name}] 首轮初始化，水印: {posts[0]['url'][:60]}…")
             continue
 
         # 离线恢复：水印 URL 不在扫描窗口里
@@ -102,6 +104,8 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
 
         if not unseen:
             continue
+
+        log_all(f"📝 [{group_name}] 发现 {len(unseen)} 篇新博客")
 
         # 按 oldest→newest 顺序处理
         raw_config["_blog_records_dirty"] = True

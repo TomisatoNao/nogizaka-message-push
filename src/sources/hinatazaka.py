@@ -34,13 +34,7 @@ async def _get_article(client: httpx.AsyncClient, url: str) -> BeautifulSoup | N
     return BeautifulSoup(r.text, "html.parser").find("div", class_="c-blog-article__text")
 
 
-def fetch_images(client: httpx.AsyncClient, url: str) -> list[str]:
-    """同步包装：日向坂图片抓取（图片 URL 可直接从页面获取，无需下载）"""
-    import asyncio
-    return asyncio.run(_fetch_images(client, url))
-
-
-async def _fetch_images(client: httpx.AsyncClient, url: str) -> list[str]:
+async def fetch_images(client: httpx.AsyncClient, url: str) -> list[str]:
     try:
         body = await _get_article(client, url)
         if not body:
