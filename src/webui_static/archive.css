@@ -308,6 +308,12 @@
     transition: background .15s, border-color .15s; }
   .msg-preview.tunnel:hover { border-left-color: var(--warn); }
 
+  /* 博客正文：保留原始 HTML 结构 */
+  .blog-body { line-height: 1.8; }
+  .blog-body p { margin: 8px 0; }
+  .blog-body br { display: block; content: ""; margin: 4px 0; }
+  .blog-body img { max-width: 100%; height: auto; border-radius: 10px; margin: 8px 0; }
+
   /* 移动端触控优化 */
   .photo-card, .msg-preview { touch-action: manipulation; }
 

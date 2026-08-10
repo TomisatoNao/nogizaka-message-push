@@ -5,7 +5,9 @@ const authToken = localStorage.getItem("webAdminToken") || "";
 const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
 
 let members = [];        // [{name, display, total, months}]
+let blogGroups = [];     // [{key, total, first_date, last_date}]
 let curMember = "";
+let curBlogGroup = "";   // 非空 = 博客模式
 let months = [];         // [{year, month, count}] 新的在前
 let curYM = null;        // {year, month}
 let curType = "";
@@ -288,8 +290,132 @@ async function loadMembers() {
     return;
   }
   populateMemberSelect(members);
+  // 同时加载博客团体 chips
+  const box = $("memberChips");
+  try {
+    const bg = await api("/api/archive/blog_groups");
+    if (bg.ok) blogGroups = bg.groups;
+    const BLOG_NAMES = {hinatazaka:"📝 日向坂46", nogizaka:"📝 乃木坂46", sakurazaka:"📝 樱坂46"};
+    for (const g of blogGroups) {
+      const b = document.createElement("button");
+      b.className = "chip" + (g.key === curBlogGroup ? " active" : "");
+      b.textContent = (BLOG_NAMES[g.key] || g.key) + "（" + g.total + "）";
+      b.addEventListener("click", () => { selectBlogGroup(g.key); });
+      box.appendChild(b);
+    }
+  } catch(e) {}
   const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
   await selectMember(wanted, true);
+}
+
+async function selectBlogGroup(key) {
+  curBlogGroup = key; curMember = "";
+  searchQuery = ""; syncSearchInput();
+  resetContent();
+  // 更新 chips 高亮
+  const box = $("memberChips");
+  box.querySelectorAll(".chip").forEach((c) => {
+    c.classList.remove("active");
+  });
+  // 找到对应 chip 并高亮
+  const chips = box.querySelectorAll(".chip");
+  for (let i = members.length; i < chips.length; i++) {
+    if (blogGroups[i - members.length]?.key === key) chips[i].classList.add("active");
+  }
+  // 加载博客月份列表
+  const data = await api("/api/archive/blog_calendar?group=" + encodeURIComponent(key));
+  dayCounts = data.ok ? data.days : {};
+  // 从 dayCounts 构建月份列表
+  const monthSet = {};
+  for (const d of Object.keys(dayCounts)) {
+    const ym = d.substring(0, 7);
+    monthSet[ym] = (monthSet[ym] || 0) + dayCounts[d];
+  }
+  months = Object.entries(monthSet).map(([ym, c]) => {
+    const [y, m] = ym.split("-").map(Number);
+    return {year: y, month: m, count: c};
+  }).sort((a, b) => b.year - a.year || b.month - a.month);
+
+  const sel = $("monthSelect");
+  sel.innerHTML = "";
+  for (const m of months) {
+    const opt = document.createElement("option");
+    opt.value = m.year + "-" + m.month;
+    opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
+    sel.appendChild(opt);
+  }
+  if (!months.length) { showEmpty("该团体还没有博客归档"); return; }
+  const pick = months[0];
+  calYM = {year: pick.year, month: pick.month};
+  curYM = {year: pick.year, month: pick.month};
+  renderCalendar();
+  sel.value = pick.year + "-" + pick.month;
+  // 隐藏类型筛选（博客用不到）
+  $("typeChips").style.display = "none";
+  $("tagToggle").parentElement.style.display = "none";
+  await loadBlogPage();
+}
+
+async function loadBlogPage() {
+  if (!curBlogGroup || !curYM) return;
+  const version = contentVersion;
+  contentAbort = new AbortController();
+  setPageLoading(true);
+  try {
+    const data = await api("/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) +
+      "&year=" + curYM.year + "&month=" + curYM.month + "&page=" + page, {signal: contentAbort.signal});
+    if (version !== contentVersion) return;
+    if (!data.ok) { showEmpty("加载失败"); return; }
+    totalPages = data.total_pages;
+    $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 篇";
+    if (!data.posts.length && page === 1) showEmpty("本月没有博客");
+    for (const post of data.posts) renderBlogBubble(post);
+    $("loadMore").hidden = page >= totalPages;
+  } catch(e) {
+    if (e.name !== "AbortError" && version === contentVersion) showEmpty("加载失败：" + e.message);
+  } finally {
+    if (version === contentVersion) setPageLoading(false);
+  }
+}
+
+function renderBlogBubble(post) {
+  const tl = $("timeline");
+  const d = new Date(post.date + (post.date.endsWith("Z") ? "" : "+09:00"));
+  const day = isNaN(d.getTime()) ? (post.date || "").substring(0, 10) :
+    d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate() + "（" + "日一二三四五六"[d.getDay()] + "）";
+  if (day !== lastDay) {
+    lastDay = day;
+    const sep = document.createElement("div");
+    sep.className = "day-sep";
+    sep.innerHTML = "<span>" + esc(day) + "</span>";
+    tl.appendChild(sep);
+  }
+  const b = document.createElement("div");
+  b.className = "bubble virtual-card";
+
+  let html = '<div class="time">' + esc(post.author) + " · " + (post.date || "").substring(0, 16);
+  html += ' · <a href="' + esc(post.url) + '" target="_blank" rel="noopener" style="color:var(--accent)">原文链接 →</a>';
+  html += "</div>";
+
+  // 图片
+  let images = [];
+  try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
+  let paths = [];
+  try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
+  for (let i = 0; i < images.length; i++) {
+    const src = paths[i] ? "/api/archive/blog_media/" + encodeURI(paths[i]) : images[i];
+    html += '<img loading="lazy" src="' + esc(src) + '" alt="" style="max-width:100%;border-radius:8px;margin:6px 0">';
+  }
+
+  // 正文（HTML）
+  if (post.body_html) {
+    html += '<div class="text blog-body">' + post.body_html + "</div>";
+  } else if (post.body_text) {
+    html += '<div class="text">' + esc(post.body_text) + "</div>";
+  }
+
+  b.innerHTML = html;
+  tl.appendChild(b);
 }
 
 async function selectMember(name, keepHash) {
@@ -372,15 +498,16 @@ async function selectMonth(year, month) {
   renderCalendar();
   $("monthSelect").value = year + "-" + month;
   const idx = months.findIndex((m) => m.year === year && m.month === month);
-  $("prevMonth").disabled = idx >= months.length - 1;   // months 新的在前
+  $("prevMonth").disabled = idx >= months.length - 1;
   $("nextMonth").disabled = idx <= 0;
   resetContent();
-  syncHash();
+  if (!curBlogGroup) syncHash();
   await loadPage();
 }
 
 async function loadPage() {
-  if (pageLoading || !curMember || !curYM) return;
+  if (pageLoading || (!curMember && !curBlogGroup) || !curYM) return;
+  if (curBlogGroup) { await loadBlogPage(); return; }
   const version = contentVersion;
   contentAbort = new AbortController();
   setPageLoading(true);
@@ -1134,11 +1261,12 @@ function renderHome(agg, members) {
 }
 
 function goHome() {
-  curMember = "";
-  curType = "";
-  searchQuery = "";
+  curMember = ""; curBlogGroup = "";
+  curType = ""; searchQuery = "";
   syncSearchInput();
   $("memberSelect").value = "";
+  $("typeChips").style.display = "";
+  $("tagToggle").parentElement.style.display = "";
   location.hash = "";
   showHome();
 }
@@ -1147,6 +1275,8 @@ function hideHome() {
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = '';
   document.querySelector('.layout').style.display = '';
+  $("typeChips").style.display = "";
+  $("tagToggle").parentElement.style.display = "";
 }
 
 // ── 入口（支持 #member=&y=&m=&t= 深链）────────────
