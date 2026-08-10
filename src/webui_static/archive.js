@@ -290,8 +290,17 @@ async function loadMembers() {
     return;
   }
   populateMemberSelect(members);
-  // 同时加载博客团体 chips
+  // 渲染成员 chips
   const box = $("memberChips");
+  box.innerHTML = "";
+  for (const m of members) {
+    const b = document.createElement("button");
+    b.className = "chip" + (m.name === curMember && !curBlogGroup ? " active" : "");
+    b.textContent = m.display + "（" + m.total + "）";
+    b.addEventListener("click", () => { curBlogGroup = ""; $("typeChips").style.display = ""; $("tagToggle").parentElement.style.display = ""; selectMember(m.name); });
+    box.appendChild(b);
+  }
+  // 加载博客团体 chips
   try {
     const bg = await api("/api/archive/blog_groups");
     if (bg.ok) blogGroups = bg.groups;
@@ -300,12 +309,6 @@ async function loadMembers() {
       const b = document.createElement("button");
       b.className = "chip" + (g.key === curBlogGroup ? " active" : "");
       b.textContent = (BLOG_NAMES[g.key] || g.key) + "（" + g.total + "）";
-      b.addEventListener("click", () => { selectBlogGroup(g.key); });
-      box.appendChild(b);
-    }
-  } catch(e) {}
-  const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
-  await selectMember(wanted, true);
 }
 
 async function selectBlogGroup(key) {
