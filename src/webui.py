@@ -1425,7 +1425,7 @@ class _Handler(BaseHTTPRequestHandler):
             year = int(qs.get("year", "0") or "0")
             month = int(qs.get("month", "0") or "0")
             page = max(1, int(qs.get("page", "1") or "1"))
-            per_page = 30
+            per_page = min(100, max(1, int(qs.get("per_page", "30") or "30")))
             posts = []
             total = 0
             try:

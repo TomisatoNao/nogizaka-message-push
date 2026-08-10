@@ -308,11 +308,22 @@
     transition: background .15s, border-color .15s; }
   .msg-preview.tunnel:hover { border-left-color: var(--warn); }
 
-  /* 博客正文：保留原始 HTML 结构 */
-  .blog-body { line-height: 1.8; }
-  .blog-body p { margin: 8px 0; }
-  .blog-body br { display: block; content: ""; margin: 4px 0; }
-  .blog-body img { max-width: 100%; height: auto; border-radius: 10px; margin: 8px 0; }
+  /* 博客卡片 */
+  .blog-card { background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 20px 22px; margin: 16px 0;
+    box-shadow: var(--shadow-sm); }
+  .blog-card-header { display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-soft); }
+  .blog-card-author { font-weight: 650; font-size: 15px; color: var(--accent); }
+  .blog-card-date { font-size: 12.5px; color: var(--muted); }
+  .blog-card-link { margin-left: auto; font-size: 12.5px; color: var(--muted);
+    text-decoration: none; }
+  .blog-card-link:hover { color: var(--accent); }
+  .blog-card-body { line-height: 2; font-size: 14.5px; color: var(--text); }
+  .blog-card-body p { margin: 12px 0; }
+  .blog-card-body img { max-width: 100%; height: auto; border-radius: 10px;
+    margin: 10px 0; display: block; }
 
   /* 移动端触控优化 */
   .photo-card, .msg-preview { touch-action: manipulation; }

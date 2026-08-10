@@ -268,7 +268,7 @@ async function loadMembers() {
     const b = document.createElement("button");
     b.className = "chip" + (m.name === curMember && !curBlogGroup ? " active" : "");
     b.textContent = m.display + "（" + m.total + "）";
-    b.addEventListener("click", () => { curBlogGroup = ""; $("typeChips").style.display = ""; $("tagToggle").parentElement.style.display = ""; selectMember(m.name); });
+    b.addEventListener("click", () => { _enterMemberMode(); selectMember(m.name); });
     box.appendChild(b);
   }
   // 加载博客团体 chips
@@ -288,52 +288,40 @@ async function loadMembers() {
   await selectMember(wanted, true);
 }
 
+function _enterMemberMode() {
+  curBlogGroup = "";
+  $("archiveSide").style.display = "";
+  $("prevMonth").style.display = $("nextMonth").style.display = $("monthSelect").style.display = "";
+  $("typeChips").style.display = "";
+  $("tagToggle").parentElement.style.display = "";
+  $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "";
+}
+
 async function selectBlogGroup(key) {
   curBlogGroup = key; curMember = "";
   searchQuery = ""; syncSearchInput();
   resetContent();
   // 更新 chips 高亮
-  const box = $("memberChips");
-  box.querySelectorAll(".chip").forEach((c) => {
-    c.classList.remove("active");
-  });
-  // 找到对应 chip 并高亮
-  const chips = box.querySelectorAll(".chip");
+  const chips = $("memberChips").querySelectorAll(".chip");
+  chips.forEach(c => c.classList.remove("active"));
   for (let i = members.length; i < chips.length; i++) {
     if (blogGroups[i - members.length]?.key === key) chips[i].classList.add("active");
   }
-  // 加载博客月份列表
-  const data = await api("/api/archive/blog_calendar?group=" + encodeURIComponent(key));
-  dayCounts = data.ok ? data.days : {};
-  // 从 dayCounts 构建月份列表
-  const monthSet = {};
-  for (const d of Object.keys(dayCounts)) {
-    const ym = d.substring(0, 7);
-    monthSet[ym] = (monthSet[ym] || 0) + dayCounts[d];
-  }
-  months = Object.entries(monthSet).map(([ym, c]) => {
-    const [y, m] = ym.split("-").map(Number);
-    return {year: y, month: m, count: c};
-  }).sort((a, b) => b.year - a.year || b.month - a.month);
-
-  const sel = $("monthSelect");
-  sel.innerHTML = "";
-  for (const m of months) {
-    const opt = document.createElement("option");
-    opt.value = m.year + "-" + m.month;
-    opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
-    sel.appendChild(opt);
-  }
-  if (!months.length) { showEmpty("该团体还没有博客归档"); return; }
-  const pick = months[0];
-  calYM = {year: pick.year, month: pick.month};
-  curYM = {year: pick.year, month: pick.month};
-  renderCalendar();
-  sel.value = pick.year + "-" + pick.month;
-  // 隐藏类型筛选（博客用不到）
+  // 博客模式：隐藏消息日历，简化工具栏
+  $("archiveSide").style.display = "none";
+  $("prevMonth").style.display = $("nextMonth").style.display = $("monthSelect").style.display = "none";
   $("typeChips").style.display = "none";
   $("tagToggle").parentElement.style.display = "none";
-  await loadBlogPage();
+  $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "none";
+  $("backTop").style.display = "";
+
+  // 直接加载全部博客（不分月）
+  const data = await api("/api/archive/blogs?group=" + encodeURIComponent(key) + "&page=1&per_page=50");
+  if (!data.ok || !data.posts.length) { showEmpty("该团体还没有博客归档"); return; }
+  totalPages = data.total_pages;
+  $("stats").textContent = "共 " + data.total + " 篇";
+  for (const post of data.posts) renderBlogBubble(post);
+  $("loadMore").hidden = page >= totalPages;
 }
 
 async function loadBlogPage() {
@@ -358,43 +346,42 @@ async function loadBlogPage() {
   }
 }
 
+function _replaceImgUrls(html, images, paths) {
+  if (!html || !images || !images.length) return html || "";
+  let result = html;
+  for (let i = 0; i < images.length; i++) {
+    const orig = images[i];
+    const local = paths[i] ? "/api/archive/blog_media/" + encodeURI(paths[i]) : orig;
+    result = result.split(orig).join(local);
+    // 也尝试替换 HTML 实体版本和可能的变体
+    try { result = result.split(esc(orig)).join(local); } catch(e) {}
+  }
+  return result;
+}
+
 function renderBlogBubble(post) {
   const tl = $("timeline");
-  const d = new Date(post.date + (post.date.endsWith("Z") ? "" : "+09:00"));
-  const day = isNaN(d.getTime()) ? (post.date || "").substring(0, 10) :
-    d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate() + "（" + "日一二三四五六"[d.getDay()] + "）";
-  if (day !== lastDay) {
-    lastDay = day;
-    const sep = document.createElement("div");
-    sep.className = "day-sep";
-    sep.innerHTML = "<span>" + esc(day) + "</span>";
-    tl.appendChild(sep);
-  }
+  const dateStr = (post.date || "").substring(0, 16);
   const b = document.createElement("div");
-  b.className = "bubble virtual-card";
+  b.className = "blog-card";
 
-  let html = '<div class="time">' + esc(post.author) + " · " + (post.date || "").substring(0, 16);
-  html += ' · <a href="' + esc(post.url) + '" target="_blank" rel="noopener" style="color:var(--accent)">原文链接 →</a>';
-  html += "</div>";
-
-  // 图片
-  let images = [];
+  // 解析图片
+  let images = [], paths = [];
   try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
-  let paths = [];
   try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
-  for (let i = 0; i < images.length; i++) {
-    const src = paths[i] ? "/api/archive/blog_media/" + encodeURI(paths[i]) : images[i];
-    html += '<img loading="lazy" src="' + esc(src) + '" alt="" style="max-width:100%;border-radius:8px;margin:6px 0">';
-  }
 
-  // 正文（HTML）
-  if (post.body_html) {
-    html += '<div class="text blog-body">' + post.body_html + "</div>";
-  } else if (post.body_text) {
-    html += '<div class="text">' + esc(post.body_text) + "</div>";
-  }
+  // 构建 HTML——图片替换为本地路径
+  let bodyHtml = post.body_html || "";
+  bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
 
-  b.innerHTML = html;
+  b.innerHTML =
+    '<div class="blog-card-header">' +
+      '<span class="blog-card-author">' + esc(post.author) + '</span>' +
+      '<span class="blog-card-date">' + esc(dateStr) + '</span>' +
+      '<a class="blog-card-link" href="' + esc(post.url) + '" target="_blank" rel="noopener">原文 →</a>' +
+    '</div>' +
+    '<div class="blog-card-body">' + bodyHtml + '</div>';
+
   tl.appendChild(b);
 }
 
@@ -1241,8 +1228,7 @@ function goHome() {
   curMember = ""; curBlogGroup = "";
   curType = ""; searchQuery = "";
   syncSearchInput();
-  $("typeChips").style.display = "";
-  $("tagToggle").parentElement.style.display = "";
+  _enterMemberMode();
   location.hash = "";
   showHome();
 }
@@ -1251,8 +1237,7 @@ function hideHome() {
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = '';
   document.querySelector('.layout').style.display = '';
-  $("typeChips").style.display = "";
-  $("tagToggle").parentElement.style.display = "";
+  _enterMemberMode();
 }
 
 // ── 入口（支持 #member=&y=&m=&t= 深链）────────────
