@@ -15,25 +15,28 @@ BLOG_IMAGE_DIR = _Path("data/blog_images")
 
 
 async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str],
-                           group_key: str, author: str, title: str) -> list[str]:
-    """下载博客图片到本地，返回本地相对路径列表。"""
-    safe_title = _re.sub(r'[\\/:*?"<>|]', '', title)[:40].strip()
+                           group_key: str, author: str, title: str,
+                           timestamp: str = "") -> list[str]:
+    """下载博客图片到本地，目录结构：{group}/{author}/{title}-{ts}/01.jpg"""
+    safe_title = _re.sub(r'[\\/:*?"<>|]', '', title)[:50].strip()
     safe_author = _re.sub(r'[\\/:*?"<>|]', '', author)[:20].strip()
-    dest_dir = BLOG_IMAGE_DIR / group_key / f"{safe_author}_{safe_title}"
+    ts = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_ts = _re.sub(r'[^0-9_]', '', ts)[:15]
+    dest_dir = BLOG_IMAGE_DIR / group_key / safe_author / f"{safe_title}-{safe_ts}"
     dest_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for i, url in enumerate(image_urls):
         try:
             r = await http_client.get(url, timeout=30)
-            ext = url.rsplit(".", 1)[-1].split("?")[0]
-            if ext.lower() not in ("jpg", "jpeg", "png", "gif", "webp"):
+            ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
+            if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
                 ext = "jpg"
             fname = f"{i+1:02d}.{ext}"
             fpath = dest_dir / fname
             fpath.write_bytes(r.content)
             paths.append(str(fpath.relative_to(BLOG_IMAGE_DIR)))
         except Exception:
-            paths.append("")  # 下载失败占位
+            paths.append("")
     return paths
 
 # ── 博客任务表 ──
@@ -172,7 +175,8 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             if post.get("images"):
                 image_paths = await _download_images(
                     client, post["images"], key,
-                    post.get("author", ""), post.get("title", ""))
+                    post.get("author", ""), post.get("title", ""),
+                    timestamp=post.get("date", "").replace("/", "").replace(" ", "_").replace(":", ""))
 
             # 存档到 SQLite
             try:
