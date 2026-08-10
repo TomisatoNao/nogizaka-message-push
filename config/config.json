@@ -40,7 +40,7 @@
   // ── 账号系统 ──
   "auth": {
     "enabled": true,
-    "archive_public": false,
+    "archive_public": true,
     "session_hours": 12
   },
 

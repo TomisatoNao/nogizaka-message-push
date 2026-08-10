@@ -14,6 +14,27 @@ import os as _os
 BLOG_IMAGE_DIR = _Path("data/blog_images")
 
 
+def _normalize_date(raw: str) -> str:
+    """把各 source 的日期字符串归一化为 ISO 8601 'YYYY-MM-DD HH:MM' 格式。"""
+    if not raw:
+        return ""
+    raw = raw.strip()
+    # 2026.8.10 21:05 (hinatazaka)
+    m = _re.match(r"(\d{4})\.(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})", raw)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d} {int(m.group(4)):02d}:{m.group(5)}"
+    # 2026/08/09 21:19 (sakurazaka)
+    m2 = _re.match(r"(\d{4})/(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", raw)
+    if m2:
+        return f"{m2.group(1)}-{m2.group(2)}-{m2.group(3)} {m2.group(4)}:{m2.group(5)}"
+    # 2026/08/08 11:13:25 (nogizaka — 含秒)
+    m3 = _re.match(r"(\d{4})/(\d{2})/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})", raw)
+    if m3:
+        return f"{m3.group(1)}-{m3.group(2)}-{m3.group(3)} {m3.group(4)}:{m3.group(5)}"
+    # Already ISO or unrecognized — return as-is
+    return raw
+
+
 async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str],
                            group_key: str, author: str, title: str,
                            timestamp: str = "") -> list[str]:
@@ -57,6 +78,7 @@ def init_blog_db() -> sqlite3.Connection:
     """初始化博客数据库，返回共享连接。"""
     BLOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(BLOG_DB_PATH), timeout=10.0, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("""
@@ -186,7 +208,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     key, post.get("author", ""), post.get("title", ""), post["url"],
-                    post.get("date", ""),
+                    _normalize_date(post.get("date", "")),
                     post.get("body_html", ""), post.get("body", ""),
                     json.dumps(post.get("images") or [], ensure_ascii=False),
                     json.dumps(image_paths, ensure_ascii=False),
