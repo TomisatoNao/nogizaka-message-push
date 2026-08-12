@@ -507,7 +507,8 @@ async function loadBlogPage(pageNum) {
   
   setPageLoading(true);
   try {
-    let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + pageNum + "&per_page=24";
+    let perPage = (pageNum === 1 && !searchQuery) ? 25 : 24;
+    let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + pageNum + "&per_page=" + perPage;
     if (curBlogAuthor) url += "&author=" + encodeURIComponent(curBlogAuthor);
     if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
     
