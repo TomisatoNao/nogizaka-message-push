@@ -489,13 +489,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── 工具 ─────────────────────────────────────────────
     def _send_json(self, obj: dict, code: int = 200) -> None:
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def _check_host(self) -> bool:
         """绑定回环地址时校验 Host 头（防 DNS rebinding）。"""
@@ -1555,6 +1558,8 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     log_all(f"⚠️ 网页端手动翻译失败: {row['author']} - {row.get('title', '')}", is_error=True)
                     self._send_json({"ok": False, "msg": "翻译失败，请稍后重试"})
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
             except Exception as e:
                 import traceback
                 with open("logs/ui_error.txt", "w", encoding="utf-8") as f:
