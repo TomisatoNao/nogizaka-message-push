@@ -223,8 +223,8 @@ async def _do_translate_gemini(text: str, is_html: bool, member_name: str, group
 
     return "[翻译失败]"
 
-def _chunk_blog_html(html: str, max_chunk_len: int = 16000) -> list[str]:
-    """将超长博客 HTML 按自然段落/标签切分成块，避免超过 Gemini 模型的输出 token 上限。"""
+def _chunk_blog_html(html: str, max_chunk_len: int = 8500) -> list[str]:
+    """将超长博客 HTML 按自然段落/标签切分成块，避免超过 Gemini 模型的输出 token 上限 (8192)。"""
     if len(html) <= max_chunk_len:
         return [html]
 
@@ -258,7 +258,7 @@ async def translate_blog_html(html: str, member_name: str = "", group_type: str 
     if not html or not getattr(cfg, "GEMINI_API_KEY", ""):
         return html
 
-    chunks = _chunk_blog_html(html, max_chunk_len=16000)
+    chunks = _chunk_blog_html(html, max_chunk_len=8500)
     if len(chunks) == 1:
         return await _do_translate_gemini(html, True, member_name, group_type, custom_client=custom_client)
 
