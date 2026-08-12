@@ -79,9 +79,7 @@ async def _post_json(url: str, payload: dict, custom_client: httpx.AsyncClient =
     未注入时（如工具脚本单独调用）退回临时客户端。"""
     headers = {"Content-Type": "application/json"}
     if custom_client is not None:
-        return await custom_client.post(
-            url, json=payload, headers=headers, timeout=cfg.TRANSLATE_TIMEOUT,
-        )
+        return await custom_client.post(url, json=payload, headers=headers)
     if _http_client is not None:
         return await _http_client.post(
             url, json=payload, headers=headers, timeout=cfg.TRANSLATE_TIMEOUT,
@@ -225,6 +223,30 @@ async def _do_translate_gemini(text: str, is_html: bool, member_name: str, group
 
     return "[翻译失败]"
 
+def _chunk_blog_html(html: str, max_chunk_len: int = 4000) -> list[str]:
+    """将超长博客 HTML 按自然段落/标签切分成块，避免超过 Gemini 模型的输出 token 上限。"""
+    if len(html) <= max_chunk_len:
+        return [html]
+
+    import re
+    pattern = r'(?=(?:<(?:p|div|section|article|figure)[\s>]))'
+    parts = re.split(pattern, html, flags=re.IGNORECASE)
+    
+    chunks = []
+    curr = ""
+    for p in parts:
+        if not p:
+            continue
+        if len(curr) + len(p) <= max_chunk_len:
+            curr += p
+        else:
+            if curr:
+                chunks.append(curr)
+            curr = p
+    if curr:
+        chunks.append(curr)
+    return chunks or [html]
+
 async def translate_text(text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
     """普通文本翻译接口"""
     if not text or not getattr(cfg, "GEMINI_API_KEY", ""):
@@ -232,9 +254,22 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "",
     return await _do_translate_gemini(text, False, member_name, group_type, custom_client=custom_client)
 
 async def translate_blog_html(html: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
-    """HTML结构化翻译接口"""
+    """HTML结构化翻译接口（支持超长博客自动切块分段翻译）"""
     if not html or not getattr(cfg, "GEMINI_API_KEY", ""):
         return html
-    return await _do_translate_gemini(html, True, member_name, group_type, custom_client=custom_client)
+
+    chunks = _chunk_blog_html(html, max_chunk_len=4000)
+    if len(chunks) == 1:
+        return await _do_translate_gemini(html, True, member_name, group_type, custom_client=custom_client)
+
+    log_all(f"✂️ 博客 HTML 过长 ({len(html)} 字符)，自动切分为 {len(chunks)} 块进行分段翻译...", is_debug=True)
+    res_chunks = []
+    for i, c in enumerate(chunks):
+        res = await _do_translate_gemini(c, True, member_name, group_type, custom_client=custom_client)
+        if res and res != "[翻译失败]":
+            res_chunks.append(res)
+        else:
+            res_chunks.append(c)
+    return "\n".join(res_chunks)
 
 
