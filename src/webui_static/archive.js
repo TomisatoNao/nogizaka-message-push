@@ -1226,11 +1226,32 @@ function startSearch(q, updateHash = true) {
   }
   loadPage();
 }
+let searchDebounceTimer = null;
+$("searchBox").addEventListener("input", () => {
+  const val = $("searchBox").value.trim();
+  $("searchClear").hidden = !val;
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    const q = normalizedQuery($("searchBox").value);
+    if (q !== searchQuery) {
+      if (q) startSearch(q);
+      else if (searchQuery) clearSearch();
+    }
+  }, 350);
+});
 $("searchBox").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && $("searchBox").value.trim()) startSearch($("searchBox").value.trim());
-  if (e.key === "Escape") { $("searchBox").value = ""; if (searchQuery) clearSearch(); }
+  if (e.key === "Enter" && $("searchBox").value.trim()) {
+    clearTimeout(searchDebounceTimer);
+    startSearch($("searchBox").value.trim());
+  }
+  if (e.key === "Escape") { 
+    clearTimeout(searchDebounceTimer);
+    $("searchBox").value = ""; 
+    if (searchQuery) clearSearch(); 
+  }
 });
 $("searchSubmit").addEventListener("click", () => {
+  clearTimeout(searchDebounceTimer);
   const q = normalizedQuery($("searchBox").value);
   if (q) startSearch(q);
   else $("searchBox").focus();

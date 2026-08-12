@@ -14,6 +14,7 @@ from src.utils import RateLimiter
 _limiter: RateLimiter = None   # type: ignore
 _http_client: httpx.AsyncClient | None = None   # 共享连接池；未注入时按需临时创建
 _trans_cache: dict[tuple[str, str], str] = {}   # (member_name, text_hash) -> translated
+_blog_cache: dict[tuple[str, str], str] = {}    # (member_name, html_hash) -> translated_html
 _MAX_CACHE_SIZE = 1000
 
 _GROUP_DISPLAY: dict[str, str] = {
@@ -158,6 +159,11 @@ async def _do_translate_gemini(text: str, is_html: bool, member_name: str, group
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
         }
     else:
+        cache_key = (member_name, _get_text_hash(text))
+        if cache_key in _blog_cache:
+            log_all(f"⚡ 命中博客翻译内存缓存 ({member_name})", is_debug=True)
+            return _blog_cache[cache_key]
+
         group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
         prompt = _BLOG_HTML_PROMPT_TEMPLATE.format(
             group_name=group_name,
@@ -191,6 +197,9 @@ async def _do_translate_gemini(text: str, is_html: bool, member_name: str, group
                                 if result.endswith("```"):
                                     result = result[:-3]
                                 result = result.strip()
+                                if len(_blog_cache) >= 100:
+                                    _blog_cache.pop(next(iter(_blog_cache)))
+                                _blog_cache[cache_key] = result
                                 return result
                             else:
                                 if len(_trans_cache) >= _MAX_CACHE_SIZE:
