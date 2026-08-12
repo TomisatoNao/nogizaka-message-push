@@ -1,12 +1,10 @@
 # nogizaka-message-push
 
-坂道系（乃木坂46 / 日向坂46）成员付费信息的**监控、推送与归档**系统。
-
-自动轮询成员 Message，翻译成中文，推送到 QQ 群 / Telegram / QQ 官方 Bot，并把每条消息连同图片视频**永久归档到本地**——退订了、App 关服了，档案还在你硬盘上。日常运维全部在浏览器里完成。
+自动轮询成员 Message 及官方博客（乃木坂46 / 日向坂46 / 樱坂46），利用 Gemini AI 翻译成中文，格式化推送到 QQ 群 / Telegram / QQ 官方 Bot，并把每条消息与博客连同图片视频**永久归档到本地**——退订了、App 关服了，档案还在你硬盘上。日常运维与归档浏览全部在浏览器里完成。
 
 ```
-成员发消息  →  抓取  →  翻译  →  推送到你的 QQ / TG
-                 └────→  归档到本地（原文 + 译文 + 媒体）→  网页浏览 / 搜索
+成员发消息 / 博客更新  →  抓取  →  Gemini AI 翻译  →  格式化推送至 QQ / TG
+                          └────→  本地数据库与媒体归档  →  网页 4 列网格 / 日历跳转 / 全文检索
 ```
 
 ---
@@ -247,6 +245,7 @@ Bot 数量不限。三步：
 | **日志** | 实时日志（含 DEBUG 级，2 秒刷新）+ 日志文件尾部；支持「仅错误」和关键词过滤，内容自动脱敏 |
 | **用户**（启用账号系统后，仅 admin 可见） | 增删用户、改密码、切换角色 |
 | **高级（JSON）** | 整份配置的 JSON 编辑 + **历史版本回滚**（每次保存前自动快照，保留 10 份） |
+| **消息/博客归档页** (`/archive`) | 顶部支持 `💬 消息归档` 与 `📝 博客归档` 实时切页，拥有独立 4 列矩阵网格、吸顶日历选择器与双语阅读器 |
 
 **通用能力**：
 
@@ -514,15 +513,16 @@ nogizaka-message-push/
 │   ├── credentials.py           # 凭证管理：双模式 Token 刷新、Header 构建
 │   └── watcher.py               # 配置文件热重载（可选 watchdog）
 ├── src/
-│   ├── app.py                   # 主循环：健康检查、轮询编排、每日摘要
-│   ├── fetcher.py               # 抓取：API 轮询、过滤、分发
-│   ├── translator.py            # Gemini 翻译（多模型容错、串行限速）
+│   ├── app.py                   # 主循环：健康检查、轮询编排、博客巡查、每日摘要
+│   ├── fetcher.py               # Message 抓取：API 轮询、过滤、分发
+│   ├── blog_fetcher.py          # 博客抓取：乃木坂/日向坂/樱坂官网爬虫、SQLite 落地与图片下载
+│   ├── translator.py            # Gemini 翻译（多模型容错、串行限速、博客段落级对照）
 │   ├── tagger.py                 # Gemini 图片打标签（Vision，10 类目分类）
-│   ├── notifier.py              # 多通道推送路由 + 系统警报
+│   ├── notifier.py              # 多通道推送路由 + zakablog 规范格式排版 + 系统警报
 │   ├── archive.py               # 消息归档：落地、媒体下载、搜索、日历统计
 │   ├── auth.py                  # 账号系统：scrypt 哈希、会话、登录限流
-│   ├── webui.py                 # 管理端 HTTP 服务（stdlib，零依赖）
-│   ├── webui_static/            # 前端：管理端 / 归档(首页+浏览) / 登录 / 共享主题
+│   ├── webui.py                 # 管理端与归档 HTTP 服务（stdlib，零依赖，包含删除翻译与博客日历接口）
+│   ├── webui_static/            # 前端：管理端 / 归档(消息+博客 4 列网格+日历) / 登录 / 共享主题
 │   ├── health.py                # 运行时健康追踪与状态摘要
 │   ├── dedup.py                 # 消息 ID 滑动窗口去重
 │   ├── member_directory.py      # 成员目录拉取（工具与网页端共用）
@@ -530,9 +530,10 @@ nogizaka-message-push/
 │   ├── utils.py                 # JST 时间、时段判断、限速器
 │   └── platforms/               # napcat.py / qq_official.py / tgbot.py
 ├── tools/                       # 见 9.2
-├── tests/                       # 五个测试套件，CI 全跑
+├── tests/                       # 测试套件，CI 全跑
 ├── data/                        # 运行时数据（git-ignored）
-│   ├── archive/                 # 消息归档
+│   ├── archive/                 # 消息归档 JSON 与博客数据库 `blogs.db`
+│   ├── blog_images/             # 下载的博客原图
 │   ├── web_credentials/         # 持久化凭证
 │   ├── users.json               # 网页账号
 │   ├── sent_ids/ time_records/  # 去重与时间戳
