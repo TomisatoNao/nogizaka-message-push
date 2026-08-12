@@ -7,8 +7,8 @@
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
   "qq_official_bots": [
-    {"name": "official_bot1", "app_id": "1905290933", "target_openid": "5CADF347E2C67F2CF0B207F84D239EF6", "member_filter": ["冨里奈央"], "group_openid": "41AF50041FB8E04AB04E119733E2873C"},
-    {"name": "official_bot2", "app_id": "1905396097", "member_filter": [], "group_openid": "164BFBF703F42544C624D36BCCF0986E"}
+    {"name": "official_bot1", "app_id": "1905290933", "target_openid": "5CADF347E2C67F2CF0B207F84D239EF6", "member_filter": ["冨里奈央"], "group_openid": "41AF50041FB8E04AB04E119733E2873C", "blog_filter": [], "push_alert": true},
+    {"name": "official_bot2", "app_id": "1905396097", "member_filter": ["冨里奈央"], "group_openid": "164BFBF703F42544C624D36BCCF0986E", "blog_filter": ["hinatazaka", "nogizaka", "sakurazaka"]}
   ],
 
   // ── 网页管理 ──
@@ -40,7 +40,7 @@
   // ── 账号系统 ──
   "auth": {
     "enabled": true,
-    "archive_public": true,
+    "archive_public": false,
     "session_hours": 12
   },
 
@@ -71,22 +71,11 @@
   ],
   "gemini_min_interval": 7,
   "translate_timeout": 30,
+  "blog_monitor": {"enabled": true, "hinatazaka": true, "nogizaka": true, "sakurazaka": true, "day_interval": [60, 120], "night_interval": [1650, 1950]},
+  "blog_records": {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""},
   "gemini_tag_min_interval": 5,
   "gemini_tag_models": [{"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"}, {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"}],
   "image_tagging": true,
-
-  // ── 博客监控 ──
-  "blog_monitor": {
-    "enabled": true,
-    "hinatazaka": true,
-    "nogizaka": true,
-    "sakurazaka": true,
-    "day_interval": [60, 120],
-    "night_interval": [1650, 1950]
-  },
-  "blog_records": {
-    "hinatazaka": "",
-    "nogizaka": "",
-    "sakurazaka": ""
-  }
+  "napcat_routes": [],
+  "tg_bots": []
 }

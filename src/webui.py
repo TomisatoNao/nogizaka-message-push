@@ -711,7 +711,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_auth_me()
             return
         if path in ("/", "/index.html"):
-            if not self._guard(need_admin=True, is_page=True):
+            user = self._current_user()
+            if not user or user.get("role") != "admin":
+                self._redirect("/archive")
                 return
             self._send_html(_STATIC_PATH)
             return
@@ -864,6 +866,10 @@ class _Handler(BaseHTTPRequestHandler):
     # ── 登录 / 登出 / 身份 ─────────────────────────
     def _handle_auth_me(self) -> None:
         import config.config as cfg
+        try:
+            cfg._load_env_and_json()
+        except Exception:
+            pass
         from src import auth as _auth
         user = self._current_user() if getattr(cfg, "AUTH_ENABLED", False) else None
         self._send_json({
@@ -1006,7 +1012,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_archive(self, sub: str) -> None:
         from urllib.parse import parse_qs, unquote
-
+        import config.config as cfg
         from src import archive as _archive
         qs = parse_qs(self.path.partition("?")[2])
 
@@ -1405,36 +1411,68 @@ class _Handler(BaseHTTPRequestHandler):
         if sub == "blog_calendar":
             qs = self._query_params()
             group = qs.get("group", "hinatazaka")
+            author = qs.get("author", "")
             days = {}
             try:
                 db = _get_blog_db()
-                for r in db.execute("""
+                where = "WHERE group_key=?"
+                params = [group]
+                if author:
+                    where += " AND author=?"
+                    params.append(author)
+                for r in db.execute(f"""
                     SELECT substr(date,1,10) as d, COUNT(*)
-                    FROM blog_posts WHERE group_key=?
+                    FROM blog_posts {where}
                     GROUP BY d
-                """, (group,)).fetchall():
+                """, params).fetchall():
                     days[r[0]] = r[1]
             except Exception:
                 pass
             self._send_json({"ok": True, "group": group, "days": days})
             return
 
+        if sub == "blog_authors":
+            qs = self._query_params()
+            group = qs.get("group", "hinatazaka")
+            authors = []
+            try:
+                db = _get_blog_db()
+                for r in db.execute("""
+                    SELECT author, COUNT(*)
+                    FROM blog_posts WHERE group_key=?
+                    GROUP BY author ORDER BY COUNT(*) DESC
+                """, (group,)).fetchall():
+                    authors.append({"name": r[0], "total": r[1]})
+            except Exception:
+                pass
+            self._send_json({"ok": True, "group": group, "authors": authors})
+            return
+
         if sub == "blogs":
             qs = self._query_params()
             group = qs.get("group", "hinatazaka")
+            author = qs.get("author", "")
             year = int(qs.get("year", "0") or "0")
             month = int(qs.get("month", "0") or "0")
             page = max(1, int(qs.get("page", "1") or "1"))
             per_page = min(100, max(1, int(qs.get("per_page", "30") or "30")))
+            q = qs.get("q", "")
             posts = []
             total = 0
             try:
                 db = _get_blog_db()
                 where = "WHERE group_key=?"
                 params: list = [group]
+                if author:
+                    where += " AND author=?"
+                    params.append(author)
                 if year and month:
                     where += " AND substr(date,1,7)=?"
                     params.append(f"{year:04d}-{month:02d}")
+                if q:
+                    where += " AND (title LIKE ? OR body_text LIKE ? OR translation LIKE ?)"
+                    q_like = f"%{q}%"
+                    params.extend([q_like, q_like, q_like])
                 total = db.execute(
                     f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]
                 rows = db.execute(
@@ -1453,6 +1491,113 @@ class _Handler(BaseHTTPRequestHandler):
                 "ok": True, "group": group, "posts": posts,
                 "total": total, "page": page, "total_pages": total_pages,
             })
+            return
+
+        if sub == "blogs/translate":
+            if getattr(cfg, "AUTH_ENABLED", False):
+                if not self._current_user():
+                    self._send_json({"ok": False, "msg": "需登录后方可使用翻译功能"}, 401)
+                    return
+
+            if self.command != "POST":
+                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
+                return
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send_json({"ok": False, "msg": "Missing body"}, 400)
+                return
+            body_data = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body_data)
+                blog_id = int(data.get("id", 0))
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "msg": "Invalid JSON"}, 400)
+                return
+                
+            if not blog_id:
+                self._send_json({"ok": False, "msg": "无效参数"})
+                return
+
+            try:
+                db = _get_blog_db()
+                row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (blog_id,)).fetchone()
+                if not row:
+                    self._send_json({"ok": False, "msg": "未找到该博客"})
+                    return
+                row = dict(row)
+
+                if row.get("translation") and row["translation"] != "[翻译失败]":
+                    self._send_json({"ok": True, "html": row["translation"]})
+                    return
+
+                import asyncio
+                import httpx
+                import importlib
+                from src import translator
+                importlib.reload(translator)
+                translator.initialize()
+                from src.logger import log_all
+
+                log_all(f"🔄 网页端请求手动翻译博客: {row['author']} - {row.get('title', '')}")
+
+                async def _do_translate():
+                    async with httpx.AsyncClient(timeout=120) as temp_client:
+                        return await translator.translate_blog_html(
+                            row["body_html"], row["author"], row["group_key"], custom_client=temp_client
+                        )
+
+                translated = asyncio.run(_do_translate())
+                if translated and "[翻译失败]" not in translated:
+                    log_all(f"✅ 网页端手动翻译完成: {row['author']} - {row.get('title', '')}")
+                    db.execute("UPDATE blog_posts SET translation = ? WHERE id = ?", (translated, blog_id))
+                    db.commit()
+                    self._send_json({"ok": True, "html": translated})
+                else:
+                    log_all(f"⚠️ 网页端手动翻译失败: {row['author']} - {row.get('title', '')}", is_error=True)
+                    self._send_json({"ok": False, "msg": "翻译失败，请稍后重试"})
+            except Exception as e:
+                import traceback
+                with open("logs/ui_error.txt", "w", encoding="utf-8") as f:
+                    traceback.print_exc(file=f)
+                self._send_json({"ok": False, "msg": f"异常: {e}"})
+            return
+
+        if sub == "blogs/delete_translation":
+            if getattr(cfg, "AUTH_ENABLED", False):
+                if not self._current_user():
+                    self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
+                    return
+
+            if self.command != "POST":
+                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send_json({"ok": False, "msg": "Missing body"}, 400)
+                return
+
+            body_data = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body_data)
+                blog_id = int(data.get("id", 0))
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "msg": "Invalid JSON"}, 400)
+                return
+
+            if not blog_id:
+                self._send_json({"ok": False, "msg": "无效参数"})
+                return
+
+            try:
+                db = _get_blog_db()
+                db.execute("UPDATE blog_posts SET translation = NULL WHERE id = ?", (blog_id,))
+                db.commit()
+                from src.logger import log_all
+                log_all(f"🗑️ 管理员删除了博客 (ID: {blog_id}) 的翻译缓存")
+                self._send_json({"ok": True, "msg": "已清除该博客的翻译"})
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"异常: {e}"})
             return
 
         if sub.startswith("blog_media/"):
@@ -1600,9 +1745,15 @@ class _Handler(BaseHTTPRequestHandler):
             entries, seq = get_recent(qs_int("after", 0))
             self._send_json({"ok": True, "source": "live", "entries": entries, "seq": seq})
             return
-        if source in ("error", "response"):
+        if source in ("error", "response", "system"):
             import config.config as cfg
-            fp = Path(cfg.ERROR_LOG_FILE if source == "error" else cfg.RESPONSE_LOG_FILE)
+            if source == "error":
+                fp = Path(cfg.ERROR_LOG_FILE)
+            elif source == "system":
+                fp = Path(getattr(cfg, "SYSTEM_LOG_FILE", "logs/system_info.log"))
+            else:
+                fp = Path(cfg.RESPONSE_LOG_FILE)
+            
             tail = max(1, min(qs_int("tail", 200), 1000))
             try:
                 lines = _tail_file(fp, tail)
@@ -1673,7 +1824,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_secrets()
             return
         if path.startswith("/api/archive/"):
-            if not self._check_auth():
+            if not self._guard(need_admin=False):
                 return
             self._handle_archive(path[len("/api/archive/"):])
             return
@@ -1901,7 +2052,10 @@ def start_webui(host: str | None = None, port: int | None = None,
         hint = "已启用 token 鉴权"
     else:
         hint = "无鉴权（仅限本机访问时可接受）"
-    print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
+    try:
+        print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
+    except Exception:
+        print(f"WebUI started: http://{host}:{server.server_address[1]}/")
     return server
 
 

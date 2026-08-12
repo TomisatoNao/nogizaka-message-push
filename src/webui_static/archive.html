@@ -12,14 +12,26 @@
 </head>
 <body>
 <header>
-  <h1>📚 消息归档</h1>
-  <div class="chips" id="memberChips"></div>
-  <span id="whoami" style="font-size:12.5px; color:var(--muted)"></span>
-  <a href="#" id="homeNavLink" onclick="goHome();return false" style="margin-left:auto;color:var(--muted);text-decoration:none;font-size:13px" title="回到首页">🏠 首页</a>
+  <h1 style="margin: 0; font-size: 18px; white-space: nowrap;">📚 坂道归档</h1>
+  <div style="flex:1" class="header-spacer"></div>
+  <div class="nav-tabs" style="margin-right: 16px;">
+    <button class="nav-tab active" id="tabMsg">💬 消息归档</button>
+    <button class="nav-tab" id="tabBlog">📝 博客归档</button>
+  </div>
+  
+  <a href="#" id="homeNavLink" onclick="goHome();return false" class="btn" style="text-decoration:none;" title="回到首页">🏠 首页</a>
+  <div class="mobile-break"></div>
   <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
-  <a href="/" id="adminLink" hidden>⚙️ 管理端</a>
-  <a href="#" id="logoutLink" hidden style="margin-left:0">登出</a>
+  <span id="whoami" style="font-size:13px; color:var(--muted);"></span>
+  <button id="logoutBtn" hidden class="btn" style="white-space:nowrap;">🚪 登出</button>
+  <a href="/" id="adminLink" hidden class="btn primary" style="text-decoration:none;">⚙️ 管理端</a>
 </header>
+  
+  <!-- 独立悬浮过滤条 -->
+  <div class="sub-nav" id="subNav">
+  <div class="chips" id="memberChips"></div>
+  <div class="chips" id="blogGroupChips" style="display:none;"></div>
+</div>
 
 <div id="archiveHome" class="home">
   <!-- 骨架屏 -->
@@ -67,6 +79,12 @@
     <label class="toggle-row"><input type="checkbox" id="tagToggle" checked> 显示标签</label>
   </div>
   <div id="timeline"></div>
+  <div id="blogGrid" class="blog-grid" style="display:none;">
+    <div id="blogAuthorBar" class="blog-author-bar"></div>
+    <div id="blogHero" class="blog-hero" style="display:none;"></div>
+    <div id="blogCards" class="blog-cards"></div>
+    <div id="blogPagination" class="blog-pagination" style="display:none;"></div>
+  </div>
   <button class="nav" id="loadMore" hidden>加载更多 ↓</button>
   <div class="center" id="emptyHint" hidden></div>
 </main>
@@ -81,6 +99,39 @@
   <img id="lbImg" alt="">
   <button class="nav-btn" id="lbNext">›</button>
 </div>
+
+<div id="blogReader" class="blog-reader" style="display:none;" role="dialog" aria-modal="true">
+  <div class="br-header">
+    <button id="brClose" class="nav-btn">← 返回</button>
+    <div class="br-title" id="brTitle"></div>
+    <div class="br-header-actions" style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+      <div id="brModeSelector" class="br-mode-selector" style="display:none;">
+        <button type="button" class="brm-btn" data-mode="ja-zh">日中</button>
+        <button type="button" class="brm-btn" data-mode="zh-ja">中日</button>
+        <button type="button" class="brm-btn" data-mode="ja-only">纯日文</button>
+      </div>
+      <button id="brDeleteTranslate" class="nav-btn" style="display:none; white-space:nowrap; background:rgba(255,59,48,0.15); color:#ff453a; border-color:rgba(255,59,48,0.3);">🗑️ 删除翻译</button>
+      <button id="brTranslate" class="nav-btn" style="white-space:nowrap;">🌐 翻译</button>
+    </div>
+  </div>
+  <div class="br-content" id="brContent"></div>
+</div>
+
+<!-- Custom Confirm Modal -->
+<div id="customConfirmModal" class="custom-modal-backdrop" style="display:none;">
+  <div class="custom-modal-card">
+    <div class="cm-icon danger">🗑️</div>
+    <h3 class="cm-title" id="cmTitle">确认操作</h3>
+    <p class="cm-message" id="cmMessage">确定要执行此操作吗？</p>
+    <div class="cm-actions">
+      <button id="cmCancel" class="cm-btn secondary">取消</button>
+      <button id="cmConfirm" class="cm-btn danger">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toastContainer" class="toast-container"></div>
 
 <script src="/static/archive.js"></script>
 </body>

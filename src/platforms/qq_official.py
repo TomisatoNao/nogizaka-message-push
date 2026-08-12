@@ -25,13 +25,16 @@ class QQOfficialBot:
     """单个 QQ 官方 Bot 实例，独立管理 token 和发送状态。"""
 
     def __init__(self, name: str, app_id: str, client_secret: str, target_openid: str,
-                 group_openid: str = "", member_filter: list[str] | None = None):
+                 group_openid: str = "", member_filter: list[str] | None = None,
+                 blog_filter: list[str] | None = None, push_alert: bool = False):
         self.name = name
         self.app_id = app_id
         self.client_secret = client_secret
         self.target_openid = target_openid
         self.group_openid = group_openid
         self.member_filter: list[str] = member_filter or []
+        self.blog_filter: list[str] = blog_filter or []
+        self.push_alert: bool = push_alert
 
         # 实例级状态
         self._client: httpx.AsyncClient = None
@@ -275,6 +278,83 @@ class QQOfficialBot:
             url = f"{self._target_base('groups', group_openid)}/messages"
             return await self._post_json(url, {"content": text[:1900], "msg_type": 0}, max_retries) is not None
 
+    async def send_private_text(self, target_openid: str, text: str, max_retries: int = 3) -> bool:
+        """向指定用户发送纯文本消息。"""
+        if not text.strip():
+            return False
+        async with self._lock:
+            if not await self.ensure_access_token():
+                return False
+            url = f"{self._target_base('users', target_openid)}/messages"
+            return await self._post_json(url, {"content": text[:1900], "msg_type": 0}, max_retries) is not None
+
+    async def send_translation_qq(self, scope: str, target_openid: str, pairs: list[tuple[str, str]]) -> bool:
+        """发送 QQ 中日对照正文（日文粗体**，中文斜体*，双语对之间零宽空格行，切分<=1800字符）。"""
+        if not pairs or not target_openid:
+            return True
+            
+        import re
+        def _esc_md(t: str) -> str:
+            t = t.replace('*', '＊').replace('_', '＿').replace('`', '｀')
+            t = re.sub(r'^#', '＃', t, flags=re.MULTILINE)
+            t = re.sub(r'^> ', '＞ ', t, flags=re.MULTILINE)
+            t = re.sub(r'^- ', '－ ', t, flags=re.MULTILINE)
+            return t
+            
+        def _format_lines(text: str, symbol: str) -> str:
+            lines = text.split('\n')
+            res = []
+            for line in lines:
+                l_str = line.strip()
+                if not l_str:
+                    continue
+                if re.match(r'^\[写真\d+\]$', l_str):
+                    res.append(l_str)
+                else:
+                    res.append(f"{symbol}{_esc_md(l_str)}{symbol}")
+            return "\n".join(res)
+            
+        blocks = []
+        for item in pairs:
+            if isinstance(item, tuple):
+                ja, zh = item
+                ja_fmt = _format_lines(ja, "**")
+                zh_fmt = _format_lines(zh, "*")
+                block = ja_fmt
+                if zh_fmt:
+                    block += f"\n{zh_fmt}"
+                blocks.append(block)
+            elif isinstance(item, str):
+                blocks.append(item)
+            
+        MAX_LEN = 1800
+        parts = []
+        buf = ""
+        for block in blocks:
+            if len(buf) + len(block) + 4 <= MAX_LEN:
+                buf = (buf + "\n​\n" + block) if buf else block
+            else:
+                if buf:
+                    parts.append(buf)
+                buf = block
+        if buf:
+            parts.append(buf)
+            
+        all_ok = True
+        async with self._lock:
+            if not await self.ensure_access_token():
+                return False
+            url = f"{self._target_base(scope, target_openid)}/messages"
+            for part in parts:
+                resp = await self._post_json(url, {"msg_type": 2, "markdown": {"content": part}})
+                if resp is None:
+                    plain_part = part.replace("**", "").replace("*", "")
+                    resp = await self._post_json(url, {"msg_type": 0, "content": plain_part})
+                    if resp is None:
+                        all_ok = False
+                await asyncio.sleep(0.5)
+        return all_ok
+
 
 # ──────────────────────────────────────────────
 # 模块级 Bot 注册表 & 媒体下载
@@ -329,20 +409,50 @@ def initialize(client: httpx.AsyncClient) -> None:
     global _bots, _client
     _client = client
     _bots = []
-    for bot_cfg in cfg.QQ_OFFICIAL_BOTS:
+    for i, bot_cfg in enumerate(cfg.QQ_OFFICIAL_BOTS):
         if not bot_cfg.get("app_id"):
             continue  # 跳过未配置的 Bot
         bot = QQOfficialBot(
-            name=bot_cfg.get("name", "unnamed"),
+            name=bot_cfg.get("name", f"official_{i}"),
             app_id=bot_cfg["app_id"],
             client_secret=bot_cfg.get("client_secret", ""),
             target_openid=bot_cfg.get("target_openid", ""),
             group_openid=bot_cfg.get("group_openid", ""),
-            member_filter=bot_cfg.get("member_filter") or [],
+            member_filter=bot_cfg.get("member_filter"),
+            blog_filter=bot_cfg.get("blog_filter"),
+            push_alert=bot_cfg.get("push_alert", False)
         )
         bot.initialize(client)
         _bots.append(bot)
         log_all(f"📝 注册官方 QQ Bot: {bot.name}")
+
+
+def reload() -> None:
+    """热重载：更新配置但继承已有的 client 和 access_token。"""
+    global _bots
+    old_bots = {b.app_id: b for b in _bots}
+    new_bots = []
+    for i, bot_cfg in enumerate(cfg.QQ_OFFICIAL_BOTS):
+        if not bot_cfg.get("app_id"):
+            continue
+        bot = QQOfficialBot(
+            name=bot_cfg.get("name", f"official_{i}"),
+            app_id=bot_cfg["app_id"],
+            client_secret=bot_cfg.get("client_secret", ""),
+            target_openid=bot_cfg.get("target_openid", ""),
+            group_openid=bot_cfg.get("group_openid", ""),
+            member_filter=bot_cfg.get("member_filter"),
+            blog_filter=bot_cfg.get("blog_filter"),
+            push_alert=bot_cfg.get("push_alert", False)
+        )
+        bot.initialize(_client)
+        if bot.app_id in old_bots:
+            old = old_bots[bot.app_id]
+            bot._access_token = old._access_token
+            bot._token_expire_at = old._token_expire_at
+        new_bots.append(bot)
+    _bots = new_bots
+    log_all("📝 官方 QQ Bot 已热重载")
 
 
 def get_bots() -> list[QQOfficialBot]:

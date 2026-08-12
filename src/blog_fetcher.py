@@ -110,12 +110,25 @@ def init_blog_db() -> sqlite3.Connection:
     return conn
 
 
-def _ensure_records(raw_config: dict) -> dict[str, str]:
-    """确保 blog_records 字段存在，返回其引用（修改会反映回 raw_config）。"""
-    if not raw_config.get("blog_records"):
-        raw_config["blog_records"] = {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""}
-    return raw_config["blog_records"]
+import json
+from pathlib import Path
 
+_RECORDS_PATH = Path(__file__).resolve().parent.parent / "state" / "blog_records.json"
+
+def _load_records() -> dict[str, str]:
+    if _RECORDS_PATH.exists():
+        try:
+            return json.loads(_RECORDS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""}
+
+def _save_records(records: dict[str, str]) -> None:
+    try:
+        _RECORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _RECORDS_PATH.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        log_all(f"⚠️ 保存博客水印失败: {e}", is_error=True)
 
 # ── 主循环 ──
 
@@ -131,7 +144,8 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
     if not blog_cfg.get("enabled", True):
         return []
 
-    records = _ensure_records(raw_config)  # 直接引用 raw_config 内部字典
+    records = _load_records()
+    records_dirty = False
     new_posts = []
 
     for group_name, fetch_fn, fetch_img_fn, key, need_detail in TASKS:
@@ -154,15 +168,18 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                 break
             unseen.append(p)
 
-        # 首轮不做推送，只记水印
+        # 首轮初始化：只记最新水印，不做推送
         if not last_url:
             records[key] = posts[0]["url"]
-            log_all(f"📝 [{group_name}] 首轮初始化，水印: {posts[0]['url'][:60]}…")
+            records_dirty = True
+            log_all(f"📝 [{group_name}] 首轮初始化，记录水印: {posts[0]['url'][:60]}...")
             continue
-
-        # 离线恢复：水印 URL 不在扫描窗口里
-        if last_url and len(unseen) == len(posts):
+        # 离线恢复：持久化记录之后很久没抓取（水印脱节），直接重置水印，不推送积压
+        elif len(unseen) == len(posts):
             records[key] = posts[0]["url"]
+            records_dirty = True
+            log_all(f"📝 [{group_name}] 水印已脱节，重置水印到最新，忽略中间积压的推送...")
+            continue
 
         if not unseen:
             continue
@@ -170,7 +187,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
         log_all(f"📝 [{group_name}] 发现 {len(unseen)} 篇新博客")
 
         # 按 oldest→newest 顺序处理
-        raw_config["_blog_records_dirty"] = True
+        records_dirty = True
         for post in reversed(unseen):
             post["group_key"] = key
             post["group_name"] = group_name
@@ -200,16 +217,39 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                     post.get("author", ""), post.get("title", ""),
                     timestamp=post.get("date", "").replace("/", "").replace(" ", "_").replace(":", ""))
 
+            # 自动调用 Gemini 翻译（利用原样注入 HTML 的逻辑）
+            translated_html = ""
+            if post.get("body_html"):
+                try:
+                    from src import translator
+                    if getattr(translator, "_http_client", None) is None:
+                        translator.initialize(client)
+                    log_all(f"🔄 正在后台翻译博客: {post.get('author', '')} - {post.get('title', '')}")
+                    translated_html = await translator.translate_blog_html(
+                        post["body_html"],
+                        post.get("author", ""),
+                        key
+                    )
+                    if translated_html == "[翻译失败]":
+                        translated_html = ""
+                    else:
+                        log_all(f"✅ 后台博客翻译完成")
+                except Exception as e:
+                    log_all(f"⚠️ 自动翻译博客失败: {e}", is_debug=True)
+            
+            post["translation"] = translated_html
+
             # 存档到 SQLite
             try:
                 db.execute("""
                     INSERT OR IGNORE INTO blog_posts
-                    (group_key, author, title, url, date, body_html, body_text, images_json, image_paths_json, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (group_key, author, title, url, date, body_html, body_text, translation, images_json, image_paths_json, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     key, post.get("author", ""), post.get("title", ""), post["url"],
                     _normalize_date(post.get("date", "")),
                     post.get("body_html", ""), post.get("body", ""),
+                    translated_html,
                     json.dumps(post.get("images") or [], ensure_ascii=False),
                     json.dumps(image_paths, ensure_ascii=False),
                     json.dumps(post, ensure_ascii=False, default=str),
@@ -218,14 +258,13 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             except Exception:
                 pass
 
-            # 推进水印
+            # 推进水印（每个 post 独立推进，容错）
             records[key] = post["url"]
             new_posts.append(post)
 
-    # 写回水印到 config
-    if raw_config.get("_blog_records_dirty"):
-        raw_config["blog_records"] = records
-        raw_config.pop("_blog_records_dirty", None)
+    # 写回水印到单独文件
+    if records_dirty:
+        _save_records(records)
 
     return new_posts
 

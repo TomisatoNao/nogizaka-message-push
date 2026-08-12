@@ -7,105 +7,109 @@
 
 /* ── 设计 token：浅色（默认） ───────────────────────── */
 :root {
-  --bg:          #f4f5f9;
-  --bg-grad-1:   #eceafb;
-  --bg-grad-2:   #f7ecf5;
-  --bg-grad-3:   #e9f0fb;
-  --card:        #ffffff;
-  --card-soft:   #fafbfd;
-  --text:        #1b2231;
-  --text-strong: #0e1420;
-  --muted:       #6b7280;
-  --border:      #e5e8ef;
-  --border-soft: #eef0f5;
-  --field:       #f5f6fa;
+  --bg:          #f4f6fa;
+  --bg-grad-1:   #e8ebf8;
+  --bg-grad-2:   #f6eff5;
+  --bg-grad-3:   #e4eaf8;
+  --card:        rgba(255, 255, 255, 0.85);
+  --card-solid:  #ffffff;
+  --card-soft:   rgba(250, 251, 253, 0.7);
+  --text:        #1e2532;
+  --text-strong: #0f1624;
+  --muted:       #717a8a;
+  --border:      rgba(226, 230, 238, 0.8);
+  --border-soft: rgba(238, 240, 245, 0.6);
+  --field:       rgba(245, 247, 251, 0.7);
 
-  --accent:      #6d5bd0;
-  --accent-2:    #a97ae0;
-  --accent-soft: #ece9fa;
-  --accent-ring: rgba(109, 91, 208, .18);
+  --accent:      #6355df;
+  --accent-2:    #a36be5;
+  --accent-soft: rgba(99, 85, 223, 0.08);
+  --accent-ring: rgba(99, 85, 223, 0.25);
 
-  --ok:          #12925a;
-  --ok-soft:     #e6f6ee;
-  --warn:        #b8720a;
-  --warn-soft:   #fdf1de;
-  --err:         #d23f3f;
-  --err-soft:    #fdecec;
+  --ok:          #0e995a;
+  --ok-soft:     #e3f6ed;
+  --warn:        #c27608;
+  --warn-soft:   #fdf2df;
+  --err:         #db3c3c;
+  --err-soft:    #fdecfe;
 
-  --shadow-sm:   0 1px 2px rgba(24, 28, 48, .05);
-  --shadow-md:   0 4px 14px rgba(24, 28, 48, .07);
-  --shadow-lg:   0 16px 44px rgba(70, 55, 130, .14);
+  --shadow-sm:   0 2px 6px rgba(18, 22, 38, 0.04);
+  --shadow-md:   0 8px 24px rgba(18, 22, 38, 0.08);
+  --shadow-lg:   0 24px 48px rgba(65, 55, 120, 0.12);
 
-  --radius:      14px;
-  --radius-sm:   9px;
-  --font: "Segoe UI", "Hiragino Sans", "Microsoft YaHei", system-ui, sans-serif;
+  --radius:      16px;
+  --radius-sm:   10px;
+  --font: "Inter", "Segoe UI", "Hiragino Sans", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "JetBrains Mono", Consolas, Menlo, monospace;
-  --tr: .16s cubic-bezier(.3, .8, .4, 1);
+  --tr: .25s cubic-bezier(.2, .8, .2, 1);
+  --tr-fast: .15s cubic-bezier(.2, .8, .2, 1);
 }
 
 /* ── 设计 token：深色 ─────────────────────────────── */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg:          #12141b;
-    --bg-grad-1:   #171a24;
-    --bg-grad-2:   #1d1a28;
-    --bg-grad-3:   #141a26;
-    --card:        #1c1f28;
-    --card-soft:   #21252f;
-    --text:        #e7eaf1;
-    --text-strong: #f4f6fa;
-    --muted:       #98a0b0;
-    --border:      #2c313d;
-    --border-soft: #262b35;
-    --field:       #242833;
+    --bg:          #0d0e12;
+    --bg-grad-1:   #151724;
+    --bg-grad-2:   #191524;
+    --bg-grad-3:   #121822;
+    --card:        rgba(22, 24, 32, 0.7);
+    --card-solid:  #161820;
+    --card-soft:   rgba(28, 30, 42, 0.5);
+    --text:        #e9ecf2;
+    --text-strong: #f6f8fb;
+    --muted:       #9199a8;
+    --border:      rgba(48, 54, 68, 0.6);
+    --border-soft: rgba(40, 46, 58, 0.4);
+    --field:       rgba(32, 36, 48, 0.5);
 
-    --accent:      #9c8cf0;
-    --accent-2:    #c79bf0;
-    --accent-soft: #2a2740;
-    --accent-ring: rgba(156, 140, 240, .22);
+    --accent:      #a294f5;
+    --accent-2:    #d0a6f5;
+    --accent-soft: rgba(162, 148, 245, 0.12);
+    --accent-ring: rgba(162, 148, 245, 0.3);
 
-    --ok:          #3ecf8e;
-    --ok-soft:     #16302a;
-    --warn:        #e8a13c;
-    --warn-soft:   #33280f;
-    --err:         #ef6a6a;
-    --err-soft:    #3a2426;
+    --ok:          #49d899;
+    --ok-soft:     #173b2e;
+    --warn:        #efa846;
+    --warn-soft:   #3d2e12;
+    --err:         #f27373;
+    --err-soft:    #422628;
 
-    --shadow-sm:   0 1px 2px rgba(0, 0, 0, .3);
-    --shadow-md:   0 4px 16px rgba(0, 0, 0, .36);
-    --shadow-lg:   0 16px 44px rgba(0, 0, 0, .5);
+    --shadow-sm:   0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-md:   0 12px 32px rgba(0, 0, 0, 0.5);
+    --shadow-lg:   0 24px 64px rgba(0, 0, 0, 0.7);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg:          #12141b;
-  --bg-grad-1:   #171a24;
-  --bg-grad-2:   #1d1a28;
-  --bg-grad-3:   #141a26;
-  --card:        #1c1f28;
-  --card-soft:   #21252f;
-  --text:        #e7eaf1;
-  --text-strong: #f4f6fa;
-  --muted:       #98a0b0;
-  --border:      #2c313d;
-  --border-soft: #262b35;
-  --field:       #242833;
+  --bg:          #0d0e12;
+  --bg-grad-1:   #151724;
+  --bg-grad-2:   #191524;
+  --bg-grad-3:   #121822;
+  --card:        rgba(22, 24, 32, 0.7);
+  --card-solid:  #161820;
+  --card-soft:   rgba(28, 30, 42, 0.5);
+  --text:        #e9ecf2;
+  --text-strong: #f6f8fb;
+  --muted:       #9199a8;
+  --border:      rgba(48, 54, 68, 0.6);
+  --border-soft: rgba(40, 46, 58, 0.4);
+  --field:       rgba(32, 36, 48, 0.5);
 
-  --accent:      #9c8cf0;
-  --accent-2:    #c79bf0;
-  --accent-soft: #2a2740;
-  --accent-ring: rgba(156, 140, 240, .22);
+  --accent:      #a294f5;
+  --accent-2:    #d0a6f5;
+  --accent-soft: rgba(162, 148, 245, 0.12);
+  --accent-ring: rgba(162, 148, 245, 0.3);
 
-  --ok:          #3ecf8e;
-  --ok-soft:     #16302a;
-  --warn:        #e8a13c;
-  --warn-soft:   #33280f;
-  --err:         #ef6a6a;
-  --err-soft:    #3a2426;
+  --ok:          #49d899;
+  --ok-soft:     #173b2e;
+  --warn:        #efa846;
+  --warn-soft:   #3d2e12;
+  --err:         #f27373;
+  --err-soft:    #422628;
 
-  --shadow-sm:   0 1px 2px rgba(0, 0, 0, .3);
-  --shadow-md:   0 4px 16px rgba(0, 0, 0, .36);
-  --shadow-lg:   0 16px 44px rgba(0, 0, 0, .5);
+  --shadow-sm:   0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-md:   0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-lg:   0 24px 64px rgba(0, 0, 0, 0.7);
 }
 
 /* ── 基础 ─────────────────────────────────────────── */
@@ -118,9 +122,9 @@ body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   background:
-    radial-gradient(1100px 620px at 8% -12%, var(--bg-grad-1), transparent 62%),
-    radial-gradient(900px 540px at 96% 4%, var(--bg-grad-2), transparent 58%),
-    radial-gradient(1000px 700px at 46% 108%, var(--bg-grad-3), transparent 62%),
+    radial-gradient(1200px 720px at 10% -10%, var(--bg-grad-1), transparent 70%),
+    radial-gradient(1000px 600px at 90% 10%, var(--bg-grad-2), transparent 60%),
+    radial-gradient(1100px 800px at 50% 110%, var(--bg-grad-3), transparent 70%),
     var(--bg);
   background-attachment: fixed;
   min-height: 100vh;

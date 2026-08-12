@@ -26,6 +26,7 @@ _ANSI_SUPPORTED: bool = (
 )
 
 error_logger:    logging.Logger | None = None
+system_logger:   logging.Logger | None = None
 response_logger: logging.Logger | None = None
 
 # 终端单行最大长度（超出部分截断，多行内容逐行判断）
@@ -67,8 +68,9 @@ def _make_rotating_logger(name: str, filepath: str) -> logging.Logger:
 
 
 def init_loggers() -> None:
-    global error_logger, response_logger
+    global error_logger, system_logger, response_logger
     error_logger    = _make_rotating_logger("error",    cfg.ERROR_LOG_FILE)
+    system_logger   = _make_rotating_logger("system",   getattr(cfg, "SYSTEM_LOG_FILE", "logs/system_info.log"))
     response_logger = _make_rotating_logger("response", cfg.RESPONSE_LOG_FILE)
 
 
@@ -103,15 +105,29 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
         line if len(line) <= _MAX_LINE_LENGTH else line[:_MAX_LINE_LENGTH] + "...[TRUNCATED]"
         for line in safe_content.split("\n")
     )
-    if _ANSI_SUPPORTED:
-        print(f"{ts} {color}[{tag}]\033[0m {safe}")
-    else:
-        print(f"{ts} [{tag}] {safe}")
+    try:
+        if _ANSI_SUPPORTED:
+            print(f"{ts} {color}[{tag}]\033[0m {safe}")
+        else:
+            print(f"{ts} [{tag}] {safe}")
+    except UnicodeEncodeError:
+        safe_fallback = safe.encode("gbk", "replace").decode("gbk")
+        if _ANSI_SUPPORTED:
+            print(f"{ts} {color}[{tag}]\033[0m {safe_fallback}")
+        else:
+            print(f"{ts} [{tag}] {safe_fallback}")
+    except Exception:
+        pass
 
     _push_recent(tag.strip(), ts, safe_content)
 
-    if not is_debug and error_logger:
-        (error_logger.error if is_error else error_logger.info)(safe_content)
+    if is_error and error_logger:
+        error_logger.error(safe_content)
+    elif not is_error and system_logger:
+        if is_debug:
+            system_logger.debug(safe_content)
+        else:
+            system_logger.info(safe_content)
 
 
 def log_response(content: str) -> None:

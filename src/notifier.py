@@ -1,5 +1,5 @@
 # ============================================================
-# notifier.py — QQ 多通道推送调度
+# notifier.py — QQ 多通道推送调度 (已解耦)
 # ============================================================
 import config.config as cfg
 from src.logger import error_logger, log_all
@@ -13,79 +13,98 @@ from src.health import ErrorTier
 
 def enabled_channels() -> list[str]:
     channels: list[str] = []
-    if cfg.ENABLE_NAPCAT_QQ:
+    if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
         channels.append("napcat")
-    if cfg.ENABLE_QQ_OFFICIAL_BOT and has_bots():
+    if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False) and has_bots():
         channels.append("official")
-    if cfg.ENABLE_TG_BOT:
+    if getattr(cfg, "ENABLE_TG_BOT", False) and getattr(cfg, "TG_BOTS", []):
         channels.append("tg")
     return channels
 
 
 async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     """
-    向所有启用的 QQ 通道推送成员消息。
+    向所有启用的通道推送成员消息。
     NapCat 保持原有可靠性语义：失败会阻断时间戳记录。
-    官方 Bot 与 NapCat 同开时作为旁路，失败只记日志，避免官方频控造成群消息重复。
+    官方 Bot 和 TG Bot 作为旁路，失败只记日志。
     """
     channels = enabled_channels()
     if not channels:
-        log_all("⏸️ QQ 推送通道均未启用，本条消息仅记录状态", is_error=True)
+        log_all("⏸️ 推送通道均未启用，本条消息仅记录状态", is_error=True)
         return True
 
+    m_name = member.get("m_name", "")
     napcat_ok = True
 
+    # 1. NapCat 路由
     if cfg.ENABLE_NAPCAT_QQ:
-        for gid in member.get("target_groups") or []:
-            ok = await send_qq_message(gid, message_chain)
-            health.get_tracker().record_channel("napcat", ok, f"群 {gid} 发送失败")
-            if not ok:
-                napcat_ok = False
-                log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
+        routes = getattr(cfg, "NAPCAT_ROUTES", [])
+        matched_any = False
+        for route in routes:
+            filters = route.get("member_filter") or []
+            if not filters or m_name in filters:
+                gid = route.get("group_id")
+                if gid:
+                    matched_any = True
+                    ok = await send_qq_message(gid, message_chain)
+                    health.get_tracker().record_channel("napcat", ok, f"群 {gid} 发送失败")
+                    if not ok:
+                        napcat_ok = False
+                        log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
+                    else:
+                        log_all(f"✅ NapCat QQ 推送成功 (群 {gid})", is_debug=True)
+        # 如果没有配置任何 NapCat 路由，我们默认算成功，不阻断
+        if not matched_any:
+            napcat_ok = True
 
+    # 2. QQ 官方 Bot 路由
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
         bots = get_configured_bots()
         media_payloads = None
         if bots:
             media_payloads = await qq_official.download_media_payloads(member, message_chain)
 
-        def _resolve_bot(name: str):
-            if name:
-                for b in bots:
-                    if b.name == name:
-                        return b
-                return None
-            return bots[0] if bots else None
-
         # 单聊目标（target_openid）—— 受 member_filter 过滤
         for bot in bots:
             if not bot.target_openid:
                 continue
-            if bot.member_filter and member.get("m_name", "") not in bot.member_filter:
+            if bot.member_filter and m_name not in bot.member_filter:
                 continue
             ok = await bot.send_message_chain(member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}", ok)
             if not ok:
                 log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 单聊推送失败", is_error=True)
+            else:
+                log_all(f"✅ 官方 QQ Bot [{bot.name}] 单聊推送成功", is_debug=True)
 
         # 群聊目标（group_openid）—— 受 member_filter 过滤
         for bot in bots:
             if not bot.group_openid:
                 continue
-            if bot.member_filter and member.get("m_name", "") not in bot.member_filter:
+            if bot.member_filter and m_name not in bot.member_filter:
                 continue
             ok = await bot.send_message_chain_to_group(
                 bot.group_openid, member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}:group", ok)
             if not ok:
                 log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 群推送失败 ({bot.group_openid[:16]}…)", is_error=True)
+            else:
+                log_all(f"✅ 官方 QQ Bot [{bot.name}] 群推送成功", is_debug=True)
 
-    # TG Bot 作为旁路推送，失败不影响 QQ 状态
+    # 3. TG Bot 路由
     if cfg.ENABLE_TG_BOT:
-        tg_ok = await tgbot.send_member_message(member, message_chain)
-        health.get_tracker().record_channel("tg", tg_ok)
-        if not tg_ok:
-            log_all(f"⚠️ TG Bot 推送失败 [{member.get('m_name', '?')}]", is_error=True)
+        tg_bots = tgbot.get_configured_bots()
+        for bot in tg_bots:
+            if not bot.target_chat:
+                continue
+            if bot.member_filter and m_name not in bot.member_filter:
+                continue
+            tg_ok = await bot.send_member_message(message_chain)
+            health.get_tracker().record_channel(f"tg:{bot.name}", tg_ok)
+            if not tg_ok:
+                log_all(f"⚠️ TG Bot [{bot.name}] 推送失败 [{m_name}]", is_error=True)
+            else:
+                log_all(f"✅ TG Bot [{bot.name}] 推送成功 [{m_name}]", is_debug=True)
 
     if cfg.ENABLE_NAPCAT_QQ:
         return napcat_ok
@@ -94,33 +113,38 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
 async def send_report_message(text: str) -> bool:
     """向所有已启用通道发送运行报告（每日摘要等，非警报语义、无前缀）。
-    目标沿用告警路由：NapCat 取 monitor 里第一个 QQ 群，TG 取第一个频道。"""
+    目标取告警通道。"""
     any_ok = False
 
-    if cfg.ENABLE_NAPCAT_QQ:
-        gid = next((g for m in cfg.MONITOR_LIST for g in (m.get("target_groups") or [])), 0)
-        if gid:
-            ok = await send_qq_message(gid, [{"type": "text", "data": {"text": text}}])
-            any_ok = any_ok or ok
+    if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
+        routes = getattr(cfg, "NAPCAT_ROUTES", [])
+        for route in routes:
+            if not route.get("push_alert"):
+                continue
+            gid = route.get("group_id")
+            if gid:
+                ok = await send_qq_message(gid, [{"type": "text", "data": {"text": text}}])
+                any_ok = any_ok or ok
 
-    if cfg.ENABLE_QQ_OFFICIAL_BOT:
+    if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
         for bot in get_configured_bots():
-            if not bot.target_openid:
-                continue      # 群专用 Bot，跳过单聊报告
+            if not bot.target_openid or not bot.push_alert:
+                continue
             if await bot.send_text(text):
                 any_ok = True
 
-    if cfg.ENABLE_TG_BOT:
-        cid = next(((m.get("tg_chat_id") or "").strip() for m in cfg.MONITOR_LIST
-                    if (m.get("tg_chat_id") or "").strip()), "")
-        if cid and await tgbot.send_text(cid, text):
-            any_ok = True
+    if getattr(cfg, "ENABLE_TG_BOT", False):
+        for bot in tgbot.get_configured_bots():
+            if not bot.target_chat or not bot.push_alert:
+                continue
+            if await bot.send_text(text):
+                any_ok = True
 
     return any_ok
 
 
 async def send_alert_message(target_group: int, text: str) -> bool:
-    """向所有已启用的推送通道发送系统警报。"""
+    """向所有配置为推送告警的通道发送系统警报。"""
     channels = enabled_channels()
     if not channels:
         log_all(f"⏸️ 没有可用的推送通道，警报未发送: {text}", is_error=True)
@@ -128,57 +152,52 @@ async def send_alert_message(target_group: int, text: str) -> bool:
 
     any_ok = False
 
-    # NapCat 群告警（target_group 为 0 表示该账号无关联 QQ 群，跳过）
-    if cfg.ENABLE_NAPCAT_QQ and target_group:
-        alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
-        ok = await send_qq_message(target_group, alert_chain)
-        if ok:
-            any_ok = True
-        else:
-            health.get_tracker().record_error(
-                f"NapCat 告警发送失败 (群 {target_group})", ErrorTier.TRANSIENT
-            )
-            if error_logger:
-                error_logger.error(f"NapCat 告警发送失败: {text}")
-
-    # QQ 官方 Bot 告警 — 发给所有已配置的 Bot
-    if cfg.ENABLE_QQ_OFFICIAL_BOT:
-        bots = get_configured_bots()
-        if not bots:
-            log_all(f"⏸️ 没有已配置的 QQ 官方 Bot，警报未发送: {text}", is_error=True)
-        else:
-            for bot in bots:
-                if not bot.target_openid:
-                    continue    # 群专用 Bot，跳过单聊告警
-                ok = await bot.send_text(f"📢 系统警报\n{text}")
+    # NapCat 群告警（发给开启了 push_alert 的路由）
+    if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
+        routes = getattr(cfg, "NAPCAT_ROUTES", [])
+        for route in routes:
+            if not route.get("push_alert"):
+                continue
+            gid = route.get("group_id")
+            if gid:
+                alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
+                ok = await send_qq_message(gid, alert_chain)
                 if ok:
                     any_ok = True
                 else:
                     health.get_tracker().record_error(
-                        f"官方Bot [{bot.name}] 告警发送失败", ErrorTier.TRANSIENT
+                        f"NapCat 告警发送失败 (群 {gid})", ErrorTier.TRANSIENT
                     )
+                    if error_logger:
+                        error_logger.error(f"NapCat 告警发送失败: {text}")
 
-    # TG Bot 告警
-    if cfg.ENABLE_TG_BOT:
-        tg_chat_id = ""
-        for m in cfg.MONITOR_LIST:
-            cid = (m.get("tg_chat_id") or "").strip()
-            if not cid:
+    # QQ 官方 Bot 告警 — 发给开启了 push_alert 的 Bot
+    if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
+        bots = get_configured_bots()
+        for bot in bots:
+            if not bot.target_openid or not bot.push_alert:
                 continue
-            # target_group 为 0（无关联 QQ 群）时取第一个可用频道
-            if not target_group or target_group in (m.get("target_groups") or []):
-                tg_chat_id = cid
-                break
-        if tg_chat_id:
-            ok = await tgbot.send_alert(tg_chat_id, text)
+            ok = await bot.send_text(f"📢 系统警报\n{text}")
             if ok:
                 any_ok = True
             else:
                 health.get_tracker().record_error(
-                    "TG Bot 告警发送失败", ErrorTier.TRANSIENT
+                    f"官方Bot [{bot.name}] 告警发送失败", ErrorTier.TRANSIENT
                 )
-        else:
-            log_all(f"⏸️ 群 {target_group} 无关联 TG 频道，TG 警报跳过", is_debug=True)
+
+    # TG Bot 告警 — 发给开启了 push_alert 的 Bot
+    if getattr(cfg, "ENABLE_TG_BOT", False):
+        tg_bots = tgbot.get_configured_bots()
+        for bot in tg_bots:
+            if not bot.push_alert or not bot.target_chat:
+                continue
+            ok = await bot.send_text(f"📢 系统警报\n{text}")
+            if ok:
+                any_ok = True
+            else:
+                health.get_tracker().record_error(
+                    f"TG Bot [{bot.name}] 告警发送失败", ErrorTier.TRANSIENT
+                )
 
     return any_ok
 
@@ -188,62 +207,220 @@ async def send_alert_message(target_group: int, text: str) -> bool:
 EMOJI_MAP = {"hinatazaka": "☀️", "nogizaka": "💜", "sakurazaka": "🌸"}
 
 
+def _compress_photo_placeholders(items: list[tuple[str, str] | str]) -> list[tuple[str, str] | str]:
+    import re
+    res = []
+    i = 0
+    while i < len(items):
+        item = items[i]
+        if isinstance(item, str) and re.match(r'^\[写真\d+\]$', item):
+            nums = []
+            while i < len(items) and isinstance(items[i], str) and re.match(r'^\[写真\d+\]$', items[i]):
+                val = int(re.match(r'^\[写真(\d+)\]$', items[i]).group(1))
+                if nums and val != nums[-1] + 1:
+                    break
+                nums.append(val)
+                i += 1
+            if len(nums) == 1:
+                res.append(f"[写真{nums[0]}]")
+            else:
+                res.append(f"[写真{nums[0]}-{nums[-1]}]")
+        else:
+            res.append(item)
+            i += 1
+    return res
+
+
+def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = None) -> list[tuple[str, str] | str]:
+    if not html_or_text:
+        return []
+
+    if media_urls and "<img" in html_or_text:
+        import re
+        def _repl_img(match):
+            img_tag = match.group(0)
+            src_m = re.search(r'src=["\']([^"\']+)["\']', img_tag)
+            if src_m:
+                src = src_m.group(1)
+                for i, u in enumerate(media_urls):
+                    if src in u or u in src or (src and u and src.split("/")[-1] == u.split("/")[-1]):
+                        return f"\n<p>[写真{i+1}]</p>\n"
+            return ""
+        html_or_text = re.sub(r'<img[^>]*>', _repl_img, html_or_text)
+
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_or_text, "html.parser")
+        items = []
+
+        elements = soup.find_all(["strong", "p"])
+        for el in elements:
+            if el.name == "strong":
+                ja_text = el.get_text("\n").strip()
+                next_node = el.next_sibling
+                em_text = ""
+                while next_node:
+                    if getattr(next_node, "name", None) == "em":
+                        em_text = next_node.get_text("\n").strip()
+                        break
+                    next_node = next_node.next_sibling
+                if ja_text:
+                    items.append((ja_text, em_text))
+            elif el.name == "p":
+                txt = el.get_text().strip()
+                import re
+                if re.match(r'^\[写真\d+\]$', txt):
+                    items.append(txt)
+
+        if items:
+            return _compress_photo_placeholders(items)
+    except Exception:
+        pass
+
+    lines = [l.strip() for l in (html_or_text or "").split("\n") if l.strip()]
+    return [("\n".join(lines), "")] if lines else []
+
+
 async def send_blog_post(post: dict) -> bool:
-    """向 QQ 官方 Bot 群推送一篇博客。"""
+    """向配置的渠道推送一篇博客（按 zakablog 顺序：1.头信息 -> 2.全量图片 -> 3.中日对照正文）。"""
     import asyncio
     import httpx
-    from src.platforms.qq_official import get_configured_bots
+    import config.config as cfg
+    from src.logger import log_all
 
     group_key = post.get("group_key", "")
     group_name = post.get("group_name", "")
     emoji = EMOJI_MAP.get(group_key, "🤖")
     blog_url = post.get("url", "")
+    author = post.get("author", "")
+    title = post.get("title", "")
+    date = post.get("date", "")
 
-    intro = (
+    import json
+    imgs_raw = post.get("images") or (json.loads(post.get("images_json")) if isinstance(post.get("images_json"), str) else [])
+    media_urls = [img for img in imgs_raw if isinstance(img, str) and img.startswith("http")]
+
+    # 1. 头消息 (Header text)
+    header_text = (
         f"{emoji} {group_name} ブログ更新\n\n"
-        f"作者：{post.get('author', '')}\n"
-        f"标题：{post.get('title', '')}\n"
-        f"时间：{post.get('date', '')}\n"
-        f"照片：共 {len(post.get('images') or [])} 张\n\n"
-        f"👉 {blog_url}"
+        f"作者：{author}\n"
+        f"标题：{title}\n"
+        f"时间：{date}\n"
+        f"照片：共 {len(media_urls)} 张\n\n"
+        f"👉 博客链接：\n{blog_url}"
     )
 
-    bots = get_configured_bots()
-    if not bots:
-        return False
+    # 2. 提取双语段落 (Pairs)
+    trans_content = post.get("translation") or post.get("body_text", "")
+    pairs = _extract_bilingual_pairs(trans_content, media_urls=media_urls)
 
-    media_urls = [img for img in (post.get("images") or [])
-                  if isinstance(img, str) and img.startswith("http")]
     any_ok = False
 
-    for bot in bots:
-        if not bot.group_openid:
-            continue
-        try:
-            ok = await bot.send_group_text(bot.group_openid, intro)
-            if not ok:
-                short = f"{emoji} {post.get('author', '')} のブログ：{post.get('title', '')}\n{blog_url}"
-                ok = await bot.send_group_text(bot.group_openid, short)
+    # ----------------------------------------------------
+    # Channel 1: QQ 官方 Bot (受 blog_filter 控制)
+    # ----------------------------------------------------
+    if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
+        from src.platforms.qq_official import get_configured_bots
+        bots = get_configured_bots()
+        for bot in bots:
+            if not bot.group_openid and not bot.target_openid:
+                continue
+            if not bot.blog_filter or group_key not in bot.blog_filter:
+                continue
 
-            for img_url in media_urls[:5]:
-                try:
-                    async with httpx.AsyncClient(timeout=30) as c:
-                        r = await c.get(img_url)
-                        img_bytes = r.content
-                    async with bot._lock:
-                        if await bot.ensure_access_token():
-                            fi = await bot._upload_media(
-                                "image", img_bytes, scope="groups",
-                                target_openid=bot.group_openid)
-                            if fi:
-                                await bot._send_uploaded_media(
-                                    fi, scope="groups",
-                                    target_openid=bot.group_openid)
-                except Exception:
-                    pass
-                await asyncio.sleep(0.4)
-            any_ok = True
-        except Exception:
-            log_all(f"⚠️ 博客推送失败 [{bot.name}]", is_error=True)
+            try:
+                scope = "groups" if bot.group_openid else "users"
+                target = bot.group_openid if bot.group_openid else bot.target_openid
+
+                # Step 1: 发送头信息
+                if scope == "groups":
+                    await bot.send_group_text(target, header_text)
+                else:
+                    await bot.send_private_text(target, header_text)
+                await asyncio.sleep(0.5)
+
+                # Step 2: 发送全量图片
+                for img_url in media_urls:
+                    try:
+                        async with httpx.AsyncClient(timeout=30) as c:
+                            r = await c.get(img_url)
+                            img_bytes = r.content
+                        async with bot._lock:
+                            if await bot.ensure_access_token():
+                                fi = await bot._upload_media("image", img_bytes, scope=scope, target_openid=target)
+                                if fi:
+                                    await bot._send_uploaded_media(fi, scope=scope, target_openid=target)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.4)
+
+                # Step 3: 发送中日对照正文 (**日文粗体** / *中文斜体*，段落间 \n​\n 分隔)
+                if pairs:
+                    await bot.send_translation_qq(scope, target, pairs)
+
+                any_ok = True
+            except Exception as e:
+                log_all(f"⚠️ 博客推送失败 [{bot.name}]: {e}", is_error=True)
+
+    # ----------------------------------------------------
+    # Channel 2: NapCat (受 blog_filter 控制)
+    # ----------------------------------------------------
+    if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
+        routes = getattr(cfg, "NAPCAT_ROUTES", [])
+        for route in routes:
+            filters = route.get("blog_filter") or []
+            if not filters or group_key not in filters:
+                continue
+            gid = route.get("group_id")
+            if not gid:
+                continue
+
+            from src.platforms.napcat import send_qq_message
+            try:
+                # Step 1 & 2: 头信息 + 全量图片消息链
+                chain = [{"type": "text", "data": {"text": header_text}}]
+                for img_url in media_urls:
+                    chain.append({"type": "image", "data": {"file": img_url}})
+                ok = await send_qq_message(int(gid), chain)
+                if ok:
+                    any_ok = True
+
+                # Step 3: 中日对照正文
+                if pairs:
+                    from src.platforms.qq_official import _escape_qq_md
+                    blocks = [f"**{_escape_qq_md(ja)}**\n*{_escape_qq_md(zh)}*" if zh else f"**{_escape_qq_md(ja)}**" for ja, zh in pairs]
+                    body_txt = "\n\n".join(blocks)
+                    await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
+            except Exception as e:
+                log_all(f"⚠️ NapCat 博客推送失败 (群 {gid}): {e}", is_error=True)
+
+    # ----------------------------------------------------
+    # Channel 3: Telegram (受 blog_filter 控制)
+    # ----------------------------------------------------
+    if getattr(cfg, "ENABLE_TG_BOT", False):
+        from src.platforms.tgbot import get_configured_bots
+        bots = get_configured_bots()
+        for bot in bots:
+            if not bot.target_chat:
+                continue
+            if not bot.blog_filter or group_key not in bot.blog_filter:
+                continue
+
+            try:
+                # Step 1 & 2: 发送图片专辑组 (Media Group)，第一张附带 Header Caption
+                if media_urls:
+                    await bot.send_media_group_photos(media_urls, caption=header_text)
+                else:
+                    await bot._send_html(bot.target_chat, header_text)
+
+                await asyncio.sleep(1.0)
+
+                # Step 3: 发送 Telegram 中日对照正文 (<i>日文斜体</i> / <b>中文粗体</b>，切分<=4000字符)
+                if pairs:
+                    await bot.send_translation_tg(pairs)
+
+                any_ok = True
+            except Exception as e:
+                log_all(f"⚠️ TG 博客推送失败 [{bot.name}]: {e}", is_error=True)
 
     return any_ok

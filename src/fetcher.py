@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # fetcher.py — 核心抓取逻辑：拉取成员消息并分发推送
 # ============================================================
 import asyncio
@@ -85,8 +85,7 @@ async def _handle_message(member: dict, msg: dict,
             log_all(f"ℹ️ {m_name} 翻译结果与原文一致，跳过翻译推送")
         else:
             translated = raw
-            if error_logger:
-                error_logger.info(f"🌐 翻译结果 ({m_name}): {translated[:150]}")
+            log_all(f"🌐 翻译结果 ({m_name}): {translated[:150]}", is_debug=True)
 
     # 归档（后台执行，不阻塞推送；开关 archive.enabled）
     archive.schedule_archive(member, msg, translated)
@@ -96,6 +95,8 @@ async def _handle_message(member: dict, msg: dict,
     if not await send_member_message(member, chain):
         log_all(f"⚠️ {m_name} 消息推送失败，保留时间戳等待下次重试", is_error=True)
         return False
+    else:
+        log_all(f"📤 {m_name} 成功分发 1 条消息 (ID: {msg_id})", is_debug=True)
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
     l_time_ref[0] = updated

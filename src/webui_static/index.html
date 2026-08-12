@@ -1,40 +1,44 @@
 <!DOCTYPE html>
+
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>⚙️</text></svg>">
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<link href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='0.9em' font-size='90'&gt;⚙️&lt;/text&gt;&lt;/svg&gt;" rel="icon"/>
 <title>坂道监控 · 配置管理</title>
-<link rel="stylesheet" href="/static/theme.css">
+<link href="/static/theme.css" rel="stylesheet"/>
 <script src="/static/theme.js"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
-  header { display: flex; align-items: center; gap: 12px; padding: 12px 24px;
-           background: color-mix(in srgb, var(--card) 82%, transparent);
-           backdrop-filter: blur(14px) saturate(1.3);
-           -webkit-backdrop-filter: blur(14px) saturate(1.3);
-           border-bottom: 1px solid var(--border);
-           position: sticky; top: 0; z-index: 10; }
-  header h1 { font-size: 15.5px; margin: 0; font-weight: 650; color: var(--text-strong);
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px;
+           background: color-mix(in srgb, var(--card-solid) 75%, transparent);
+           backdrop-filter: blur(20px) saturate(1.4);
+           -webkit-backdrop-filter: blur(20px) saturate(1.4);
+           border-bottom: 1px solid var(--border-soft);
+           position: sticky; top: 0; z-index: 40; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; color: var(--text-strong);
               letter-spacing: .01em; }
   header .spacer { flex: 1; }
-  .dirty-dot { color: var(--warn); font-size: 12px; display: none; }
-  main { max-width: 1000px; margin: 0 auto; padding: 22px 24px 84px; }
-  nav.tabs { display: flex; gap: 5px; margin-bottom: 18px; flex-wrap: wrap; }
-  nav.tabs button { border: 1px solid transparent; background: transparent; color: var(--muted);
-    padding: 7px 15px; border-radius: 999px; cursor: pointer; font-size: 13.5px;
-    transition: color var(--tr), background var(--tr), border-color var(--tr); }
-  nav.tabs button:hover { color: var(--text); background: var(--card-soft); }
-  nav.tabs button.active { background: var(--accent-soft); color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 34%, transparent); font-weight: 650;
-    box-shadow: 0 1px 6px var(--accent-ring); }
+  .dirty-dot { display: none !important; }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 24px 100px; }
+  nav.tabs { display: inline-flex; background: color-mix(in srgb, var(--card) 60%, var(--bg) 40%);
+             padding: 6px; border-radius: 999px; gap: 4px; margin-bottom: 24px;
+             box-shadow: inset 0 2px 4px rgba(0,0,0,.03); border: 1px solid var(--border-soft);
+             flex-wrap: wrap; }
+  nav.tabs button { border: none; background: transparent; color: var(--muted);
+    padding: 8px 18px; border-radius: 999px; cursor: pointer; font-size: 13.5px;
+    transition: color var(--tr), background var(--tr), transform var(--tr-fast); position: relative; }
+  nav.tabs button:hover { color: var(--text); }
+  nav.tabs button.active { background: var(--card-solid); color: var(--text-strong);
+    font-weight: 650; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
   section.tab { display: none; }
-  section.tab.active { display: block; animation: fadeUp .22s ease both; }
-  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
-          padding: 20px 22px; margin-bottom: 16px; box-shadow: var(--shadow-sm);
-          transition: box-shadow var(--tr); }
-  .card:hover { box-shadow: var(--shadow-md); }
+  section.tab.active { display: block; animation: fadeUp .3s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } }
+  .card { background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius);
+          padding: 24px 28px; margin-bottom: 20px; box-shadow: var(--shadow-sm);
+          backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+          transition: box-shadow var(--tr), transform var(--tr); }
+  .card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
   .card h2 { font-size: 13px; margin: 0 0 15px; color: var(--muted); font-weight: 650;
              letter-spacing: .06em; text-transform: uppercase;
              display: flex; align-items: center; gap: 8px; }
@@ -42,62 +46,60 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 18px; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
   input[type=text], input[type=number], input[type=search], select, textarea {
-    padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: var(--field); color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
-    transition: border-color var(--tr), box-shadow var(--tr), background var(--tr); }
+    transition: border-color var(--tr), box-shadow var(--tr), background var(--tr);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.02); }
   input:focus, select:focus, textarea:focus {
-    outline: none; border-color: var(--accent); background: var(--card);
-    box-shadow: 0 0 0 3px var(--accent-ring); }
+    outline: none; border-color: var(--accent); background: var(--card-solid);
+    box-shadow: 0 0 0 3px var(--accent-ring), inset 0 1px 3px rgba(0,0,0,.01); }
   input.invalid { border-color: var(--err); outline: 1px solid var(--err); }
   .pair { display: flex; gap: 8px; align-items: center; }
   .pair input { width: 90px; }
-  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+  .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;
             font-size: 14px; color: var(--text); }
   .switch input { display: none; }
-  .switch .track { width: 36px; height: 20px; border-radius: 10px; background: var(--border);
-    position: relative; transition: background .15s; flex: none; }
-  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-    border-radius: 50%; background: var(--card); transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
-  .switch input:checked + .track { background: var(--accent); }
-  .switch input:checked + .track::after { left: 18px; }
+  .switch .track { width: 42px; height: 24px; border-radius: 12px; background: color-mix(in srgb, var(--border) 80%, transparent);
+    position: relative; transition: background .25s cubic-bezier(.2,.8,.2,1); flex: none; box-shadow: inset 0 1px 3px rgba(0,0,0,.05); }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+    border-radius: 50%; background: #fff; transition: transform .25s cubic-bezier(.2,.8,.2,1); box-shadow: 0 2px 4px rgba(0,0,0,.15); }
+  .switch input:checked + .track { background: var(--ok); }
+  .switch input:checked + .track::after { transform: translateX(18px); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border-soft);
+  th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--border-soft);
            vertical-align: middle; }
   tbody tr { transition: background var(--tr); }
-  tbody tr:hover { background: var(--card-soft); }
+  tbody tr:hover { background: color-mix(in srgb, var(--card-soft) 80%, transparent); }
   tbody tr:last-child td { border-bottom: none; }
   th { font-size: 11.5px; color: var(--muted); font-weight: 650; letter-spacing: .04em;
        text-transform: uppercase; }
   td input, td select { min-width: 70px; }
   .table-wrap { overflow-x: auto; }
-  button.btn { border: 1px solid var(--border); background: var(--card); color: var(--text);
-    padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
-    font-family: inherit;
-    transition: transform .06s, border-color var(--tr), background var(--tr), opacity var(--tr); }
-  button.btn:hover { border-color: var(--accent); background: var(--card-soft); }
-  button.btn:active { transform: translateY(1px) scale(.97); }
-  button.btn:disabled { opacity: .55; cursor: default; transform: none; }
-  button.btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    border-color: transparent; color: #fff; font-weight: 650;
-    box-shadow: 0 3px 10px var(--accent-ring); }
-  button.btn.primary:hover { background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    filter: brightness(1.06); }
-  button.btn.danger { color: var(--err); }
-  button.btn.danger:hover { background: var(--danger-soft); border-color: var(--err); }
-  button.btn.danger-solid { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
-  button.btn.danger-solid:hover { border-color: var(--err); opacity: .88; }
-  button.btn.small { padding: 4px 10px; font-size: 12.5px; }
+  .btn { border: 1px solid var(--border); background: var(--card-solid); color: var(--text);
+    padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
+    font-family: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+    transition: transform var(--tr-fast), border-color var(--tr), background var(--tr), opacity var(--tr), box-shadow var(--tr);
+    box-shadow: 0 1px 2px rgba(0,0,0,.02); text-decoration: none; }
+  .btn:hover { border-color: var(--accent); background: var(--card-soft); box-shadow: 0 2px 6px rgba(0,0,0,.04); color: var(--accent); }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: 0.5; pointer-events: none; border-color: var(--border-soft); }
+  .btn.danger:hover { border-color: var(--err); color: var(--err); background: rgba(220,53,69,.06); }
+  .btn.primary { border-color: var(--accent); background: var(--accent); color: #fff !important; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+  .btn.primary:hover { background: var(--accent-ring); border-color: var(--accent-ring); color: #fff !important; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+  .btn.small { padding: 4px 10px; font-size: 12.5px; }
   .cred { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
   .cred.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
   .cred.miss { color: var(--err); background: var(--danger-soft); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
   .hint code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-  footer.savebar { position: fixed; bottom: 0; left: 0; right: 0;
-    background: color-mix(in srgb, var(--card) 88%, transparent);
-    backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
-    border-top: 1px solid var(--border); padding: 11px 24px; display: flex; gap: 12px;
-    align-items: center; z-index: 10; box-shadow: 0 -2px 14px rgba(0,0,0,.05); }
-  footer.savebar .msg { flex: 1; font-size: 13px; white-space: pre-wrap; }
+  footer.savebar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px);
+    background: color-mix(in srgb, var(--card-solid) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    border: 1px solid var(--border-soft); padding: 12px 24px; display: flex; gap: 16px;
+    align-items: center; z-index: 50; box-shadow: var(--shadow-lg); border-radius: 999px;
+    transition: transform 0.4s cubic-bezier(.2,.8,.2,1), opacity 0.3s; opacity: 0; pointer-events: none; width: min(800px, 92vw); }
+  footer.savebar.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
+  footer.savebar .msg { flex: 1; font-size: 13.5px; white-space: pre-wrap; font-weight: 500; }
   footer.savebar .msg.ok { color: var(--ok); }
   footer.savebar .msg.err { color: var(--err); }
   textarea#rawJson { min-height: 420px; font-family: Consolas, Menlo, monospace; font-size: 13px;
@@ -158,15 +160,15 @@
     nav.tabs { gap: 5px; margin-bottom: 14px; }
     nav.tabs button { padding: 8px 12px; font-size: 13px; }
 
-    .card { padding: 14px; margin-bottom: 12px; }
-    .card h2 { font-size: 12px; margin-bottom: 12px; }
+    .card { padding: 18px 20px; margin-bottom: 16px; }
+    .card h2 { font-size: 12px; margin-bottom: 14px; }
     .grid { grid-template-columns: 1fr; gap: 12px; }
 
     .pair { flex-wrap: wrap; }
     .pair input { width: 100%; min-width: 0; }
 
-    button.btn { padding: 8px 12px; font-size: 13.5px; }
-    button.btn.small { padding: 6px 10px; font-size: 12.5px; }
+    .btn { padding: 8px 12px; font-size: 13.5px; }
+    .btn.small { padding: 6px 10px; font-size: 12.5px; }
 
     /* 表格横向滚动 */
     .table-wrap { -webkit-overflow-scrolling: touch; }
@@ -181,9 +183,10 @@
 
     /* 底部保存条 + 安全区 */
     footer.savebar {
-      padding: 10px 12px;
-      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      bottom: max(16px, env(safe-area-inset-bottom));
+      padding: 10px 16px; width: calc(100vw - 32px);
     }
+    footer.savebar .btn { padding: 8px 14px; }
     footer.savebar .msg { font-size: 12.5px; }
 
     textarea#rawJson { min-height: 46vh; }
@@ -193,477 +196,538 @@
 </head>
 <body>
 <header>
-  <h1>⚙️ 坂道监控 · 配置管理</h1>
-  <span class="dirty-dot" id="dirtyDot">● 有未保存的修改</span>
-  <div class="spacer"></div>
-  <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
-  <span class="hint" id="whoami" style="margin:0" hidden></span>
-  <button class="btn" id="btnLogout" hidden>登出</button>
-  <a class="btn" href="/archive" style="text-decoration:none" title="浏览已归档的成员消息">📚 消息归档</a>
-  <button class="btn" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
-  <button class="btn danger" id="btnRestart" hidden
-          title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
+<h1>⚙️ 坂道监控 · 配置管理</h1>
+<div class="spacer"></div>
+<button class="btn" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
+<button class="btn danger" hidden="" id="btnRestart" title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
+<div style="width: 10px;"></div> <!-- 小分隔 -->
+<button class="theme-toggle" title="切换主题" type="button">🖥️</button>
+<span class="hint" hidden="" id="whoami" style="margin:0"></span>
+<button class="btn" hidden="" id="btnLogout">登出</button>
+<a class="btn primary" href="/archive" title="浏览已归档的成员消息">📚 消息归档</a>
 </header>
-
 <main>
-  <nav class="tabs">
-    <button data-tab="status" class="active">状态</button>
-    <button data-tab="general">基本设置</button>
-    <button data-tab="accounts">账号池</button>
-    <button data-tab="members">监控成员</button>
-    <button data-tab="logs">日志</button>
-    <button data-tab="users" id="tabUsers" hidden>用户</button>
-    <button data-tab="advanced">高级（JSON）</button>
-  </nav>
-
-  <!-- ── 状态 ─────────────────────────────── -->
-  <section class="tab active" id="tab-status">
-    <div class="card">
-      <h2>巡查</h2>
-      <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
-        <span id="stCycle">—</span>
-        <span id="stNext" style="color:var(--muted)">—</span>
-        <button class="btn" id="btnPollNow" hidden>⏩ 立即巡查</button>
-        <button class="btn" id="btnTestPush" hidden>📨 测试推送</button>
-        <span class="hint" id="pollFeedback" style="margin:0"></span>
-      </div>
-      <p class="hint" id="stHint"></p>
-    </div>
-    <div class="card">
-      <h2>账号 Token</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>账号</th><th>剩余时间</th><th>状态</th></tr></thead>
-        <tbody id="stTokens"></tbody>
-      </table></div>
-      <p class="hint">Token 剩余不足 5 分钟时主程序会在下一轮巡查前自动续期，无需干预；只有显示「失效」时才需要重新填凭证。</p>
-    </div>
-    <div class="card">
-      <h2>推送通道（自上次状态摘要以来）</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
-        <tbody id="stChannels"></tbody>
-      </table></div>
-    </div>
-    <div class="card">
-      <h2>成员</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>成员</th><th>拉取</th><th>推送</th><th>最近错误</th></tr></thead>
-        <tbody id="stMembers"></tbody>
-      </table></div>
-    </div>
-    <div class="card">
-      <h2>近期错误（最多 20 条）</h2>
-      <div id="stErrors" class="empty">（无）</div>
-    </div>
-  </section>
-
-  <!-- ── 基本设置 ─────────────────────────────── -->
-  <section class="tab" id="tab-general">
-    <div class="card">
-      <h2>推送通道</h2>
-      <div class="grid" id="channelSwitches"></div>
-      <div style="margin-top:14px">
-        <label class="field">NapCat API 地址
-          <input type="text" id="napcatApi" placeholder="http://127.0.0.1:3000/send_group_msg">
-        </label>
-      </div>
-      <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
-        <span style="font-size:12.5px; color:var(--muted)">TG Bot Token (.env)</span>
-        <span id="tgTokenStatus"></span>
-        <button class="btn small" id="btnFillTgToken">填写</button>
-        <span class="hint" style="margin:0">（TG Token 修改后点右上角「⟳ 重启主程序」生效）</span>
-      </div>
-    </div>
-    <div class="card">
-      <h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>名称</th><th>App ID</th><th>个人 OpenID</th><th>群 OpenID</th><th>推送成员</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
-        <tbody id="qqBotRows"></tbody>
-      </table></div>
-      <div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
-      <p class="hint" id="qqBotHint">App ID 直接在表格里填；Client Secret 点该行「填写」存入 <code>.env</code>。
+<nav class="tabs">
+<button class="active" data-tab="status">状态</button>
+<button data-tab="accounts">账号池</button>
+<button data-tab="monitors">监控成员</button>
+<button data-tab="channels">推送通道</button>
+<button data-tab="system">系统设置</button>
+<button data-tab="advanced">高级</button>
+</nav>
+<!-- ── 状态 ─────────────────────────────── -->
+<section class="tab active" id="tab-status">
+<div class="card">
+<h2>巡查</h2>
+<div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+<span id="stCycle">—</span>
+<span id="stNext" style="color:var(--muted)">—</span>
+<button class="btn" hidden="" id="btnPollNow">⏩ 立即巡查</button>
+<button class="btn" hidden="" id="btnTestPush">📨 测试推送</button>
+<span class="hint" id="pollFeedback" style="margin:0"></span>
+</div>
+<p class="hint" id="stHint"></p>
+</div>
+<div class="card">
+<h2>账号 Token</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>账号</th><th>剩余时间</th><th>状态</th></tr></thead>
+<tbody id="stTokens"></tbody>
+</table></div>
+<p class="hint">Token 剩余不足 5 分钟时主程序会在下一轮巡查前自动续期，无需干预；只有显示「失效」时才需要重新填凭证。</p>
+</div>
+<div class="card">
+<h2>推送通道（自上次状态摘要以来）</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
+<tbody id="stChannels"></tbody>
+</table></div>
+</div>
+<div class="card">
+<h2>成员</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>成员</th><th>拉取</th><th>推送</th><th>最近错误</th></tr></thead>
+<tbody id="stMembers"></tbody>
+</table></div>
+</div>
+<div class="card">
+<h2>近期错误（最多 20 条）</h2>
+<div class="empty" id="stErrors">（无）</div>
+</div>
+</section>
+<!-- ── 基本设置 ─────────────────────────────── -->
+<!-- ── 账号池 ─────────────────────────────── -->
+<section class="tab" id="tab-accounts">
+<div class="card">
+<h2>账号池（凭证在 .env，按账号名大写自动匹配）</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>账号 ID</th><th>团体</th><th>登录方式</th><th>App 标签</th><th>凭证 (.env)</th><th></th></tr></thead>
+<tbody id="accountRows"></tbody>
+</table></div>
+<div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
+<div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
+<p class="hint">凭证可以点每行的「填凭证」直接填写（存入 <code>.env</code> 并立即轮换生效），也可以手动编辑 <code>.env</code>（手动改需重启）：<br/>
+        · web 账号 → <code>账号ID大写_TOKEN</code> + <code>账号ID大写_COOKIE</code><br/>
+        · mobile 账号 → <code>账号ID大写_REFRESH_TOKEN</code><br/>
+        ⚠️ 新账号要先「保存并热重载」把账号写进 config.json，然后才能填凭证。</p>
+</div>
+</section>
+<!-- ── 监控成员 ─────────────────────────────── -->
+<section class="tab" id="tab-monitors">
+<div class="card">
+<h2>监控成员</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>成员 ID</th><th>名字</th><th>账号</th><th></th></tr></thead>
+<tbody id="memberRows"></tbody>
+</table></div>
+<div class="empty" hidden="" id="memberEmpty">还没有监控成员。</div>
+<div style="margin-top:12px; display:flex; gap:10px">
+<button class="btn" id="btnAddMember">＋ 手动添加</button>
+<button class="btn" id="btnPickMember">📋 从账号拉取成员列表</button>
+</div>
+<p class="hint">成员 ID 可用 <code>python tools/list_members.py &lt;账号ID&gt;</code> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。</p>
+</div>
+<div class="card">
+<h2>博客抓取</h2>
+<div class="grid">
+<label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
+<div style="display:flex; flex-direction:column; gap:4px;">
+<span style="font-size:12.5px; color:var(--muted)">团体独立开关</span>
+<div style="display:flex; gap:12px; margin-top:4px; flex-wrap:wrap">
+<label class="switch"><input id="blogHinatazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>日向坂</label>
+<label class="switch"><input id="blogNogizaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>乃木坂</label>
+<label class="switch"><input id="blogSakurazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>樱坂</label>
+</div>
+</div>
+<label class="field">博客日间间隔（min / max 秒）
+          <span class="pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
+</label>
+<label class="field">博客深夜间隔（min / max 秒）
+          <span class="pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
+</label>
+</div>
+</div>
+<div style="margin-top:14px; font-size:13px; color:var(--muted)">
+  提示：博客具体的推送目标渠道，请在「推送通道」对应卡片中为各通道开启「推博客」。
+</div>
+</div></section><section class="tab" id="tab-channels"><div class="card">
+<h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>名称</th><th>App ID</th><th>个人 OpenID</th><th>群 OpenID</th><th>推送成员</th><th>推博客</th><th>推告警</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
+<tbody id="qqBotRows"></tbody>
+</table></div>
+<div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
+<p class="hint" id="qqBotHint">App ID 直接在表格里填；Client Secret 点该行「填写」存入 <code>.env</code>。
       <b>目标 OpenID 有两种拿法</b>：已知的话直接填；不知道就点「🎯 自动获取」——
       系统会连上 Bot 网关等待，让目标用户给 Bot 发一条私聊消息即可自动捕获并回填。
       官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用 Bot，所有成员都有推送目标。</p>
-      <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border-soft)">
-        <h3 style="margin:0 0 12px; font-size:14.5px">Bot 指令响应</h3>
-        <div class="grid">
-          <label class="switch"><input type="checkbox" id="cmdOn"><span class="track"></span>允许私聊 Bot 查询信息</label>
-          <label class="field">授权 OpenID（逗号分隔）
-            <input type="text" id="cmdAllow" placeholder="留空＝仅上表已填的目标 OpenID">
-          </label>
-        </div>
-        <p class="hint">开启后，白名单用户私聊 Bot 发 <code>/help</code> 即可看到全部指令：
+<div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border-soft)">
+<h3 style="margin:0 0 12px; font-size:14.5px">Bot 指令响应</h3>
+<div class="grid">
+<label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许私聊 Bot 查询信息</label>
+<label class="field">授权 OpenID（逗号分隔）
+            <input id="cmdAllow" placeholder="留空＝仅上表已填的目标 OpenID" type="text"/>
+</label>
+</div>
+<p class="hint">开启后，白名单用户私聊 Bot 发 <code>/help</code> 即可看到全部指令：
         <code>/status</code> 运行状态、<code>/members</code> 监控成员、<code>/latest [成员] [条数]</code> 最近消息、
         <code>/search 关键词</code> 归档搜索、<code>/stats</code> 归档统计。
         指令全部只读，<b>无法改配置、无法重启</b>；白名单之外的人发什么都不会有响应。修改后点右上角「⟳ 重启主程序」生效。</p>
-      </div>
-    </div>
-    <div class="card">
-      <h2>轮询节奏（秒 / JST 小时）</h2>
-      <div class="grid">
-        <label class="field">日间间隔（min / max 秒）
-          <span class="pair"><input type="number" id="dayMin" min="1"><span>–</span><input type="number" id="dayMax" min="1"></span>
-        </label>
-        <label class="field">深夜间隔（min / max 秒）
-          <span class="pair"><input type="number" id="nightMin" min="1"><span>–</span><input type="number" id="nightMax" min="1"></span>
-        </label>
-        <label class="field">休眠时段（起 / 止 时）
-          <span class="pair"><input type="number" id="sleepStart" min="0" max="23"><span>–</span><input type="number" id="sleepEnd" min="0" max="23"></span>
-        </label>
-        <label class="field">告警冷却（秒）
-          <input type="number" id="alertCooldown" min="0">
-        </label>
-        <label class="field">QQ 发送间隔（秒）
-          <input type="number" id="qqSendInterval" min="0" step="0.1">
-        </label>
-      </div>
-    </div>
-    <div class="card">
-      <h2>翻译</h2>
-      <div class="grid">
-        <label class="switch"><input type="checkbox" id="translateOn"><span class="track"></span>启用 Gemini 翻译</label>
-        <label class="field">Gemini 最小调用间隔（秒）
-          <input type="number" id="geminiMinInterval" min="0" step="0.5">
-        </label>
-        <label class="field">翻译超时（秒）
-          <input type="number" id="translateTimeout" min="1">
-        </label>
-      </div>
-      <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
-        <span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
-        <span id="geminiKeyStatus"></span>
-        <button class="btn small" id="btnFillGeminiKey">填写</button>
-      </div>
-      <p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
-    </div>
-    <div class="card">
-      <h2>消息归档与每日摘要</h2>
-      <div class="grid">
-        <label class="switch"><input type="checkbox" id="archiveOn"><span class="track"></span>归档新消息（含媒体文件）</label>
-        <label class="switch"><input type="checkbox" id="archiveMedia"><span class="track"></span>下载媒体文件</label>
-        <label class="switch"><input type="checkbox" id="summaryOn"><span class="track"></span>每日运行摘要</label>
-        <label class="field">摘要时间（JST 整点）
-          <input type="number" id="summaryHour" min="0" max="23">
-        </label>
-      </div>
-      <p class="hint">归档内容在 <a href="/archive">📚 消息归档</a> 页浏览，历史消息用 <code>python tools/backfill_archive.py</code> 回填。
+</div>
+</div>
+<div class="card">
+<h2>NapCat 路由 (独立解耦)</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>NapCat 群号</th><th>订阅成员 (不过滤则为空)</th><th>推博客</th><th>推告警</th><th></th></tr></thead>
+<tbody id="napcatRows"></tbody>
+</table></div>
+<div style="margin-top:12px"><button class="btn" id="btnAddNapcat">➕ 添加路由</button></div>
+</div>
+<div class="card">
+<h2>Telegram Bots (独立解耦，凭证存 .env)</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Bot Name</th><th>Target Chat ID</th><th>订阅成员</th><th>推博客</th><th>推告警</th><th></th></tr></thead>
+<tbody id="tgBotRows"></tbody>
+</table></div>
+<div style="margin-top:12px"><button class="btn" id="btnAddTGBot">➕ 添加 TG Bot</button></div>
+</div>
+</section><section class="tab" id="tab-system"><div class="card">
+<h2>推送通道</h2>
+<div class="grid" id="channelSwitches"></div>
+<div style="margin-top:14px; max-width: 500px;">
+<label class="field">NapCat API 地址
+          <input id="napcatApi" placeholder="http://127.0.0.1:3000/send_group_msg" type="text"/>
+</label>
+</div>
+<div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+<span style="font-size:12.5px; color:var(--muted)">TG Bot Token (.env)</span>
+<span id="tgTokenStatus"></span>
+<button class="btn small" id="btnFillTgToken">填写</button>
+<span class="hint" style="margin:0">（TG Token 修改后点右上角「⟳ 重启主程序」生效）</span>
+</div>
+</div><div class="card">
+<h2>轮询节奏（秒 / JST 小时）</h2>
+<div class="grid">
+<label class="field">日间间隔（min / max 秒）
+          <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
+</label>
+<label class="field">深夜间隔（min / max 秒）
+          <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
+</label>
+<label class="field">休眠时段（起 / 止 时）
+          <span class="pair"><input id="sleepStart" max="23" min="0" type="number"/><span>–</span><input id="sleepEnd" max="23" min="0" type="number"/></span>
+</label>
+<label class="field">告警冷却（秒）
+          <input id="alertCooldown" min="0" type="number"/>
+</label>
+<label class="field">QQ 发送间隔（秒）
+          <input id="qqSendInterval" min="0" step="0.1" type="number"/>
+</label>
+</div>
+</div><div class="card">
+<h2>翻译</h2>
+<div class="grid">
+<label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 Gemini 翻译</label>
+<label class="field">Gemini 最小调用间隔（秒）
+          <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
+</label>
+<label class="field">翻译超时（秒）
+          <input id="translateTimeout" min="1" type="number"/>
+</label>
+</div>
+<div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+<span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
+<span id="geminiKeyStatus"></span>
+<button class="btn small" id="btnFillGeminiKey">填写</button>
+</div>
+<p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
+</div><div class="card">
+<h2>消息归档与每日摘要</h2>
+<div class="grid">
+<label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
+<label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
+<label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
+<label class="field">摘要时间（JST 整点）
+          <input id="summaryHour" max="23" min="0" type="number"/>
+</label>
+</div>
+<p class="hint">归档内容在 <a href="/archive">📚 消息归档</a> 页浏览，历史消息用 <code>python tools/backfill_archive.py</code> 回填。
       每日摘要通过已启用的推送通道发送——<b>哪天没收到摘要，就说明系统挂了</b>（反向监控）。</p>
-    </div>
-    <div class="card">
-      <h2>网页管理端</h2>
-      <div class="grid">
-        <label class="switch"><input type="checkbox" id="webAdminOn"><span class="track"></span>启用（下次重启生效）</label>
-        <label class="field">监听地址<input type="text" id="webAdminHost" placeholder="127.0.0.1"></label>
-        <label class="field">端口<input type="number" id="webAdminPort" min="1" max="65535"></label>
-      </div>
-      <p class="hint">⚠️ 关闭开关并保存后，需要通过直接编辑 <code>config.json</code> 才能重新打开。监听地址改为非 127.0.0.1 前请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。</p>
-    </div>
-  </section>
-
-  <!-- ── 账号池 ─────────────────────────────── -->
-  <section class="tab" id="tab-accounts">
-    <div class="card">
-      <h2>账号池（凭证在 .env，按账号名大写自动匹配）</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>账号 ID</th><th>团体</th><th>登录方式</th><th>App 标签</th><th>凭证 (.env)</th><th></th></tr></thead>
-        <tbody id="accountRows"></tbody>
-      </table></div>
-      <div class="empty" id="accountEmpty" hidden>还没有账号，点下面添加一个。</div>
-      <div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
-      <p class="hint">凭证可以点每行的「填凭证」直接填写（存入 <code>.env</code> 并立即轮换生效），也可以手动编辑 <code>.env</code>（手动改需重启）：<br>
-        · web 账号 → <code>账号ID大写_TOKEN</code> + <code>账号ID大写_COOKIE</code><br>
-        · mobile 账号 → <code>账号ID大写_REFRESH_TOKEN</code><br>
-        ⚠️ 新账号要先「保存并热重载」把账号写进 config.json，然后才能填凭证。</p>
-    </div>
-  </section>
-
-  <!-- ── 监控成员 ─────────────────────────────── -->
-  <section class="tab" id="tab-members">
-    <div class="card">
-      <h2>监控成员</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>成员 ID</th><th>名字</th><th>账号</th><th>QQ 群（逗号分隔）</th><th>TG Chat ID</th><th></th></tr></thead>
-        <tbody id="memberRows"></tbody>
-      </table></div>
-      <div class="empty" id="memberEmpty" hidden>还没有监控成员。</div>
-      <div style="margin-top:12px; display:flex; gap:10px">
-        <button class="btn" id="btnAddMember">＋ 手动添加</button>
-        <button class="btn" id="btnPickMember">📋 从账号拉取成员列表</button>
-      </div>
-      <p class="hint">成员 ID 可用 <code>python tools/list_members.py &lt;账号ID&gt;</code> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。</p>
-    </div>
-  </section>
-
-  <!-- ── 日志 ─────────────────────────────── -->
-  <section class="tab" id="tab-logs">
-    <div class="card">
-      <h2>运行日志（已自动脱敏；打开本页时每 2 秒刷新）</h2>
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
-        <div class="chips" id="logSourceChips"></div>
-        <label class="switch"><input type="checkbox" id="logErrOnly"><span class="track"></span>仅错误</label>
-        <input type="text" id="logKeyword" placeholder="关键词过滤…" style="width:170px">
-        <span class="hint" id="logFilterInfo" style="margin:0"></span>
-        <label class="switch" style="margin-left:auto"><input type="checkbox" id="logFollow" checked><span class="track"></span>自动滚动到底部</label>
-      </div>
-      <div id="logView"></div>
-      <p class="hint" id="logHint"></p>
-    </div>
-  </section>
-
-  <!-- ── 用户 ─────────────────────────────── -->
-  <section class="tab" id="tab-users">
-    <div class="card">
-      <h2>账号管理</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th></th></tr></thead>
-        <tbody id="userRows"></tbody>
-      </table></div>
-      <div style="margin-top:12px"><button class="btn" id="btnAddUser">＋ 添加用户</button></div>
-      <p class="hint">
-        <b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br>
-        密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br>
+</div><div class="card">
+<h2>网页管理端</h2>
+<div class="grid">
+<label class="switch"><input id="webAdminOn" type="checkbox"/><span class="track"></span>启用（下次重启生效）</label>
+<label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
+<label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
+</div>
+<p class="hint">⚠️ 关闭开关并保存后，需要通过直接编辑 <code>config.json</code> 才能重新打开。监听地址改为非 127.0.0.1 前请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。</p>
+</div></section>
+<!-- ── 日志 ─────────────────────────────── -->
+<!-- ── 用户 ─────────────────────────────── -->
+<!-- ── 高级 ─────────────────────────────── -->
+<section class="tab" id="tab-advanced"><div class="card">
+<h2>运行日志（已自动脱敏；打开本页时每 2 秒刷新）</h2>
+<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
+<div class="chips" id="logSourceChips"></div>
+<label class="switch"><input id="logErrOnly" type="checkbox"/><span class="track"></span>仅错误</label>
+<input id="logKeyword" placeholder="关键词过滤…" style="width:170px" type="text"/>
+<span class="hint" id="logFilterInfo" style="margin:0"></span>
+<label class="switch" style="margin-left:auto"><input checked="" id="logFollow" type="checkbox"/><span class="track"></span>自动滚动到底部</label>
+</div>
+<div id="logView"></div>
+<p class="hint" id="logHint"></p>
+</div><div class="card">
+<h2>账号管理</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th></th></tr></thead>
+<tbody id="userRows"></tbody>
+</table></div>
+<div style="margin-top:12px"><button class="btn" id="btnAddUser">＋ 添加用户</button></div>
+<p class="hint">
+<b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br/>
+        密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br/>
         为防止把自己锁在门外：不能删除或降级最后一个 admin，也不能删除当前登录的账号。
       </p>
-    </div>
-  </section>
-
-  <!-- ── 高级 ─────────────────────────────── -->
-  <section class="tab" id="tab-advanced">
-    <div class="card">
-      <h2>完整配置（严格 JSON，应用后回到表单继续编辑）</h2>
-      <textarea id="rawJson" spellcheck="false"></textarea>
-      <div style="margin-top:10px; display:flex; gap:10px">
-        <button class="btn" id="btnApplyJson">应用到表单</button>
-        <button class="btn" id="btnResetJson">从表单刷新</button>
-      </div>
-      <p class="hint">保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。</p>
-    </div>
-    <div class="card">
-      <h2>历史版本（每次保存前自动快照，保留最近 10 份）</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>快照时间</th><th>大小</th><th></th></tr></thead>
-        <tbody id="historyRows"></tbody>
-      </table></div>
-      <div class="empty" id="historyEmpty" hidden>还没有历史快照（保存一次配置后出现）。</div>
-      <p class="hint">恢复前会把当前版本也快照一份，所以恢复操作本身可以再撤销。</p>
-    </div>
-  </section>
+</div>
+<div class="card">
+<h2>完整配置（严格 JSON，应用后回到表单继续编辑）</h2>
+<textarea id="rawJson" spellcheck="false"></textarea>
+<div style="margin-top:10px; display:flex; gap:10px">
+<button class="btn" id="btnApplyJson">应用到表单</button>
+<button class="btn" id="btnResetJson">从表单刷新</button>
+</div>
+<p class="hint">保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。</p>
+</div>
+<div class="card">
+<h2>历史版本（每次保存前自动快照，保留最近 10 份）</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>快照时间</th><th>大小</th><th></th></tr></thead>
+<tbody id="historyRows"></tbody>
+</table></div>
+<div class="empty" hidden="" id="historyEmpty">还没有历史快照（保存一次配置后出现）。</div>
+<p class="hint">恢复前会把当前版本也快照一份，所以恢复操作本身可以再撤销。</p>
+</div>
+</section>
 </main>
-
 <footer class="savebar">
-  <button class="btn primary" id="btnSave">💾 保存并热重载</button>
-  <span class="msg" id="saveMsg"></span>
+<button class="btn primary" id="btnSave">💾 保存并热重载</button>
+<span class="msg" id="saveMsg"></span>
 </footer>
-
 <!-- 通用确认 / 提示对话框（替代原生 confirm/alert） -->
 <dialog id="confirmDialog">
-  <h3 id="confirmTitle">确认操作</h3>
-  <div id="confirmBody" style="white-space:pre-wrap; font-size:13.5px; line-height:1.75;
+<h3 id="confirmTitle">确认操作</h3>
+<div id="confirmBody" style="white-space:pre-wrap; font-size:13.5px; line-height:1.75;
        max-width:min(440px, 88vw); color:var(--text)"></div>
-  <div class="actions">
-    <button class="btn" id="confirmNo">取消</button>
-    <button class="btn primary" id="confirmYes">确定</button>
-  </div>
+<div class="actions">
+<button class="btn" id="confirmNo">取消</button>
+<button class="btn primary" id="confirmYes">确定</button>
+</div>
 </dialog>
-
 <!-- 历史快照查看对话框 -->
 <dialog id="historyViewDialog">
-  <h3 id="historyViewTitle">历史快照</h3>
-  <pre id="historyViewContent" style="max-height:60vh; overflow:auto; background:var(--bg);
+<h3 id="historyViewTitle">历史快照</h3>
+<pre id="historyViewContent" style="max-height:60vh; overflow:auto; background:var(--bg);
     border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12.5px;
     min-width:min(560px, 90vw); white-space:pre-wrap; word-break:break-all"></pre>
-  <div class="actions">
-    <button class="btn" id="historyViewClose">关闭</button>
-    <button class="btn primary" id="historyViewRestore">恢复到这个版本</button>
-  </div>
+<div class="actions">
+<button class="btn" id="historyViewClose">关闭</button>
+<button class="btn primary" id="historyViewRestore">恢复到这个版本</button>
+</div>
 </dialog>
-
 <!-- 测试推送对话框 -->
 <dialog id="testPushDialog">
-  <h3>测试推送</h3>
-  <div class="dialog-note">往指定目标发一条测试消息，验证通道配置是否正确。只发一条纯文本，不影响正常巡查。</div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">通道</span></div>
-    <div class="chips" id="testPushChannel"></div>
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">目标<span class="req">*</span></span>
-      <span class="fenv" id="testPushTargetHint">TG chat_id</span></div>
-    <input type="text" id="testPushTarget" list="testPushTargets" placeholder="-1001234567890">
-    <datalist id="testPushTargets"></datalist>
-    <div class="fhelp">下拉可选配置里已有的目标，也可以手动输入其他目标。</div>
-  </div>
-  <div class="actions">
-    <button class="btn" id="testPushCancel">取消</button>
-    <button class="btn primary" id="testPushSend">发送</button>
-  </div>
+<h3>测试推送</h3>
+<div class="dialog-note">往指定目标发一条测试消息，验证通道配置是否正确。只发一条纯文本，不影响正常巡查。</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">通道</span></div>
+<div class="chips" id="testPushChannel"></div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">目标<span class="req">*</span></span>
+<span class="fenv" id="testPushTargetHint">选择要测试的 Bot/目标</span></div>
+<select id="testPushTarget" class="inp" style="width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--bg-card); color: var(--fg);"></select>
+<div class="fhelp">自动加载当前通道下已配置的所有推送目标。</div>
+</div>
+<div class="actions">
+<button class="btn" id="testPushCancel">取消</button>
+<button class="btn primary" id="testPushSend">发送</button>
+</div>
 </dialog>
-
 <!-- 添加 QQ 官方 Bot 对话框（一次填齐，不必先建后改） -->
 <dialog id="qqBotDialog">
-  <h3>添加 QQ 官方 Bot</h3>
-  <div class="dialog-note">
+<h3>添加 QQ 官方 Bot</h3>
+<div class="dialog-note">
     App ID 和 Secret 来自 <b>QQ 开放平台 → 应用管理 → 开发设置</b>。
     Secret 会存入 <code>.env</code>，其余存入 <code>config.json</code>。
   </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">Bot 名称<span class="req">*</span></span>
-      <span class="fenv">小写字母 / 数字 / _</span></div>
-    <input type="text" id="qqBotName" placeholder="qq_official_bot1" autocomplete="off"
-           data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-    <div class="fhelp" id="qqBotNameHelp">你自己起的标识，用于区分多个 Bot，并决定密钥在 .env 里的变量名。</div>
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">App ID<span class="req">*</span></span></div>
-    <input type="text" id="qqBotAppId" placeholder="102000001" autocomplete="off"
-           data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">Client Secret<span class="req">*</span></span>
-      <span class="fenv" id="qqBotSecretEnv">.env · —</span></div>
-    <div class="input-group">
-      <input type="text" id="qqBotSecret" class="masked" autocomplete="off"
-             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
-             data-form-type="other">
-      <button type="button" class="eye" id="qqBotSecretEye">👁</button>
-    </div>
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">目标 OpenID</span>
-      <span class="fenv">可留空，稍后自动获取</span></div>
-    <div class="input-group">
-      <input type="text" id="qqBotOpenid" placeholder="留空则创建后点「🎯 自动获取」" autocomplete="off"
-             data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-    </div>
-    <div class="fhelp">OpenID 只能从「用户主动私聊 Bot」的事件里获得；不知道就先留空。</div>
-  </div>
-  <div class="actions">
-    <button class="btn" id="qqBotCancel">取消</button>
-    <button class="btn primary" id="qqBotSave">添加</button>
-  </div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">Bot 名称<span class="req">*</span></span>
+<span class="fenv">小写字母 / 数字 / _</span></div>
+<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" id="qqBotName" placeholder="qq_official_bot1" type="text"/>
+<div class="fhelp" id="qqBotNameHelp">你自己起的标识，用于区分多个 Bot，并决定密钥在 .env 里的变量名。</div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">App ID<span class="req">*</span></span></div>
+<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" id="qqBotAppId" placeholder="102000001" type="text"/>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">Client Secret<span class="req">*</span></span>
+<span class="fenv" id="qqBotSecretEnv">.env · —</span></div>
+<div class="input-group">
+<input autocomplete="off" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="qqBotSecret" type="text"/>
+<button class="eye" id="qqBotSecretEye" type="button">👁</button>
+</div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">目标 OpenID</span>
+<span class="fenv">可留空，稍后自动获取</span></div>
+<div style="display:flex; gap:16px; margin-bottom:8px">
+<label style="display:flex; align-items:center; gap:4px; font-size:13px"><input checked="" name="qqBotOpenidType" type="radio" value="target"/> 个人单聊</label>
+<label style="display:flex; align-items:center; gap:4px; font-size:13px"><input name="qqBotOpenidType" type="radio" value="group"/> 群聊</label>
+</div>
+<div class="input-group">
+<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" id="qqBotOpenid" placeholder="留空则创建后点「🎯 自动获取」" type="text"/>
+</div>
+<div class="fhelp">OpenID 只能从「用户主动私聊 Bot」的事件里获得；不知道就先留空。</div>
+</div>
+<div class="actions">
+<button class="btn" id="qqBotCancel">取消</button>
+<button class="btn primary" id="qqBotSave">添加</button>
+</div>
 </dialog>
-
 <!-- QQ openid 捕获对话框 -->
 <dialog id="openidDialog">
-  <h3>自动获取目标 OpenID</h3>
-  <div class="dialog-note" id="openidNote">
+<h3>自动获取目标 OpenID</h3>
+<div class="dialog-note" id="openidNote">
     官方 Bot 只能从「用户主动私聊 Bot」的事件里拿到 OpenID。点开始后，
     <b>让目标用户给 Bot 发一条私聊消息</b>，捕获成功会自动填回表格。
   </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">类型</span></div>
-    <div class="chips" id="openidMode"></div>
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">Bot</span>
-      <span class="fenv" id="openidBotName">—</span></div>
-    <div class="fhelp" id="openidAppId">App ID: —</div>
-  </div>
-  <div class="secret-field" id="openidSecretField" hidden>
-    <div class="flabel"><span class="fname">Client Secret<span class="req">*</span></span>
-      <span class="fenv">仅本次连接使用，不落盘</span></div>
-    <div class="input-group">
-      <input type="text" id="openidSecret" class="masked" autocomplete="off"
-             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
-             data-form-type="other">
-      <button type="button" class="eye" id="openidSecretEye">👁</button>
-    </div>
-  </div>
-  <div id="openidStatus" style="margin:14px 0; font-size:13.5px; line-height:1.7; min-height:44px"></div>
-  <div class="actions">
-    <button class="btn" id="openidClose">关闭</button>
-    <button class="btn" id="openidStop" hidden>停止监听</button>
-    <button class="btn primary" id="openidStart">开始监听</button>
-  </div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">类型</span></div>
+<div class="chips" id="openidMode"></div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">Bot</span>
+<span class="fenv" id="openidBotName">—</span></div>
+<div class="fhelp" id="openidAppId">App ID: —</div>
+</div>
+<div class="secret-field" hidden="" id="openidSecretField">
+<div class="flabel"><span class="fname">Client Secret<span class="req">*</span></span>
+<span class="fenv">仅本次连接使用，不落盘</span></div>
+<div class="input-group">
+<input autocomplete="off" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="openidSecret" type="text"/>
+<button class="eye" id="openidSecretEye" type="button">👁</button>
+</div>
+</div>
+<div id="openidStatus" style="margin:14px 0; font-size:13.5px; line-height:1.7; min-height:44px"></div>
+<div class="actions">
+<button class="btn" id="openidClose">关闭</button>
+<button class="btn" hidden="" id="openidStop">停止监听</button>
+<button class="btn primary" id="openidStart">开始监听</button>
+</div>
 </dialog>
-
 <!-- 添加用户对话框 -->
 <dialog id="userDialog">
-  <h3>添加用户</h3>
-  <div class="dialog-note">密码仅上传、不回显；创建后可随时改密或改角色。</div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">用户名<span class="req">*</span></span>
-      <span class="fenv">字母 / 数字 / _ / -</span></div>
-    <input type="text" id="newUserName" placeholder="friend" autocomplete="off"
-           data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
-           data-form-type="other">
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">角色</span></div>
-    <div class="chips" id="newUserRole"></div>
-    <div class="fhelp" id="newUserRoleHelp"></div>
-  </div>
-  <div class="secret-field">
-    <div class="flabel"><span class="fname">密码<span class="req">*</span></span>
-      <span class="fenv" id="pwLenHint">至少 8 位</span></div>
-    <div class="input-group">
-      <!-- autocomplete=off 而非 new-password：后者会触发密码管理器的
+<h3>添加用户</h3>
+<div class="dialog-note">密码仅上传、不回显；创建后可随时改密或改角色。</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">用户名<span class="req">*</span></span>
+<span class="fenv">字母 / 数字 / _ / -</span></div>
+<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="newUserName" placeholder="friend" type="text"/>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">角色</span></div>
+<div class="chips" id="newUserRole"></div>
+<div class="fhelp" id="newUserRoleHelp"></div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">密码<span class="req">*</span></span>
+<span class="fenv" id="pwLenHint">至少 8 位</span></div>
+<div class="input-group">
+<!-- autocomplete=off 而非 new-password：后者会触发密码管理器的
            「生成密码」悬浮层，它会盖住输入框导致无法输入 -->
-      <input type="text" id="newUserPw" class="masked" autocomplete="off"
-             data-bwignore="true" data-1p-ignore="true" data-lpignore="true"
-             data-form-type="other">
-      <button type="button" class="eye" id="newUserPwEye">👁</button>
-    </div>
-    <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap">
-      <button type="button" class="btn small" id="btnGenPw">🎲 生成随机密码</button>
-      <button type="button" class="btn small" id="btnCopyPw" hidden>📋 复制</button>
-      <span class="fhelp" id="genPwHint" style="margin:0"></span>
-    </div>
-  </div>
-  <div class="actions">
-    <button class="btn" id="userCancel">取消</button>
-    <button class="btn primary" id="userSave">创建</button>
-  </div>
+<input autocomplete="off" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="newUserPw" type="text"/>
+<button class="eye" id="newUserPwEye" type="button">👁</button>
+</div>
+<div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap">
+<button class="btn small" id="btnGenPw" type="button">🎲 生成随机密码</button>
+<button class="btn small" hidden="" id="btnCopyPw" type="button">📋 复制</button>
+<span class="fhelp" id="genPwHint" style="margin:0"></span>
+</div>
+</div>
+<div class="actions">
+<button class="btn" id="userCancel">取消</button>
+<button class="btn primary" id="userSave">创建</button>
+</div>
 </dialog>
-
+<!-- 官方 Bot 订阅对话框 -->
+<dialog id="botSubscribeDialog">
+<h3 id="botSubTitle">配置 Bot 推送</h3>
+<div class="dialog-note">选择哪些官方 Bot 应该推送该成员的消息。勾选后会自动更新 Bot 的 <code>member_filter</code>。</div>
+<div id="botSubList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;"></div>
+<div class="actions">
+<button class="btn primary" id="botSubClose">完成</button>
+</div>
+</dialog>
 <!-- 成员选择对话框 -->
 <dialog id="memberPickDialog">
-  <h3>从账号拉取成员列表</h3>
-  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
-    <div class="chips" id="pickAccountChips"></div>
-    <button class="btn small" id="btnFetchMembers">拉取</button>
-  </div>
-  <div id="memberPickList" style="max-height:50vh; overflow-y:auto; min-width:420px"></div>
-  <p class="hint" id="memberPickHint">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
-  <div class="actions">
-    <button class="btn" id="memberPickClose">关闭</button>
-  </div>
+<h3>从账号拉取成员列表</h3>
+<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
+<div class="chips" id="pickAccountChips"></div>
+<button class="btn small" id="btnFetchMembers">拉取</button>
+</div>
+<div id="memberPickList" style="max-height:50vh; overflow-y:auto; min-width:420px"></div>
+<p class="hint" id="memberPickHint">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
+<div class="actions">
+<button class="btn" id="memberPickClose">关闭</button>
+</div>
 </dialog>
-
 <!-- 凭证填写对话框 -->
 <dialog id="secretDialog">
-  <h3 id="secretDialogTitle">填写凭证</h3>
-  <div class="dialog-note" id="secretDialogHint"></div>
-  <div id="secretFields"></div>
-  <div class="actions">
-    <button class="btn" id="secretCancel">取消</button>
-    <button class="btn primary" id="secretSave">🔐 保存到 .env</button>
-  </div>
+<h3 id="secretDialogTitle">填写凭证</h3>
+<div class="dialog-note" id="secretDialogHint"></div>
+<div id="secretFields"></div>
+<div class="actions">
+<button class="btn" id="secretCancel">取消</button>
+<button class="btn primary" id="secretSave">🔐 保存到 .env</button>
+</div>
 </dialog>
-
 <!-- 账号编辑对话框 -->
 <dialog id="accountDialog">
-  <h3 id="accountDialogTitle">添加账号</h3>
-  <div class="grid">
-    <label class="field">账号 ID（小写下划线）<input type="text" id="accId" placeholder="nogizaka_main"></label>
-    <label class="field">团体
+<h3 id="accountDialogTitle">添加账号</h3>
+<div class="grid">
+<label class="field">账号 ID（小写下划线）<input id="accId" placeholder="nogizaka_main" type="text"/></label>
+<label class="field">团体
       <div class="chips" id="accGroupChips"></div>
-    </label>
-    <label class="field">登录方式
+</label>
+<label class="field">登录方式
       <div class="chips" id="accAuthChips"></div>
-    </label>
-    <label class="field">App 标签（可选）<input type="text" id="accAppTag" placeholder="yodel"></label>
-    <label class="field">API Base（可选）<input type="text" id="accApiBase" placeholder="https://api.service.yodel-app.com"></label>
-    <label class="field">Web Origin（可选）<input type="text" id="accWebOrigin" placeholder="https://service.yodel-app.com"></label>
-  </div>
-  <div class="actions">
-    <button class="btn" id="accCancel">取消</button>
-    <button class="btn primary" id="accSave">确定</button>
-  </div>
+</label>
+<label class="field">App 标签（可选）<input id="accAppTag" placeholder="yodel" type="text"/></label>
+<label class="field">API Base（可选）<input id="accApiBase" placeholder="https://api.service.yodel-app.com" type="text"/></label>
+<label class="field">Web Origin（可选）<input id="accWebOrigin" placeholder="https://service.yodel-app.com" type="text"/></label>
+</div>
+<div class="actions">
+<button class="btn" id="accCancel">取消</button>
+<button class="btn primary" id="accSave">确定</button>
+</div>
+</dialog>
+<dialog class="dialog" id="dialog-tgbot">
+<div class="dialog-content">
+<h3 style="margin-top:0">配置 Telegram Bot</h3>
+<div class="grid" style="grid-template-columns: 1fr 1fr; gap: 16px;">
+<label class="field">Bot Name (作 .env 前缀)
+          <input id="tgbName" placeholder="例如: tg_main" type="text"/>
+</label>
+<label class="field">Target Chat ID
+          <input id="tgbChat" placeholder="-10012345678" type="text"/>
+</label>
+<label class="field" style="grid-column: 1 / -1;">成员订阅 (逗号分隔，留空则全收)
+          <input id="tgbMembers" placeholder="冨里奈央,小川彩" type="text"/>
+</label>
+<div style="display:flex; gap:16px; margin-top:8px; grid-column: 1 / -1;">
+<label class="switch"><input id="tgbBlog" type="checkbox"/><span class="track"></span>推送博客</label>
+<label class="switch"><input id="tgbAlert" type="checkbox"/><span class="track"></span>推送系统告警</label>
+</div>
+</div>
+<div class="dialog-actions">
+<button class="btn btn-danger" onclick="document.getElementById('dialog-tgbot').close()">取消</button>
+<button class="btn" id="tgbSave">保存</button>
+</div>
+</div>
+</dialog>
+<dialog class="dialog" id="dialog-napcat">
+<div class="dialog-content">
+<h3 style="margin-top:0">配置 NapCat 路由</h3>
+<div class="grid" style="grid-template-columns: 1fr 1fr; gap: 16px;">
+<label class="field">QQ 群号
+          <input id="ncGroup" placeholder="12345678" type="number"/>
+</label>
+<label class="field">成员订阅 (留空则全收)
+          <input id="ncMembers" placeholder="冨里奈央,小川彩" type="text"/>
+</label>
+</div>
+<div class="dialog-actions">
+<button class="btn btn-danger" onclick="document.getElementById('dialog-napcat').close()">取消</button>
+<button class="btn" id="ncSave">保存</button>
+</div>
+</div>
 </dialog>
 
-<script>
+<dialog class="dialog" id="dialog-member-select">
+<div class="dialog-content" style="max-width: 500px">
+<h3 style="margin-top:0">选择订阅成员</h3>
+<p class="hint">勾选要订阅的成员，不选代表【全收】。</p>
+<div class="grid" id="memberSelectGrid" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); max-height: 400px; overflow-y: auto; gap: 8px; margin-bottom: 16px;">
+<!-- Checkboxes injected by JS -->
+</div>
+<div class="dialog-actions">
+<button class="btn" onclick="document.getElementById('dialog-member-select').close()">取消</button>
+<button class="btn primary" id="btnSaveMemberSelect">确定</button>
+</div>
+</div>
+</dialog>
+</body></html><script>
 "use strict";
 // ── 状态 ─────────────────────────────────────────
 let config = null;        // 当前编辑中的配置对象（新格式）
@@ -680,14 +744,33 @@ let baseline = "";   // 最近一次加载/保存时的配置快照（JSON 串�
 
 function setDirty(v) {
   dirty = v;
-  $("dirtyDot").style.display = v ? "inline" : "none";
   document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
+  const bar = document.querySelector("footer.savebar");
+  if (v) {
+    bar.classList.add("show");
+  } else if (!window.saveMsgTimer) {
+    bar.classList.remove("show");
+  }
+}
+
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || typeof a !== "object" || b == null || typeof b !== "object") return false;
+  let keysA = Object.keys(a), keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (let key of keysA) {
+    if (!keysB.includes(key) || !deepEqual(a[key], b[key])) return false;
+  }
+  return true;
 }
 
 // 基于内容对比的脏标记：加了又删、改了又改回去，会自动恢复"无修改"状态
 function markDirty() {
   collectGeneral();
-  setDirty(JSON.stringify(config) !== baseline);
+  collectChannels();
+  let baseObj = {};
+  try { baseObj = JSON.parse(baseline); } catch(e){}
+  setDirty(!deepEqual(config, baseObj));
 }
 
 // ── 页面内确认 / 提示（替代原生 confirm/alert）────
@@ -713,7 +796,16 @@ function _settleConfirm(v) {
 $("confirmYes").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(true); });
 $("confirmNo").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(false); });
 $("confirmDialog").addEventListener("close", () => _settleConfirm(false));  // Esc 等价取消
-function msg(text, cls) { const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); }
+function msg(text, cls) { 
+  const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); 
+  const bar = document.querySelector("footer.savebar");
+  bar.classList.add("show");
+  clearTimeout(window.saveMsgTimer);
+  window.saveMsgTimer = setTimeout(() => {
+    window.saveMsgTimer = null;
+    if (!dirty) bar.classList.remove("show");
+  }, 4000);
+}
 
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
@@ -768,6 +860,20 @@ async function loadConfig() {
 
 async function saveConfig() {
   collectGeneral();
+  collectChannels();
+  
+  // 增加前端校验
+  const errors = [];
+  if (config.day_interval[0] > config.day_interval[1]) errors.push("日间间隔的最小值不能大于最大值");
+  if (config.night_interval[0] > config.night_interval[1]) errors.push("深夜间隔的最小值不能大于最大值");
+  if (config.blog_monitor.day_interval[0] > config.blog_monitor.day_interval[1]) errors.push("博客日间间隔的最小值不能大于最大值");
+  if (config.blog_monitor.night_interval[0] > config.blog_monitor.night_interval[1]) errors.push("博客深夜间隔的最小值不能大于最大值");
+  
+  if (errors.length > 0) {
+    msg("保存失败，请检查配置：\n" + errors.join("\n"), "err");
+    return;
+  }
+
   // 高级页有没点「应用到表单」的 JSON 修改时，保存会忽略它们——先确认
   if (document.getElementById("tab-advanced").classList.contains("active")) {
     let rawParsed = null;
@@ -800,12 +906,25 @@ async function saveConfig() {
 // ── Tab 切换 ─────────────────────────────────────
 document.querySelectorAll("nav.tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (btn.dataset.tab === "advanced") { collectGeneral(); refreshRawJson(); refreshHistory(); }
+    if (btn.dataset.tab === "advanced") { 
+      collectGeneral();
+      collectChannels(); 
+      refreshRawJson(); 
+      refreshHistory(); 
+      refreshUsers();
+      startLogPolling();
+    } else {
+      stopLogPolling();
+    }
+    
+    if (btn.dataset.tab === "status") {
+      startStatusPolling();
+    } else {
+      stopStatusPolling();
+    }
+    
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
     document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
-    if (btn.dataset.tab === "logs") startLogPolling(); else stopLogPolling();
-    if (btn.dataset.tab === "status") startStatusPolling(); else stopStatusPolling();
-    if (btn.dataset.tab === "users") refreshUsers();
   });
 });
 
@@ -914,27 +1033,57 @@ function stopStatusPolling() {
 
 // ── 测试推送 ─────────────────────────────────────
 function testPushPrefill(channel) {
-  $("testPushTargetHint").textContent = channel === "tg" ? "TG chat_id" : channel === "official" ? "群 openid" : "QQ 群号";
-  const monitor = config && config.monitor || [];
-  // 收集配置里该通道的全部目标（去重）供下拉选择
-  const targets = [];
-  for (const m of monitor) {
-    if (channel === "tg" && m.tg && !targets.includes(m.tg)) targets.push(m.tg);
-    if (channel === "napcat") {
-      for (const g of m.groups || []) {
-        if (!targets.includes(String(g))) targets.push(String(g));
+  const sel = $("testPushTarget");
+  sel.innerHTML = "";
+  
+  if (channel === "tg") {
+    $("testPushTargetHint").textContent = "Telegram Bot";
+    const bots = config.tg_bots || [];
+    for (const b of bots) {
+      const opt = document.createElement("option");
+      opt.value = b.name;
+      opt.textContent = `${b.name} (目标: ${b.target_chat || "未填"})`;
+      opt.style.color = "#000"; // 强制黑字，防止 Windows 默认白底导致的白字白底
+      sel.appendChild(opt);
+    }
+  } else if (channel === "official") {
+    $("testPushTargetHint").textContent = "QQ 官方 Bot";
+    const bots = config.qq_official_bots || [];
+    for (const b of bots) {
+      if (b.group_openid) {
+        const opt = document.createElement("option");
+        opt.value = `${b.name}|group`;
+        opt.textContent = `${b.name} - 群聊 (${b.group_openid.slice(0, 10)}...)`;
+        opt.style.color = "#000";
+        sel.appendChild(opt);
+      }
+      if (b.target_openid) {
+        const opt = document.createElement("option");
+        opt.value = `${b.name}|private`;
+        opt.textContent = `${b.name} - 私聊 (${b.target_openid.slice(0, 10)}...)`;
+        opt.style.color = "#000";
+        sel.appendChild(opt);
       }
     }
+  } else if (channel === "napcat") {
+    $("testPushTargetHint").textContent = "NapCat 路由组";
+    const routes = config.napcat_routes || [];
+    for (const r of routes) {
+      const opt = document.createElement("option");
+      opt.value = String(r.group_id);
+      opt.textContent = `群组: ${r.group_id}`;
+      opt.style.color = "#000";
+      sel.appendChild(opt);
+    }
   }
-  const dl = $("testPushTargets");
-  dl.innerHTML = "";
-  for (const t of targets) {
+  
+  if (sel.options.length === 0) {
     const opt = document.createElement("option");
-    opt.value = t;
-    dl.appendChild(opt);
+    opt.value = "";
+    opt.textContent = "（该通道暂未配置任何有效目标）";
+    opt.style.color = "#000";
+    sel.appendChild(opt);
   }
-  $("testPushTarget").value = targets[0] || "";
-  $("testPushTarget").placeholder = channel === "tg" ? "-1001234567890" : "533072575";
 }
 $("btnTestPush").addEventListener("click", () => {
   const ch = (config.channels || {});
@@ -1041,6 +1190,15 @@ function renderGeneral() {
   $("dayMin").value = di[0]; $("dayMax").value = di[1];
   $("nightMin").value = ni[0]; $("nightMax").value = ni[1];
   $("sleepStart").value = sh[0]; $("sleepEnd").value = sh[1];
+  const bm = config.blog_monitor || {};
+  $("blogMonitorOn").checked = bm.enabled !== false;
+  $("blogHinatazaka").checked = bm.hinatazaka !== false;
+  $("blogNogizaka").checked = bm.nogizaka !== false;
+  $("blogSakurazaka").checked = bm.sakurazaka !== false;
+  const bdi = bm.day_interval || [60, 120];
+  const bni = bm.night_interval || [1650, 1950];
+  $("blogDayMin").value = bdi[0]; $("blogDayMax").value = bdi[1];
+  $("blogNightMin").value = bni[0]; $("blogNightMax").value = bni[1];
   $("alertCooldown").value = config.alert_cooldown ?? 3600;
   $("qqSendInterval").value = config.qq_send_interval ?? 1.5;
   $("translateOn").checked = config.translate !== false;
@@ -1199,6 +1357,12 @@ function renderQqBots() {
       }
       document.body.appendChild(panel);
 
+      const tdBlogs = document.createElement("td");
+      tdBlogs.appendChild(mkBlogInput(bot.blog_filter, (v) => { bot.blog_filter = v; markDirty(); }));
+
+      const tdAlert = document.createElement("td");
+      tdAlert.appendChild(mkAlertSwitch(bot.push_alert, (v) => { bot.push_alert = v; markDirty(); }));
+
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
       // 本次会话刚写入的密钥服务端状态里还查不到，一并算作已配置
@@ -1257,13 +1421,13 @@ function renderQqBots() {
         msg("已删除，点「保存并热重载」生效", "ok");
       }, "danger"));
 
-      tr.append(tdName, tdApp, tdOpenid, tdGroupOpenid, tdMemberFilter, tdSecret, tdState, tdOps);
+      tr.append(tdName, tdApp, tdOpenid, tdGroupOpenid, tdMemberFilter, tdBlogs, tdAlert, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
     });
   } else if (!qqBotStatus.filter((s) => !s.declared).length) {
     // 既没声明 Bot，.env 里也没有旧槽位 —— 明确的空态，不再挂占位行
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="8" class="empty">还没有配置官方 Bot。点下方「＋ 添加 Bot」，' +
+    tr.innerHTML = '<td colspan="10" class="empty">还没有配置官方 Bot。点下方「＋ 添加 Bot」，' +
       '在 QQ 开放平台拿到 App ID 和 Secret 即可。</td>';
     tbody.appendChild(tr);
   } else {
@@ -1380,7 +1544,11 @@ $("qqBotSave").addEventListener("click", async () => {
     secretsWritten.add(name);   // 保存前 status 里查不到，前端自己记住
 
     const bot = { name: name, app_id: appId };
-    if (openid) bot.target_openid = openid;
+    if (openid) {
+      const openidType = document.querySelector('input[name="qqBotOpenidType"]:checked').value;
+      if (openidType === "group") bot.group_openid = openid;
+      else bot.target_openid = openid;
+    }
     config.qq_official_bots = config.qq_official_bots || [];
     config.qq_official_bots.push(bot);
     markDirty(); renderQqBots();
@@ -1406,6 +1574,14 @@ function collectGeneral() {
   config.day_interval = [num("dayMin", 120), num("dayMax", 180)];
   config.night_interval = [num("nightMin", 1500), num("nightMax", 1800)];
   config.sleep_hours = [num("sleepStart", 2), num("sleepEnd", 7)];
+  config.blog_monitor = {
+    enabled: $("blogMonitorOn").checked,
+    hinatazaka: $("blogHinatazaka").checked,
+    nogizaka: $("blogNogizaka").checked,
+    sakurazaka: $("blogSakurazaka").checked,
+    day_interval: [num("blogDayMin", 60), num("blogDayMax", 120)],
+    night_interval: [num("blogNightMin", 1650), num("blogNightMax", 1950)]
+  };
   config.alert_cooldown = num("alertCooldown", 3600);
   config.qq_send_interval = num("qqSendInterval", 1.5, true);
   config.translate = $("translateOn").checked;
@@ -1430,8 +1606,20 @@ function collectGeneral() {
     allow_openids: $("cmdAllow").value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
   };
 }
-document.querySelectorAll("#tab-general input").forEach(() => {});
-$("tab-general").addEventListener("input", () => markDirty());
+document.querySelectorAll("#tab-system input").forEach(() => {});
+$("tab-system").addEventListener("input", () => markDirty());
+$("tab-channels").addEventListener("input", () => markDirty());
+$("tab-monitors").addEventListener("input", () => markDirty());
+$("tab-monitors").addEventListener("change", (e) => {
+  if (e.target.type === "checkbox") {
+    markDirty();
+  }
+});
+$("tab-system").addEventListener("change", (e) => {
+  if (e.target.type === "checkbox") {
+    markDirty();
+  }
+});
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
@@ -1707,7 +1895,234 @@ $("accSave").addEventListener("click", () => {
   markDirty(); renderAccounts(); renderMembers();
 });
 
-// ── 监控成员 ─────────────────────────────────────
+
+// ── Channels (NapCat & TG) ──────────────────────────────
+
+// ── Member Selector Dialog ──────────────────────
+let _currentMemberSelectCallback = null;
+
+function openMemberSelect(currentListStr, callback) {
+  _currentMemberSelectCallback = callback;
+  const grid = $("memberSelectGrid");
+  grid.innerHTML = "";
+  
+  const currentSet = new Set(currentListStr.split(",").map(s => s.trim()).filter(Boolean));
+  const allMembers = config.monitor || [];
+  
+  if (allMembers.length === 0) {
+    grid.innerHTML = '<div class="empty" style="grid-column: 1/-1">暂无监控成员</div>';
+  } else {
+    allMembers.forEach(m => {
+      const lbl = document.createElement("label");
+      lbl.className = "switch";
+      lbl.style.display = "flex";
+      lbl.style.alignItems = "center";
+      
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = m.name;
+      cb.checked = currentSet.has(m.name);
+      
+      const span = document.createElement("span");
+      span.className = "track";
+      span.style.marginRight = "8px";
+      
+      const txt = document.createTextNode(m.name);
+      lbl.append(cb, span, txt);
+      grid.appendChild(lbl);
+    });
+  }
+  
+  $("dialog-member-select").showModal();
+}
+
+$("btnSaveMemberSelect").addEventListener("click", () => {
+  const checkboxes = document.querySelectorAll("#memberSelectGrid input[type='checkbox']");
+  const selected = [];
+  checkboxes.forEach(cb => {
+    if (cb.checked) selected.push(cb.value);
+  });
+  
+  if (_currentMemberSelectCallback) {
+    _currentMemberSelectCallback(selected.join(","));
+  }
+  $("dialog-member-select").close();
+});
+
+function mkBlogInput(initialArr, onChangeCallback) {
+  const wrapper = document.createElement("div");
+  wrapper.style.display = "flex";
+  wrapper.style.gap = "8px";
+  wrapper.style.alignItems = "center";
+  
+  let currentArr = [...(initialArr || [])];
+  
+  const groups = [
+    { key: "hinatazaka", label: "日向坂" },
+    { key: "nogizaka", label: "乃木坂" },
+    { key: "sakurazaka", label: "樱坂" }
+  ];
+  groups.forEach(g => {
+    const lbl = document.createElement("label");
+    lbl.style.display = "flex";
+    lbl.style.alignItems = "center";
+    lbl.style.gap = "2px";
+    lbl.style.cursor = "pointer";
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.checked = currentArr.includes(g.key);
+    chk.onchange = () => {
+      if (chk.checked && !currentArr.includes(g.key)) currentArr.push(g.key);
+      else if (!chk.checked) currentArr = currentArr.filter(x => x !== g.key);
+      onChangeCallback(currentArr);
+    };
+    lbl.append(chk, document.createTextNode(g.label));
+    wrapper.appendChild(lbl);
+  });
+  return wrapper;
+}
+
+function mkAlertSwitch(checked, onChangeCallback) {
+  const lab = document.createElement("label");
+  lab.className = "switch";
+  lab.style.margin = "0";
+  const inp = document.createElement("input");
+  inp.type = "checkbox";
+  inp.checked = !!checked;
+  inp.onchange = () => onChangeCallback(inp.checked);
+  const trk = document.createElement("span");
+  trk.className = "track";
+  lab.append(inp, trk);
+  return lab;
+}
+
+function mkMemberInput(value, onChangeCallback) {
+  const wrapper = document.createElement("div");
+  wrapper.style.display = "flex";
+  wrapper.style.gap = "4px";
+  
+  const inp = document.createElement("input");
+  inp.type = "text";
+  inp.value = value;
+  inp.placeholder = "留空全收";
+  inp.style.flex = "1";
+  inp.onchange = (e) => onChangeCallback(e.target.value);
+  
+  const btn = document.createElement("button");
+  btn.className = "btn";
+  btn.style.padding = "4px 8px";
+  btn.textContent = "选择";
+  btn.onclick = () => {
+    openMemberSelect(inp.value, (newVal) => {
+      inp.value = newVal;
+      onChangeCallback(newVal);
+      markDirty();
+    });
+  };
+  
+  wrapper.append(inp, btn);
+  return wrapper;
+}
+
+function renderChannels() {
+  renderNapcat();
+  renderTGBots();
+  if (typeof renderQqBots === 'function') renderQqBots();
+}
+
+function collectChannels() {
+  // Config collected on save button click or dialog save. 
+  // Arrays are manipulated in place.
+}
+
+function renderNapcat() {
+  const tbody = $("napcatRows");
+  tbody.innerHTML = "";
+  const routes = config.napcat_routes || [];
+  
+  routes.forEach((r, idx) => {
+    const tr = document.createElement("tr");
+    
+    const tdId = document.createElement("td");
+    tdId.appendChild(mkInput(r.group_id || "", (v) => { r.group_id = parseInt(v); }, "12345678", "width:120px"));
+    
+    const tdMembers = document.createElement("td");
+    tdMembers.appendChild(mkMemberInput((r.member_filter || []).join(","), (v) => { r.member_filter = v.split(",").map(s=>s.trim()).filter(Boolean); }));
+    
+    const tdBlogs = document.createElement("td");
+    tdBlogs.appendChild(mkBlogInput(r.blog_filter, (v) => { r.blog_filter = v; markDirty(); }));
+
+    const tdAlert = document.createElement("td");
+    tdAlert.appendChild(mkAlertSwitch(r.push_alert, (v) => { r.push_alert = v; markDirty(); }));
+    
+    const tdAct = document.createElement("td");
+    tdAct.className = "actions";
+    const btnDel = document.createElement("button");
+    btnDel.className = "btn btn-danger";
+    btnDel.textContent = "删除";
+    btnDel.onclick = () => {
+      config.napcat_routes.splice(idx, 1);
+      markDirty(); renderNapcat();
+    };
+    tdAct.appendChild(btnDel);
+    
+    tr.append(tdId, tdMembers, tdBlogs, tdAlert, tdAct);
+    tbody.appendChild(tr);
+  });
+}
+
+function renderTGBots() {
+  const tbody = $("tgBotRows");
+  tbody.innerHTML = "";
+  const bots = config.tg_bots || [];
+  
+  bots.forEach((b, idx) => {
+    const tr = document.createElement("tr");
+    
+    const tdName = document.createElement("td");
+    tdName.appendChild(mkInput(b.name || "", (v) => { b.name = v.trim(); }, "tg_main", "width:100px"));
+    
+    const tdChat = document.createElement("td");
+    tdChat.appendChild(mkInput(b.target_chat || "", (v) => { b.target_chat = v.trim(); }, "-1001", "width:120px"));
+    
+    const tdMembers = document.createElement("td");
+    tdMembers.appendChild(mkMemberInput((b.member_filter || []).join(","), (v) => { b.member_filter = v.split(",").map(s=>s.trim()).filter(Boolean); }));
+    
+    const tdBlog = document.createElement("td");
+    tdBlog.appendChild(mkBlogInput(b.blog_filter, (v) => { b.blog_filter = v; markDirty(); }));
+    
+    const tdAlert = document.createElement("td");
+    tdAlert.appendChild(mkAlertSwitch(b.push_alert, (v) => { b.push_alert = v; markDirty(); }));
+    
+    const tdAct = document.createElement("td");
+    tdAct.className = "actions";
+    const btnDel = document.createElement("button");
+    btnDel.className = "btn btn-danger";
+    btnDel.textContent = "删除";
+    btnDel.onclick = () => {
+      config.tg_bots.splice(idx, 1);
+      markDirty(); renderTGBots();
+    };
+    tdAct.appendChild(btnDel);
+    
+    tr.append(tdName, tdChat, tdMembers, tdBlog, tdAlert, tdAct);
+    tbody.appendChild(tr);
+  });
+}
+
+$("btnAddNapcat").addEventListener("click", () => {
+  config.napcat_routes = config.napcat_routes || [];
+  config.napcat_routes.push({ group_id: null, member_filter: [] });
+  markDirty(); renderNapcat();
+});
+
+$("btnAddTGBot").addEventListener("click", () => {
+  config.tg_bots = config.tg_bots || [];
+  config.tg_bots.push({ name: "tg_bot" + (config.tg_bots.length+1), target_chat: "", member_filter: [], push_blog: true, push_alert: false });
+  markDirty(); renderTGBots();
+});
+
+// ── Members ──────────────────────────────────
 function renderMembers() {
   const tbody = $("memberRows");
   tbody.innerHTML = "";
@@ -1720,7 +2135,7 @@ function renderMembers() {
     const tdId = document.createElement("td");
     tdId.appendChild(mkInput(m.id || "", (v) => { m.id = v.trim(); }, "55", "width:70px"));
     const tdName = document.createElement("td");
-    tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里奈央"));
+    tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里奈央", "max-width:200px"));
     const tdAcc = document.createElement("td");
     const sel = document.createElement("select");
     for (const aid of accountIds) {
@@ -1736,22 +2151,6 @@ function renderMembers() {
     sel.value = m.account || accountIds[0] || "";
     sel.addEventListener("change", () => { m.account = sel.value; markDirty(); });
     tdAcc.appendChild(sel);
-    const tdGroups = document.createElement("td");
-    tdGroups.appendChild(mkInput((m.groups || []).join(", "), (v, el) => {
-      const nums = v.split(/[,，\s]+/).filter(Boolean).map(Number);
-      if (nums.some((n) => !Number.isInteger(n) || n <= 0)) {
-        el.classList.add("invalid");  // 非法输入不写回，标红提示
-        return;
-      }
-      el.classList.remove("invalid");
-      m.groups = nums;
-    }, "533072575, 752269366"));
-    const tdTg = document.createElement("td");
-    tdTg.appendChild(mkInput(m.tg || "", (v) => {
-      const t = v.trim();
-      if (t) m.tg = t; else delete m.tg;
-    }, "-1001234567890", "width:140px"));
-
     const tdOps = document.createElement("td");
     tdOps.appendChild(mkBtn("删除", async () => {
       if (!(await uiConfirm("删除成员 " + (m.name || m.id) + "？",
@@ -1760,7 +2159,7 @@ function renderMembers() {
       markDirty(); renderMembers();
     }, "danger"));
 
-    tr.append(tdId, tdName, tdAcc, tdGroups, tdTg, tdOps);
+    tr.append(tdId, tdName, tdAcc, tdOps);
     tbody.appendChild(tr);
   });
   // 成员变动后同步刷新 Bot 的推送成员选择面板
@@ -1828,7 +2227,7 @@ $("btnAddMember").addEventListener("click", () => {
 });
 
 // ── 日志 ─────────────────────────────────────────
-const LOG_SOURCES = [["live", "实时"], ["error", "错误日志文件"], ["response", "响应日志文件"]];
+const LOG_SOURCES = [["live", "实时"], ["system", "系统日志文件"], ["error", "错误日志文件"], ["response", "响应日志文件"]];
 let logSource = "live";
 let logSeq = 0;
 let logTimer = null;
@@ -1915,7 +2314,7 @@ async function fetchLogs() {
     }
     logSeq = data.seq;
     $("logHint").textContent = logEntries.length ? "" :
-      "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「错误日志文件」。）";
+      "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「系统日志文件」或「错误日志文件」。）";
   } else {
     logLines = data.lines;
     $("logHint").textContent = !data.lines.length ? "（日志文件为空或不存在）"
@@ -2238,7 +2637,8 @@ async function refreshHistory() {
 
 // ── 高级 JSON ────────────────────────────────────
 function refreshRawJson() { $("rawJson").value = JSON.stringify(config, null, 2); }
-$("btnResetJson").addEventListener("click", () => { collectGeneral(); refreshRawJson(); });
+$("btnResetJson").addEventListener("click", () => { collectGeneral();
+  collectChannels(); refreshRawJson(); });
 $("btnApplyJson").addEventListener("click", () => {
   try {
     const obj = JSON.parse($("rawJson").value);
@@ -2270,7 +2670,7 @@ function mkInput(value, onChange, placeholder, style) {
   return input;
 }
 
-function renderAll() { renderGeneral(); renderAccounts(); renderMembers(); refreshRawJson(); }
+function renderAll() { renderGeneral(); renderChannels(); renderAccounts(); renderMembers(); refreshRawJson(); }
 
 // ── 入口 ─────────────────────────────────────────
 $("btnSave").addEventListener("click", saveConfig);
@@ -2340,6 +2740,10 @@ $("btnLogout").addEventListener("click", async () => {
 
 loadConfig();
 startStatusPolling();   // 状态页是默认标签页
+
+$("botSubClose").addEventListener("click", () => {
+  $("botSubscribeDialog").close();
+});
 </script>
 </body>
 </html>

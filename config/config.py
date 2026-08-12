@@ -53,10 +53,11 @@ _DEFAULTS: dict = {
     ],
     "gemini_tag_min_interval":  5.0,
     # 文件路径
-    "cred_dir":                 "data/web_credentials",
-    "time_record_dir":          "data/time_records",
-    "sent_ids_dir":             "data/sent_ids",
+    "cred_dir":                 "state/web_credentials",
+    "time_record_dir":          "state/time_records",
+    "sent_ids_dir":             "state/sent_ids",
     "error_log_file":           "logs/error_debug.log",
+    "system_log_file":          "logs/system_info.log",
     "response_log_file":        "logs/response_debug.log",
     "sent_ids_max":             500,
     # 账号与成员（必须由 config.json 提供，这里仅为缺失时的安全兜底）
@@ -113,7 +114,9 @@ _DEFAULTS: dict = {
     "enable_napcat_qq":         True,
     "enable_qq_official_bot":   False,
     "enable_tg_bot":            False,
-    "tg_bot_token":             "",
+    "tg_bot_token":             "",  # legacy single bot token
+    "tg_bots":                  [],
+    "napcat_routes":            [],
 }
 
 
@@ -215,18 +218,53 @@ def _normalize_config(raw: dict) -> dict:
         if "monitor" in cfg:
             accounts = cfg.get("accounts", {})
             normalized = []
+            
+            # Compatibility migration for legacy tg and groups routing
+            legacy_tg_chats = {} # chat_id -> list of members
+            legacy_napcat_groups = {} # group_id -> list of members
+            
             for m in cfg["monitor"]:
                 acc = accounts.get(m["account"], {})
                 normalized.append({
                     "account_id":    m["account"],
                     "group_type":    acc.get("group", ""),
                     "m_id":          str(m["id"]),
-                    "m_name":        m["name"],
-                    "target_groups": m.get("groups") or [],
-                    "tg_chat_id":    m.get("tg", ""),
+                    "m_name":        m["name"]
                 })
+                
+                # Extract legacy routes
+                m_name = m["name"]
+                if "tg" in m and m["tg"]:
+                    chat_id = str(m["tg"]).strip()
+                    if chat_id:
+                        legacy_tg_chats.setdefault(chat_id, []).append(m_name)
+                if "groups" in m and m["groups"]:
+                    for gid in m["groups"]:
+                        legacy_napcat_groups.setdefault(gid, []).append(m_name)
+                        
             cfg["monitor_list"] = normalized
             del cfg["monitor"]
+            
+            # Auto-migrate legacy routing to new structure if not manually configured
+            if "tg_bots" not in cfg and legacy_tg_chats:
+                cfg["tg_bots"] = []
+                for i, (chat_id, members) in enumerate(legacy_tg_chats.items()):
+                    # Create one bot configuration per unique chat id to mimic old behavior
+                    # The token will fallback to the global TG_BOT_TOKEN
+                    cfg["tg_bots"].append({
+                        "name": f"tg_bot_{i+1}",
+                        "target_chat": chat_id,
+                        "member_filter": members,
+                        "push_blog": True,
+                        "push_alert": True if i == 0 else False
+                    })
+            if "napcat_routes" not in cfg and legacy_napcat_groups:
+                cfg["napcat_routes"] = []
+                for gid, members in legacy_napcat_groups.items():
+                    cfg["napcat_routes"].append({
+                        "group_id": gid,
+                        "member_filter": members
+                    })
 
         return cfg
 
@@ -297,6 +335,8 @@ def _build_qq_official_bots(cfg: dict) -> dict:
                 "target_openid": b.get("target_openid") or _env(f"{prefix}_TARGET_OPENID", ""),
                 "group_openid":  b.get("group_openid", ""),
                 "member_filter": b.get("member_filter") or [],
+                "blog_filter":   b.get("blog_filter") or [],
+                "push_alert":    bool(b.get("push_alert", False)),
             })
     else:
         for i in range(1, 21):
@@ -314,11 +354,41 @@ def _build_qq_official_bots(cfg: dict) -> dict:
     return cfg
 
 
+def _build_tg_bots(cfg: dict) -> dict:
+    """构建多 TG Bot 列表。
+    
+    从 config.json 的 tg_bots 读取，token 按 {NAME大写}_TOKEN 从 .env 匹配；
+    如果未找到，回退使用全局 TG_BOT_TOKEN。
+    """
+    if not cfg.get("enable_tg_bot"):
+        cfg["tg_bots"] = []
+        return cfg
+
+    declared = cfg.get("tg_bots") or []
+    bots = []
+    global_token = _env("TG_BOT_TOKEN", "")
+    
+    for b in declared:
+        prefix = str(b.get("name", "")).upper()
+        token = _env(f"{prefix}_TOKEN", "") or global_token
+        bots.append({
+            "name":          b.get("name", ""),
+            "token":         token,
+            "target_chat":   str(b.get("target_chat", "")).strip(),
+            "member_filter": b.get("member_filter") or [],
+            "blog_filter":   b.get("blog_filter") or [],
+            "push_alert":    bool(b.get("push_alert", False)),
+        })
+        
+    cfg["tg_bots"] = bots
+    return cfg
+
+
 def _build_paths(cfg: dict) -> dict:
     """将 JSON 中的相对路径字符串拼接为项目根目录下的绝对路径。"""
     _path_keys = {
         "cred_dir", "time_record_dir", "sent_ids_dir",
-        "error_log_file", "response_log_file", "archive_dir",
+        "error_log_file", "system_log_file", "response_log_file", "archive_dir",
     }
     for key in _path_keys:
         if key in cfg:
@@ -374,6 +444,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "time_record_dir":              "TIME_RECORD_DIR",
     "sent_ids_dir":                 "SENT_IDS_DIR",
     "error_log_file":               "ERROR_LOG_FILE",
+    "system_log_file":              "SYSTEM_LOG_FILE",
     "response_log_file":            "RESPONSE_LOG_FILE",
     "sent_ids_max":                 "SENT_IDS_MAX",
     "debug_log_response":           "DEBUG_LOG_RESPONSE",
@@ -478,6 +549,9 @@ def _load_config() -> dict:
 
     # 9. QQ 官方 Bot 构建（从 .env 读取）
     cfg = _build_qq_official_bots(cfg)
+    
+    # 10. TG Bot 构建
+    cfg = _build_tg_bots(cfg)
 
     return cfg
 

@@ -25,7 +25,8 @@ let calendarAbort = null;
 let lightboxOpener = null;
 let memberVersion = 0;
 let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲掉）
-
+let curMode = "msg";     // "msg" 或 "blog"
+let curBlogAuthor = "";  // 当前选中的博客作者
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
 
@@ -80,6 +81,7 @@ function initInfiniteScroll() {
     const scrollBottom = window.innerHeight + window.scrollY;
     const docHeight = document.documentElement.scrollHeight;
     if (docHeight - scrollBottom < 350) {
+      if ($("blogGrid").style.display !== "none") return;
       page++;
       loadPage();
     }
@@ -123,6 +125,9 @@ function fmtDateKey(utc) {
 
 // ── 日历 ─────────────────────────────────────────
 async function loadCalendar() {
+  if (curMode === "blog") {
+    return loadBlogCalendar();
+  }
   const version = ++calendarVersion;
   if (calendarAbort) calendarAbort.abort();
   calendarAbort = new AbortController();
@@ -136,6 +141,33 @@ async function loadCalendar() {
     dayCounts = {};
   }
   if (version !== calendarVersion) return;
+  renderCalendar();
+}
+
+async function loadBlogCalendar() {
+  if (curMode !== "blog" || !curBlogGroup) return;
+  const version = ++calendarVersion;
+  if (calendarAbort) calendarAbort.abort();
+  calendarAbort = new AbortController();
+  try {
+    const data = await api("/api/archive/blog_calendar?group=" + encodeURIComponent(curBlogGroup) +
+                           "&author=" + encodeURIComponent(curBlogAuthor || ""), { signal: calendarAbort.signal });
+    if (version !== calendarVersion) return;
+    dayCounts = data.ok ? (data.days || {}) : {};
+  } catch (e) {
+    if (e.name === "AbortError" || version !== calendarVersion) return;
+    dayCounts = {};
+  }
+  if (version !== calendarVersion) return;
+  
+  if (!calYM || Object.keys(dayCounts).length > 0) {
+    const keys = Object.keys(dayCounts).sort();
+    if (keys.length > 0) {
+      const latest = keys[keys.length - 1];
+      const [y, m] = latest.split("-").map(Number);
+      calYM = { year: y, month: m };
+    }
+  }
   renderCalendar();
 }
 
@@ -193,6 +225,35 @@ async function jumpToDay(dateKey) {
   const [y, m] = dateKey.split("-").map(Number);
   searchQuery = "";
   syncSearchInput();
+
+  if (curMode === "blog") {
+    // 博客模式下的日期跳转
+    await loadBlogPage(1, true);
+    setTimeout(() => {
+      const cards = document.querySelectorAll("#blogHero, .bmc-card");
+      let targetEl = null;
+      cards.forEach(card => {
+        if (card.dataset.date && card.dataset.date.startsWith(dateKey)) {
+          if (!targetEl) targetEl = card;
+        }
+      });
+      if (targetEl) {
+        targetEl.scrollIntoView({ block: "center", behavior: "smooth" });
+        targetEl.style.outline = "2px solid var(--accent)";
+        targetEl.style.outlineOffset = "4px";
+        targetEl.style.borderRadius = "12px";
+        targetEl.style.transition = "outline 0.3s ease";
+        setTimeout(() => {
+          targetEl.style.outline = "";
+          targetEl.style.outlineOffset = "";
+        }, 2500);
+      } else {
+        showToast(dateKey + " 暂无符合条件的博客", "info");
+      }
+    }, 350);
+    return;
+  }
+
   await selectMonth(y, m);
   let jumpVersion = contentVersion;
   // 加载全月（最多几页），保证目标日期的分隔条已渲染
@@ -251,8 +312,48 @@ async function jumpToDay(dateKey) {
   }, 5000);
 }
 
+// ── 模式切换 ─────────────────────────────────────
+function switchMainTab(mode, keepHash) {
+  curMode = mode;
+  $("tabMsg").classList.toggle("active", mode === "msg");
+  $("tabBlog").classList.toggle("active", mode === "blog");
+  $("memberChips").style.display = mode === "msg" ? "" : "none";
+  $("blogGroupChips").style.display = mode === "blog" ? "" : "none";
+
+  if (mode === "msg") {
+    if (!keepHash) goHome();
+  } else {
+    if (!keepHash) {
+      if (blogGroups && blogGroups.length > 0) {
+        selectBlogGroup(blogGroups[0].key);
+      } else {
+        location.hash = "blog="; // 触发 hashchange 或 reload
+        showBlogHome();
+      }
+    }
+  }
+}
+
+$("tabMsg").addEventListener("click", () => switchMainTab("msg"));
+$("tabBlog").addEventListener("click", () => switchMainTab("blog"));
+
+function showBlogHome() {
+  $('archiveHome').classList.remove('active');
+  $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
+  document.querySelector('.layout').style.display = '';
+  $("timeline").innerHTML = '<div class="center">请在上方选择一个坂道组</div>';
+  $("blogGrid").style.display = "none";
+  $("timeline").style.display = "";
+  $("loadMore").hidden = true;
+  $("emptyHint").hidden = true;
+  document.querySelectorAll(".toolbar")[0].style.display = "none";
+  document.querySelectorAll(".toolbar")[1].style.display = "none";
+  $("archiveSide").style.display = "none";
+  syncChipHighlight();
+}
+
 // ── 数据加载 ─────────────────────────────────────
-async function loadMembers() {
+async function loadMembers(skipSelect = false) {
   const data = await api("/api/archive/members");
   if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
   members = data.members;
@@ -266,84 +367,644 @@ async function loadMembers() {
   box.innerHTML = "";
   for (const m of members) {
     const b = document.createElement("button");
-    b.className = "chip" + (m.name === curMember && !curBlogGroup ? " active" : "");
-    b.textContent = m.display + "（" + m.total + "）";
-    b.addEventListener("click", () => { _enterMemberMode(); selectMember(m.name); });
+    b.className = "chip";
+    if (m.name === curMember && curMode === "msg") b.classList.add("active");
+    b.dataset.key = m.name;
+    b.textContent = "💬 " + m.display + "（" + m.total + "）";
+    b.addEventListener("click", () => { hideHome(); selectMember(m.name); });
     box.appendChild(b);
   }
-  // 加载博客团体 chips
-  try {
-    const bg = await api("/api/archive/blog_groups");
-    if (bg.ok) blogGroups = bg.groups;
-    const BLOG_NAMES = {hinatazaka:"📝 日向坂46", nogizaka:"📝 乃木坂46", sakurazaka:"📝 樱坂46"};
-    for (const g of blogGroups) {
-      const b = document.createElement("button");
-      b.className = "chip" + (g.key === curBlogGroup ? " active" : "");
-      b.textContent = (BLOG_NAMES[g.key] || g.key) + "（" + g.total + "）";
-      b.addEventListener("click", () => { selectBlogGroup(g.key); });
-      box.appendChild(b);
-    }
-  } catch(e) {}
+  
+  loadBlogGroupChips();
+
+  // skipSelect=true 时只渲染 chips，不自动跳转（首页模式下使用）
+  if (skipSelect) return;
   const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
   await selectMember(wanted, true);
 }
 
+async function loadBlogGroupChips() {
+  try {
+    const bg = await api("/api/archive/blog_groups");
+    if (bg.ok) blogGroups = bg.groups;
+    const box = $("blogGroupChips");
+    box.innerHTML = "";
+    const BLOG_NAMES = {hinatazaka:"📝 日向坂46", nogizaka:"📝 乃木坂46", sakurazaka:"📝 樱坂46"};
+    for (const g of blogGroups) {
+      const b = document.createElement("button");
+      b.className = "chip";
+      if (g.key === curBlogGroup && curMode === "blog") b.classList.add("active");
+      b.dataset.key = g.key;
+      b.textContent = (BLOG_NAMES[g.key] || g.key) + "（" + g.total + "）";
+      b.addEventListener("click", () => { selectBlogGroup(g.key); });
+      box.appendChild(b);
+    }
+    syncChipHighlight();
+  } catch(e) {}
+}
+
 function _enterMemberMode() {
+  curMode = "msg";
   curBlogGroup = "";
   $("archiveSide").style.display = "";
-  $("prevMonth").style.display = $("nextMonth").style.display = $("monthSelect").style.display = "";
-  $("typeChips").style.display = "";
+  $("blogGrid").style.display = "none";
+  $("timeline").style.display = "";
+  document.querySelectorAll(".toolbar").forEach(t => t.style.display = "");
   $("tagToggle").parentElement.style.display = "";
   $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "";
 }
 
-async function selectBlogGroup(key) {
-  curBlogGroup = key; curMember = "";
-  searchQuery = ""; syncSearchInput();
-  resetContent();
-  // 更新 chips 高亮
-  const chips = $("memberChips").querySelectorAll(".chip");
-  chips.forEach(c => c.classList.remove("active"));
-  for (let i = members.length; i < chips.length; i++) {
-    if (blogGroups[i - members.length]?.key === key) chips[i].classList.add("active");
-  }
-  // 博客模式：隐藏消息日历，简化工具栏
-  $("archiveSide").style.display = "none";
-  $("prevMonth").style.display = $("nextMonth").style.display = $("monthSelect").style.display = "none";
-  $("typeChips").style.display = "none";
-  $("tagToggle").parentElement.style.display = "none";
-  $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "none";
-  $("backTop").style.display = "";
-
-  // 直接加载全部博客（不分月）
-  const data = await api("/api/archive/blogs?group=" + encodeURIComponent(key) + "&page=1&per_page=50");
-  if (!data.ok || !data.posts.length) { showEmpty("该团体还没有博客归档"); return; }
-  totalPages = data.total_pages;
-  $("stats").textContent = "共 " + data.total + " 篇";
-  for (const post of data.posts) renderBlogBubble(post);
-  $("loadMore").hidden = page >= totalPages;
+// 根据 curMember / curBlogGroup 同步所有 chip 高亮状态
+function syncChipHighlight() {
+  $("memberChips").querySelectorAll(".chip").forEach(c => {
+    c.classList.toggle("active", curMode === "msg" && c.dataset.key === curMember);
+  });
+  $("blogGroupChips").querySelectorAll(".chip").forEach(c => {
+    c.classList.toggle("active", curMode === "blog" && c.dataset.key === curBlogGroup);
+  });
 }
 
-async function loadBlogPage() {
-  if (!curBlogGroup || !curYM) return;
-  const version = contentVersion;
-  contentAbort = new AbortController();
+// ── 博客相关逻辑 ─────────────────────────────────────
+async function selectBlogGroup(key) {
+  curMode = "blog";
+  curMember = "";
+  curBlogGroup = key;
+  curBlogAuthor = "";
+  searchQuery = "";
+  syncSearchInput();
+  syncChipHighlight();
+  location.hash = "blog=" + encodeURIComponent(key);
+  
+  $('archiveHome').classList.remove('active');
+  $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
+  document.querySelector('.layout').style.display = '';
+  $("timeline").style.display = "none";
+  $("blogGrid").style.display = "";
+  $("archiveSide").style.display = "";
+  document.querySelectorAll(".toolbar")[0].style.display = "none";
+  document.querySelectorAll(".toolbar")[1].style.display = "";
+  $("tagToggle").parentElement.style.display = "none";
+  
+  await loadBlogAuthors(key);
+  await loadBlogCalendar();
+  await loadBlogPage(1, true);
+}
+
+async function loadBlogAuthors(key) {
+  try {
+    const data = await api("/api/archive/blog_authors?group=" + encodeURIComponent(key));
+    const bar = $("blogAuthorBar");
+    bar.innerHTML = "";
+    if (data.ok && data.authors) {
+      const allBtn = document.createElement("button");
+      allBtn.className = "blog-author-chip active";
+      allBtn.textContent = "全部成员";
+      allBtn.onclick = () => selectBlogAuthor("");
+      bar.appendChild(allBtn);
+      
+      data.authors.forEach(a => {
+        const btn = document.createElement("button");
+        btn.className = "blog-author-chip";
+        btn.textContent = a.name;
+        btn.onclick = () => selectBlogAuthor(a.name);
+        bar.appendChild(btn);
+      });
+    }
+  } catch (e) {}
+}
+
+function selectBlogAuthor(author) {
+  curBlogAuthor = author;
+  const btns = $("blogAuthorBar").querySelectorAll(".blog-author-chip");
+  btns.forEach(b => {
+    if ((author === "" && b.textContent === "全部成员") || b.textContent === author) {
+      b.classList.add("active");
+    } else {
+      b.classList.remove("active");
+    }
+  });
+  
+  const p = new URLSearchParams({ blog: curBlogGroup });
+  if (author) p.set("author", author);
+  selfHashUpdate = true;
+  location.hash = p.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+  
+  loadBlogCalendar();
+  loadBlogPage(1, true);
+}
+
+// ── 渲染博客网格 ─────────────────────────────────────
+async function loadBlogPage(pageNum) {
+  page = pageNum;
+  $("blogCards").innerHTML = "";
+  $("blogHero").style.display = "none";
+  $("blogHero").innerHTML = "";
+  $("emptyHint").hidden = true;
+  $("blogPagination").style.display = "none";
+  $("blogPagination").innerHTML = "";
+  $("loadMore").hidden = true;
+  
   setPageLoading(true);
   try {
-    const data = await api("/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) +
-      "&year=" + curYM.year + "&month=" + curYM.month + "&page=" + page, {signal: contentAbort.signal});
-    if (version !== contentVersion) return;
-    if (!data.ok) { showEmpty("加载失败"); return; }
+    let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + pageNum + "&per_page=24";
+    if (curBlogAuthor) url += "&author=" + encodeURIComponent(curBlogAuthor);
+    if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
+    
+    const data = await api(url);
+    if (!data.ok) throw new Error("加载失败");
+    
     totalPages = data.total_pages;
-    $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 篇";
-    if (!data.posts.length && page === 1) showEmpty("本月没有博客");
-    for (const post of data.posts) renderBlogBubble(post);
-    $("loadMore").hidden = page >= totalPages;
-  } catch(e) {
-    if (e.name !== "AbortError" && version === contentVersion) showEmpty("加载失败：" + e.message);
-  } finally {
-    if (version === contentVersion) setPageLoading(false);
+    if (data.posts.length === 0) {
+      $("emptyHint").textContent = "没有找到博客";
+      $("emptyHint").hidden = false;
+    } else {
+      let posts = data.posts;
+      if (pageNum === 1 && posts.length > 0 && !searchQuery) {
+        renderBlogHero(posts[0]);
+        posts = posts.slice(1);
+      }
+      posts.forEach(p => {
+        renderBlogMiniCard(p, $("blogCards"));
+      });
+      renderBlogPagination(pageNum, totalPages);
+      
+      if (pageNum > 1) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  } catch (e) {
+    $("emptyHint").textContent = "加载错误: " + e.message;
+    $("emptyHint").hidden = false;
   }
+  setPageLoading(false);
+}
+
+function renderBlogPagination(curPage, total) {
+  const container = $("blogPagination");
+  if (total <= 1) return;
+  container.style.display = "flex";
+  
+  let html = '';
+  
+  if (curPage > 1) {
+    html += '<button class="bp-btn" onclick="loadBlogPage(' + (curPage - 1) + ')">‹</button>';
+  } else {
+    html += '<button class="bp-btn" disabled>‹</button>';
+  }
+  
+  const pages = [];
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) pages.push(i);
+  } else {
+    if (curPage <= 4) {
+      pages.push(1, 2, 3, 4, 5, '...', total);
+    } else if (curPage >= total - 3) {
+      pages.push(1, '...', total - 4, total - 3, total - 2, total - 1, total);
+    } else {
+      pages.push(1, '...', curPage - 1, curPage, curPage + 1, '...', total);
+    }
+  }
+  
+  for (const p of pages) {
+    if (p === '...') {
+      html += '<span class="bp-ellipsis">...</span>';
+    } else {
+      if (p === curPage) {
+        html += '<button class="bp-btn active">' + p + '</button>';
+      } else {
+        html += '<button class="bp-btn" onclick="loadBlogPage(' + p + ')">' + p + '</button>';
+      }
+    }
+  }
+  
+  if (curPage < total) {
+    html += '<button class="bp-btn" onclick="loadBlogPage(' + (curPage + 1) + ')">›</button>';
+  } else {
+    html += '<button class="bp-btn" disabled>›</button>';
+  }
+  
+  container.innerHTML = html;
+}
+
+function renderBlogHero(post) {
+  const hero = $("blogHero");
+  hero.style.display = "block";
+  hero.dataset.date = (post.date || "").substring(0, 10);
+  const dateStr = (post.date || "").substring(0, 16);
+  
+  let images = [], paths = [];
+  try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
+  try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
+  let bodyHtml = post.body_html || "";
+  bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
+  
+  // 提取第一张图作为 Hero 封面图
+  let coverUrl = "";
+  const match = bodyHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
+  if (match) coverUrl = match[1];
+  
+  let coverHtml = '';
+  if (coverUrl) {
+    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" alt=""></div>';
+  } else {
+    coverHtml = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
+  }
+  
+  hero.innerHTML = 
+    coverHtml +
+    '<div class="bh-info">' +
+      '<div class="bh-meta"><span class="bh-author">' + esc(post.author) + '</span><span class="bh-date">' + esc(dateStr) + '</span></div>' +
+      '<h2 class="bh-title">' + highlightQuery(post.title || '无题', searchQuery) + '</h2>' +
+      '<div class="bh-excerpt">' + esc(bodyHtml.replace(/<[^>]+>/g, '').substring(0, 150)) + '...</div>' +
+    '</div>';
+    
+  hero.onclick = function(e) {
+    if (e.target.tagName === 'A') return;
+    openBlogReader(post, bodyHtml);
+  };
+}
+
+function renderBlogMiniCard(post, container) {
+  const grid = container || $("blogCards");
+  const dateStr = (post.date || "").substring(0, 16);
+  
+  let images = [], paths = [];
+  try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
+  try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
+  let bodyHtml = post.body_html || "";
+  bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
+  
+  let coverUrl = "";
+  const match = bodyHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
+  if (match) coverUrl = match[1];
+  
+  const card = document.createElement("div");
+  card.className = "bmc-card blog-card-mini";
+  card.dataset.date = (post.date || "").substring(0, 10);
+  
+  let html = '';
+  if (coverUrl) {
+    html += '<div class="bc-cover"><img src="' + esc(coverUrl) + '" alt="" loading="lazy"></div>';
+  } else {
+    html += '<div class="bc-cover no-pic">📝</div>';
+  }
+  
+  let excerpt = "";
+  if (searchQuery) {
+    let fullText = "";
+    if (post.body_text) fullText += post.body_text.replace(/\s+/g, " ");
+    else if (post.body_html) fullText += post.body_html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    if (post.translation) fullText += " " + post.translation.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    
+    const lowerText = fullText.toLowerCase();
+    const lowerQuery = searchQuery.toLowerCase();
+    let idx = lowerText.indexOf(lowerQuery);
+    if (idx !== -1) {
+      let snippets = [];
+      let lastEnd = 0;
+      while (idx !== -1 && snippets.length < 3) {
+        let start = Math.max(lastEnd, idx - 25);
+        let end = Math.min(fullText.length, idx + lowerQuery.length + 35);
+        let snippet = fullText.substring(start, end);
+        if (start > lastEnd) snippet = "..." + snippet;
+        snippets.push(snippet);
+        lastEnd = end;
+        idx = lowerText.indexOf(lowerQuery, lastEnd);
+      }
+      let finalSnippet = snippets.join("");
+      if (lastEnd < fullText.length) finalSnippet += "...";
+      excerpt = '<div class="bc-excerpt">' + highlightQuery(finalSnippet, searchQuery) + '</div>';
+    } else {
+      excerpt = '<div class="bc-excerpt"><span style="color:var(--muted)">原文/译文包含关键词</span></div>';
+    }
+  }
+
+  html += '<div class="bc-info">' +
+            '<div class="bc-meta">' + esc(post.author) + ' · ' + esc(dateStr) + '</div>' +
+            '<div class="bc-title">' + highlightQuery(post.title || '无题', searchQuery) + '</div>' +
+            excerpt +
+          '</div>';
+    
+  card.innerHTML = html;
+  
+  card.onclick = function(e) {
+    if (e.target.tagName === 'A') return;
+    openBlogReader(post, bodyHtml);
+  };
+  
+  grid.appendChild(card);
+}
+
+let currentBlogReaderPost = null;
+let currentTransMode = localStorage.getItem("blog_trans_mode") || "ja-zh";
+
+function applyTransMode(html, mode) {
+  if (!html) return "";
+  if (mode === "ja-zh") return html;
+  
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString("<div>" + html + "</div>", "text/html");
+    const container = doc.body.firstElementChild;
+    if (!container) return html;
+    
+    const strongs = Array.from(container.querySelectorAll("strong"));
+    strongs.forEach(strong => {
+      let next = strong.nextSibling;
+      let emNode = null;
+      let nodesToSwap = [];
+      
+      while (next) {
+        if (next.nodeName === "EM") {
+          emNode = next;
+          break;
+        }
+        nodesToSwap.push(next);
+        next = next.nextSibling;
+      }
+      
+      if (emNode) {
+        const parent = strong.parentNode;
+        if (mode === "zh-ja") {
+          parent.insertBefore(emNode, strong);
+          const br = document.createElement("br");
+          parent.insertBefore(br, strong);
+          nodesToSwap.forEach(n => n.remove());
+        } else if (mode === "ja-only") {
+          nodesToSwap.forEach(n => n.remove());
+          emNode.remove();
+        }
+      }
+    });
+    return container.innerHTML;
+  } catch(e) {
+    return html;
+  }
+}
+
+function updateModeSelectorUI() {
+  const selector = $("brModeSelector");
+  const delBtn = $("brDeleteTranslate");
+  const hasTrans = currentBlogReaderPost && currentBlogReaderPost.translation && currentBlogReaderPost.translation !== "[翻译失败]";
+  
+  if (selector) {
+    if (hasTrans) {
+      selector.style.display = "inline-flex";
+      const btns = selector.querySelectorAll(".brm-btn");
+      btns.forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.mode === currentTransMode);
+      });
+    } else {
+      selector.style.display = "none";
+    }
+  }
+
+  if (delBtn) {
+    if (window._isLoggedIn && hasTrans) {
+      delBtn.style.display = "inline-block";
+    } else {
+      delBtn.style.display = "none";
+    }
+  }
+}
+
+function renderCurrentBlogContent() {
+  if (!currentBlogReaderPost) return;
+  const hasTrans = currentBlogReaderPost.translation && currentBlogReaderPost.translation !== "[翻译失败]";
+  
+  let bodyHtml = "";
+  if (hasTrans) {
+    const processedHtml = applyTransMode(currentBlogReaderPost.translation, currentTransMode);
+    bodyHtml = _replaceImgUrls(processedHtml, JSON.parse(currentBlogReaderPost.images_json || "[]"), JSON.parse(currentBlogReaderPost.image_paths_json || "[]"));
+  } else {
+    bodyHtml = _replaceImgUrls(currentBlogReaderPost.body_html || "", JSON.parse(currentBlogReaderPost.images_json || "[]"), JSON.parse(currentBlogReaderPost.image_paths_json || "[]"));
+  }
+
+  $("brContent").innerHTML = 
+    '<div class="br-meta">' +
+      '<div><span class="br-author">' + esc(currentBlogReaderPost.author) + '</span><span style="margin-left:12px">' + esc((currentBlogReaderPost.date || "").substring(0, 16)) + '</span></div>' +
+      '<a class="br-link" href="' + esc(currentBlogReaderPost.url) + '" target="_blank">阅读原文 ↗</a>' +
+    '</div>' +
+    '<h1 style="margin-top:0; font-size:24px;">' + esc(currentBlogReaderPost.title || "无题") + '</h1>' +
+    bodyHtml;
+    
+  updateModeSelectorUI();
+}
+
+function openBlogReader(post, bodyHtml) {
+  currentBlogReaderPost = post;
+  $("brTitle").textContent = post.title || "无题";
+  
+  const transBtn = $("brTranslate");
+  if (transBtn) {
+    if (!window._isLoggedIn) {
+      transBtn.style.display = "none";
+    } else {
+      transBtn.style.display = "";
+      if (post.translation && post.translation !== "[翻译失败]") {
+        transBtn.textContent = "✓ 已翻译";
+        transBtn.disabled = true;
+      } else {
+        transBtn.textContent = "🌐 翻译";
+        transBtn.disabled = false;
+      }
+    }
+  }
+
+  renderCurrentBlogContent();
+  $("blogReader").style.display = "";
+  $("blogReader").scrollTop = 0;
+  
+  document.body.style.overflow = "hidden";
+  if (typeof handleBackTopScroll === "function") handleBackTopScroll();
+
+  if (searchQuery) {
+    setTimeout(() => {
+      const contentDiv = $("brContent");
+      if (!contentDiv) return;
+      const walker = document.createTreeWalker(contentDiv, NodeFilter.SHOW_TEXT, null, false);
+      let node;
+      let found = false;
+      const lowerQuery = searchQuery.toLowerCase();
+      while ((node = walker.nextNode())) {
+        if (node.nodeValue.toLowerCase().includes(lowerQuery)) {
+          const span = document.createElement("mark");
+          span.className = "br-search-target";
+          span.style.background = "var(--accent-soft)";
+          span.style.color = "var(--accent)";
+          
+          const idx = node.nodeValue.toLowerCase().indexOf(lowerQuery);
+          const before = node.nodeValue.substring(0, idx);
+          const match = node.nodeValue.substring(idx, idx + searchQuery.length);
+          const after = node.nodeValue.substring(idx + searchQuery.length);
+          
+          span.textContent = match;
+          const parent = node.parentNode;
+          
+          const beforeNode = document.createTextNode(before);
+          const afterNode = document.createTextNode(after);
+          
+          parent.insertBefore(beforeNode, node);
+          parent.insertBefore(span, node);
+          parent.insertBefore(afterNode, node);
+          parent.removeChild(node);
+          
+          if (!found) {
+            setTimeout(() => {
+              const reader = $("blogReader");
+              const topPos = span.getBoundingClientRect().top + reader.scrollTop - (window.innerHeight / 2);
+              reader.scrollTo({ top: Math.max(0, topPos), behavior: "smooth" });
+            }, 100);
+            found = true;
+          }
+          
+          walker.currentNode = afterNode;
+        }
+      }
+    }, 100);
+  }
+}
+
+const brCloseBtn = $("brClose");
+if (brCloseBtn) {
+  brCloseBtn.addEventListener("click", () => {
+    $("blogReader").style.display = "none";
+    document.body.style.overflow = "";
+    $("brContent").innerHTML = "";
+    if (typeof handleBackTopScroll === "function") handleBackTopScroll();
+  });
+}
+
+const brModeSelector = $("brModeSelector");
+if (brModeSelector) {
+  brModeSelector.addEventListener("click", (e) => {
+    const btn = e.target.closest(".brm-btn");
+    if (!btn || !btn.dataset.mode) return;
+    currentTransMode = btn.dataset.mode;
+    try { localStorage.setItem("blog_trans_mode", currentTransMode); } catch(err) {}
+    renderCurrentBlogContent();
+  });
+}
+
+function customConfirm({ title = "确认操作", message = "确定继续吗？", confirmText = "确认删除", icon = "🗑️" } = {}) {
+  return new Promise((resolve) => {
+    const modal = $("customConfirmModal");
+    if (!modal) {
+      resolve(confirm(message));
+      return;
+    }
+    $("cmTitle").textContent = title;
+    $("cmMessage").textContent = message;
+    $("cmConfirm").textContent = confirmText;
+    modal.querySelector(".cm-icon").textContent = icon;
+    
+    modal.style.display = "flex";
+
+    const onConfirm = () => {
+      cleanup();
+      resolve(true);
+    };
+    const onCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+    const cleanup = () => {
+      modal.style.display = "none";
+      $("cmConfirm").removeEventListener("click", onConfirm);
+      $("cmCancel").removeEventListener("click", onCancel);
+    };
+
+    $("cmConfirm").addEventListener("click", onConfirm);
+    $("cmCancel").addEventListener("click", onCancel);
+  });
+}
+
+function showToast(msg, type = "info") {
+  let container = $("toastContainer");
+  if (!container) return;
+  const toast = document.createElement("div");
+  const icon = type === "success" ? "✅" : type === "error" ? "❌" : "ℹ️";
+  toast.className = `custom-toast ${type}`;
+  toast.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(-10px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 2500);
+}
+
+const brDeleteTranslateBtn = $("brDeleteTranslate");
+if (brDeleteTranslateBtn) {
+  brDeleteTranslateBtn.addEventListener("click", async () => {
+    if (!currentBlogReaderPost || !currentBlogReaderPost.translation) return;
+    
+    const ok = await customConfirm({
+      title: "清除翻译确认",
+      message: "确认要删除该博客的 Gemini 翻译结果并恢复为原始状态吗？",
+      confirmText: "确认删除",
+      icon: "🗑️"
+    });
+    if (!ok) return;
+
+    try {
+      const res = await fetch("/api/archive/blogs/delete_translation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: currentBlogReaderPost.id })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        currentBlogReaderPost.translation = null;
+        const transBtn = $("brTranslate");
+        if (transBtn) {
+          transBtn.textContent = "🌐 翻译";
+          transBtn.disabled = false;
+        }
+        renderCurrentBlogContent();
+        showToast("已成功删除翻译", "success");
+      } else {
+        showToast(data.msg || "删除失败", "error");
+      }
+    } catch(err) {
+      showToast("网络异常: " + err, "error");
+    }
+  });
+}
+
+const brTranslateBtn = $("brTranslate");
+if (brTranslateBtn) {
+  brTranslateBtn.addEventListener("click", async () => {
+    if (!currentBlogReaderPost || brTranslateBtn.disabled) return;
+    
+    brTranslateBtn.textContent = "⏳ 翻译中 (需10~30秒)...";
+    brTranslateBtn.disabled = true;
+    
+    try {
+      const res = await fetch("/api/archive/blogs/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: currentBlogReaderPost.id })
+      });
+      const data = await res.json();
+      if (data.ok && data.html) {
+        currentBlogReaderPost.translation = data.html;
+        if ($("blogReader").style.display !== "none") {
+          renderCurrentBlogContent();
+          brTranslateBtn.textContent = "✓ 已翻译";
+        }
+      } else {
+        alert(data.msg || "翻译失败");
+        brTranslateBtn.textContent = "🌐 重试翻译";
+        brTranslateBtn.disabled = false;
+      }
+    } catch(err) {
+      alert("网络异常: " + err);
+      brTranslateBtn.textContent = "🌐 重试翻译";
+      brTranslateBtn.disabled = false;
+    }
+  });
 }
 
 function _replaceImgUrls(html, images, paths) {
@@ -351,43 +1012,36 @@ function _replaceImgUrls(html, images, paths) {
   let result = html;
   for (let i = 0; i < images.length; i++) {
     const orig = images[i];
-    const local = paths[i] ? "/api/archive/blog_media/" + encodeURI(paths[i]) : orig;
+    let localPath = paths[i] || "";
+    if (localPath) {
+        localPath = localPath.replace(/\\/g, '/');
+    }
+    const encodedPath = localPath ? localPath.split('/').map(encodeURIComponent).join('/') : "";
+    const local = encodedPath ? "/api/archive/blog_media/" + encodedPath : orig;
     result = result.split(orig).join(local);
-    // 也尝试替换 HTML 实体版本和可能的变体
     try { result = result.split(esc(orig)).join(local); } catch(e) {}
+    
+    // 乃木坂/樱坂的 body_html 含相对 src，尝试仅用 URL 路径部分匹配
+    try {
+      // 提供 base url 避免 orig 是相对路径时 throw error
+      const u = new URL(orig, "https://dummy.com");
+      const relPath = u.pathname + u.search;
+      if (relPath && relPath !== orig && relPath !== '/') {
+        result = result.split(relPath).join(local);
+        try { result = result.split(esc(relPath)).join(local); } catch(e) {}
+      }
+    } catch(e) {}
   }
   return result;
 }
 
-function renderBlogBubble(post) {
-  const tl = $("timeline");
-  const dateStr = (post.date || "").substring(0, 16);
-  const b = document.createElement("div");
-  b.className = "blog-card";
-
-  // 解析图片
-  let images = [], paths = [];
-  try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
-  try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
-
-  // 构建 HTML——图片替换为本地路径
-  let bodyHtml = post.body_html || "";
-  bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
-
-  b.innerHTML =
-    '<div class="blog-card-header">' +
-      '<span class="blog-card-author">' + esc(post.author) + '</span>' +
-      '<span class="blog-card-date">' + esc(dateStr) + '</span>' +
-      '<a class="blog-card-link" href="' + esc(post.url) + '" target="_blank" rel="noopener">原文 →</a>' +
-    '</div>' +
-    '<div class="blog-card-body">' + bodyHtml + '</div>';
-
-  tl.appendChild(b);
-}
+// Removed old renderBlogBubble
 
 async function selectMember(name, keepHash) {
   const version = ++memberVersion;
   curMember = name;
+  curBlogGroup = "";     // 切换到成员模式，清空博客分组
+  syncChipHighlight();  // 同步 chip 高亮
   if (!keepHash) searchQuery = "";
   syncSearchInput();
   const data = await api("/api/archive/months?member=" + encodeURIComponent(name));
@@ -446,6 +1100,18 @@ window.addEventListener("hashchange", async () => {
     searchQuery = q;
     syncSearchInput();
     await selectMember(m, true);
+  } else if (p.has("blog")) {
+    const b = p.get("blog") || "";
+    const a = p.get("author") || "";
+    switchMainTab("blog", true);
+    if (b && (b !== curBlogGroup || a !== curBlogAuthor)) {
+      curBlogGroup = b;
+      curBlogAuthor = a;
+      await selectBlogGroup(b);
+      if (a) selectBlogAuthor(a);
+    } else if (!b) {
+      showBlogHome();
+    }
   } else if (q !== searchQuery) {
     searchQuery = q;
     syncSearchInput();
@@ -472,8 +1138,7 @@ async function selectMonth(year, month) {
 }
 
 async function loadPage() {
-  if (pageLoading || (!curMember && !curBlogGroup) || !curYM) return;
-  if (curBlogGroup) { await loadBlogPage(); return; }
+  if (curMode === "blog") return;
   const version = contentVersion;
   contentAbort = new AbortController();
   setPageLoading(true);
@@ -550,7 +1215,15 @@ function startSearch(q, updateHash = true) {
   syncSearchInput();
   resetContent();
   if (updateHash) syncHash();
-  if (!searchQuery) { if (curYM) selectMonth(curYM.year, curYM.month); return; }
+  if (!searchQuery) {
+    if (curMode === "blog") { loadBlogPage(1, true); return; }
+    if (curYM) { selectMonth(curYM.year, curYM.month); return; }
+    return;
+  }
+  if (curMode === "blog") {
+    loadBlogPage(1, true);
+    return;
+  }
   loadPage();
 }
 $("searchBox").addEventListener("keydown", (e) => {
@@ -565,6 +1238,7 @@ $("searchSubmit").addEventListener("click", () => {
 function clearSearch() {
   searchQuery = "";
   syncSearchInput();
+  if (curMode === "blog") { loadBlogPage(1, true); return; }
   if (curYM) selectMonth(curYM.year, curYM.month);
 }
 $("searchClear").addEventListener("click", clearSearch);
@@ -888,6 +1562,7 @@ $("nextMonth").addEventListener("click", () => {
 });
 $("loadMore").addEventListener("click", () => {
   if (pageLoading || page >= totalPages) return;
+  if ($("blogGrid").style.display !== "none") return;
   page++;
   loadPage();
 });
@@ -900,33 +1575,75 @@ $("calendarToggle").addEventListener("click", () => {
 
 // ── 回到顶部 ─────────────────────────────────────
 const backTop = $("backTop");
-window.addEventListener("scroll", () => {
-  backTop.classList.toggle("show", window.scrollY > 400);
-}, { passive: true });
-backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
+function handleBackTopScroll() {
+  if (backTop.classList.contains('force-hide')) return;
+  if ($("blogReader").style.display === "") {
+    backTop.classList.toggle("show", $("blogReader").scrollTop > 400);
+  } else {
+    backTop.classList.toggle("show", window.scrollY > 400);
+  }
+}
+
+window.addEventListener("scroll", handleBackTopScroll, { passive: true });
+$("blogReader").addEventListener("scroll", handleBackTopScroll, { passive: true });
+
+backTop.addEventListener("click", () => {
+  if ($("blogReader").style.display === "") {
+    $("blogReader").scrollTo({ top: 0, behavior: "smooth" });
+  } else {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+});
 initInfiniteScroll();
 
 
 // ── 登录状态 ─────────────────────────────────────
+window._isLoggedIn = false;
 (async function initAuth() {
   try {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
-    if (!me.auth_enabled) { window._isArchiveAdmin = true; $("adminLink").hidden = false; return; }  // 未启用账号系统：照旧
+    if (!me.auth_enabled) { 
+      window._isArchiveAdmin = true; 
+      window._isLoggedIn = true; 
+      $("adminLink").hidden = false;
+      $("adminLink").style.display = "inline-flex";
+      $("logoutBtn").hidden = true;
+      $("logoutBtn").style.display = "none";
+      return; 
+    }
     if (me.user) {
+      window._isLoggedIn = true;
       $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
-      $("logoutLink").hidden = false;
-      if (me.user.role === "admin") { window._isArchiveAdmin = true; $("adminLink").hidden = false; }
-    } else if (me.archive_public) {
-      $("whoami").innerHTML = '<a href="/login">登录</a>';
+      $("logoutBtn").hidden = false;
+      $("logoutBtn").style.display = "inline-flex";
+      if (me.user.role === "admin") { 
+        window._isArchiveAdmin = true; 
+        $("adminLink").hidden = false;
+        $("adminLink").style.display = "inline-flex";
+      } else {
+        $("adminLink").hidden = true;
+        $("adminLink").style.display = "none";
+      }
+    } else {
+      window._isLoggedIn = false;
+      $("whoami").textContent = "";
+      $("logoutBtn").hidden = true;
+      $("logoutBtn").style.display = "none";
+      $("adminLink").hidden = false;
+      $("adminLink").style.display = "inline-flex";
     }
   } catch (e) { /* 忽略 */ }
 })();
-$("logoutLink").addEventListener("click", async (e) => {
-  e.preventDefault();
-  try { await fetch("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
-  try { localStorage.removeItem("webAdminToken"); } catch (err) { /* 主题偏好保留 */ }
-  location.href = "/login";
-});
+const logoutBtn = $("logoutBtn");
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    try { await fetch("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
+    try { localStorage.removeItem("webAdminToken"); } catch (err) { /* 保留偏好 */ }
+    location.href = "/login";
+  });
+}
 
 // ── 首页 ─────────────────────────────────────────
 function fmtDate(utc) {
@@ -946,7 +1663,7 @@ function fmtDateShort(utc) {
 
 async function showHome() {
   document.querySelector('.layout').style.display = 'none';
-  $('backTop').style.display = 'none';
+  $('backTop').classList.remove('show'); $('backTop').classList.add('force-hide');
   $('archiveHome').classList.add('active');
   // 骨架屏
   $('homeSkeleton').classList.add('active');
@@ -1018,6 +1735,8 @@ function renderHome(agg, members) {
     const tm = latestMonth ? latestMonth.month : (today.getMonth() + 1);
     const goToday = (e) => {
       e.preventDefault();
+      curMode = "msg";
+      switchMainTab("msg", true);
       hideHome();
       curMember = defaultMember;
       curType = "";
@@ -1045,6 +1764,8 @@ function renderHome(agg, members) {
     ).join('');
     strip.querySelectorAll('.photo-card').forEach(el => {
       el.addEventListener('click', () => {
+        curMode = "msg";
+        switchMainTab("msg", true);
         hideHome();
         curMember = el.dataset.member;
         curType = "";
@@ -1206,6 +1927,8 @@ function renderHome(agg, members) {
     tunnelDiv.innerHTML = html;
     tunnelDiv.querySelectorAll('.msg-preview').forEach(el => {
       el.addEventListener('click', () => {
+        curMode = "msg";
+        switchMainTab("msg", true);
         hideHome();
         curMember = el.dataset.member;
         curType = "";
@@ -1228,44 +1951,65 @@ function goHome() {
   curMember = ""; curBlogGroup = "";
   curType = ""; searchQuery = "";
   syncSearchInput();
-  _enterMemberMode();
+  switchMainTab("msg", true);
   location.hash = "";
   showHome();
 }
 
 function hideHome() {
   $('archiveHome').classList.remove('active');
-  $('backTop').style.display = '';
+  $('backTop').classList.remove('force-hide');
   document.querySelector('.layout').style.display = '';
   _enterMemberMode();
 }
 
-// ── 入口（支持 #member=&y=&m=&t= 深链）────────────
+// ── 入口（支持 #member=&y=&m=&t= / #blog=深链）────────────
 function boot() {
   const p = new URLSearchParams(location.hash.slice(1));
-  curMember = p.get("member") || "";
   curType = p.get("t") || "";
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();
   initTypeChips();
-  if (!curMember) {
-    showHome();
+  
+  if (p.has("blog")) {
+    curMode = "blog";
+    curBlogGroup = p.get("blog") || "";
+    curBlogAuthor = p.get("author") || "";
+    switchMainTab("blog", true);
+    loadMembers(true); // 后台加载 chips
+    if (curBlogGroup) {
+      selectBlogGroup(curBlogGroup).then(() => {
+        if (curBlogAuthor) selectBlogAuthor(curBlogAuthor);
+      });
+    } else {
+      showBlogHome();
+    }
   } else {
-    hideHome();
-    loadMembers();
+    curMode = "msg";
+    curMember = p.get("member") || "";
+    switchMainTab("msg", true);
+    if (!curMember) {
+      showHome();
+      loadMembers(true); 
+    } else {
+      hideHome();
+      loadMembers();
+    }
   }
 }
 boot();
 // 从浏览器 bfcache 恢复时重新加载内容
 window.addEventListener("pageshow", (e) => { if (e.persisted) boot(); });
 
-// hash 变化：无 member 回到首页
+// hash 变化：无 member 和 blog 回到首页
 window.addEventListener("hashchange", () => {
+  if (selfHashUpdate) return;
   const p = new URLSearchParams(location.hash.slice(1));
-  const newMember = p.get("member") || "";
-  if (!newMember && curMember) {
-    curMember = "";
-    showHome();
+  if (!p.has("blog") && !(p.get("member") || "")) {
+    if (curMember || curBlogGroup) {
+      goHome();
+      loadMembers(true);
+    }
   }
 });
 

@@ -34,6 +34,34 @@ _PROMPT_TEMPLATE = (
     "原文：\n{text}"
 )
 
+_BLOG_HTML_PROMPT_TEMPLATE = (
+    "你是坂道系列偶像团体的资深粉丝翻译。"
+    "以下是一篇{group_name}成员{member_name}的日文博客HTML源码。\n"
+    "请按要求将内容翻译成简体中文，并返回处理后的完整HTML源码：\n"
+    "1. 严格保留所有的HTML标签（如<img>, <div>, <p>, <span>等）和原有属性，绝对不能破坏图片排版和原有空行数量。\n"
+    "2. 将博客正文替换为“双语对照”格式。必须遵守以下【严格排版规则】：\n"
+    "   - 【段落划分规则】：\n"
+    "     * 由单行或单个 <br> 连接的连续文本属于【同一个段落】。同段落内的日文合成一个 <strong> 块，对应的中文合成一个 <em> 块。\n"
+    "     * 被多个空行/换行（如 <br><br> 或 <br><br><br>）隔开的文本属于【不同的段落】！不同段落必须各自独立成块，绝对不能把被空行隔开的两个段落强行合成一个 <strong> 块。\n"
+    "     * 段落之间的多个空行 <br>，必须放在前一个段落的 <em> 译文之后、下一个段落的 <strong> 原文之前！\n"
+    "   - 【对照格式】：\n"
+    "     * 先输出当前段落的日文原文（用 <strong> 加粗包围），紧接着换行 <br>，然后输出对应的中文译文（用 <em> 斜体包围）。\n"
+    "     * 译文内部的换行要和原文内部的换行一一对应（原文同段内有几行，译文同段内就有几行）。\n"
+    "   [正确示范]：\n"
+    "   <p>\n"
+    "   <strong>少し遅くなってしまいましたが、😢<br>音楽の日 DREAMダンス企画ありがとうございました！！！</strong><br>\n"
+    "   <em>虽然稍微有点迟了，😢<br>音乐之日 DREAM舞蹈企划非常感谢！！！</em>\n"
+    "   <br><br><br>\n"
+    "   <strong>坂道グループ選抜として、皆さんと一緒に...</strong><br>\n"
+    "   <em>作为坂道集团选拔成员，和大家一起...</em>\n"
+    "   </p>\n"
+    "   [错误示范]（把被空行隔开的两个段落强行合成了一段）：\n"
+    "   <p><strong>少し遅くなって...<br>音楽の日...<br><br><br>坂道グループ選抜として...</strong>...</p>\n"
+    "3. 不认识的人名保持日文原文，专有名词参考中文粉丝圈通用译法。\n"
+    "4. 直接输出纯HTML代码，不要添加任何markdown代码块语法（如```html），绝对不能有前言或结语。\n\n"
+    "以下是原HTML源码：\n{html}"
+)
+
 def _get_text_hash(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
@@ -45,10 +73,14 @@ def initialize(client: httpx.AsyncClient | None = None) -> None:
     _http_client = client
 
 
-async def _post_json(url: str, payload: dict) -> httpx.Response:
+async def _post_json(url: str, payload: dict, custom_client: httpx.AsyncClient = None) -> httpx.Response:
     """发送翻译请求。优先复用共享连接池（超时按请求覆盖），
     未注入时（如工具脚本单独调用）退回临时客户端。"""
     headers = {"Content-Type": "application/json"}
+    if custom_client is not None:
+        return await custom_client.post(
+            url, json=payload, headers=headers, timeout=cfg.TRANSLATE_TIMEOUT,
+        )
     if _http_client is not None:
         return await _http_client.post(
             url, json=payload, headers=headers, timeout=cfg.TRANSLATE_TIMEOUT,
@@ -100,54 +132,71 @@ def _extract_text(data: dict, model_name: str) -> str:
     return ""
 
 
-async def translate_text(text: str, member_name: str = "", group_type: str = "") -> str:
-    """
-    将日文翻译为中文。
-    member_name / group_type 用于给翻译 AI 提供成员和团体的上下文，
-    帮助更准确地翻译成员特有的语气和用词。
-    RateLimiter 覆盖「等待间隔 + HTTP 请求」全程，彻底串行化，
-    杜绝并发请求触发 Gemini RPM 限制。
-    """
+async def _do_translate_gemini(text: str, is_html: bool, member_name: str, group_type: str, custom_client: httpx.AsyncClient = None) -> str:
+    if not is_html:
+        if not text or not text.strip():
+            return text
+        if _is_already_chinese(text):
+            return text
+        if len(text) > cfg.TRANSLATE_MAX_LENGTH:
+            log_all(f"⚠️ 文本过长 ({len(text)} 字符)，跳过翻译", is_debug=True)
+            return "[消息过长，暂不翻译]"
 
-    if not text or not text.strip():
-        return text
-    if _is_already_chinese(text):
-        return text
-    if len(text) > cfg.TRANSLATE_MAX_LENGTH:
-        log_all(f"⚠️ 文本过长 ({len(text)} 字符)，跳过翻译", is_debug=True)
-        return "[消息过长，暂不翻译]"
+        cache_key = (member_name, _get_text_hash(text))
+        if cache_key in _trans_cache:
+            log_all(f"⚡ 命中翻译内存缓存 ({member_name})", is_debug=True)
+            return _trans_cache[cache_key]
+        
+        group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
+        prompt = _PROMPT_TEMPLATE.format(
+            group_name=group_name,
+            member_name=member_name or "未知成员",
+            text=text,
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
+        }
+    else:
+        group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
+        prompt = _BLOG_HTML_PROMPT_TEMPLATE.format(
+            group_name=group_name,
+            member_name=member_name or "未知成员",
+            html=text,
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
+        }
 
-    cache_key = (member_name, _get_text_hash(text))
-    if cache_key in _trans_cache:
-        log_all(f"⚡ 命中翻译内存缓存 ({member_name})", is_debug=True)
-        return _trans_cache[cache_key]
-
-    group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
-    prompt = _PROMPT_TEMPLATE.format(
-        group_name=group_name,
-        member_name=member_name or "未知成员",
-        text=text,
-    )
-
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
-    }
+    global _limiter
+    if _limiter is None:
+        _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
 
     async with _limiter:
         for model in cfg.GEMINI_MODELS:
             url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
             for attempt in range(2):
                 try:
-                    resp = await _post_json(url, payload)
+                    resp = await _post_json(url, payload, custom_client=custom_client)
 
                     if resp.status_code == 200:
                         result = _extract_text(resp.json(), model["name"])
                         if result:
-                            if len(_trans_cache) >= _MAX_CACHE_SIZE:
-                                _trans_cache.pop(next(iter(_trans_cache)))
-                            _trans_cache[cache_key] = result
-                            return result
+                            if is_html:
+                                if result.startswith("```html"):
+                                    result = result[7:]
+                                if result.startswith("```"):
+                                    result = result[3:]
+                                if result.endswith("```"):
+                                    result = result[:-3]
+                                result = result.strip()
+                                return result
+                            else:
+                                if len(_trans_cache) >= _MAX_CACHE_SIZE:
+                                    _trans_cache.pop(next(iter(_trans_cache)))
+                                _trans_cache[cache_key] = result
+                                return result
                         break   # 响应结构异常，换下一个模型
                     elif resp.status_code == 429:
                         await asyncio.sleep((attempt + 1) * 3)
@@ -166,4 +215,17 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "")
                     break
 
     return "[翻译失败]"
+
+async def translate_text(text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
+    """普通文本翻译接口"""
+    if not text or not getattr(cfg, "GEMINI_API_KEY", ""):
+        return text
+    return await _do_translate_gemini(text, False, member_name, group_type, custom_client=custom_client)
+
+async def translate_blog_html(html: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
+    """HTML结构化翻译接口"""
+    if not html or not getattr(cfg, "GEMINI_API_KEY", ""):
+        return html
+    return await _do_translate_gemini(html, True, member_name, group_type, custom_client=custom_client)
+
 

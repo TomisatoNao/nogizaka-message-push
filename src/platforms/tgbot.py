@@ -1,5 +1,5 @@
 # ============================================================
-# tgbot.py — Telegram Bot 推送（HTML 格式化，支持媒体直传 URL）
+# tgbot.py — Telegram Bot 推送（HTML 格式化，支持多 Bot 实例）
 # ============================================================
 import asyncio
 import re
@@ -8,51 +8,254 @@ import config.config as cfg
 from src.constants import ROLE_KEY, ROLE_TRANSLATION
 from src.logger import log_all
 
-# ---- 模块级状态（由 initialize() 在事件循环内创建） ----
-_bot = None       # telegram.Bot
-_request = None   # telegram.request.HTTPXRequest
+# ---- 模块级状态 ----
+_bots: list["TGBot"] = []
 
 # Telegram 文本上限 4096、caption 上限 1024（均按转义后的 HTML 计），各留一点余量
 _TELEGRAM_MAX_LENGTH = 4000
 _TELEGRAM_CAPTION_MAX = 1000
 
+# ──────────────────────────────────────────────
+# TGBot 实例类
+# ──────────────────────────────────────────────
+class TGBot:
+    """单个 Telegram Bot 实例，独立管理 token 和发送目标。"""
+    
+    def __init__(self, name: str, token: str, target_chat: str, 
+                 member_filter: list[str] | None = None,
+                 push_blog: bool = False, push_alert: bool = False):
+        self.name = name
+        self.token = token
+        self.target_chat = target_chat
+        self.member_filter = member_filter or []
+        self.push_blog = push_blog
+        self.push_alert = push_alert
+        
+        self._bot = None
+        self._request = None
+        
+    def initialize(self) -> None:
+        if not self.token:
+            return
+            
+        try:
+            from telegram import Bot
+            from telegram.request import HTTPXRequest
+            
+            self._request = HTTPXRequest(read_timeout=30, connect_timeout=10, write_timeout=15)
+            self._bot = Bot(token=self.token, request=self._request)
+        except ImportError:
+            log_all("⚠️ python-telegram-bot 未安装，Telegram 推送不可用", is_error=True)
+            self._bot = None
+            
+    async def get_me(self):
+        if not self._bot:
+            raise Exception("Bot not initialized")
+        return await self._bot.get_me()
+
+    async def _send_with_retry(self, label: str, action) -> bool:
+        """执行一次 Telegram API 调用，带超时容忍与 flood control 重试。"""
+        from telegram.error import RetryAfter, TimedOut
+
+        for attempt in range(1, 4):
+            try:
+                await action()
+                return True
+            except TimedOut:
+                log_all(f"⚠️ TG Bot [{self.name}] {label}超时（服务端可能已收到），视为成功", is_error=True)
+                return True
+            except RetryAfter as e:
+                wait = _retry_wait(e)
+                if attempt < 3:
+                    log_all(f"⚠️ TG Bot [{self.name}] {label}触发 flood control，{wait:.1f}s 后重试 ({attempt}/3)", is_error=True)
+                    await asyncio.sleep(wait)
+                else:
+                    log_all(f"❌ TG Bot [{self.name}] {label} flood control 重试耗尽 ({attempt}/3)", is_error=True)
+                    return False
+            except Exception as e:
+                if attempt < 3:
+                    wait = _retry_wait(e) or (2 ** attempt)
+                    log_all(f"⚠️ TG Bot [{self.name}] {label}失败 ({attempt}/3): {e}，{wait:.1f}s 后重试", is_error=True)
+                    await asyncio.sleep(wait)
+                else:
+                    log_all(f"❌ TG Bot [{self.name}] {label}彻底失败 (已重试 3 次): {e}", is_error=True)
+                    return False
+
+        return False
+
+    async def _send_html(self, chat_id: str, html: str) -> bool:
+        if not html or not html.strip() or not self._bot:
+            return True
+
+        from telegram.constants import ParseMode
+        return await self._send_with_retry("发送", lambda: self._bot.send_message(
+            chat_id=chat_id,
+            text=html,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        ))
+
+    async def _post_message(self, chat_id: str, text: str) -> bool:
+        return await self._send_html(chat_id, _to_html(text, _TELEGRAM_MAX_LENGTH))
+
+    async def _post_media(self, chat_id: str, media_type: str, file_url: str, caption: str = "") -> bool:
+        from telegram.constants import ParseMode
+        
+        if not self._bot:
+            return False
+
+        safe_caption = _to_html(caption, _TELEGRAM_CAPTION_MAX) if caption else ""
+        kwargs = {
+            "chat_id": chat_id,
+            "caption": safe_caption or None,
+            "parse_mode": ParseMode.HTML if safe_caption else None,
+        }
+
+        if media_type == "image":
+            action = lambda: self._bot.send_photo(photo=file_url, **kwargs)          # noqa: E731
+        elif media_type == "video":
+            action = lambda: self._bot.send_video(video=file_url, **kwargs)          # noqa: E731
+        elif media_type == "record":
+            action = lambda: self._bot.send_audio(audio=file_url, **kwargs)          # noqa: E731
+        else:
+            link = f'\n\n📎 <a href="{_escape_html(file_url)}">媒体文件</a>'
+            return await self._send_html(chat_id, safe_caption + link)
+
+        return await self._send_with_retry("媒体发送", action)
+
+    async def send_media_group_photos(self, photos: list[str], caption: str = "") -> bool:
+        """发送 Telegram 图片专辑组（支持全量图片分批，第一张附带 Caption）。"""
+        if not self._bot or not self.target_chat or not photos:
+            return False
+            
+        from telegram import InputMediaPhoto
+        from telegram.constants import ParseMode
+        
+        batches = [photos[i:i+10] for i in range(0, len(photos), 10)]
+        all_ok = True
+        
+        for bi, batch in enumerate(batches):
+            media = []
+            for i, url in enumerate(batch):
+                cap = caption if (bi == 0 and i == 0) else None
+                pm = ParseMode.HTML if cap else None
+                media.append(InputMediaPhoto(media=url, caption=cap, parse_mode=pm))
+                
+            action = lambda b=media: self._bot.send_media_group(chat_id=self.target_chat, media=b)
+            ok = await self._send_with_retry("Telegram 媒体组", action)
+            if not ok:
+                all_ok = False
+                for i, url in enumerate(batch):
+                    cap = caption if (bi == 0 and i == 0) else ""
+                    await self._post_media(self.target_chat, "image", url, cap)
+            await asyncio.sleep(1.0)
+        return all_ok
+
+    async def send_translation_tg(self, pairs: list[tuple[str, str] | str]) -> bool:
+        """发送 Telegram 中日对照正文（日文斜体<i>，中文粗体<b>，照片占位符[写真X]，自动切分<=4000字符）。"""
+        if not self._bot or not self.target_chat or not pairs:
+            return True
+            
+        import html as _html
+        blocks = []
+        for item in pairs:
+            if isinstance(item, tuple):
+                ja, zh = item
+                ja_esc = _html.escape(ja)
+                zh_esc = _html.escape(zh)
+                block = f"<i>{ja_esc}</i>"
+                if zh_esc:
+                    block += f"\n<b>{zh_esc}</b>"
+                blocks.append(block)
+            elif isinstance(item, str):
+                blocks.append(item)
+            
+        TELEGRAM_MAX = 3900
+        parts = []
+        buf = ""
+        for block in blocks:
+            if len(buf) + len(block) + 2 <= TELEGRAM_MAX:
+                buf = (buf + "\n\n" + block) if buf else block
+            else:
+                if buf:
+                    parts.append(buf)
+                buf = block
+        if buf:
+            parts.append(buf)
+            
+        all_ok = True
+        for part in parts:
+            sent = await self._send_html(self.target_chat, part)
+            if not sent:
+                all_ok = False
+            await asyncio.sleep(0.5)
+        return all_ok
+
+    async def send_member_message(self, message_chain: list[dict]) -> bool:
+        if not self._bot or not self.target_chat:
+            return True
+
+        caption, media_list, translation = _chain_extract(message_chain)
+        full_text = caption + translation
+        ok = True
+
+        if not media_list:
+            return await self._post_message(self.target_chat, full_text) if full_text else True
+
+        caption_fits = len(_escape_html(full_text)) <= _TELEGRAM_CAPTION_MAX
+        if not caption_fits and full_text:
+            if not await self._post_message(self.target_chat, full_text):
+                ok = False
+            await asyncio.sleep(0.5)
+
+        for i, (media_type, file_url) in enumerate(media_list):
+            cap = full_text if (caption_fits and i == 0) else ""
+            if not await self._post_media(self.target_chat, media_type, file_url, cap):
+                ok = False
+            if i < len(media_list) - 1:
+                await asyncio.sleep(0.5)
+
+        return ok
+
+    async def send_text(self, text: str, title: str = "") -> bool:
+        if not self._bot or not self.target_chat:
+            return False
+        body = _to_html(text, _TELEGRAM_MAX_LENGTH - 64)
+        prefix = f"<b>{_escape_html(title)}</b>\n" if title else ""
+        return await self._send_html(self.target_chat, prefix + body)
+
+
+# ──────────────────────────────────────────────
+# 全局 API
+# ──────────────────────────────────────────────
 
 def initialize() -> None:
-    """在事件循环内调用，创建 telegram.Bot 实例。"""
-    global _bot, _request
+    """在事件循环内调用，初始化所有配置的 TG Bot 实例。"""
+    global _bots
+    _bots = []
+    
+    if getattr(cfg, "ENABLE_TG_BOT", False) and getattr(cfg, "TG_BOTS", []):
+        for bot_cfg in cfg.TG_BOTS:
+            if not bot_cfg.get("token"):
+                continue
+            
+            bot = TGBot(
+                name=bot_cfg.get("name", "tg_unnamed"),
+                token=bot_cfg.get("token", ""),
+                target_chat=bot_cfg.get("target_chat", ""),
+                member_filter=bot_cfg.get("member_filter") or [],
+                push_blog=bool(bot_cfg.get("push_blog", False)),
+                push_alert=bool(bot_cfg.get("push_alert", False))
+            )
+            bot.initialize()
+            if bot._bot:
+                _bots.append(bot)
+                log_all(f"📝 注册 TG Bot: {bot.name}")
 
-    if not cfg.ENABLE_TG_BOT:
-        return
-
-    token = cfg.TG_BOT_TOKEN
-    if not token:
-        log_all("⚠️ TG Bot Token 未配置，Telegram 推送不可用", is_error=True)
-        return
-
-    try:
-        from telegram import Bot
-        from telegram.request import HTTPXRequest
-    except ImportError:
-        log_all("⚠️ python-telegram-bot 未安装，Telegram 推送不可用", is_error=True)
-        return
-
-    _request = HTTPXRequest(read_timeout=30, connect_timeout=10, write_timeout=15)
-    _bot = Bot(token=token, request=_request)
-    log_all("📝 TG Bot 已初始化", is_debug=True)
-
-
-# ──────────────────────────────────────────────
-# message_chain → Telegram 转换
-# ──────────────────────────────────────────────
+def get_configured_bots() -> list[TGBot]:
+    return _bots
 
 def _chain_extract(message_chain: list[dict]) -> tuple[str, list[tuple[str, str]], str]:
-    """
-    从 message_chain 中提取三部分：
-      - caption: 正文文本段（成员名 + 时间 + 原文）
-      - media:   媒体段列表 [(type, file_url), ...]
-      - translation: 翻译段（由 build_message_chain 打上 ROLE_TRANSLATION 标记）
-    返回 (caption, media_list, translation_text)
-    """
     text_parts: list[str] = []
     media: list[tuple[str, str]] = []
     translation = ""
@@ -74,26 +277,13 @@ def _chain_extract(message_chain: list[dict]) -> tuple[str, list[tuple[str, str]
 
     return "\n".join(text_parts), media, translation
 
-
 def _escape_html(text: str) -> str:
-    """转义 Telegram HTML 的三个特殊字符。
-
-    这里**不做**任何标签还原 —— 成员消息和翻译结果都是不可信文本，
-    需要真标签的调用方应先转义正文，再拼接自己的标签（见 send_alert）。
-    """
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-
 def _to_html(text: str, limit: int) -> str:
-    """转义为 HTML，并保证结果长度不超过 limit。
-
-    裁剪发生在**明文**层面（对转义后的长度做二分），避免把 &amp; 之类的
-    实体切成两半导致 Telegram 报 400。
-    """
     safe = _escape_html(text)
     if len(safe) <= limit:
         return safe
-
     lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
@@ -103,10 +293,7 @@ def _to_html(text: str, limit: int) -> str:
             hi = mid - 1
     return _escape_html(text[:lo]) + "..."
 
-
 def _retry_wait(exc: Exception) -> float:
-    """从异常中提取 Telegram flood control 等待秒数，无法提取时返回 0。
-    来源：RetryAfter.retry_after 属性，或错误消息中的 'Retry in N' 文本。"""
     retry_attr = getattr(exc, "retry_after", None)
     if retry_attr is not None:
         return float(retry_attr) + 0.5
@@ -115,170 +302,19 @@ def _retry_wait(exc: Exception) -> float:
         return float(m.group(1)) + 0.5
     return 0.0
 
-
-# ──────────────────────────────────────────────
-# 发送
-# ──────────────────────────────────────────────
-
-async def _send_with_retry(label: str, action) -> bool:
-    """执行一次 Telegram API 调用，带超时容忍与 flood control 重试。
-
-    action 为无参调用，每次重试都重新构造协程。
-    超时视为成功（服务端很可能已收到，重发会导致频道里出现重复消息）。
-    """
-    from telegram.error import RetryAfter, TimedOut
-
-    for attempt in range(1, 4):
-        try:
-            await action()
-            return True
-        except TimedOut:
-            log_all(f"⚠️ TG Bot {label}超时（服务端可能已收到），视为成功", is_error=True)
-            return True
-        except RetryAfter as e:
-            wait = _retry_wait(e)
-            if attempt < 3:
-                log_all(f"⚠️ TG Bot {label}触发 flood control，{wait:.1f}s 后重试 ({attempt}/3)", is_error=True)
-                await asyncio.sleep(wait)
-            else:
-                log_all(f"❌ TG Bot {label}flood control 重试耗尽 ({attempt}/3)", is_error=True)
-                return False
-        except Exception as e:
-            if attempt < 3:
-                wait = _retry_wait(e) or (2 ** attempt)
-                log_all(f"⚠️ TG Bot {label}失败 ({attempt}/3): {e}，{wait:.1f}s 后重试", is_error=True)
-                await asyncio.sleep(wait)
-            else:
-                log_all(f"❌ TG Bot {label}彻底失败 (已重试 3 次): {e}", is_error=True)
-                return False
-
-    return False
-
-
-async def _send_html(chat_id: str, html: str) -> bool:
-    """发送一条**已转义并拼装完毕**的 HTML 消息（长度须由调用方保证）。"""
-    if not html or not html.strip():
-        return True
-
-    from telegram.constants import ParseMode
-
-    return await _send_with_retry("发送", lambda: _bot.send_message(
-        chat_id=chat_id,
-        text=html,
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    ))
-
-
-async def _post_message(chat_id: str, text: str) -> bool:
-    """发送纯文本消息（内部负责转义与长度裁剪）。"""
-    return await _send_html(chat_id, _to_html(text, _TELEGRAM_MAX_LENGTH))
-
-
-async def _post_media(chat_id: str, media_type: str, file_url: str, caption: str = "") -> bool:
-    """通过 URL 直接发送单个媒体文件，可附带 caption。"""
-    from telegram.constants import ParseMode
-
-    safe_caption = _to_html(caption, _TELEGRAM_CAPTION_MAX) if caption else ""
-    kwargs = {
-        "chat_id": chat_id,
-        "caption": safe_caption or None,
-        "parse_mode": ParseMode.HTML if safe_caption else None,
-    }
-
-    if media_type == "image":
-        action = lambda: _bot.send_photo(photo=file_url, **kwargs)          # noqa: E731
-    elif media_type == "video":
-        action = lambda: _bot.send_video(video=file_url, **kwargs)          # noqa: E731
-    elif media_type == "record":
-        action = lambda: _bot.send_audio(audio=file_url, **kwargs)          # noqa: E731
-    else:
-        # 未知媒体类型，退化为带链接的文本消息
-        link = f'\n\n📎 <a href="{_escape_html(file_url)}">媒体文件</a>'
-        return await _send_html(chat_id, safe_caption + link)
-
-    return await _send_with_retry("媒体发送", action)
-
-
-# ──────────────────────────────────────────────
-# 公开 API
-# ──────────────────────────────────────────────
-
-def _resolve_chat_id(member: dict) -> str:
-    """获取成员的 tg_chat_id。未配置时返回空字符串。"""
-    return (member.get("tg_chat_id") or "").strip()
-
-
-async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
-    """
-    向该成员配置的 Telegram 频道发送消息。
-    - 纯文本：一条 HTML 消息
-    - 含媒体且正文不超 caption 上限：首个媒体带 caption（原文 + 翻译）
-    - 含媒体且正文超上限：先发完整文本，再发不带 caption 的媒体（避免翻译被截断丢失）
-    - 成员未配置 tg_chat_id 时静默跳过
-    """
-    if _bot is None:
-        return False
-
-    chat_id = _resolve_chat_id(member)
-    if not chat_id:
-        return True  # 未配置 TG 推送，不算失败
-
-    caption, media_list, translation = _chain_extract(message_chain)
-
-    # 原文与翻译合并为一条消息，中间是 TRANSLATION_SEPARATOR
-    full_text = caption + translation
-
-    ok = True
-
-    if not media_list:
-        return await _post_message(chat_id, full_text) if full_text else True
-
-    # 正文（含翻译）塞不进 caption 时，单独发一条文本，媒体不带 caption
-    caption_fits = len(_escape_html(full_text)) <= _TELEGRAM_CAPTION_MAX
-    if not caption_fits and full_text:
-        if not await _post_message(chat_id, full_text):
-            ok = False
-        await asyncio.sleep(0.5)
-
-    for i, (media_type, file_url) in enumerate(media_list):
-        cap = full_text if (caption_fits and i == 0) else ""
-        if not await _post_media(chat_id, media_type, file_url, cap):
-            ok = False
-        if i < len(media_list) - 1:
-            await asyncio.sleep(0.5)  # 媒体间短暂间隔
-
-    return ok
-
-
-async def send_text(chat_id: str, text: str, title: str = "") -> bool:
-    """发送纯文本消息到指定 TG 频道（可选加粗标题行）。"""
-    if _bot is None or not chat_id:
-        return False
-    body = _to_html(text, _TELEGRAM_MAX_LENGTH - 64)
-    prefix = f"<b>{_escape_html(title)}</b>\n" if title else ""
-    return await _send_html(chat_id, prefix + body)
-
-
-async def send_alert(chat_id: str, text: str) -> bool:
-    """发送系统警报消息到指定 TG 频道。"""
-    return await send_text(chat_id, text, title="📢 系统警报")
-
-
 async def health_check() -> bool:
-    """通过 getMe() 验证 Bot Token 有效。"""
-    if _bot is None:
-        # 静默返回会让启动检查里 TG 那一行凭空消失，必须明确报告原因
-        log_all(
-            "🔴 TG Bot 未初始化（TG_BOT_TOKEN 缺失或 python-telegram-bot 未安装）",
-            is_error=True,
-        )
+    """验证所有 Bot Token 有效性。"""
+    if getattr(cfg, "ENABLE_TG_BOT", False) and not _bots:
+        log_all("🔴 TG Bot 未初始化（TG_BOTS 配置缺失或 python-telegram-bot 未安装）", is_error=True)
         return False
-
-    try:
-        me = await _bot.get_me()
-        log_all(f"🟢 TG Bot 连通正常 (@{me.username})")
-        return True
-    except Exception as e:
-        log_all(f"🔴 TG Bot 无法连接: {e}", is_error=True)
-        return False
+        
+    any_ok = False
+    for bot in _bots:
+        try:
+            me = await bot.get_me()
+            log_all(f"🟢 TG Bot [{bot.name}] 连通正常 (@{me.username})")
+            any_ok = True
+        except Exception as e:
+            log_all(f"🔴 TG Bot [{bot.name}] 无法连接: {e}", is_error=True)
+            
+    return any_ok

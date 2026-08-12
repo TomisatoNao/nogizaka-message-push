@@ -372,23 +372,25 @@ async def _run_cycle() -> None:
         try:
             new_posts = await blog_fetcher.run_blog_cycle(
                 _blog_client, _blog_db, cfg._config)
+            health.get_tracker().record_member_fetch("博客 (全局)", True)
             if new_posts:
                 from src.notifier import send_blog_post
                 log_all(f"📝 博客更新：{len(new_posts)} 篇")
                 for post in new_posts:
-                    await send_blog_post(post)
+                    try:
+                        ok = await send_blog_post(post)
+                        if ok:
+                            log_all(f"✅ 博客 [{post.get('title', '无题')}] 推送完成")
+                        else:
+                            log_all(f"⚠️ 博客 [{post.get('title', '无题')}] 推送失败（无可用通道）", is_error=True)
+                    except Exception as e:
+                        log_all(f"💥 博客推送异常: {e}", is_error=True)
+                        health.get_tracker().record_member_push("博客 (全局)", False)
                     await asyncio.sleep(0.5)
-            # 水印变更后写回 config.json
-            if cfg._config.get("_blog_records_dirty"):
-                try:
-                    config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
-                    cfg_data = json.loads(config_path.read_text(encoding="utf-8"))
-                    cfg_data["blog_records"] = cfg._config["blog_records"]
-                    json.dump(cfg_data, open(str(config_path), "w", encoding="utf-8"),
-                              ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
+            health.get_tracker().record_member_push("博客 (全局)", True)
+            
         except Exception as e:
+            health.get_tracker().record_member_fetch("博客 (全局)", False, health.ErrorTier.TRANSIENT, str(e))
             log_all(f"⚠️ 博客巡查异常: {e}", is_error=True)
 
 
@@ -544,6 +546,14 @@ def _on_config_reload(success: bool) -> None:
         load_all_accounts()
     except Exception:
         log_all(f"🚨 热重载后加载账号凭证失败:\n{traceback.format_exc()}", is_error=True)
+        
+    try:
+        from src.platforms import qq_official, tgbot
+        qq_official.reload()
+        tgbot.initialize()
+    except Exception as e:
+        log_all(f"⚠️ 热重载 Bot 失败: {e}", is_error=True)
+
     # 指令监听要跟着新配置走，否则在管理端新加的 Bot 得等到下次重启才会上线
     if _main_loop is not None:
         _main_loop.call_soon_threadsafe(_sync_command_listeners)
@@ -645,24 +655,43 @@ async def main() -> None:
         loop.call_soon_threadsafe(poll_event.set)
 
     def _request_test_push(channel: str, target: str, text: str) -> tuple[bool, str]:
-        """网页「测试推送」回调（HTTP 线程调用）：把发送协程调度到主事件循环执行。"""
+        """网页「测试推送」回调（HTTP 线程调用）：把发送协程调度到主事件循环执行。
+        target 参数现在是:
+        - TG: bot_name
+        - NapCat: group_id
+        - Official: "bot_name|mode" (mode = group / private)
+        """
         try:
             if channel == "tg":
                 if not cfg.ENABLE_TG_BOT:
-                    return False, "TG 通道未启用（channels.tg）"
-                coro = tgbot.send_alert(target, text)
+                    return False, "TG 通道未启用"
+                bots = tgbot.get_configured_bots()
+                bot = next((b for b in bots if b.name == target), None)
+                if not bot:
+                    return False, f"找不到指定的 TG Bot: {target}"
+                coro = bot.send_text(text)
             elif channel == "napcat":
                 if not cfg.ENABLE_NAPCAT_QQ:
-                    return False, "NapCat 通道未启用（channels.napcat）"
+                    return False, "NapCat 通道未启用"
                 chain = [{"type": "text", "data": {"text": text}}]
                 coro = napcat.send_qq_message(int(target), chain)
             elif channel == "official":
                 if not cfg.ENABLE_QQ_OFFICIAL_BOT:
-                    return False, "QQ 官方 Bot 通道未启用（channels.qq_official）"
+                    return False, "QQ 官方 Bot 通道未启用"
+                parts = target.split("|")
+                if len(parts) != 2:
+                    return False, "无效的目标格式"
+                bot_name, mode = parts[0], parts[1]
                 bots = qq_official.get_configured_bots()
-                if not bots:
-                    return False, "没有已配置的官方 Bot"
-                coro = bots[0].send_group_text(target, text)
+                bot = next((b for b in bots if b.name == bot_name), None)
+                if not bot:
+                    return False, f"找不到指定的官方 Bot: {bot_name}"
+                if mode == "group":
+                    if not bot.group_openid: return False, "未配置群 openid"
+                    coro = bot.send_group_text(bot.group_openid, text)
+                else:
+                    if not bot.target_openid: return False, "未配置单聊 openid"
+                    coro = bot.send_private_text(bot.target_openid, text)
             else:
                 return False, f"不支持的通道: {channel}"
             fut = asyncio.run_coroutine_threadsafe(coro, loop)
