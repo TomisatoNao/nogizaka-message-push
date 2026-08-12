@@ -38,27 +38,35 @@ def _normalize_date(raw: str) -> str:
 async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str],
                            group_key: str, author: str, title: str,
                            timestamp: str = "") -> list[str]:
-    """下载博客图片到本地，目录结构：{group}/{author}/{title}-{ts}/01.jpg"""
+    """并发下载博客图片到本地，目录结构：{group}/{author}/{title}-{ts}/01.jpg"""
+    import asyncio
     safe_title = _re.sub(r'[\\/:*?"<>|]', '', title)[:50].strip()
     safe_author = _re.sub(r'[\\/:*?"<>|]', '', author)[:20].strip()
     ts = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_ts = _re.sub(r'[^0-9_]', '', ts)[:15]
     dest_dir = BLOG_IMAGE_DIR / group_key / safe_author / f"{safe_title}-{safe_ts}"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for i, url in enumerate(image_urls):
-        try:
-            r = await http_client.get(url, timeout=30)
-            ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
-            if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
-                ext = "jpg"
-            fname = f"{i+1:02d}.{ext}"
-            fpath = dest_dir / fname
-            fpath.write_bytes(r.content)
-            paths.append(str(fpath.relative_to(BLOG_IMAGE_DIR)))
-        except Exception:
-            paths.append("")
-    return paths
+    
+    sem = asyncio.Semaphore(5)
+
+    async def _fetch_one(i: int, url: str) -> tuple[int, str]:
+        async with sem:
+            try:
+                r = await http_client.get(url, timeout=20)
+                ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
+                if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+                    ext = "jpg"
+                fname = f"{i+1:02d}.{ext}"
+                fpath = dest_dir / fname
+                fpath.write_bytes(r.content)
+                return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
+            except Exception:
+                return (i, "")
+
+    tasks = [_fetch_one(i, url) for i, url in enumerate(image_urls)]
+    results = await asyncio.gather(*tasks)
+    results.sort(key=lambda x: x[0])
+    return [path for _, path in results]
 
 # ── 博客任务表 ──
 # (显示名, fetch_posts, fetch_images, record_key, need_detail)
