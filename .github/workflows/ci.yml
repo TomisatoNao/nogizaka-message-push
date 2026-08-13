@@ -47,3 +47,9 @@ jobs:
 
       - name: Bot commands test
         run: python tests/test_qq_commands.py
+
+      - name: Tagger test
+        run: python tests/test_tagger.py
+
+      - name: QQ official groups test
+        run: python tests/test_qq_official_groups.py

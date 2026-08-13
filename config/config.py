@@ -37,6 +37,7 @@ _DEFAULTS: dict = {
     "gemini_api_key":           "",
     # 注：限速是全局串行的 gemini_min_interval，模型级 rpm 从未生效，已移除
     "gemini_models": [
+        {"name": "gemini-3.7-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
         {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
         {"name": "gemini-3.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
         {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
