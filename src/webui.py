@@ -716,9 +716,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_auth_me()
             return
         if path in ("/", "/index.html"):
-            user = self._current_user()
-            if not user or user.get("role") != "admin":
-                self._redirect("/archive")
+            if not self._guard(need_admin=True, is_page=True):
                 return
             self._send_html(_STATIC_PATH)
             return
@@ -953,8 +951,14 @@ class _Handler(BaseHTTPRequestHandler):
                 "独立模式下不可用（需要主程序的事件循环来跑 WebSocket 监听）"]}, 400)
             return
 
+        def _call_openid(act: str, aid: str, sec: str, md: str = "user") -> tuple[bool, str]:
+            try:
+                return _on_openid_cb(act, aid, sec, md)
+            except TypeError:
+                return _on_openid_cb(act, aid, sec)
+
         if action == "stop":
-            ok, msg = _on_openid_cb("stop", "", "", "")
+            ok, msg = _call_openid("stop", "", "", "")
             self._send_json({"ok": ok, "message": msg})
             return
 
@@ -975,7 +979,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "缺少 Client Secret（.env 里也没有该 Bot 的密钥）"]}, 400)
                 return
 
-        ok, msg = _on_openid_cb("start", app_id, secret, mode)
+        ok, msg = _call_openid("start", app_id, secret, mode)
         self._send_json({"ok": ok, "message": msg} if ok
                         else {"ok": False, "errors": [msg]}, 200 if ok else 409)
 
@@ -2008,12 +2012,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             from src.logger import log_all
             log_all("⟳ 网页端发起主程序进程重启")
-            # 先把响应发出去再触发停机，客户端才能收到确认
-            self._send_json({"ok": True, "restarting": True})
             try:
                 _on_restart_cb()
             except Exception as e:
                 log_all(f"🚨 重启回调异常: {e}", is_error=True)
+            self._send_json({"ok": True, "restarting": True})
             return
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 

@@ -231,7 +231,9 @@ def _normalize_config(raw: dict) -> dict:
                     "account_id":    m["account"],
                     "group_type":    acc.get("group", ""),
                     "m_id":          str(m["id"]),
-                    "m_name":        m["name"]
+                    "m_name":        m["name"],
+                    "target_groups": m.get("groups", []),
+                    "tg_chat_id":    str(m.get("tg", "")).strip(),
                 })
                 
                 # Extract legacy routes
