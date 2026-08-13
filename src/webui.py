@@ -1549,10 +1549,7 @@ class _Handler(BaseHTTPRequestHandler):
 
                 import asyncio
                 import httpx
-                import importlib
                 from src import translator
-                importlib.reload(translator)
-                translator.initialize()
                 from src.logger import log_all
 
                 log_all(f"🔄 网页端请求手动翻译博客: {row['author']} - {row.get('title', '')}")

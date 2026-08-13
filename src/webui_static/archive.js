@@ -1001,6 +1001,9 @@ if (brTranslateBtn) {
   brTranslateBtn.addEventListener("click", async () => {
     if (!currentBlogReaderPost || brTranslateBtn.disabled) return;
     
+    const targetPost = currentBlogReaderPost;
+    const reqBlogId = targetPost.id;
+    
     brTranslateBtn.textContent = "⏳ 翻译中 (需10~30秒)...";
     brTranslateBtn.disabled = true;
     
@@ -1008,27 +1011,34 @@ if (brTranslateBtn) {
       const res = await fetch("/api/archive/blogs/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: currentBlogReaderPost.id })
+        body: JSON.stringify({ id: reqBlogId })
       });
       const data = await res.json();
       if (data.ok && data.html) {
-        currentBlogReaderPost.translation = data.html;
-        if (data.content_json) currentBlogReaderPost.content_json = data.content_json;
-        if (data.translation_model) currentBlogReaderPost.translation_model = data.translation_model;
-        currentTransMode = "ja-zh";  // 翻译完成自动切回「日中对照」
-        if ($("blogReader").style.display !== "none") {
+        targetPost.translation = data.html;
+        if (data.content_json) targetPost.content_json = data.content_json;
+        if (data.translation_model) targetPost.translation_model = data.translation_model;
+        
+        // 若当前仍在该博客阅读器界面，立即渲染并切换为日中对照
+        if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId && $("blogReader").style.display !== "none") {
+          currentTransMode = "ja-zh";
           renderCurrentBlogContent();
           brTranslateBtn.textContent = "✓ 已翻译";
+          brTranslateBtn.disabled = true;
         }
       } else {
-        alert(data.msg || "翻译失败");
-        brTranslateBtn.textContent = "🌐 重试翻译";
-        brTranslateBtn.disabled = false;
+        alert(data.msg || "翻译失败，请检查 API Key 配置与网络连接");
+        if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
+          brTranslateBtn.textContent = "🌐 重试翻译";
+          brTranslateBtn.disabled = false;
+        }
       }
     } catch(err) {
       alert("网络异常: " + err);
-      brTranslateBtn.textContent = "🌐 重试翻译";
-      brTranslateBtn.disabled = false;
+      if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
+        brTranslateBtn.textContent = "🌐 重试翻译";
+        brTranslateBtn.disabled = false;
+      }
     }
   });
 }

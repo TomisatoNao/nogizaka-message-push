@@ -2,6 +2,7 @@
 # utils.py — 公共工具：时间转换、速率限制
 # ============================================================
 import asyncio
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -47,12 +48,12 @@ def in_hour_range(hour: int, start: int, end: int) -> bool:
 
 
 class RateLimiter:
-    """基于 asyncio.Lock + 时间间隔的异步速率限制器。
+    """基于时间戳与线程安全锁的异步速率限制器（支持多线程与不同 event loop）。
 
     interval 可以是固定 float 或 Callable[[], float]，后者每次检查时实时读取，
     自然支持配置热重载（只需确保 Callable 读取的是模块级变量而非本地副本）。
 
-    保证 lock 覆盖的区间内操作间隔 >= interval 秒，多协程调用时严格串行。
+    保证进入区间的操作间隔 >= interval 秒，多协程/多线程并发调用时严格串行。
     """
 
     def __init__(self, interval: float | Callable[[], float]):
@@ -60,17 +61,21 @@ class RateLimiter:
             self._get_interval = interval
         else:
             self._get_interval = lambda: interval
-        self._lock: asyncio.Lock = asyncio.Lock()
-        self._last_ts: float = 0.0
+        self._thread_lock = threading.Lock()
+        self._next_allowed_ts: float = 0.0
 
     async def __aenter__(self):
-        await self._lock.acquire()
-        elapsed = time.monotonic() - self._last_ts
-        need = self._get_interval() - elapsed
-        if need > 0:
-            await asyncio.sleep(need)
+        with self._thread_lock:
+            now = time.monotonic()
+            interval = float(self._get_interval())
+            # 计算当前请求获准执行的时间点
+            scheduled_ts = max(now, self._next_allowed_ts)
+            self._next_allowed_ts = scheduled_ts + interval
+            wait_time = scheduled_ts - now
+
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
         return self
 
     async def __aexit__(self, *args):
-        self._last_ts = time.monotonic()
-        self._lock.release()
+        pass
