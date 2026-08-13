@@ -1,576 +1,473 @@
-# nogizaka-message-push
+# 🌸 nogizaka-message-push
 
-自动轮询成员 Message 及官方博客（乃木坂46 / 日向坂46 / 樱坂46），利用 Gemini AI 翻译成中文，格式化推送到 QQ 群 / Telegram / QQ 官方 Bot，并把每条消息与博客连同图片视频**永久归档到本地**——退订了、App 关服了，档案还在你硬盘上。日常运维与归档浏览全部在浏览器里完成。
+> **坂道联合（乃木坂46 / 日向坂46 / 櫻坂46）Message & 官方博客全自动监控、Gemini AI 智能双语翻译、多通道格式化推送与全量本地永久归档系统。**
+
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![Platform: Cross-Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg?style=flat-square)]()
+[![AI: Google Gemini](https://img.shields.io/badge/AI-Google%20Gemini-orange.svg?style=flat-square&logo=google)]()
+
+自动轮询成员 Mobile Message 私密消息及官方博客，利用 Google Gemini AI 进行地道上下文双语翻译，格式化推送到 **QQ 群（NapCat/Lagrange） / Telegram 频道 / QQ 官方机器人**，并将每条消息与博客连同高清原图、视频、语音**永久归档到本地数据库与硬盘**。日常运维、凭证热更、用户管理与归档查阅全部在自带的现代 Web UI 中极简完成。
 
 ```
-成员发消息 / 博客更新  →  抓取  →  Gemini AI 翻译  →  格式化推送至 QQ / TG
-                          └────→  本地数据库与媒体归档  →  网页 4 列网格 / 日历跳转 / 全文检索
+┌────────────────────────────────┐
+│  成员发消息 / 官方博客更新更新  │
+└───────────────┬────────────────┘
+                ▼
+      ┌──────────────────┐
+      │   异步轮询与抓取  │
+      └─────────┬────────┘
+                ├─────────────────────────────────────────────────┐
+                ▼                                                 ▼
+     ┌─────────────────────┐                          ┌───────────────────────┐
+     │  Gemini AI 智能翻译  │                          │  本地持久化与媒体归档  │
+     │  (多模型容错/段落对照)│                          │  (SQLite/JSON/原图/音视频)│
+     └──────────┬──────────┘                          └───────────┬───────────┘
+                ▼                                                 ▼
+┌───────────────────────────────┐             ┌────────────────────────────────────────┐
+│      多通道格式化消息推送      │             │         现代浏览器 Web 管理端          │
+│ · QQ 群 (NapCat/Lagrange)     │             │ · 4 列响应式自适应博客网格矩阵         │
+│ · Telegram 频道 / 私聊        │             │ · 吸顶式热力日历与毫秒级全文检索       │
+│ · QQ 官方 Bot (个人/群聊推送) │             │ · 日中对照/日文/中文三态解耦阅读器     │
+└───────────────────────────────┘             │ · 账号池管理 / 凭证热更 / 实时脱敏日志 │
+                                              └────────────────────────────────────────┘
 ```
 
 ---
 
-## 目录
+## 📑 目录
 
-| 章节 | 内容 |
-|---|---|
-| [1. 快速开始](#1-快速开始) | 从零到跑起来 |
-| [2. 核心概念](#2-核心概念) | 账号 / 成员 / 通道的关系，必读 |
-| [3. 日常操作](#3-日常操作) | 加成员、换凭证、调频率……按任务查 |
-| [4. 网页管理端](#4-网页管理端) | 六个页签能做什么 |
-| [5. 消息归档](#5-消息归档) | 浏览、搜索、回填历史 |
-| [6. 账号与权限](#6-账号与权限) | 登录、给朋友开访客号 |
-| [7. 部署与运维](#7-部署与运维) | 长期运行、监控、备份 |
-| [8. 故障排查](#8-故障排查) | 症状 → 原因 → 解决 |
-| [9. 参考](#9-参考) | 配置项、命令、结构、成员 ID 表 |
+- [✨ 核心特性 / Features](#-核心特性--features)
+- [🚀 快速开始 / Quick Start](#-快速开始--quick-start)
+  - [1.1 环境准备与安装](#11-环境准备与安装)
+  - [1.2 准备推送通道](#12-准备推送通道)
+  - [1.3 基础配置填写](#13-基础配置填写)
+  - [1.4 账号凭证获取与配置](#14-账号凭证获取与配置)
+  - [1.5 启动系统](#15-启动系统)
+- [🧩 核心概念 / Concepts](#-核心概念--concepts)
+  - [2.1 账号、成员与通道映射](#21-账号成员与通道映射)
+  - [2.2 双模式认证与凭证优先级](#22-双模式认证与凭证优先级)
+- [🛠️ 博客归档与双语阅读器](#️-博客归档与双语阅读器)
+  - [3.1 4 列自适应网格与日期日历](#31-4-列自适应网格与日期日历)
+  - [3.2 智能分段解析与图片原位保护](#32-智能分段解析与图片原位保护)
+  - [3.3 三态多语言视图与解耦架构](#33-三态多语言视图与解耦架构)
+  - [3.4 全渠道排版规范与格式化推送](#34-全渠道排版规范与格式化推送)
+- [💬 消息归档与全文检索](#-消息归档与全文检索)
+  - [4.1 聚合动态首页与最新写真画廊](#41-聚合动态首页与最新写真画廊)
+  - [4.2 时间线浏览、FTS5 全文搜索与图片 AI 识图打标](#42-时间线浏览fts5-全文搜索与图片-ai-识图打标)
+- [🖥️ 网页管理端与日常运维](#️-网页管理端与日常运维)
+  - [5.1 六大管理页签功能](#51-六大管理页签功能)
+  - [5.2 账号权限体系与访客隔离](#52-账号权限体系与访客隔离)
+  - [5.3 QQ 官方机器人私聊交互指令](#53-qq-官方机器人私聊交互指令)
+- [⚙️ 服务化部署与运维](#️-服务化部署与运维)
+  - [6.1 Windows 计划任务后台守护](#61-windows-计划任务后台守护)
+  - [6.2 Linux Systemd 服务化托管](#62-linux-systemd-服务化托管)
+  - [6.3 每日健康摘要与数据备份](#63-每日健康摘要与数据备份)
+- [🔍 故障排查 / FAQ](#-故障排查--faq)
+- [📖 附录与配置参考](#-附录与配置参考)
+  - [8.1 全量配置项手册 (config.json)](#81-全量配置项手册-configjson)
+  - [8.2 环境变量速查 (.env)](#82-环境变量速查-env)
+  - [8.3 命令行工具矩阵 (tools/)](#83-命令行工具矩阵-tools)
+  - [8.4 现役成员 ID 速查表](#84-现役成员-id-速查表)
 
 ---
 
-## 1. 快速开始
+## ✨ 核心特性 / Features
 
-### 1.1 环境与安装
+### 1. 智能博客解析与媒体保护
+- **DOM 智能分段与大段落合并**：全面兼容乃木坂46、日向坂46、樱坂46三团官网差异化 DOM。以空 `<p>` 标签作为视效分段标识，智能合并连续 `<p>` / `<div>` 节点为完整大段落并保留段内换行（`\n`），1:1 精准还原官方博客的排版留白与阅读节奏。
+- **图片节点抽离与位置保护**：在送交 AI 模型翻译前，预先抽离、标记并保护正文中的 `<img>` 节点，补全绝对 URL 并携带 `referrerpolicy="no-referrer"`，杜绝长篇博客翻译截断与畸形标签导致的图片丢失或位移。
+- **破图优雅降级机制**：卡片列表与封面图片遇 404、防盗链拦截或资源损坏时，自动隐藏图片容器并转为优雅占位样式，彻底杜绝浏览器破图图标。
 
-需要 **Python 3.10+**（Windows / Linux 均可）。
+### 2. 多语言视图与解耦架构
+- **三档语言视图随心切换**：双语阅读器提供「日中对照」、「日文」、「中文」三种视图模式（未生成译文时自动隐藏切换器，避免误操作）。
+- **智能生命周期状态跳转**：
+  - 进入博客详情页若已包含译文，默认激活并展示「日中对照」视图；
+  - 在当前页面发起即时翻译并收到就绪信号后，自动平滑切换至「日中对照」视图。
+- **数据独立持久化存储**：日文原文（原始 HTML）与中文译文解耦独立存储在 SQLite `blogs.db` 中，切换语言直接取独立字段，杜绝单语模式切换导致的内容篡改与丢段问题。
+
+### 3. 视觉排版与全渠道对齐
+- **专属中日字体区分规范**：日中对照模式下，**日文原文统一渲染为斜体（Italic）**，**中文译文统一渲染为粗体（Bold）**，主次分明、视觉层次清晰。
+- **全渠道排版严格一致**：Web 网页端阅读器与各推送通道（Telegram、QQ 群、QQ 官方 Bot 等卡片/长图）统一执行该排版与字体规范，并自动压缩连续照片占位符为 `[写真1-3]` 形式。
+
+### 4. 翻译来源透明化
+- **AI 模型实时动态标记**：详情页右上角动态显示当前译文生成的 AI 模型名称（如 `Gemini 2.5 Flash` / `Gemini 1.5 Pro` 等），仅在存在译文且处于「日中对照」或「中文」视图时优雅展示。
+
+### 5. 极致的稳定性与性能
+- **多模型自动 Failover 降级**：内置模型熔断轮询机制，遭遇 HTTP 429 或限额时自动毫秒级切换备用模型，保障翻译不中断。
+- **SQLite WAL 模式与零依赖 WebUI**：后端采用标准库 asyncio HTTP 服务，零外部前端框架依赖；归档采用 SQLite WAL 模式 + FTS5 全文索引，百万级消息秒级响应。
+
+---
+
+## 🚀 快速开始 / Quick Start
+
+### 1.1 环境准备与安装
+
+需要 **Python 3.10+**（支持 Windows / Linux / macOS）。
 
 ```bash
+# 1. 克隆代码仓库
 git clone https://github.com/TomisatoNao/nogizaka-message-push.git
 cd nogizaka-message-push
+
+# 2. 安装核心依赖
 pip install -r requirements.txt
-cp .env.example .env        # Windows: copy .env.example .env
+
+# 3. 复制环境变量配置文件
+cp .env.example .env        # Windows CMD/PowerShell: copy .env.example .env
 ```
 
-### 1.2 准备一个推送通道
+### 1.2 准备推送通道
 
-至少要有一个地方接收消息，先准备好其中一个：
+至少准备以下任意一个推送通道：
 
-| 通道 | 准备工作 |
-|---|---|
-| **Telegram**（最省事） | 找 [@BotFather](https://t.me/BotFather) 发 `/newbot` 建一个 Bot，拿到 Token；把 Bot 拉进你的频道并设为**管理员** |
-| **QQ 群** | 本机跑起 [NapCat](https://github.com/NapNeko/NapCatQQ) 或 [Lagrange](https://github.com/LagrangeDev/Lagrange.Core)，开启 HTTP API（默认 `http://127.0.0.1:3000`） |
-| **QQ 官方 Bot** | 见 [3.6 启用 QQ 官方 Bot](#36-启用-qq-官方-bot) |
+| 通道类型 | 推荐指数 | 快速准备步骤 |
+|---|:---:|---|
+| **Telegram** | ⭐⭐⭐⭐⭐ | 找 [@BotFather](https://t.me/BotFather) 发送 `/newbot` 获取 `TG_BOT_TOKEN`；将机器人加入频道并设为**管理员**。 |
+| **QQ 群 (OneBot v11)** | ⭐⭐⭐⭐ | 启动 [NapCatQQ](https://github.com/NapNeko/NapCatQQ) 或 [Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)，开启 HTTP API（默认 `http://127.0.0.1:3000`）。 |
+| **QQ 官方机器人** | ⭐⭐⭐⭐ | 在 [QQ 开放平台](https://q.qq.com/#/apps) 创建机器人，获取 `AppID` 和 `ClientSecret`（支持个人单聊与群聊推送）。 |
 
-### 1.3 填最小配置
+### 1.3 基础配置填写
 
-编辑 `.env`，只填这两项就能起步（其余留空）：
+1. 编辑 `.env` 文件（密钥凭证）：
+   ```bash
+   TG_BOT_TOKEN=123456:ABC-DEF                 # 使用 Telegram 推送时填写
+   GEMINI_API_KEY=AIzaSy...                    # Google AI Studio 免费申请 (https://aistudio.google.com/apikey)
+   ```
 
+2. 编辑 `config/config.json`，配置通道与要监控的成员：
+   ```json5
+   {
+     "channels": {
+       "napcat": false,
+       "tg": true,
+       "qq_official": false
+     },
+     "accounts": {
+       "nogizaka_main": { "group": "nogizaka46" }    // 账号 ID 自定义（小写下划线）
+     },
+     "monitor": [
+       {
+         "id": "55",
+         "name": "冨里奈央",
+         "account": "nogizaka_main",
+         "tg": "-1004219007326"                      // 填入接收消息的 TG 频道 ID
+       }
+     ],
+     "blog_monitor": {
+       "enabled": true,
+       "nogizaka": true,
+       "hinatazaka": true,
+       "sakurazaka": true
+     }
+   }
+   ```
+
+> 💡 **成员 ID 怎么获取？** 先运行程序，在网页管理端「监控成员 → 📋 从账号拉取成员列表」中直接点选添加，或参考文末 [8.4 现役成员 ID 速查表](#84-现役成员-id-速查表)。
+
+### 1.4 账号凭证获取与配置
+
+Message 账号凭证从电脑浏览器或手机端抓包获取：
+
+| 凭证类型 | 对应登录方式 | 获取途径 |
+|---|---|---|
+| `TOKEN` (JWT) | Web 网页版 (默认) | 电脑登录 Message 官网 ➔ F12 开发者工具 ➔ Network ➔ 任意 API ➔ 请求头 `authorization: Bearer eyJ...` |
+| `COOKIE` | Web 网页版 (默认) | 同上请求的 Request Headers 中 `cookie:` 完整字符串 |
+| `REFRESH_TOKEN` | Mobile 移动端 | 手机抓包（Charles / Proxyman / HTTP Catcher）拦截 `update_token` 请求体中的 `refresh_token` |
+
+配置写入 `.env`（变量名规则：`账号ID大写_TOKEN` / `_COOKIE` / `_REFRESH_TOKEN`）：
 ```bash
-TG_BOT_TOKEN=123456:ABC-DEF          # 用 TG 推送才需要
-GEMINI_API_KEY=AIza...               # 中文翻译，去 https://aistudio.google.com/apikey 免费申请
-```
-
-编辑 `config/config.json`，把账号和要监控的成员改成你自己的：
-
-```json5
-{
-  "channels": { "napcat": false, "tg": true, "qq_official": false },
-
-  "accounts": {
-    "nogizaka_main": { "group": "nogizaka46" }     // 账号 ID 随便起，小写下划线
-  },
-
-  "monitor": [
-    { "id": "55", "name": "冨里奈央", "account": "nogizaka_main", "tg": "-1004219007326" }
-  ]
-}
-```
-
-> 成员 `id` 怎么查？先跑起来，在网页管理端「监控成员 → 📋 从账号拉取成员列表」里点选即可；也可查 [9.5 成员 ID 速查](#95-乃木坂46-现役成员-id-速查)。
-
-### 1.4 填账号凭证
-
-账号凭证（Token / Cookie）**从浏览器或手机抓包获取**：
-
-| 凭证 | 从哪里来 |
-|---|---|
-| `TOKEN`（JWT） | 电脑浏览器登录 message 网站 → F12 → Network → 任意 API 请求 → 请求头 `authorization: Bearer eyJ...` |
-| `COOKIE` | 同一请求的请求头 `cookie:` 整串复制 |
-| `REFRESH_TOKEN`（手机端账号用） | 手机抓包（Charles / Proxyman）拦截 `update_token` 请求 → 请求体里的 `refresh_token` |
-
-变量名规则 = **账号 ID 大写** + 后缀：
-
-```bash
-# 对应 accounts 里的 "nogizaka_main"
-NOGIZAKA_MAIN_TOKEN=eyJ...
+NOGIZAKA_MAIN_TOKEN=eyJhbGciOi...
 NOGIZAKA_MAIN_COOKIE=session=xxx; other=yyy
 ```
 
-> 💡 更省事的做法：先空着跑起来，然后在网页管理端「账号池 → 填凭证」里粘贴，会自动写入 `.env` 并立即生效。
+> 💡 **零手动极简配置**：可先留空直接启动，打开网页管理端「👥 账号与成员 ➔ 填凭证」直接粘贴，系统将自动安全写入 `.env` 并即时热重载生效！
 
-### 1.5 运行
+### 1.5 启动系统
 
 ```bash
 python main.py
 ```
 
-启动会先做健康检查，然后进入轮询：
-
+终端将打印初始化自检日志并启动轮询：
+```text
+22:00:00 [INFO] 🟢 TG Bot 连通正常 (@sakurapush_bot)
+22:00:01 [INFO] 🟢 账号凭证完整（1 个账号已就绪）
+22:00:02 [INFO] 🟢 博客监控引擎已启动 [乃木坂46 / 日向坂46 / 櫻坂46]
+22:00:03 [INFO] 🔍 巡查完毕 [冨里奈央] - 无新消息
 ```
-22:00:03 [INFO] 🟢 TG Bot 连通正常 (@your_bot)
-22:00:03 [INFO] 🟢 账号凭证完整（1 个账号）
-22:00:05 [INFO] 🔍 巡查完毕 [冨里奈央]
-```
 
-### 1.6 打开管理端
-
-浏览器访问 **http://127.0.0.1:8787/** ——之后的所有配置、凭证、日志、归档都在这里操作，不用再手动编辑文件。
+打开浏览器访问 **`http://127.0.0.1:8787/`**，即可进入全功能 Web 管理控制台与归档中心。
 
 ---
 
-## 2. 核心概念
+## 🧩 核心概念 / Concepts
 
-### 2.1 账号、成员、通道的关系
+### 2.1 账号、成员与通道映射
+
+```text
+┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
+│    账号池 (Accounts)    │ 1:N  │   监控成员 (Monitor)    │ 1:N  │   推送通道 (Channels)  │
+│  你持有的各团体订阅凭证  ├─────►│  用指定账号监控谁的消息 ├─────►│  消息分发到哪些群或频道 │
+│  · "nogizaka_main"     │      │  · 冨里奈央 (id=55)    │      │  · TG 频道 -100xxx     │
+│  · "hinata_sub"        │      │  · 金村美玖 (id=12)    │      │  · QQ 群 533072575     │
+└────────────────────────┘      └────────────────────────┘      └────────────────────────┘
+```
+
+- **多成员复用账号**：一个账号只要订阅了多位成员，即可同时监控抓取这些成员。
+- **通道灵活绑定**：每个成员可独立配置推送目标（QQ 群 `groups`、Telegram `tg` 等），无配置的通道自动跳过。
+
+### 2.2 双模式认证与凭证优先级
+
+1. **认证模式分发**：
+   - `web` 模式（默认）：模拟 Chrome 桌面端，依赖 Token 与 Cookie；
+   - `mobile` 模式：模拟 iOS 客户端，使用 `refresh_token` 自动向鉴权中心换取短期 JWT，免去 Cookie 过期困扰。
+2. **凭证加载优先级机制**：
+   ```
+   磁盘动态凭证 (data/web_credentials/*.json)  >  环境变量 (.env)  >  默认配置
+   ```
+   > ⚠️ **重要提示**：Token 自动续期后会落地到 `data/web_credentials/`。更换凭证时强烈推荐在**网页端「账号与成员」卡片中点击「填凭证」**修改，系统会自动清理旧磁盘凭证并同步更新 `.env`。
+
+---
+
+## 🛠️ 博客归档与双语阅读器
+
+本系统深度集成坂道三团官方博客爬虫，提供**抓取 ➔ 结构化解耦 ➔ AI 翻译 ➔ 高清下载 ➔ 优雅阅读**全链路方案：
+
+### 3.1 4 列自适应网格与日期日历
+
+- **4 列自适应响应式矩阵**：每页 24 条博客卡片排版，搭载 1:1 精致封面、作者头像标签、发布时间与搜索关键词高亮。
+- **破图优雅降级**：封面遇 404、防盗链拦截或原图下架时，前端自动隐藏破损图片节点并以 📝 极简图标占位，视觉整洁一致。
+- **日期跳转与日历热力**：左侧吸顶日历按日统计博客发文量，点击任意日期自动重置筛选并精准定位高亮目标博客。
+
+### 3.2 智能分段解析与图片原位保护
 
 ```
-账号（accounts）          成员（monitor）              通道（channels）
-你的订阅凭证        →     用这个账号去拉谁的消息   →    消息推送到哪里
-"nogizaka_main"           冨里奈央 (id=55)             TG 频道 -100xxx
-                          賀喜遥香 (id=30)             QQ 群 533072575
+[原始 HTML] ──────────────────────────┐
+  │                                    ▼
+  │  1. 空 <p>/空行切分 ───►  [视效大段落 1 (JP)] ──► Gemini AI ──► [中文译文 1 (ZH)]
+  │  2. 抽离 <img> 节点 ───►  [图片节点原位 (IMG)] ──► 绝对路径化 ──► [原图保留 (IMG)]
+  │  3. 连续非空行合并 ───►  [视效大段落 2 (JP)] ──► Gemini AI ──► [中文译文 2 (ZH)]
+  │                                    │
+  └────────────────────────────────────┴───────────────────────────┐
+                                                                   ▼
+                                                [结构化解耦存储 content_json]
 ```
 
-- **一个账号可以拉多个成员**（只要该账号订阅了他们）
-- **每个成员必须指定用哪个账号**（`monitor[].account` 指向 `accounts` 的 key）
-- **每个成员至少要有一个推送目标**：QQ 群（`groups`）、TG 频道（`tg`），或已启用的官方 Bot（它推全局单聊、不区分成员）。都没有的话启动检查会报错。
+- **5 类 DOM 统一归一化**：自动消除 `<br>` 堆叠、逐行 `<p>` 碎片化与 `<div>` 容器差异，确保段落粒度与人类视效完全一致。
+- **原位节点保留**：图片不参与纯文本翻译，预先抽离并在拼接时无损插回原位，彻底根除漏图、跳段与长文截断现象。
 
-### 2.2 两个配置文件
+### 3.3 三态多语言视图与解耦架构
 
-| 文件 | 放什么 | 能否提交 Git |
+双语阅读器内置自由切换机制：
+
+| 视图模式 | 渲染逻辑 | 适用场景 |
 |---|---|---|
-| `config/config.json` | 通道开关、账号定义、成员列表、轮询节奏 | ✅ 可以（不含密钥） |
-| `.env` | 所有密钥和凭证（Token / Cookie / API Key） | ❌ 已 gitignore |
+| **📖 日中对照** (默认) | 日文段落（*斜体*）与中文译文（**粗体**）交替插值渲染，图片原位嵌入 | 最佳双语精读体验 |
+| **🇯🇵 仅日文** | 100% 渲染官网原始 `body_html`，保留原汁原味排版与样式 | 原文核对、生词学习 |
+| **🇨🇳 仅中文** | 提取纯中文段落并原位保留图片；若某段无译文自动优雅降级回退至日文 | 快速通读流览 |
 
-配置加载顺序：**内置默认值 → `config.json` 覆盖 → `.env` 补充密钥**。
+- **翻译模型动态溯源**：详情页右上角次级灰字动态标示 `翻译模型：gemini-2.5-flash`，让翻译来源清晰透明。
+- **管理员一键管理**：登录 Admin 后可在阅读器内随时「🗑️ 删除翻译」或「🌐 即时重译」。
 
-### 2.3 凭证优先级（重要）
+### 3.4 全渠道排版规范与格式化推送
 
-Token 会自动续期，续期后的**新值写在 `data/web_credentials/`**（磁盘），所以：
-
-> **磁盘凭证优先级高于 `.env`。光改 `.env` 不会生效。**
-
-换凭证的正确做法见 [3.3 更换账号凭证](#33-更换账号凭证)——用网页端填就自动处理好了，手动改则需要删除磁盘凭证文件。
+博客推送全渠道（Telegram / QQ 群 / 官方 Bot）严格统一按照 **zakablog 标准排版规范** 发送：
+1. **Header 信息头**：团体 Emoji、成员名、标题、发布时间、原图统计与原文链接；
+2. **全量高清原图**：并发下载并无损发送所有博客配图；
+3. **双语正文**：日文 *斜体*、中文 **粗体**；连续图片占位符智能归并为 `[写真1-3]`，自动转义特殊 Markdown 符号。
 
 ---
 
-## 3. 日常操作
+## 💬 消息归档与全文检索
 
-> 以下操作**优先用网页管理端**（http://127.0.0.1:8787/ ），大多数改动保存即生效、无需重启。手动方式作为备选一并列出。
+### 4.1 聚合动态首页与最新写真画廊
 
-### 3.1 添加 / 删除监控成员
+访问 `/archive` 即可进入跨成员聚合首页：
+- **Hero 卡片**：直观展示全站归档总数、时间跨度、本周收发环比及「今日 X 条」一键准确定位跳转。
+- **最新写真横向画廊**：轮播展示最新抓取的高清生写与日常随拍，支持键盘方向键翻页与全屏灯箱。
+- **最近动态流**：聚合展示各成员最新 Message 气泡与双语译文。
 
-**网页**：「监控成员」页 →「📋 从账号拉取成员列表」→ 选账号 → 点成员旁的「添加」→ 底部「保存并热重载」。
-手动填也行：「＋ 手动添加」后逐格填写。删除点每行的「删除」。
+### 4.2 时间线浏览、FTS5 全文搜索与图片 AI 识图打标
 
-**手动**：在 `config.json` 的 `monitor` 数组增删项目：
-```json5
-{ "id": "39", "name": "筒井あやめ", "account": "nogizaka_main", "groups": [752269366] }
+- **聊天气泡时间线**：按天精准分隔（JST 时间），支持日中双语对照、音频在线播放、视频流媒体拖拽进度。
+- **SQLite FTS5 全文检索**：毫秒级秒搜数万条历史消息，支持空格多词分词与中日双语联合匹配。
+- **Gemini Vision 智能打标**：自动对收到的图片进行 10 种类目识别（自拍/合照/舞台/外出/美食/玩偶/动物/花草/风景/截图），点击标签即可一键聚合检索。
+
+---
+
+## 🖥️ 网页管理端与日常运维
+
+管理后台监听于 **`http://127.0.0.1:8787/`**，包含六大核心模块：
+
+### 5.1 六大管理页签功能
+
+```
+┌────────┬─────────────┬──────────┬──────────┬─────────┬──────────┐
+│ 📊状态 │ 👥账号与成员 │ 📢推送通道│ ⚙️系统设置│ 🔑用户   │ 🛠️高级   │
+└────────┴─────────────┴──────────┴──────────┴─────────┴──────────┘
 ```
 
-### 3.2 添加账号
-
-**网页**：「账号池」→「＋ 添加账号」→ 填账号 ID、选团体和登录方式 →「保存并热重载」→ 再点该行的「填凭证」。全程无需重启。
-
-**手动**：`config.json` 加 `accounts` 条目，`.env` 按命名规则加凭证，然后**重启**（`.env` 只在启动时读取）。
-
-### 3.3 更换账号凭证
-
-**网页**（推荐）：「账号池」→ 对应行「填凭证」→ 粘贴新 Token / Cookie → 保存。系统会自动完成"写 `.env` → 删除旧磁盘凭证 → 热重载"，**立即生效**。
-
-**手动**：三步缺一不可——
-1. 改 `.env` 里的 `{账号ID大写}_TOKEN` / `_COOKIE` / `_REFRESH_TOKEN`
-2. **删除** `data/web_credentials/{账号ID}.json`
-3. 重启主程序
-
-漏了第 2 步的话，启动时会看到「⚠️ xxx 的 .env 凭证已修改，但磁盘凭证优先」的提醒。
-
-### 3.4 开关推送通道
-
-「基本设置」→ 推送通道开关。只用 TG 的话关掉 napcat 即可，此时成员可以只配 `tg` 不配 `groups`。
-
-### 3.5 调整轮询节奏
-
-「基本设置」→ 轮询节奏。日间/深夜间隔（秒）、休眠时段（JST 小时）。默认日间 2-3 分钟、深夜 25-30 分钟、凌晨 2-7 点休眠。
-
-### 3.6 启用 QQ 官方 Bot
-
-Bot 数量不限。三步：
-
-1. 「基本设置」→ 打开「QQ 官方 Bot」通道 →「＋ 添加 Bot」→ 填名称和 App ID
-2. Client Secret 点该行「填写」（存入 `.env`，变量名 = **Bot 名称大写** + `_CLIENT_SECRET`）
-3. 目标 OpenID —— **知道就直接填**；不知道就点该行的「🎯 自动获取」：
-
-   系统会连上 Bot 网关等待，**让目标用户给 Bot 发一条私聊消息**，捕获成功后自动填回表格（5 分钟超时，可随时停止）。最后点「保存并热重载」即生效。
-
-   > OpenID 只能从「用户主动私聊 Bot」的事件里拿到，这是官方接口的限制，所以必须有人发一条消息。
-   > 命令行等价工具：`python tools/get_qq_openid.py [APP_ID] [SECRET]`
-
-> 旧配置兼容：`config.json` 未声明 `qq_official_bots` 时，自动扫描 `.env` 的 `QQ_OFFICIAL_BOT{1..20}_*` 编号槽位。
-
-### 3.7 用私聊指令查信息（可选）
-
-官方 Bot 除了推送，还能反过来回答你的提问。在「基本设置」→「QQ 官方 Bot」卡片底部打开「允许私聊 Bot 查询信息」，重启主程序后，私聊 Bot 发以下指令即可：
-
-| 指令 | 作用 |
+| 页签 | 功能覆盖与亮点 |
 |---|---|
-| `/help` | 指令列表 |
-| `/status` | 巡查轮次、运行时长、各账号 Token 剩余、异常成员 |
-| `/members` | 监控成员及各自的推送目标 |
-| `/latest [成员] [条数]` | 最近消息（默认第一个成员、5 条） |
-| `/search 关键词` | 全归档搜索（原文和译文都搜），返回最近 5 条 |
-| `/stats` | 各成员归档条数与月份数 |
+| **📊 状态** | 实时查看巡查轮次、倒计时、账号 Token 剩余有效期、通道健康度；提供「立即巡查」与「测试推送」快捷入口。 |
+| **👥 账号与成员** | 账号池增删改、凭证即时粘贴更新；从官方 API 一键拉取现役成员目录，点击直接添加监控。 |
+| **📢 推送通道** | 集中管控 NapCat QQ、Telegram、QQ 官方 Bot 等通道开关、API 接口、推送路由与独立成员/博客过滤。 |
+| **⚙️ 系统设置** | 日间/深夜/休眠时段轮询间隔配置、博客爬虫抓取开关、Gemini API 参数及图片打标设置。 |
+| **🔑 用户** | 采用 scrypt 加盐哈希的用户鉴权系统，在线增删用户、分配角色、生成随机高强度密码（防锁死保护）。 |
+| **🛠️ 高级** | 实时脱敏运行日志控制台（支持过滤与清空）、全局 JSON 配置可视化编辑及 **10 份历史快照一键回滚**。 |
 
-**谁能用**：默认只有各 Bot 的目标 OpenID——也就是你自己。想放开给别人，在「授权 OpenID」里逗号分隔填写；**一旦填了，这份名单就完全取代默认值**。名单之外的人发什么都不会得到任何响应（日志里会记一条拒绝）。
+### 5.2 账号权限体系与访客隔离
 
-指令全部只读：查得到状态和归档，**改不了配置、重启不了程序、拿不到任何凭证**。聊天窗口不是可信入口，所以有副作用的操作一律不开放，要改配置请走管理端。
+通过 `config.json` 中的 `auth` 模块轻松启用多用户访问控制：
+- **`admin` (管理员)**：拥有管理后台全部权限、配置热更、系统重启与归档管理能力。
+- **`viewer` (访客/朋友)**：仅允许访问 `/archive` 归档查阅界面，完全隔离敏感配置、日志与凭证信息。
+- **安全防误锁机制**：系统内置底层约束，严禁删除或降级当前登录账号及最后一个管理员账号。
 
-回复走**被动消息**（带原消息 id），不消耗官方接口的主动推送额度；超过 900 字会截断。
+### 5.3 QQ 官方机器人私聊交互指令
 
-### 3.8 验证推送是否正常
+启用 QQ 官方 Bot 并开启指令后，授权用户在 QQ 私聊机器人即可发送查询指令（回复走被动消息，不消耗主动额度）：
 
-「状态」页 →「📨 测试推送」→ 选通道和目标 → 发送。会往目标发一条测试消息，用来确认群号 / chat_id 配置正确，不必等真实消息。
-
-### 3.9 立即巡查一次
-
-「状态」页 →「⏩ 立即巡查」。跳过等待立刻跑一轮（休眠时段也能唤醒），按钮会等到这一轮真正跑完再给结果。适合刚改完凭证想立刻验证。
-
----
-
-## 4. 网页管理端
-
-默认地址 **http://127.0.0.1:8787/** （`config.json` 的 `web_admin` 控制开关、监听地址和端口）。
-
-| 页签 | 能做什么 |
+| 指令 | 说明 |
 |---|---|
-| **状态** | 巡查轮次与下次倒计时、各账号 Token 实时剩余、通道成功率、每个成员的拉取/推送状态、近期错误分级；「立即巡查」「测试推送」按钮 |
-| **基本设置** | 通道开关、NapCat 地址、官方 Bot 增删改、轮询/休眠节奏、翻译参数、归档与每日摘要开关、TG Token 与 Gemini Key 填写 |
-| **账号池** | 增删改账号，凭证状态一目了然，「填凭证」直接粘贴 |
-| **监控成员** | 表格内直接编辑；从官方 API 拉成员列表点选添加 |
-| **日志** | 实时日志（含 DEBUG 级，2 秒刷新）+ 日志文件尾部；支持「仅错误」和关键词过滤，内容自动脱敏 |
-| **用户**（启用账号系统后，仅 admin 可见） | 增删用户、改密码、切换角色 |
-| **高级（JSON）** | 整份配置的 JSON 编辑 + **历史版本回滚**（每次保存前自动快照，保留 10 份） |
-| **消息/博客归档页** (`/archive`) | 顶部支持 `💬 消息归档` 与 `📝 博客归档` 实时切页，拥有独立 4 列矩阵网格、吸顶日历选择器与双语阅读器 |
-
-**通用能力**：
-
-- **保存即校验**：点「保存并热重载」后，服务端按 schema 校验（外加账号引用完整性检查），通过才原子写回 `config.json` 并热重载
-- **凭证只进不出**：所有密钥填写走同一套对话框，写入 `.env`，接口只回报"有/无"，绝不回显值；密码框还屏蔽了密码管理器的自动填充干扰
-- **重启主程序**：右上角「⟳ 重启主程序」，优雅停机后进程自替换（PID 不变），用于让改动过的 `.env` 或代码生效
-- **主题**：右上角按钮在「跟随系统 / 浅色 / 深色」间循环，选择记在浏览器本地
-
-⚠️ **保存会重新生成 `config.json`**（使用标准分区注释），手写的自定义注释会丢失。
+| `/help` | 查看支持的指令帮助菜单 |
+| `/status` | 实时查看系统运行时间、巡查轮次、各账号 Token 剩余与异常告警 |
+| `/members` | 查看当前监控的所有成员及其绑定的推送通道 |
+| `/latest [成员名] [条数]` | 调取指定成员最新的 Message 消息（默认 5 条） |
+| `/search <关键词>` | 全归档双语检索并返回最近 5 条匹配结果 |
+| `/stats` | 统计各成员的历史归档总量与月份跨度 |
 
 ---
 
-## 5. 消息归档
+## ⚙️ 服务化部署与运维
 
-`config.json` 的 `archive.enabled` 控制（默认开启）。每抓到一条新消息就自动落地：
+### 6.1 Windows 计划任务后台守护
 
-```
-data/archive/{成员名}/{年}/{月}/
-    messages.json          # 该月全部消息：原文 + 中文译文 + 本地媒体路径
-    images/ videos/ audio/ # 媒体文件，命名 {时间戳}_{消息id}.{ext}
-```
-
-### 5.1 首页
-
-打开 `/archive` 首先看到**聚合首页**，跨所有成员展示最近动态：
-
-- **Hero 卡片**：成员名、总消息数、时间跨度、本周统计（较上周变化）、今日新消息数（可点击跳转）、最后更新时间
-- **最新写真**：横向滚动卡片条，最新 10 张图片，自动轮播（hover/触屏暂停），点击跳转到归档中该图片的具体位置并高亮
-- **最近动态**：最近 8 条文字消息（原文 + 译文），点击跳转到该消息位置
-- **成员入口**：每个成员一个按钮，点击进入该成员的完整归档浏览
-- **骨架屏**：加载过程中显示占位动画
-- **单/多成员自适应**：单成员时不显示成员名标签，多成员时合并展示并标注来源
-
-### 5.2 归档浏览
-
-从首页点击成员按钮或「🏠 首页」返回，进入成员归档浏览：
-
-- **左侧日历**：每天显示消息条数（热力深浅），点某天直接跳到时间线对应位置；手机端折叠为下拉面板
-- **时间线**：聊天气泡样式，按天分隔，JST 时间，日文原文 + 中文译文对照
-- **筛选**：全部 / 文字 / 图片 / 视频 / 语音（日历会跟着筛选变化）
-- **搜索**：跨全部月份，原文、译文和标签都匹配，空格分词为「与」关系（底层 SQLite FTS5 全文索引）
-- **标签**：图片自动打标签（Gemini Vision 识别 10 个类目：自拍/合照/舞台/外出/美食/玩偶/动物/花草/风景/截图），点击标签即搜索；管理员可手动补充自定义标签，有全局显示开关
-- **一键复制**：每条消息可复制原文 + 译文（格式：`成员 · MM/DD HH:MM\n原文\n译文`）
-- **键盘快捷键**：`[` / `]` 切换月份，`/` 聚焦搜索框，`Esc` 关闭灯箱，灯箱内方向键翻页
-- **媒体**：图片灯箱（键盘翻页），视频/语音在线播放并支持拖进度
-- **深链**：URL 带 `#member=&y=&m=&t=`，可复制分享给别人直达某月某筛选
-
-### 5.3 博客归档
-
-系统支持博客抓取、自动/手动 Gemini AI 翻译及本地持久化归档：
-
-- **4 列标准网格列表**：单页 24 条博客自适应矩阵排版，每张卡片含标准 1:1 图片封面、作者、发布时间与搜索关键词高亮摘要；封面图加载失败（404 / 防盗链 / 资源缺失）时优雅降级为 📝 占位，不显示浏览器破图图标
-- **左侧日期跳转日历**：按团/按成员统计每日博客发布数量，点击日期自动切页并平滑滚动高亮目标博客卡片；手机端支持折叠与展收
-- **智能分段解析**：兼容三个团体的官网 DOM 形态（`<br>` 分隔 / 逐行 `<p>` / `<div>` 承载），以「空 `<p>` / 空行」切分视效大段落、连续非空行合并为一段，逐段对齐日中对照粒度；修复长博客截断与畸形 `</img>` 导致的正文 / 图片丢失
-- **双语阅读器**：
-  - 语言切换「日中对照 / 日文 / 中文」三态：有译文时默认选中「日中对照」，翻译完成自动切回；无译文时隐藏切换组件
-  - 「日文」直接渲染原始日文 HTML（100% 完整）；「中文」渲染译文，无译文的段落降级显示原文（不丢段）
-  - 日中对照排版：日文原文**斜体**、中文译文**常规体**（Web 与推送一致）
-  - 数据解耦：日文原文与中文译文分离存储，切换语言不依赖字符串过滤，杜绝漏段 / 缺内容
-  - 详情页右上角展示「翻译模型：xxx」次级灰字标记（仅日中对照 / 中文视图且存在译文时显示）
-- **管理员翻译管理**：管理员登录状态下可一键「删除翻译」，恢复原始日文排版以便重新发起 Gemini AI 高质量双语对照翻译
-- **多渠道规范推送**：
-  - 排版顺序：页头信息 ➔ 全量原图 ➔ 中日双语对照正文
-  - 照片占位符自动压缩：连续照片占位符自动归并为 `[写真1-3]` 形式，上下保留 1 行空行
-  - 排版字体与 Web 一致：日文行斜体 `*`、中文行常规体，自动转义原文中的 `*` 字符，杜绝符号与表情符号破坏 Markdown 解析（QQ Bot / NapCat / Telegram 三通道统一）
-
-### 5.2 回填历史消息
-
-实时归档只覆盖启用之后的消息，更早的用工具补：
-
-```bash
-python tools/backfill_archive.py                            # 全部成员、全部历史
-python tools/backfill_archive.py 冨里奈央 --from 2023-01-01   # 指定成员和起始日期
-```
-
-断点续传（进度存 `data/archive_progress.json`），已归档的自动跳过，媒体下载失败的会重试，页间隔自适应（顺畅提速、遇限流退避）。
-
-⚠️ **回填前必须停主程序**——两个进程同时刷新同一账号的 Token 会让其中一个凭证作废。工具会自动检测并拒绝启动（确认无冲突可加 `--force`）。
-
-### 5.3 注意事项
-
-- **空间**：媒体占大头，参考值单成员 3.5 年约 **1.7 GB**。只想存文字的话把 `archive.media` 设为 `false`
-- **写入语义**：按消息 id 幂等合并、原子写；先落 JSON 再补媒体，进程中断最多丢媒体不丢消息
-- **备份**：`data/` 不进 Git，归档是**唯一副本**。重要档案建议定期拷贝到移动硬盘或网盘
-
----
-
-## 6. 账号与权限
-
-默认关闭（本机访问无需登录）。开启后分两种角色：
-
-| 角色 | 权限 |
-|---|---|
-| `admin` | 管理端全部功能 + 归档 |
-| `viewer` | **只能访问归档** `/archive`，碰不到配置和凭证 |
-
-### 6.1 启用
-
-1. 创建第一个管理员（密码交互输入，不留在命令行历史）：
-   ```bash
-   python tools/manage_users.py add 你的用户名
-   ```
-2. `config.json` 里打开（或在网页「高级 JSON」改）：
-   ```json5
-   "auth": { "enabled": true, "archive_public": false, "session_hours": 12 }
-   ```
-3. 重启主程序。之后访问会跳转到登录页。
-
-### 6.2 给朋友开访客账号
-
-启用后在「用户」页操作最方便：「＋ 添加用户」→ 角色选 **viewer** →「🎲 生成随机密码」→「📋 复制」→ 创建，把用户名密码转告对方即可。
-
-命令行等价操作：
-```bash
-python tools/manage_users.py add 朋友名字 --viewer
-python tools/manage_users.py list / passwd <用户名> / role <用户名> <角色> / del <用户名>
-```
-
-若希望归档**完全公开**（无需登录即可看），把 `auth.archive_public` 设为 `true`；若设为 `false`，未登录访问 `/` 或 `/archive` 将自动带上 `next` 参数安全重定向至 `/login` 登录页，且顶栏按钮自动保持干净干练的交互风格。
-
-### 6.3 安全说明
-
-- 密码用 **scrypt 加盐哈希**存 `data/users.json`（权限 600，git-ignored），不可逆、永不回显
-- 会话 = 随机 token + **HttpOnly / SameSite=Strict** cookie，仅存进程内存（重启即失效），滑动续期；改密码立即踢掉该用户所有会话
-- 登录失败按 IP 限流（10 分钟 5 次 → 锁 15 分钟）；密码校验常时比较，用户不存在时也走一次哈希（防时序探测）
-- 写请求校验 `Origin`（防 CSRF），绑定回环地址时校验 `Host`（防 DNS rebinding）
-- 归档媒体用 `private, no-cache` + ETag：登出后浏览器缓存里的图片也无法再显示
-- 防误锁：不能删除或降级最后一个 admin，也不能删除当前登录的账号
-- `WEB_ADMIN_TOKEN`（`.env`）继续可用，作为脚本/自动化的 API 通道（等价 admin）
-- ⚠️ 服务是**明文 HTTP**。局域网使用请挂 TLS 反代（如 Caddy），否则密码和会话 cookie 在链路上裸奔
-
----
-
-## 7. 部署与运维
-
-### 7.1 每日摘要（死人开关）
-
-`config.json` 的 `daily_summary`（默认每天 JST 23:00）。通过已启用通道发一条当日报告：各成员消息数、巡查轮次、Token 状态、待处理错误、归档占用与磁盘剩余。
-
-它的核心价值是**反向监控**：系统挂了不会有报错通知，但「今天没收到摘要」本身就是告警。发送失败会每 30 分钟补发，最多 3 次。
-
-### 7.2 长期运行（开机自启 + 崩溃自拉起）
-
-程序自身已有内层容错（单成员失败不影响其他、异常不终止主循环、Token 自动续期）。下面配置的是外层：进程整个挂掉时由系统拉起。
-
-**Windows —— 计划任务**
+针对 Windows 生产环境，项目内置了具备崩溃自拉起、防孤儿进程的 PowerShell 守护脚本：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Start   # 安装并启动
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status  # 查看
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Stop    # 停止服务
-powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall
+# 以管理员权限打开 PowerShell，运行以下命令：
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Start     # 安装自启计划任务并立即拉起
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status    # 查看守护进程运行状态
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Stop      # 优雅停机（不留孤儿进程）
+powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall # 卸载开机自启
 ```
 
-⚠️ **停服务一定要用 `-Stop`**，不要直接 `Stop-ScheduledTask`：后者只终止守护脚本，它启动的 python 子进程会变成孤儿继续运行——而计划任务启动的进程**普通权限杀不掉**，孤儿会一直重复抓取推送。`-Stop` 通过信号文件让主程序自己优雅退出，不涉及权限。守护脚本启动时也会检测端口占用，已有实例就直接退出，不再叠加。
+### 6.2 Linux Systemd 服务化托管
 
-登录时自动启动、后台无窗口、崩溃后 60 秒自动拉起（守护逻辑在 `tools/run_service.ps1`，日志 `logs/service.log`）。
-
-- 拉起由守护脚本负责，**不依赖** Task Scheduler 自带的"失败后重启"（那个策略只在任务整体失败时触发，捕捉不到"子进程被杀而包装器正常退出"）
-- 退出码 0 视为主动停止不再拉起，非 0 视为崩溃则重启；启动即崩溃会拉长退避
-- ⚠️ 安装前先停掉手动启动的实例，否则抢 8787 端口
-- 万一出现杀不掉的孤儿进程（旧版本遗留），用**管理员** PowerShell 执行 `taskkill /F /IM python.exe`（注意会杀掉所有 python 进程）
-- ⚠️ `.ps1` 必须保持 **UTF-8 with BOM**（PowerShell 5.1 用系统 ANSI 读无 BOM 文件，中文变乱码导致脚本无法解析；单元测试会守住这点）
-
-**Linux —— systemd**
+针对 Linux 服务器环境，提供一键注册为 systemd 守护服务的脚本：
 
 ```bash
-bash tools/install_systemd.sh              # 用户级（推荐，无需 root，自动开 linger）
-bash tools/install_systemd.sh --system     # 系统级（需 sudo）
+# 用户级守护服务（推荐，无需 root，自动开启 linger 开机启动）
+bash tools/install_systemd.sh
 bash tools/install_systemd.sh --status
-bash tools/install_systemd.sh --logs       # journald 日志跟踪
-bash tools/install_systemd.sh --uninstall
+bash tools/install_systemd.sh --logs       # 查看实时 journal 日志
+bash tools/install_systemd.sh --stop       # 停止服务
 ```
 
-`Restart=always`，异常退出 60 秒后重启；停止时发 `SIGTERM`，主程序走优雅停机（关连接池、等归档任务收尾），比 Windows 强杀更干净。脚本会自动识别 `.venv/bin/python`。
+### 6.3 每日健康摘要与数据备份
 
-**容器**：跑 `python main.py` 即可，注意三点——`data/` 和 `logs/` 挂卷（归档和凭证在里面）、`.env` 用 secrets 注入、`web_admin.host` 设 `0.0.0.0` 并映射端口（此时**务必启用账号系统或 `WEB_ADMIN_TOKEN`**）。重启策略交给编排器，不要再叠加上面的脚本。
+- **死人开关 (Daily Summary)**：每日设定时间（默认 JST 23:00）向指定通道推送运行日报。如果某天未收到日报，即说明系统出现异常。
+- **核心数据备份清单**：
+  - `data/archive/`：历史 Message 归档与 `blogs.db` 数据库（**最重要数据，建议定期冷备份**）；
+  - `data/blog_images/`：本地下载的博客原图；
+  - `config/config.json` 与 `.env`：系统配置与密钥凭证。
 
-### 7.3 备份清单
+---
 
-| 路径 | 内容 | 丢了会怎样 |
+## 🔍 故障排查 / FAQ
+
+| 故障现象 | 潜在排查原因 | 解决方案 |
 |---|---|---|
-| `data/archive/` | 消息归档（唯一副本） | **不可恢复** |
-| `.env` | 所有密钥凭证 | 需重新抓包获取 |
-| `config/config.json` | 配置 | 需重配（网页有历史快照可回滚） |
-| `data/users.json` | 网页账号 | 重建即可 |
+| **启动提示「没有任何可用推送目标」** | 监控成员未配置 `groups` 或 `tg`，且未启用官方 Bot。 | 在「👥 账号与成员」中为监控成员勾选或填入推送目标。 |
+| **Telegram 报错 `Chat not found`** | Bot 未加入目标频道，或未被赋予「发布消息」管理员权限。 | 将 Bot 添加至频道 Admin；使用 [@getidsbot](https://t.me/getidsbot) 获取准确的频道 Chat ID。 |
+| **NapCat 提示连接失败** | OneBot 框架未启动，或 `napcat_api` 地址配置有误。 | 确认 NapCat 运行中，且 HTTP API 地址（如 `http://127.0.0.1:3000`）可正常访问。 |
+| **Token 频繁报错过期或 401** | Web 凭证 Cookie 失效或账号在多处登录发生冲突。 | 重新抓包获取最新凭证，在 WebUI「账号与成员」中点击「填凭证」更新。 |
+| **消息/博客有原文但无译文** | `GEMINI_API_KEY` 未配置或触发了 Google 限频 (429)。 | 在「⚙️ 系统设置」中检查 API Key 是否有效，或增加备用 Gemini 模型。 |
+| **改了 `.env` 但未生效** | 磁盘动态凭证 `data/web_credentials/` 优先级高于 `.env`。 | 推荐在 WebUI 页面直接粘贴凭证，或删除对应磁盘 JSON 文件后重启。 |
+| **博客列表封面出现破图** | 官方 CDN 开启了防盗链或原图链接失效。 | 新版已集成自动过滤与占位降级机制，更新代码后自动恢复整洁样式。 |
 
 ---
 
-## 8. 故障排查
+## 📖 附录与配置参考
 
-| 症状 | 原因与解决 |
-|---|---|
-| **启动报「没有任何可用推送目标」** | 该成员既没配 `groups` 也没配 `tg`，且官方 Bot 不可用。补一个推送目标即可 |
-| **TG 报 `Chat not found`** | Bot 不在该频道，或不是管理员。把 Bot 加进频道并授予「发布消息」权限；chat_id 可用 [@getidsbot](https://t.me/getidsbot) 转发频道消息获取 |
-| **QQ 推送 `All connection attempts failed`** | NapCat / Lagrange 没启动，或 `napcat_api` 地址不对 |
-| **日志刷屏「Token 刷新失败 / Cookie 已死亡」** | 凭证过期，重新抓包后走 [3.3 更换账号凭证](#33-更换账号凭证) |
-| **改了 `.env` 但没生效** | `.env` 只在**启动时**读取；且磁盘凭证优先于 `.env`。用网页「填凭证」，或删除 `data/web_credentials/{账号}.json` 后重启 |
-| **抓取报 `KeyError: cookies`** | 账号在 web / mobile 之间切换过而凭证格式没跟上。新版会自动识别并重建，升级后重启即可 |
-| **消息有原文没译文** | `GEMINI_API_KEY` 没配或额度耗尽。在「基本设置 → 翻译」检查 Key 状态，日志里搜「翻译失败」看具体原因 |
-| **回填工具拒绝启动** | 检测到主程序在跑（会互相作废 Token）。先停主程序，或确认无冲突后加 `--force` |
-| **归档页一片空白** | 还没有归档数据。确认 `archive.enabled` 已开，或先跑一次回填工具 |
-| **登出后仍能看到归档图片** | 旧版缓存策略问题，已修复。按 `Ctrl+Shift+R` 强制刷新清掉本地旧缓存 |
-| **管理端打不开 / 端口被占** | 可能有两个实例（手动启动 + 计划任务）。用 `Get-NetTCPConnection -LocalPort 8787` 查占用进程 |
-| **忘记网页登录密码** | 你有服务器本机权限，直接重置：`python tools/manage_users.py passwd <用户名>` |
-| **PowerShell 脚本报一堆乱码语法错误** | `.ps1` 文件的 UTF-8 BOM 丢了，见 [7.2](#72-长期运行开机自启--崩溃自拉起) 的说明 |
+### 8.1 全量配置项手册 (config.json)
 
-排查通用手段：管理端「日志」页开「仅错误」筛选，或直接看 `logs/error_debug.log`。
+| 配置节点 | 类型 | 默认值 | 详细说明 |
+|---|:---:|:---:|---|
+| `channels.napcat` | `bool` | `true` | 是否启用 NapCat / Lagrange QQ 群消息推送 |
+| `channels.tg` | `bool` | `false` | 是否启用 Telegram 频道 / 机器人消息推送 |
+| `channels.qq_official` | `bool` | `false` | 是否启用 QQ 官方开放平台机器人推送 |
+| `napcat_api` | `string` | `"http://127.0.0.1:3000"` | NapCat HTTP API 服务监听地址 |
+| `qq_official_bots` | `array` | `[]` | 官方 Bot 列表（支持配置 `name`, `app_id`, `target_openid`, `group_openid`, `member_filter`, `blog_filter`） |
+| `web_admin.enabled` | `bool` | `true` | 是否启动 Web 管理端后台 |
+| `web_admin.host` | `string` | `"127.0.0.1"` | Web 管理端监听地址（若需要局域网访问可设为 `"0.0.0.0"` 并启用 auth） |
+| `web_admin.port` | `int` | `8787` | Web 管理端监听端口 |
+| `archive.enabled` | `bool` | `true` | 是否开启 Message 本地归档与持久化 |
+| `archive.media` | `bool` | `true` | 是否下载 Message 配套图片、语音与视频媒体至本地 |
+| `blog_monitor.enabled` | `bool` | `true` | 是否全局开启官方博客抓取与监控 |
+| `blog_monitor.nogizaka` | `bool` | `true` | 乃木坂46 官方博客监控开关 |
+| `blog_monitor.hinatazaka` | `bool` | `true` | 日向坂46 官方博客监控开关 |
+| `blog_monitor.sakurazaka` | `bool` | `true` | 櫻坂46 官方博客监控开关 |
+| `day_interval` | `[int, int]` | `[120, 180]` | 白天轮询随机间隔范围（单位：秒） |
+| `night_interval` | `[int, int]` | `[1500, 1800]` | 深夜轮询随机间隔范围（单位：秒） |
+| `sleep_hours` | `[int, int]` | `[2, 7]` | 休眠时段范围（JST 日本标准时间小时） |
+| `translate` | `bool` | `true` | 是否开启 Gemini AI 智能翻译 |
+| `gemini_models` | `array` | `[...]` | 翻译模型池与 Fallback 备选降级序列 |
+| `gemini_min_interval` | `float` | `1.0` | 翻译请求并发最小间隔保护（秒） |
+| `image_tagging` | `bool` | `true` | 是否启用 Gemini Vision 消息图片自动打标签 |
+| `daily_summary.enabled` | `bool` | `true` | 每日运行健康报告日报开关 |
+| `daily_summary.hour` | `int` | `23` | 日报推送时间（JST 小时） |
+| `auth.enabled` | `bool` | `false` | Web 管理端多用户登录鉴权开关 |
+| `auth.archive_public` | `bool` | `false` | 是否允许免登录公开查阅 `/archive` 归档 |
+| `auth.session_hours` | `int` | `24` | 登录会话 Token 有效期（小时） |
 
----
+### 8.2 环境变量速查 (.env)
 
-## 9. 参考
+```bash
+# AI 翻译与多模态识图
+GEMINI_API_KEY=AIzaSy...
 
-### 9.1 配置项
+# Telegram Bot Token
+TG_BOT_TOKEN=123456:ABC-DEF
 
-`config/config.json` 全部段落（schema 定义见 `config/config.schema.json`）：
+# 网页管理端 API Token (可选，外部脚本调用凭证)
+WEB_ADMIN_TOKEN=your_secure_token
 
-| 段落 | 说明 |
-|---|---|
-| `channels` | `napcat` / `tg` / `qq_official` 三个通道开关 |
-| `napcat_api` | NapCat HTTP API 地址 |
-| `qq_official_bots` | 官方 Bot 列表（`name` / `app_id` / `target_openid`），数量不限 |
-| `web_admin` | 管理端 `enabled` / `host` / `port` |
-| `archive` | 归档 `enabled` / `dir` / `media` |
-| `daily_summary` | 每日摘要 `enabled` / `hour`（JST） |
-| `qq_commands` | Bot 私聊指令 `enabled` / `allow_openids`（留空＝仅 Bot 的 `target_openid`） |
-| `auth` | 账号系统 `enabled` / `archive_public` / `session_hours` |
-| `accounts` | 账号池：`group`（团体）/ `auth`（web·mobile）/ `app_tag` / `api_base` / `web_origin` |
-| `monitor` | 成员列表：`id` / `name` / `account` / `groups` / `tg` |
-| `day_interval` `night_interval` | 轮询间隔 `[最小, 最大]` 秒 |
-| `sleep_hours` | 休眠时段 `[起, 止]` JST 小时 |
-| `alert_cooldown` | 告警冷却秒数，防刷屏 |
-| `translate` `gemini_models` `gemini_min_interval` `translate_timeout` | 翻译相关 |
-| `image_tagging` `gemini_tag_models` `gemini_tag_min_interval` | 图片自动打标签（Gemini Flash Lite，10 类目分类） |
-| `qq_send_interval` | QQ 消息发送间隔秒数 |
+# 账号凭证格式：{账号ID大写}_TOKEN / _COOKIE / _REFRESH_TOKEN
+NOGIZAKA_MAIN_TOKEN=eyJ...
+NOGIZAKA_MAIN_COOKIE=session=xxx
+NOGIZAKA_MAIN_REFRESH_TOKEN=
 
-未列出的项（文件路径、超时、并发数、调试开关等）用内置默认值，见 `config/config.py` 的 `_DEFAULTS`。
-
-`.env` 变量：
-
-| 变量 | 用途 |
-|---|---|
-| `{账号ID大写}_TOKEN` / `_COOKIE` / `_REFRESH_TOKEN` | 账号凭证 |
-| `GEMINI_API_KEY` | 翻译 |
-| `TG_BOT_TOKEN` | Telegram Bot |
-| `{Bot名称大写}_CLIENT_SECRET` | QQ 官方 Bot 密钥 |
-| `WEB_ADMIN_TOKEN` | 管理端 API token（脚本用；启用账号系统后仍有效） |
-
-### 9.2 命令行工具
-
-| 命令 | 用途 |
-|---|---|
-| `python main.py` | 启动主程序 |
-| `python -m src.webui` | 只起管理端（主程序没跑时也能改配置） |
-| `python tools/list_members.py [账号ID]` | 列出账号可见的成员及 ID |
-| `python tools/backfill_archive.py [成员] [--from 日期]` | 回填历史消息 |
-| `python tools/archive_member.py <列表页/详情页 URL 或成员 ct>` [--group] [--translate] | 归档单个成员的全量历史博客（可选 AI 双语翻译） |
-| `python tools/tag_images.py [--member 成员] [--year Y] [--month M] [--dry-run]` | 批量图片打标签（幂等，只补没标签的） |
-| `python tools/manage_users.py add/list/passwd/role/del` | 网页账号管理 |
-| `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 获取 QQ 用户 OpenID（网页端也有「🎯 自动获取」） |
-| `python tools/test_models.py` | Gemini 模型连通性诊断 |
-| `python tests/test_*.py` | 运行测试（CI 同款） |
-
-### 9.3 目录结构
-
-```
-nogizaka-message-push/
-├── main.py                      # 入口
-├── config/
-│   ├── config.json              # 用户配置（非敏感）
-│   ├── config.schema.json       # 配置结构定义，保存时自动校验
-│   ├── config.py                # 配置 facade：默认值 → JSON → .env 三层加载
-│   ├── credentials.py           # 凭证管理：双模式 Token 刷新、Header 构建
-│   └── watcher.py               # 配置文件热重载（可选 watchdog）
-├── src/
-│   ├── app.py                   # 主循环：健康检查、轮询编排、博客巡查、每日摘要
-│   ├── fetcher.py               # Message 抓取：API 轮询、过滤、分发
-│   ├── blog_fetcher.py          # 博客抓取：乃木坂/日向坂/樱坂官网爬虫、SQLite 落地与图片下载
-│   ├── translator.py            # Gemini 翻译（多模型容错、串行限速、博客段落级对照）
-│   ├── tagger.py                 # Gemini 图片打标签（Vision，10 类目分类）
-│   ├── notifier.py              # 多通道推送路由 + zakablog 规范格式排版 + 系统警报
-│   ├── archive.py               # 消息归档：落地、媒体下载、搜索、日历统计
-│   ├── auth.py                  # 账号系统：scrypt 哈希、会话、登录限流
-│   ├── webui.py                 # 管理端与归档 HTTP 服务（stdlib，零依赖，包含删除翻译与博客日历接口）
-│   ├── webui_static/            # 前端：管理端 / 归档(消息+博客 4 列网格+日历) / 登录 / 共享主题
-│   ├── health.py                # 运行时健康追踪与状态摘要
-│   ├── dedup.py                 # 消息 ID 滑动窗口去重
-│   ├── member_directory.py      # 成员目录拉取（工具与网页端共用）
-│   ├── logger.py                # 日志（彩色终端 + 滚动文件 + 内存环）
-│   ├── utils.py                 # JST 时间、时段判断、限速器
-│   └── platforms/               # napcat.py / qq_official.py / tgbot.py
-├── tools/                       # 见 9.2
-├── tests/                       # 测试套件，CI 全跑
-├── data/                        # 运行时数据（git-ignored）
-│   ├── archive/                 # 消息归档 JSON 与博客数据库 `blogs.db`
-│   ├── blog_images/             # 下载的博客原图
-│   ├── web_credentials/         # 持久化凭证
-│   ├── users.json               # 网页账号
-│   ├── sent_ids/ time_records/  # 去重与时间戳
-└── logs/                        # 运行日志（git-ignored）
+# QQ 官方 Bot 密钥：{Bot名称大写}_CLIENT_SECRET
+QQ_OFFICIAL_BOT1_CLIENT_SECRET=your_secret_here
 ```
 
-### 9.4 架构与核心设计
+### 8.3 命令行工具矩阵 (tools/)
 
-```
-Member API  →  fetcher  →  translator(Gemini)  →  notifier  →  napcat / qq_official / tgbot
-                  │                                              （QQ 群 / 官方单聊 / TG）
-                  ├────────→  archive  →  data/archive/  →  webui /archive（浏览·搜索）
-                  └────────→  dedup / credentials  →  data/
-```
+| 脚本文件 | 命令示例 | 功能说明 |
+|---|---|---|
+| `archive_member.py` | `python tools/archive_member.py <博客列表/详情URL> --translate` | 归档指定成员全量历史博客与原图（支持断点与 AI 翻译） |
+| `backfill_archive.py` | `python tools/backfill_archive.py 冨里奈央 --from 2023-01-01` | 回填指定成员或全员的历史 Message 消息与多媒体 |
+| `sync_archive_db.py` | `python tools/sync_archive_db.py` | 扫描磁盘 JSON 归档并全量同步重构 SQLite 数据库索引 |
+| `tag_images.py` | `python tools/tag_images.py --member 冨里奈央` | 批量对归档图片调用 Gemini Vision 进行补全打标 |
+| `manage_users.py` | `python tools/manage_users.py add <用户名> --viewer` | 命令行增删网页端用户、重置密码或变更权限角色 |
+| `list_members.py` | `python tools/list_members.py nogizaka_main` | 查询指定账号已订阅/可见的成员列表与成员 ID |
+| `get_qq_openid.py` | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 自动捕获私聊用户的 `target_openid` |
+| `get_qq_group_openid.py`| `python tools/get_qq_group_openid.py [APP_ID] [SECRET]` | 自动捕获机器人在目标群中的 `group_openid` |
+| `test_models.py` | `python tools/test_models.py` | 诊断检测 `.env` 中 Gemini 各模型连通性与响应延时 |
+| `install_autostart.ps1` | `powershell -File tools\install_autostart.ps1 -Start` | Windows 计划任务开机自启安装与管理脚本 |
+| `install_systemd.sh` | `bash tools/install_systemd.sh` | Linux systemd 服务化守护一键安装配置脚本 |
 
-- **双认证模式** — 每个账号可选 `web`（Cookie + Bearer，Chrome 头仿真）或 `mobile`（refresh_token → JWT，iOS 头仿真），在 URL / Header / 401 处理三处分发
-- **Token 生命周期** — 启动时为 mobile 账号初始刷新；每轮巡查前解码 JWT 检查 `exp`，不足 300 秒主动续期；401 时被动刷新后重试
-- **原子写入** — 时间戳、去重表、凭证、归档、配置全部走「临时文件 + `os.replace`」，中断不留半截文件
-- **串行化限速** — 翻译全局串行 + 最小间隔，无论多少成员并发
-- **反爬** — 轮询间隔 ±10% 抖动、发送间隔随机、指数退避重试、每轮打乱成员顺序
-- **容错语义** — NapCat 推送失败会阻止时间戳推进（下轮重试）；TG / 官方 Bot 失败仅记日志（避免限频导致重复推送）
-- **健康追踪** — 纯内存记录通道成功率、Token 剩余、成员状态，分级错误（TRANSIENT 临时 / PERSISTENT 需人工），供状态页和摘要使用
+### 8.4 现役成员 ID 速查表
 
-### 9.5 乃木坂46 现役成员 ID 速查
+<details>
+<summary><b>乃木坂46 现役成员 ID 速查（点击展开）</b></summary>
 
-> 通过手机端 API 拉取的现役成员（`state=open`）。ID 可能随运营调整变化，以实际 API 返回为准；也可在网页端「从账号拉取成员列表」实时查看。
+> 注：以下为 API 常规 ID。实际配置亦可在 Web 管理端「从账号拉取成员列表」中点选。
 
-| m_id | 成员 | 期别 | | m_id | 成员 | 期别 |
-|---|---|---|---|---|---|---|
+| ID | 成员姓名 | 期别 | | ID | 成员姓名 | 期别 |
+|:---:|:---|:---:|:---:|:---:|:---|:---:|
 | 17 | 伊藤 理々杏 | 3期 | | 51 | 小川 彩 | 5期 |
 | 18 | 岩本 蓮加 | 3期 | | 52 | 奥田 いろは | 5期 |
 | 19 | 梅澤 美波 | 3期 | | 53 | 川﨑 桜 | 5期 |
@@ -590,21 +487,10 @@ Member API  →  fetcher  →  translator(Gemini)  →  notifier  →  napcat / 
 | 49 | 井上 和 | 5期 | | 74 | 小津 玲奈 | 6期 |
 | 50 | 岡本 姫奈 | 5期 | | | | |
 
-### 9.6 依赖
-
-| 包 | 用途 |
-|---|---|
-| [httpx](https://www.python-httpx.org/) | 全异步 HTTP 客户端 |
-| [python-dotenv](https://github.com/theskumar/python-dotenv) | `.env` 加载 |
-| [json5](https://github.com/dpranke/pyjson5) | 解析带注释的 `config.json` |
-| [jsonschema](https://github.com/python-jsonschema/jsonschema) | 配置结构校验 |
-| [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) | TG 推送（不用可不装，缺失时自动禁用该通道） |
-| [websockets](https://websockets.readthedocs.io/) | 仅 `tools/get_qq_openid.py` 需要 |
-
-管理端与归档页是**纯 stdlib + 零依赖前端**（无框架、无构建步骤）。
+</details>
 
 ---
 
-## License
+## 📄 开源许可证 / License
 
-MIT
+本项目采用 [MIT License](LICENSE) 许可证开源。仅供粉丝个人学习、技术研究与偶像应援交流使用，请勿用于商业用途。
