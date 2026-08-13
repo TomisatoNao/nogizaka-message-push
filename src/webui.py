@@ -272,7 +272,7 @@ def _trigger_reload() -> bool:
 # WEB_ADMIN_TOKEN 故意排除：管理端令牌只能手动设置，防止误操作把自己锁在门外。
 _SECRET_KEY_RE = re.compile(
     r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID)"
-    r"|GEMINI_API_KEY)$"
+    r"|GEMINI_API_KEY|ZHIPU_API_KEY)$"
 )
 _FORBIDDEN_ENV_KEYS = {"WEB_ADMIN_TOKEN"}
 
@@ -440,6 +440,7 @@ def _load_raw_config() -> dict:
 def _env_status() -> dict:
     return {
         "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
+        "ZHIPU_API_KEY": bool(os.getenv("ZHIPU_API_KEY")),
         "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
     }
 

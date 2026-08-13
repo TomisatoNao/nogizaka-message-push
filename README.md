@@ -1,14 +1,14 @@
 # 🌸 nogizaka-message-push
 
-> **坂道联合（乃木坂46 / 日向坂46 / 櫻坂46）Message 私密消息 & 官方博客全自动监控、Google Gemini AI 智能双语翻译、多通道格式化推送与全量本地永久持久化归档系统。**
+> **坂道联合（乃木坂46 / 日向坂46 / 櫻坂46）Message 私密消息 & 官方博客全自动监控、Google Gemini & 智谱清言 AI 多引擎智能双语翻译、多通道格式化推送与全量本地永久持久化归档系统。**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Platform: Cross-Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg?style=flat-square)]()
-[![AI: Google Gemini](https://img.shields.io/badge/AI-Google%20Gemini%202.5%20%2F%201.5-orange.svg?style=flat-square&logo=google)]()
+[![AI: Gemini & Zhipu](https://img.shields.io/badge/AI-Gemini%203.7%20%2F%20Zhipu%20GLM--4-orange.svg?style=flat-square&logo=google)]()
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=flat-square)](https://github.com/astral-sh/ruff)
 
-自动轮询成员 Mobile Message 消息及官方博客更新，利用 Google Gemini AI 进行具有偶像口吻与文脉连贯的地道中文翻译，格式化推送到 **QQ 群（NapCat / Lagrange） / Telegram 频道 / QQ 官方开放平台机器人**，并将每条消息与博客连同原图、视频、语音**永久归档到本地硬盘与 SQLite 数据库**——即使退订、毕业或 App 关服，珍贵档案依然完整保存在你的设备上。日常运维、账号凭证热更、用户权限管理与归档查阅全部在浏览器端 Web UI 中完成。
+自动轮询成员 Mobile Message 消息及官方博客更新，利用 **Google Gemini**（Gemini 3.7 / 3.6 / 3.5 Flash）与 **智谱清言**（GLM-4-Flash）双引擎智能交替轮流翻译（Round-Robin + 自动 Failover 容灾），进行具有偶像口吻与文脉连贯的地道中文翻译，格式化推送到 **QQ 群（NapCat / Lagrange） / Telegram 频道 / QQ 官方开放平台机器人**，并将每条消息与博客连同原图、视频、语音**永久归档到本地硬盘与 SQLite 数据库**——即使退订、毕业或 App 关服，珍贵档案依然完整保存在你的设备上。日常运维、账号凭证热更、用户权限管理与归档查阅全部在浏览器端 Web UI 中完成。
 
 ```
                               ┌─────────────────────────────────────────────────────────┐
@@ -39,8 +39,8 @@
                │                                                                                    │
                ▼                                                                                    ▼
 ┌──────────────────────────────┐                                                     ┌──────────────────────────────┐
-│  1.3 Gemini AI 智能对话翻译  │                                                     │  2.3 DOM 智能分段与图片保护  │
-│  · 多模型 Failover 自动降级  │                                                     │  · 空 <p>/空行切分视效大段落 │
+│  1.3 双引擎 AI 智能轮流翻译  │                                                     │  2.3 DOM 智能分段与图片保护  │
+│  · Gemini + 智谱 轮流分发    │                                                     │  · 空 <p>/空行切分视效大段落 │
 │  · 偶像语境/假名爱称硬性约束 │                                                     │  · 抽离 <img> 原位保持       │
 │  · 颜文字/Emoji 100% 保留    │                                                     │  · 结构化解耦存储 content_json│
 └──────────────┬───────────────┘                                                     └──────────────┬───────────────┘
@@ -189,7 +189,7 @@ python main.py
 
 在后台页面中直接完成所有日常配置（全部无需手动修改 JSON）：
 
-1. **配置 AI 翻译**：切换到「⚙️ 系统设置」，填入你的 Google Gemini API Key（可在 [Google AI Studio](https://aistudio.google.com/apikey) 免费获取）；
+1. **配置 AI 翻译**：切换到「⚙️ 系统设置」，点击「填写」录入你的 Google Gemini API Key（可在 [Google AI Studio](https://aistudio.google.com/apikey) 免费获取）或智谱开放平台 API Key（可在 [智谱开放平台](https://open.bigmodel.cn/) 免费获取，GLM-4-Flash 永久免费且国内直连）；同时配置两者将开启**双引擎智能轮流调度与自动容灾**；
 2. **开启推送通道**：切换到「📢 推送通道」，开启 Telegram 频道、NapCat QQ 群 或 QQ 官方机器人，并点击「📨 发送测试」验证连通性；
 3. **添加账号与监控成员**：切换到「👥 账号与成员」，点击「填凭证」直接粘贴 Message 抓包的 Token/Cookie，然后点击「📋 从账号拉取成员列表」一键勾选要监控的偶像成员；
 4. **即时生效**：点击右上角「⟳ 重新载入」，系统即刻进入全自动抓取、翻译、推送与归档状态！
@@ -503,7 +503,7 @@ bash tools/install_systemd.sh --stop       # 停止服务
 | **Telegram 报错 `Chat not found`** | Bot 未加入目标频道，或未被赋予「发布消息」管理员权限。 | 将 Bot 添加至频道 Admin；使用 [@getidsbot](https://t.me/getidsbot) 获取准确的频道 Chat ID。 |
 | **NapCat 提示连接失败** | OneBot 框架未启动，或 `napcat_api` 地址配置有误。 | 确认 NapCat 运行中，且 HTTP API 地址（如 `http://127.0.0.1:3000`）可正常访问。 |
 | **Token 频繁报错过期或 401** | Web 凭证 Cookie 失效或账号在多处登录发生冲突。 | 重新抓包获取最新凭证，在 WebUI「账号与成员」中点击「填凭证」更新。 |
-| **消息/博客有原文但无译文** | `GEMINI_API_KEY` 未配置或触发了 Google 限频 (429)。 | 在「⚙️ 系统设置」中检查 API Key 是否有效，或增加备用 Gemini 模型。 |
+| **消息/博客有原文但无译文** | API Key 未配置，或单家 API 触发了频控限额。 | 在「⚙️ 系统设置」中检查并补充 Google Gemini API Key 或 智谱 API Key（支持两家混合轮流调用）。 |
 | **改了 `.env` 但未生效** | 磁盘动态凭证 `data/web_credentials/` 优先级高于 `.env`。 | 推荐在 WebUI 页面直接粘贴凭证，或删除对应磁盘 JSON 文件后重启。 |
 | **博客列表封面出现破图** | 官方 CDN 开启了防盗链或原图链接失效。 | 新版已集成自动过滤与占位降级机制，更新代码后自动恢复整洁样式。 |
 
@@ -532,9 +532,9 @@ bash tools/install_systemd.sh --stop       # 停止服务
 | `day_interval` | `[int, int]` | `[120, 180]` | 白天轮询随机间隔范围（单位：秒） |
 | `night_interval` | `[int, int]` | `[1500, 1800]` | 深夜轮询随机间隔范围（单位：秒） |
 | `sleep_hours` | `[int, int]` | `[2, 7]` | 休眠时段范围（JST 日本标准时间小时） |
-| `translate` | `bool` | `true` | 是否开启 Gemini AI 智能翻译 |
-| `gemini_models` | `array` | `[...]` | 翻译模型池与 Fallback 备选降级序列 |
-| `gemini_min_interval` | `float` | `1.0` | 翻译请求并发最小间隔保护（秒） |
+| `translate` | `bool` | `true` | 是否开启 AI 智能双语翻译 |
+| `gemini_models` | `array` | `[...]` | 多引擎模型池列表（Google Gemini + 智谱清言 GLM-4 智能轮番调度与 Failover 备选序列） |
+| `gemini_min_interval` | `float` | `7.0` | 翻译请求并发最小间隔保护（秒） |
 | `image_tagging` | `bool` | `true` | 是否启用 Gemini Vision 消息图片自动打标签 |
 | `daily_summary.enabled` | `bool` | `true` | 每日运行健康报告日报开关 |
 | `daily_summary.hour` | `int` | `23` | 日报推送时间（JST 小时） |
@@ -545,8 +545,11 @@ bash tools/install_systemd.sh --stop       # 停止服务
 ### 9.2 环境变量速查 (.env)
 
 ```bash
-# AI 翻译与多模态识图
+# Google Gemini API Key（可在 Google AI Studio 免费获取）
 GEMINI_API_KEY=AIzaSy...
+
+# 智谱开放平台 API Key（GLM-4-Flash 永久免费，国内免翻直连）
+ZHIPU_API_KEY=df488cc9484f46488045...
 
 # Telegram Bot Token
 TG_BOT_TOKEN=123456:ABC-DEF
@@ -575,7 +578,7 @@ QQ_OFFICIAL_BOT1_CLIENT_SECRET=your_secret_here
 | `list_members.py` | `python tools/list_members.py nogizaka_main` | 查询指定账号已订阅/可见的成员列表与成员 ID |
 | `get_qq_openid.py` | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 自动捕获私聊用户的 `target_openid` |
 | `get_qq_group_openid.py`| `python tools/get_qq_group_openid.py [APP_ID] [SECRET]` | 自动捕获机器人在目标群中的 `group_openid` |
-| `test_models.py` | `python tools/test_models.py` | 诊断检测 `.env` 中 Gemini 各模型连通性与响应延时 |
+| `test_models.py` | `python tools/test_models.py` | 诊断检测 `.env` 中 Gemini 与 智谱各模型连通性与响应延时 |
 | `install_autostart.ps1` | `powershell -File tools\install_autostart.ps1 -Start` | Windows 计划任务开机自启安装与管理脚本 |
 | `install_systemd.sh` | `bash tools/install_systemd.sh` | Linux systemd 服务化守护一键安装配置脚本 |
 

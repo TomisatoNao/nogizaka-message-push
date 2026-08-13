@@ -33,11 +33,13 @@ _DEFAULTS: dict = {
     "qq_official_media_timeout": 60,   # 下载/上传媒体的独立超时（25MB 视频跑不进 15s）
     "qq_official_media_max_bytes": 26214400,
     "qq_official_bots":         [],
-    # Gemini
+    # AI 翻译（双引擎：Google Gemini + 智谱 GLM-4 智能轮番调度与容灾）
     "gemini_api_key":           "",
+    "zhipu_api_key":            "",
     # 注：限速是全局串行的 gemini_min_interval，模型级 rpm 从未生效，已移除
     "gemini_models": [
         {"name": "gemini-3.7-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
+        {"name": "glm-4-flash",            "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
         {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
         {"name": "gemini-3.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
         {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
@@ -455,6 +457,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "debug_log_response":           "DEBUG_LOG_RESPONSE",
     "debug_log_qq_payload":         "DEBUG_LOG_QQ_PAYLOAD",
     "gemini_api_key":               "GEMINI_API_KEY",
+    "zhipu_api_key":                "ZHIPU_API_KEY",
     "gemini_models":                "GEMINI_MODELS",
     "gemini_min_interval":          "GEMINI_MIN_INTERVAL",
     "translate_max_length":         "TRANSLATE_MAX_LENGTH",
@@ -547,6 +550,7 @@ def _load_config() -> dict:
 
     # 7. 从 .env 补充密钥（覆盖 config.json 中的 $ENV: 占位符）
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
+    cfg["zhipu_api_key"]  = _env("ZHIPU_API_KEY", "")
     cfg["tg_bot_token"]   = _env("TG_BOT_TOKEN", "")
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）

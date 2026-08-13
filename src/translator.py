@@ -21,6 +21,7 @@ _trans_cache: dict[tuple[str, str], str] = {}   # (member_name, text_hash) -> tr
 _blog_cache: dict[tuple[str, str], str] = {}    # (member_name, html_hash) -> translated_html
 _blog_structured_cache: dict[tuple[str, str], tuple] = {}   # (member_name, html_hash) -> (结构化块列表, 模型名)
 _MAX_CACHE_SIZE = 1000
+_round_robin_counter: int = 0
 
 _GROUP_DISPLAY: dict[str, str] = {
     "nogizaka46": "乃木坂46",
@@ -74,17 +75,18 @@ def initialize(client: httpx.AsyncClient | None = None) -> None:
     _http_client = client
 
 
-async def _post_json(url: str, payload: dict, custom_client: httpx.AsyncClient = None) -> httpx.Response:
+async def _post_json(url: str, payload: dict, headers: dict | None = None, custom_client: httpx.AsyncClient = None) -> httpx.Response:
     """发送翻译请求。优先复用共享连接池。"""
-    headers = {"Content-Type": "application/json"}
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+    timeout = getattr(cfg, "TRANSLATE_TIMEOUT", 90)
     if custom_client is not None:
-        return await custom_client.post(url, json=payload, headers=headers)
+        return await custom_client.post(url, json=payload, headers=req_headers, timeout=timeout)
     if _http_client is not None:
-        return await _http_client.post(
-            url, json=payload, headers=headers, timeout=cfg.TRANSLATE_TIMEOUT,
-        )
-    async with httpx.AsyncClient(timeout=cfg.TRANSLATE_TIMEOUT) as client:
-        return await client.post(url, json=payload, headers=headers)
+        return await _http_client.post(url, json=payload, headers=req_headers, timeout=timeout)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.post(url, json=payload, headers=req_headers)
 
 def _is_already_chinese(text: str) -> bool:
     """检查文本是否不需要翻译。判断依据：出现假名则必须翻译；纯汉字/英文/符号跳过。"""
@@ -93,8 +95,42 @@ def _is_already_chinese(text: str) -> bool:
             return False
     return True
 
-def _extract_text(data: dict, model_name: str) -> str:
-    """从 Gemini 响应中取出译文，取不到时返回空字符串（由调用方降级下一个模型）。"""
+def _get_active_models() -> list[dict]:
+    """获取当前已配置有效 API Key 的可用模型列表（支持 Gemini 与 智谱 GLM 等多平台）。"""
+    has_gemini = bool(getattr(cfg, "GEMINI_API_KEY", ""))
+    has_zhipu = bool(getattr(cfg, "ZHIPU_API_KEY", ""))
+
+    active: list[dict] = []
+    models = getattr(cfg, "GEMINI_MODELS", []) or []
+    for m in models:
+        name = m.get("name", "")
+        url = m.get("url", "")
+        provider = m.get("provider", "")
+        if not provider:
+            if "bigmodel.cn" in url or name.lower().startswith("glm"):
+                provider = "zhipu"
+            else:
+                provider = "gemini"
+
+        if provider == "zhipu" and has_zhipu:
+            active.append({**m, "provider": "zhipu"})
+        elif provider == "gemini" and has_gemini:
+            active.append({**m, "provider": "gemini"})
+
+    return active
+
+def _get_round_robin_models() -> list[dict]:
+    """按 Round-Robin 算法选取本次请求的模型尝试序列（各平台智能轮流交替，失败自动 Failover）。"""
+    global _round_robin_counter
+    models = _get_active_models()
+    if not models:
+        return []
+    start_idx = _round_robin_counter % len(models)
+    _round_robin_counter += 1
+    return models[start_idx:] + models[:start_idx]
+
+def _extract_text_gemini(data: dict, model_name: str) -> str:
+    """从 Gemini 响应中取出译文。"""
     candidates = data.get("candidates") or []
     if not candidates:
         log_all(f"⚠️ 翻译模型 {model_name} 响应无 candidates", is_error=True)
@@ -120,12 +156,12 @@ def _extract_text(data: dict, model_name: str) -> str:
     )
     return ""
 
-def _parse_gemini_json_response(res_text: str) -> dict[str, str]:
-    """安全解析 Gemini 返回的 JSON 字典。"""
+def _parse_json_response(res_text: str) -> dict[str, str]:
+    """安全解析模型返回的 JSON 字典（支持 ```json 标记剥离）。"""
     res_text = res_text.strip()
     if res_text.startswith("```json"):
         res_text = res_text[7:]
-    if res_text.startswith("```"):
+    elif res_text.startswith("```"):
         res_text = res_text[3:]
     if res_text.endswith("```"):
         res_text = res_text[:-3]
@@ -135,7 +171,86 @@ def _parse_gemini_json_response(res_text: str) -> dict[str, str]:
         if isinstance(data, dict):
             return {str(k): str(v) for k, v in data.items()}
     except Exception as e:
-        log_all(f"⚠️ 解析 Gemini JSON 响应失败: {e}", is_debug=True)
+        log_all(f"⚠️ 解析翻译模型 JSON 响应失败: {e}", is_debug=True)
+    return {}
+
+async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncClient = None) -> str:
+    """按 provider 规范请求单条文本翻译。"""
+    provider = model.get("provider", "gemini")
+    if provider == "zhipu":
+        url = model.get("url") or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        headers = {"Authorization": f"Bearer {cfg.ZHIPU_API_KEY}"}
+        payload = {
+            "model": model["name"],
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 4096,
+        }
+        resp = await _post_json(url, payload, headers=headers, custom_client=custom_client)
+        if resp.status_code == 200:
+            data = resp.json()
+            choices = data.get("choices") or []
+            if choices:
+                return (choices[0].get("message", {}).get("content") or "").strip()
+        elif resp.status_code == 429:
+            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+        else:
+            log_all(f"⚠️ 智谱模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
+            return ""
+    else:
+        url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
+        }
+        resp = await _post_json(url, payload, custom_client=custom_client)
+        if resp.status_code == 200:
+            return _extract_text_gemini(resp.json(), model["name"])
+        elif resp.status_code == 429:
+            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+        else:
+            log_all(f"⚠️ Gemini 模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
+            return ""
+    return ""
+
+async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncClient = None) -> dict[str, str]:
+    """按 provider 规范请求结构化 JSON 字典翻译。"""
+    provider = model.get("provider", "gemini")
+    if provider == "zhipu":
+        url = model.get("url") or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        headers = {"Authorization": f"Bearer {cfg.ZHIPU_API_KEY}"}
+        payload = {
+            "model": model["name"],
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 4096,
+        }
+        resp = await _post_json(url, payload, headers=headers, custom_client=custom_client)
+        if resp.status_code == 200:
+            data = resp.json()
+            choices = data.get("choices") or []
+            if choices:
+                raw_text = choices[0].get("message", {}).get("content") or ""
+                return _parse_json_response(raw_text)
+        elif resp.status_code == 429:
+            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+        else:
+            log_all(f"⚠️ 智谱模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
+    else:
+        url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
+        }
+        resp = await _post_json(url, payload, custom_client=custom_client)
+        if resp.status_code == 200:
+            raw_text = _extract_text_gemini(resp.json(), model["name"])
+            if raw_text:
+                return _parse_json_response(raw_text)
+        elif resp.status_code == 429:
+            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+        else:
+            log_all(f"⚠️ Gemini 模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
     return {}
 
 async def _do_translate_gemini_json(
@@ -144,11 +259,15 @@ async def _do_translate_gemini_json(
     group_type: str,
     custom_client: httpx.AsyncClient = None
 ) -> tuple[dict[str, str], str]:
-    """纯文本段落组批量整体翻译（带 Failover 自动模型降级机制）。
+    """纯文本段落组批量整体翻译（双引擎智能轮流 Round-Robin + 自动 Failover 降级）。
 
     返回 (译文映射, 成功使用的模型名)；无可用结果时返回 ({}, "")。
     """
     if not items:
+        return {}, ""
+
+    try_models = _get_round_robin_models()
+    if not try_models:
         return {}, ""
 
     group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
@@ -158,53 +277,38 @@ async def _do_translate_gemini_json(
         member_name=member_name or "未知成员",
         json_payload=payload_text,
     )
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
-    }
 
     global _limiter
     if _limiter is None:
         _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
 
     async with _limiter:
-        for model in cfg.GEMINI_MODELS:
-            url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+        for model in try_models:
             for attempt in range(2):
                 try:
-                    resp = await _post_json(url, payload, custom_client=custom_client)
-                    if resp.status_code == 200:
-                        raw_text = _extract_text(resp.json(), model["name"])
-                        if raw_text:
-                            parsed_json = _parse_gemini_json_response(raw_text)
-                            if parsed_json:
-                                return parsed_json, model["name"]
-                        break   # 提取/解析失败，切下一个模型
-                    elif resp.status_code == 429:
-                        await asyncio.sleep((attempt + 1) * 3)
+                    parsed_json = await _call_model_json(model, prompt, custom_client=custom_client)
+                    if parsed_json:
+                        return parsed_json, model["name"]
+                    break  # 未返回有效 JSON，切换下一个模型
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429:
+                        await asyncio.sleep((attempt + 1) * 2)
                         continue
-                    else:
-                        log_all(
-                            f"⚠️ 翻译模型 {model['name']} 返回 HTTP {resp.status_code}，改用下一个模型",
-                            is_debug=True,
-                        )
-                        break
+                    break
                 except Exception as e:
-                    log_all(
-                        f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}",
-                        is_debug=True,
-                    )
+                    log_all(f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}", is_debug=True)
                     break
 
     return {}, ""
 
 async def translate_text(text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
-    """普通文本消息翻译接口（维持原有逻辑与模型 Failover）"""
+    """普通文本消息翻译接口（多引擎智能轮番调度与 Failover）"""
     if not text or not text.strip():
         return text
     if _is_already_chinese(text):
         return text
-    if not getattr(cfg, "GEMINI_API_KEY", ""):
+    try_models = _get_round_robin_models()
+    if not try_models:
         return text
     if len(text) > cfg.TRANSLATE_MAX_LENGTH:
         log_all(f"⚠️ 文本过長 ({len(text)} 字符)，跳过翻译", is_debug=True)
@@ -221,43 +325,29 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "",
         member_name=member_name or "未知成员",
         text=text,
     )
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
-    }
 
     global _limiter
     if _limiter is None:
         _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
 
     async with _limiter:
-        for model in cfg.GEMINI_MODELS:
-            url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+        for model in try_models:
             for attempt in range(2):
                 try:
-                    resp = await _post_json(url, payload, custom_client=custom_client)
-                    if resp.status_code == 200:
-                        result = _extract_text(resp.json(), model["name"])
-                        if result:
-                            if len(_trans_cache) >= _MAX_CACHE_SIZE:
-                                _trans_cache.pop(next(iter(_trans_cache)))
-                            _trans_cache[cache_key] = result
-                            return result
-                        break
-                    elif resp.status_code == 429:
-                        await asyncio.sleep((attempt + 1) * 3)
+                    result = await _call_model_text(model, prompt, custom_client=custom_client)
+                    if result:
+                        if len(_trans_cache) >= _MAX_CACHE_SIZE:
+                            _trans_cache.pop(next(iter(_trans_cache)))
+                        _trans_cache[cache_key] = result
+                        return result
+                    break
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429:
+                        await asyncio.sleep((attempt + 1) * 2)
                         continue
-                    else:
-                        log_all(
-                            f"⚠️ 翻译模型 {model['name']} 返回 HTTP {resp.status_code}，改用下一个模型",
-                            is_debug=True,
-                        )
-                        break
+                    break
                 except Exception as e:
-                    log_all(
-                        f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}",
-                        is_debug=True,
-                    )
+                    log_all(f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}", is_debug=True)
                     break
 
     return "[翻译失败]"
@@ -415,7 +505,7 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
        {"type": "img",  "src": "https://..."}]
     无 API key / 空输入 / 无需翻译时返回 ([], "")。
     """
-    if not html or not getattr(cfg, "GEMINI_API_KEY", ""):
+    if not html or (not getattr(cfg, "GEMINI_API_KEY", "") and not getattr(cfg, "ZHIPU_API_KEY", "")):
         return [], ""
 
     cache_key = (member_name, _get_text_hash(html))
@@ -440,8 +530,8 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
     if not items_to_translate:
         return [], ""  # 无需翻译
 
-    # 3. 一次性把整篇博客发给 Gemini（保证整篇文脉全局连贯），>50 段分批
-    batch_size = 50
+    # 3. 批量发送给翻译引擎（保证整篇文脉全局连贯），25 段一批避免单次超时
+    batch_size = 25
     all_keys = list(items_to_translate.keys())
     translated_map: dict[str, str] = {}
     model_name = ""

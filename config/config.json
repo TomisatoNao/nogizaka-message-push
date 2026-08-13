@@ -40,7 +40,7 @@
   // ── 账号系统 ──
   "auth": {
     "enabled": true,
-    "archive_public": true,
+    "archive_public": false,
     "session_hours": 12
   },
 
@@ -65,6 +65,7 @@
   "translate": true,
   "gemini_models": [
     {"name": "gemini-3.7-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
+    {"name": "glm-4-flash", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
     {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
     {"name": "gemini-3.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
     {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},

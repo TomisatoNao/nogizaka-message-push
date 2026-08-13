@@ -35,29 +35,54 @@ DIM = "\033[90m"
 RESET = "\033[0m"
 
 
-def _build_payload() -> dict:
-    """与 translator.translate_text 完全一致的请求体。"""
+def _build_payload() -> tuple[dict, str]:
+    """与 translator.translate_text 完全一致的请求体与 prompt。"""
     prompt = _PROMPT_TEMPLATE.format(
         group_name="乃木坂46",
         member_name="与田祐希",
         text=SAMPLE,
     )
-    return {
+    payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
     }
+    return payload, prompt
 
 
 async def test_one(model: dict) -> dict:
-    """返回单个模型的测试结果（含响应结构诊断信息）。"""
+    """返回单个模型的测试结果（含响应结构诊断信息，支持 Gemini / 智谱）。"""
     name = model["name"]
-    url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
-    result: dict = {"name": name, "text": "", "elapsed": 0.0, "error": None,
+    url = model.get("url", "")
+    provider = model.get("provider", "")
+    if not provider:
+        provider = "zhipu" if ("bigmodel.cn" in url or name.lower().startswith("glm")) else "gemini"
+
+    result: dict = {"name": name, "provider": provider, "text": "", "elapsed": 0.0, "error": None,
                     "finish": "", "parts": [], "usage": {}}
     t0 = time.time()
     try:
+        payload_gemini, prompt = _build_payload()
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=_build_payload())
+            if provider == "zhipu":
+                if not cfg.ZHIPU_API_KEY:
+                    result["error"] = "缺少 ZHIPU_API_KEY"
+                    return result
+                req_url = url or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+                headers = {"Authorization": f"Bearer {cfg.ZHIPU_API_KEY}", "Content-Type": "application/json"}
+                req_body = {
+                    "model": name,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 4096,
+                }
+                resp = await client.post(req_url, json=req_body, headers=headers)
+            else:
+                if not cfg.GEMINI_API_KEY:
+                    result["error"] = "缺少 GEMINI_API_KEY"
+                    return result
+                req_url = f"{url}?key={cfg.GEMINI_API_KEY}"
+                resp = await client.post(req_url, json=payload_gemini)
+
         result["elapsed"] = time.time() - t0
 
         if resp.status_code != 200:
@@ -72,6 +97,17 @@ async def test_one(model: dict) -> dict:
             result["error"] = data["error"].get("message", str(data["error"]))[:100]
             return result
 
+        if provider == "zhipu":
+            choices = data.get("choices") or []
+            if not choices:
+                result["error"] = "无 choices 响应"
+                return result
+            text = choices[0].get("message", {}).get("content", "")
+            result["finish"] = choices[0].get("finish_reason", "stop")
+            result["usage"] = data.get("usage") or {}
+            result["text"] = text.strip()
+            return result
+
         candidate = (data.get("candidates") or [{}])[0]
         parts = (candidate.get("content") or {}).get("parts") or []
         result["finish"] = candidate.get("finishReason", "?")
@@ -81,7 +117,6 @@ async def test_one(model: dict) -> dict:
             for p in parts
         ]
 
-        # 生产逻辑应取第一个非思考段 —— 这里同样这么取，以便发现 parts[0] 是思考段的情况
         text = next(
             (p["text"] for p in parts if p.get("text") and not p.get("thought")),
             "",
@@ -99,13 +134,14 @@ async def test_one(model: dict) -> dict:
 
 
 async def main() -> None:
-    print(f"\n{BOLD}═══ nogizaka-message-push 模型序列测试 ═══{RESET}")
+    print(f"\n{BOLD}═══ nogizaka-message-push 模型序列测试（Gemini + 智谱 GLM）═══{RESET}")
     print(f"  模型数: {len(cfg.GEMINI_MODELS)}")
-    print(f"  API Key: {'已配置' if cfg.GEMINI_API_KEY else '❌ 未配置'}")
-    print(f"  测试文本: {len(SAMPLE)} 字 | maxOutputTokens: 4096 | temperature: 0.3\n")
+    print(f"  Gemini API Key: {'✓ 已配置' if cfg.GEMINI_API_KEY else '✗ 未配置'}")
+    print(f"  智谱 API Key:   {'✓ 已配置' if cfg.ZHIPU_API_KEY else '✗ 未配置'}")
+    print(f"  测试文本: {len(SAMPLE)} 字 | maxTokens: 4096 | temperature: 0.3\n")
 
-    if not cfg.GEMINI_API_KEY:
-        print(f"{YELLOW}  GEMINI_API_KEY 未配置，无法测试{RESET}\n")
+    if not cfg.GEMINI_API_KEY and not cfg.ZHIPU_API_KEY:
+        print(f"{YELLOW}  GEMINI_API_KEY 与 ZHIPU_API_KEY 均未配置，无法测试{RESET}\n")
         return
 
     total = len(cfg.GEMINI_MODELS)

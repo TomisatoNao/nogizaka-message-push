@@ -518,25 +518,32 @@
   </div>
 
   <div class="card">
-    <h2>🌐 Gemini AI 翻译设置</h2>
+    <h2>🌐 多引擎 AI 翻译设置（Gemini + 智谱 GLM-4 智能轮番调度）</h2>
     <div class="grid">
-      <label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 Gemini 翻译</label>
-      <label class="field">Gemini 最小调用间隔（秒）
+      <label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 AI 智能翻译</label>
+      <label class="field">调用限速间隔（秒）
         <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
       </label>
-      <label class="field">翻译超时（秒）
+      <label class="field">翻译单次超时（秒）
         <input id="translateTimeout" min="1" type="number"/>
       </label>
     </div>
-    <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
-      <span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
-      <span id="geminiKeyStatus"></span>
-      <button class="btn small" id="btnFillGeminiKey" type="button">填写</button>
+    <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Google Gemini Key (.env)</span>
+        <span id="geminiKeyStatus"></span>
+        <button class="btn small" id="btnFillGeminiKey" type="button">填写</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span style="font-size:12.5px; color:var(--muted); min-width:180px;">智谱开放平台 Key (.env)</span>
+        <span id="zhipuKeyStatus"></span>
+        <button class="btn small" id="btnFillZhipuKey" type="button">填写</button>
+      </div>
     </div>
     <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 翻译模型设置说明</summary>
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 双引擎智能轮番调用与自动容灾说明</summary>
       <div class="hint" style="margin-top: 6px;">
-        Gemini API Key 存在 <code>.env</code> 文件中；模型列表及 Prompt 参数请在「🛠️ 高级（JSON）」配置中编辑。
+        同时配置 Gemini 与智谱 API Key 时，系统在每次翻译请求时<b>智能交替轮流分发（Round-Robin）</b>，分摊单家配额并大幅提升并发响应速度；当任意一家遭遇限频（429）或网络故障时，<b>自动无缝降级</b>至另一引擎模型。
       </div>
     </details>
   </div>
@@ -1430,6 +1437,7 @@ function renderGeneral() {
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
+  if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
   renderQqBots();
 }
 
@@ -2015,6 +2023,12 @@ $("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
   "填写 Gemini API Key", "保存并热重载后立即生效（翻译每次调用时读取最新值）。",
   [{ env: "GEMINI_API_KEY", label: "API Key", required: true, placeholder: "AIza...",
      help: "Google AI Studio（aistudio.google.com/apikey）创建，免费额度即可用。" }], null));
+if ($("btnFillZhipuKey")) {
+  $("btnFillZhipuKey").addEventListener("click", () => openSecretDialog(
+    "填写智谱开放平台 API Key", "保存并热重载后立即生效（与 Gemini 模型智能轮番交替调用）。",
+    [{ env: "ZHIPU_API_KEY", label: "API Key", required: true, placeholder: "xxx.yyy...",
+       help: "在智谱开放平台（open.bigmodel.cn）控制台创建，GLM-4-Flash 永久免费。" }], null));
+}
 
 // ── 账号池 ───────────────────────────────────────
 function credBadge(accId) {
