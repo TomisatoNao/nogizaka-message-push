@@ -12,7 +12,6 @@
 import argparse
 import asyncio
 import json
-import os
 import re
 import sqlite3
 import sys
@@ -27,10 +26,10 @@ from bs4 import BeautifulSoup
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.blog_fetcher import init_blog_db, _download_images, _normalize_date
-from src.sources.sakurazaka import _parse_date as sakura_parse_date
-from src.sources.nogizaka import _parse_jsonp as nogi_parse_jsonp
-from src import translator
+from src.blog_fetcher import init_blog_db, _download_images, _normalize_date  # noqa: E402
+from src.sources.sakurazaka import _parse_date as sakura_parse_date  # noqa: E402
+from src.sources.nogizaka import _parse_jsonp as nogi_parse_jsonp  # noqa: E402
+from src import translator  # noqa: E402
 
 def safe_log(msg: str):
     """防止 Windows 命令行编码造成的 Print 崩溃"""
@@ -98,9 +97,9 @@ async def resolve_target(client: httpx.AsyncClient, url_or_ct: str, group_opt: s
     return group.lower(), ct, single_url
 
 async def archive_single_post(client: httpx.AsyncClient, db: sqlite3.Connection, group_key: str, post_url: str, translate: bool = False):
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     safe_log(f"📌 归档单篇博客: {post_url}")
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     
     r = await client.get(post_url, timeout=25.0)
     r.encoding = "utf-8"
@@ -142,9 +141,9 @@ async def archive_single_post(client: httpx.AsyncClient, db: sqlite3.Connection,
     await _process_and_save_posts(client, db, group_key, [post_item], translate=translate)
 
 async def archive_nogizaka(client: httpx.AsyncClient, db: sqlite3.Connection, ct: str, translate: bool = False):
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     safe_log(f"💜 开始归档【乃木坂46】成员 ct={ct} 的全量博客...")
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     
     api_url = "https://www.nogizaka46.com/s/n46/api/list/blog"
     headers = {"accept": "application/json", "x-requested-with": "XMLHttpRequest"}
@@ -214,9 +213,9 @@ async def archive_nogizaka(client: httpx.AsyncClient, db: sqlite3.Connection, ct
     await _process_and_save_posts(client, db, "nogizaka", all_posts, translate=translate)
 
 async def archive_sakurazaka(client: httpx.AsyncClient, db: sqlite3.Connection, ct: str, translate: bool = False):
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     safe_log(f"🌸 开始归档【樱坂46】成员 ct={ct} 的全量博客...")
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     
     page = 0
     all_posts = []
@@ -320,9 +319,9 @@ async def archive_sakurazaka(client: httpx.AsyncClient, db: sqlite3.Connection, 
     await _process_and_save_posts(client, db, "sakurazaka", detail_posts, translate=translate)
 
 async def archive_hinatazaka(client: httpx.AsyncClient, db: sqlite3.Connection, ct: str, translate: bool = False):
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     safe_log(f"☀️ 开始归档【日向坂46】成员 ct={ct} 的全量博客...")
-    safe_log(f"==========================================")
+    safe_log("==========================================")
     
     page = 0
     all_posts = []
@@ -425,7 +424,7 @@ async def _process_and_save_posts(client: httpx.AsyncClient, db: sqlite3.Connect
             content_json = ""
             translation_model = ""
             if translate:
-                safe_log(f"   🌐 [AI 翻译中...]")
+                safe_log("   🌐 [AI 翻译中...]")
                 structured, model_name = await translator.translate_blog_structured(
                     p["body_html"], p["author"], group_key, custom_client=client
                 )

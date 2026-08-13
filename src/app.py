@@ -2,7 +2,6 @@
 # app.py — 程序入口：初始化所有模块、驱动主轮询循环
 # ============================================================
 import asyncio
-import json
 import os
 import random
 import signal
@@ -687,10 +686,12 @@ async def main() -> None:
                 if not bot:
                     return False, f"找不到指定的官方 Bot: {bot_name}"
                 if mode == "group":
-                    if not bot.group_openid: return False, "未配置群 openid"
+                    if not bot.group_openid:
+                        return False, "未配置群 openid"
                     coro = bot.send_group_text(bot.group_openid, text)
                 else:
-                    if not bot.target_openid: return False, "未配置单聊 openid"
+                    if not bot.target_openid:
+                        return False, "未配置单聊 openid"
                     coro = bot.send_private_text(bot.target_openid, text)
             else:
                 return False, f"不支持的通道: {channel}"

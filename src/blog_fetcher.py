@@ -9,7 +9,6 @@ from src.logger import log_all
 from src.sources import hinatazaka, nogizaka, sakurazaka
 from pathlib import Path as _Path
 import re as _re
-import os as _os
 
 BLOG_IMAGE_DIR = _Path("data/blog_images")
 
@@ -118,10 +117,6 @@ def init_blog_db() -> sqlite3.Connection:
             pass  # 列已存在
     conn.commit()
     return conn
-
-
-import json
-from pathlib import Path
 
 _RECORDS_PATH = Path(__file__).resolve().parent.parent / "state" / "blog_records.json"
 

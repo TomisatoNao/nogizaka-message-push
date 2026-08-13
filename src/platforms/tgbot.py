@@ -141,7 +141,9 @@ class TGBot:
                 pm = ParseMode.HTML if cap else None
                 media.append(InputMediaPhoto(media=url, caption=cap, parse_mode=pm))
                 
-            action = lambda b=media: self._bot.send_media_group(chat_id=self.target_chat, media=b)
+            def action(b=media):
+                return self._bot.send_media_group(chat_id=self.target_chat, media=b)
+
             ok = await self._send_with_retry("Telegram 媒体组", action)
             if not ok:
                 all_ok = False

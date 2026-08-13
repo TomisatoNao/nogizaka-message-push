@@ -276,7 +276,7 @@ def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = N
     except Exception:
         pass
 
-    lines = [l.strip() for l in (html_or_text or "").split("\n") if l.strip()]
+    lines = [line.strip() for line in (html_or_text or "").split("\n") if line.strip()]
     return [("\n".join(lines), "")] if lines else []
 
 

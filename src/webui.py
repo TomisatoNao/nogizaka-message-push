@@ -23,6 +23,7 @@ import os
 import random
 import re
 import shutil
+import sqlite3
 import sys
 import threading
 import time as _time
