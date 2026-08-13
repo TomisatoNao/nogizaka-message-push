@@ -4,6 +4,7 @@ data/web_credentials/
 
 # 运行时产生的数据目录
 data/
+state/
 config/history/
 
 # 日志

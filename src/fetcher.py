@@ -80,12 +80,12 @@ async def _handle_message(member: dict, msg: dict,
     if cfg.ENABLE_TRANSLATION and original_text.strip():
         raw = await translate_text(original_text, m_name, group_type)
         if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
-            log_all(f"⚠️ {m_name} 翻译失败，仅推送原文 ({raw})", is_error=True)
+            log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 翻译失败，仅推送原文 ({raw})", is_error=True)
         elif raw.strip() == original_text.strip():
-            log_all(f"ℹ️ {m_name} 翻译结果与原文一致，跳过翻译推送")
+            log_all(f"ℹ️ [成员ID: {m_id} | 名字: {m_name}] 翻译结果与原文一致，跳过翻译推送", is_debug=True)
         else:
             translated = raw
-            log_all(f"🌐 翻译结果 ({m_name}): {translated[:150]}", is_debug=True)
+            log_all(f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成: {translated[:100]}...", is_debug=True)
 
     # 归档（后台执行，不阻塞推送；开关 archive.enabled）
     archive.schedule_archive(member, msg, translated)
@@ -93,10 +93,10 @@ async def _handle_message(member: dict, msg: dict,
     # 推送 QQ
     chain = build_message_chain(m_name, updated, msg, translated)
     if not await send_member_message(member, chain):
-        log_all(f"⚠️ {m_name} 消息推送失败，保留时间戳等待下次重试", is_error=True)
+        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息推送失败，保留时间戳等待下次重试", is_error=True)
         return False
     else:
-        log_all(f"📤 {m_name} 成功分发 1 条消息 (ID: {msg_id})", is_debug=True)
+        log_all(f"📤 [成员ID: {m_id} | 名字: {m_name}] 成功分发 1 条消息 (ID: {msg_id})", is_debug=True)
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
     l_time_ref[0] = updated
@@ -123,7 +123,7 @@ async def _fetch_member_messages(member: dict):
 
     cred = ACCOUNT_CREDS.get(account_id)
     if not cred:
-        log_all(f"🚨 {m_name} 账号 {account_id} 无可用凭据", is_error=True)
+        log_all(f"🚨 [成员ID: {m_id} | 名字: {m_name}] 账号 {account_id} 无可用凭据", is_error=True)
         _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, f"账号 {account_id} 无可用凭据")
         return None
 
@@ -170,8 +170,6 @@ async def _fetch_member_messages(member: dict):
             if is_mobile:
                 headers = get_mobile_headers(account_id)
             else:
-                # .get 防御：认证方式刚切换、凭证尚未重建时结构可能错位，
-                # 缺字段应表现为 401 触发告警，而不是 KeyError 炸掉本轮
                 cookie_str = "; ".join(f"{k}={v}" for k, v in (cred.get("cookies") or {}).items())
                 headers = get_web_headers(
                     group_type, cred.get("token", ""),
@@ -181,6 +179,7 @@ async def _fetch_member_messages(member: dict):
                 )
                 headers["cookie"] = cookie_str
 
+            log_all(f"🔍 [成员ID: {m_id} | 名字: {m_name}] 请求 API (尝试 {attempt}/{MAX_FETCH_ATTEMPTS})", is_debug=True)
             async with _semaphore:
                 resp = await _http_client.get(url, headers=headers)
 
@@ -188,7 +187,7 @@ async def _fetch_member_messages(member: dict):
                 try:
                     msgs = resp.json().get("messages", [])
                 except Exception:
-                    log_all(f"🚨 {m_name} API 响应不是合法 JSON", is_error=True)
+                    log_all(f"🚨 [成员ID: {m_id} | 名字: {m_name}] API 响应 HTTP 200 但不是合法 JSON", is_error=True)
                     _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "API 响应非 JSON")
                     return None
 
@@ -201,10 +200,10 @@ async def _fetch_member_messages(member: dict):
                     ],
                     key=lambda x: x["updated_at"],
                 )
-                if new_msgs and any(
-                    str(m.get("id") or m.get("updated_at", "")) not in id_set
-                    for m in new_msgs
-                ):
+                truly_new = [m for m in new_msgs if str(m.get("id") or m.get("updated_at", "")) not in id_set]
+                log_all(f"📥 [成员ID: {m_id} | 名字: {m_name}] HTTP 200 | 原始消息 {len(msgs)} 条 | 新增待推送 {len(truly_new)} 条", is_debug=True)
+
+                if truly_new:
                     log_response(resp.text)
 
                 _health_tracker().record_member_fetch(m_name, True)
@@ -214,12 +213,12 @@ async def _fetch_member_messages(member: dict):
                 log_response(resp.text)
                 body_snippet = resp.text[:300] if resp.text else "(空响应)"
                 if attempt >= MAX_FETCH_ATTEMPTS:
-                    log_all(f"🔥 {m_name} 已达最大尝试次数，放弃本次轮询 | {body_snippet}", is_error=True)
+                    log_all(f"🔥 [成员ID: {m_id} | 名字: {m_name}] HTTP 401 达到最大尝试次数，放弃轮询 | {body_snippet}", is_error=True)
                     _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, f"401 认证失败 (已重试{MAX_FETCH_ATTEMPTS}次)")
                     return None
                 log_all(
-                    f"⚠️ {m_name} 触发 401，刷新账号 {account_id} token "
-                    f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})... | {body_snippet}",
+                    f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 触发 HTTP 401，尝试刷新账号 {account_id} token "
+                    f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})...",
                     is_error=True,
                 )
                 if is_mobile:

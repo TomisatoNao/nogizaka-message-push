@@ -41,7 +41,6 @@ _DEFAULTS: dict = {
         {"name": "gemini-3.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
         {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
         {"name": "gemini-3.1-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
-        {"name": "gemini-3-flash",        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent"},
         {"name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
         {"name": "gemini-2.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"},
     ],

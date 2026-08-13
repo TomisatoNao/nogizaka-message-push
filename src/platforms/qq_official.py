@@ -289,7 +289,7 @@ class QQOfficialBot:
             return await self._post_json(url, {"content": text[:1900], "msg_type": 0}, max_retries) is not None
 
     async def send_translation_qq(self, scope: str, target_openid: str, pairs: list[tuple[str, str]]) -> bool:
-        """发送 QQ 中日对照正文（日文粗体**，中文斜体*，双语对之间零宽空格行，切分<=1800字符）。"""
+        """发送 QQ 中日对照正文（日文斜体*，中文常规体，双语对之间零宽空格行，切分<=1800字符）。"""
         if not pairs or not target_openid:
             return True
             
@@ -318,8 +318,8 @@ class QQOfficialBot:
         for item in pairs:
             if isinstance(item, tuple):
                 ja, zh = item
-                ja_fmt = _format_lines(ja, "**")
-                zh_fmt = _format_lines(zh, "*")
+                ja_fmt = _format_lines(ja, "*")
+                zh_fmt = _format_lines(zh, "")
                 block = ja_fmt
                 if zh_fmt:
                     block += f"\n{zh_fmt}"

@@ -26,6 +26,7 @@ def _parse_date(raw: str) -> str:
 async def fetch_posts(client: httpx.AsyncClient, limit: int = 30) -> list[dict]:
     try:
         r = await client.get(SAKURA_LIST_URL)
+        r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
         container = soup.find("ul", class_="com-blog-part")
         if not container:
@@ -56,6 +57,7 @@ async def fetch_html(client: httpx.AsyncClient, url: str) -> str:
     """获取正文原始 HTML。"""
     try:
         r = await client.get(url)
+        r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
         body = soup.find("div", class_="box-article") or soup
         return str(body)
@@ -67,6 +69,7 @@ async def fetch_detail(client: httpx.AsyncClient, url: str) -> tuple[list[str], 
     """返回 (图片列表, 精确发送时间, 正文纯文本)。"""
     try:
         r = await client.get(url)
+        r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
         body = soup.find("div", class_="box-article") or soup
         imgs = [

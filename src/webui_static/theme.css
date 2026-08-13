@@ -153,6 +153,102 @@ body {
 .theme-toggle:hover { border-color: var(--accent); background: var(--accent-soft); }
 .theme-toggle:active { transform: scale(.93); }
 
+/* ── 统一 Header 三段式布局 CSS（管理页与归档页共用） ─────────── */
+header.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  padding: 0 24px;
+  background: color-mix(in srgb, var(--card-solid) 85%, transparent);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  z-index: 1000 !important;
+  overflow: visible !important;
+}
+
+.header-brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.header-brand .brand-logo {
+  display: flex; align-items: center; gap: 8px;
+  text-decoration: none; color: var(--text-strong);
+  font-weight: 750; font-size: 16px; letter-spacing: -0.01em;
+}
+.header-brand .brand-logo:hover { opacity: 0.9; }
+.header-brand .brand-icon { font-size: 18px; }
+
+.header-nav { display: flex; align-items: center; gap: 12px; overflow: visible !important; }
+.header-nav .nav-tabs {
+  display: inline-flex;
+  background: color-mix(in srgb, var(--card) 60%, var(--bg) 40%);
+  padding: 3px; border-radius: 999px; gap: 2px;
+  border: 1px solid var(--border-soft);
+}
+.header-nav .nav-tab {
+  border: none; background: transparent; color: var(--muted);
+  padding: 5px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
+  font-weight: 500; transition: var(--tr); display: inline-flex; align-items: center; gap: 5px;
+}
+.header-nav .nav-tab:hover { color: var(--text); }
+.header-nav .nav-tab.active {
+  background: var(--card-solid); color: var(--text-strong);
+  font-weight: 650; box-shadow: var(--shadow-sm);
+}
+
+/* 成员工具下拉组件（z-index: 9999 绝对浮于最顶层 + 鼠标安全热区 bridge） */
+.header-dropdown { position: relative; display: inline-block; overflow: visible !important; z-index: 9999 !important; }
+.header-dropdown .dropdown-toggle { white-space: nowrap; }
+.header-dropdown .dropdown-menu {
+  position: absolute; top: 100%; left: 0;
+  margin-top: 4px;
+  background: var(--card-solid); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px; min-width: 185px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18); backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: none; flex-direction: column; gap: 2px; z-index: 9999 !important;
+}
+/* 鼠标防脱离安全桥（Hover Bridge）：透明填充 12px 间隙 */
+.header-dropdown .dropdown-menu::before {
+  content: ""; position: absolute; top: -12px; left: 0; right: 0; height: 12px; background: transparent;
+}
+.header-dropdown:hover .dropdown-menu,
+.header-dropdown:focus-within .dropdown-menu,
+.header-dropdown.open .dropdown-menu { display: flex; animation: navDlgIn .15s ease-out; }
+@keyframes navDlgIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+.dropdown-item {
+  border: none; background: transparent; color: var(--text);
+  padding: 8px 12px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; text-align: left; display: flex; align-items: center; gap: 8px;
+  transition: var(--tr-fast); width: 100%; white-space: nowrap; text-decoration: none;
+}
+.dropdown-item:hover { background: var(--accent-soft); color: var(--accent); }
+
+.header-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.header-actions .user-badge {
+  font-size: 13px; color: var(--muted); font-weight: 500;
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.subdued-btn {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: var(--muted) !important;
+  box-shadow: none !important;
+}
+.subdued-btn:hover {
+  color: var(--err) !important;
+  background: var(--err-soft) !important;
+}
+
+@media (max-width: 768px) {
+  header.app-header { padding: 0 12px; height: auto; min-height: 54px; flex-wrap: wrap; gap: 8px; padding-top: 6px; padding-bottom: 6px; }
+  .header-nav { order: 3; width: 100%; justify-content: flex-start; flex-wrap: wrap; padding-bottom: 4px; overflow: visible !important; }
+  .header-actions { gap: 6px; }
+  .header-actions .user-badge { font-size: 12px; }
+}
+
 /* 主题切换时的整体柔和过渡（首帧不过渡，避免闪烁） */
 .theme-ready,
 .theme-ready header,

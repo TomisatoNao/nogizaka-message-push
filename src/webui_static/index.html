@@ -146,6 +146,40 @@
   dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
 
+  /* 可折叠帮助提示盒（Help Box） */
+  details.help-box {
+    background: color-mix(in srgb, var(--card-soft) 85%, transparent);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    padding: 8px 14px;
+    transition: border-color var(--tr);
+  }
+  details.help-box[open] {
+    border-color: var(--border);
+    background: var(--card-solid);
+  }
+  details.help-box summary {
+    font-weight: 500;
+    transition: color var(--tr);
+  }
+  /* Tooltip 提示图标 */
+  .tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    cursor: help;
+    color: var(--muted);
+    transition: color var(--tr), transform var(--tr);
+    user-select: none;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .tooltip-icon:hover {
+    color: var(--accent);
+    transform: scale(1.15);
+  }
+
   /* ── 手机端适配（≤640px） ──────────────────────── */
   @media (max-width: 640px) {
     /* 顶栏换行，spacer 隐藏，按钮紧凑 */
@@ -195,87 +229,106 @@
 </style>
 </head>
 <body>
-<header>
-<h1>⚙️ 坂道监控 · 配置管理</h1>
-<div class="spacer"></div>
-<button class="btn" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
-<button class="btn danger" hidden="" id="btnRestart" title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
-<div style="width: 10px;"></div> <!-- 小分隔 -->
-<button class="theme-toggle" title="切换主题" type="button">🖥️</button>
-<span class="hint" hidden="" id="whoami" style="margin:0"></span>
-<button class="btn" hidden="" id="btnLogout">登出</button>
-<a class="btn primary" href="/archive" title="浏览已归档的成员消息">📚 消息归档</a>
+<header class="app-header">
+  <!-- 1. 左侧 Brand 品牌区 -->
+  <div class="header-brand">
+    <a href="/" class="brand-logo" title="坂道监控系统管理">
+      <span class="brand-icon">🌸</span>
+      <span class="brand-title">坂道监控</span>
+    </a>
+  </div>
+
+  <!-- 2. 中间 Navigation 导航区（精简分类后的管理 Tab） -->
+  <nav class="header-nav">
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="status"><span class="tab-icon">📊</span> 状态</button>
+      <button class="nav-tab" data-tab="monitors"><span class="tab-icon">👥</span> 账号与成员</button>
+      <button class="nav-tab" data-tab="channels"><span class="tab-icon">📢</span> 推送通道</button>
+      <button class="nav-tab" data-tab="system"><span class="tab-icon">⚙️</span> 系统设置</button>
+      <button class="nav-tab" id="tabUsers" hidden data-tab="users"><span class="tab-icon">🔑</span> 用户</button>
+      <button class="nav-tab" data-tab="advanced"><span class="tab-icon">🛠️</span> 高级</button>
+    </div>
+  </nav>
+
+  <!-- 3. 右侧 Actions 系统与用户控制区 -->
+  <div class="header-actions">
+    <!-- 管理控制区 (重新载入 / 重启主程序) -->
+    <button class="btn small" id="btnReloadFile" title="放弃未保存修改，重新读取 config.json">↺ 重新载入</button>
+    <button class="btn small danger" hidden="" id="btnRestart" title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
+    
+    <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
+    <span id="whoami" class="user-badge" hidden=""></span>
+    <a href="/archive" id="archiveLink" class="btn primary app-switch-btn" title="返回已归档的消息与博客">📚 返回归档</a>
+    <button id="btnLogout" hidden="" class="btn subdued-btn">🚪 登出</button>
+  </div>
 </header>
 <main>
-<nav class="tabs">
-<button class="active" data-tab="status">状态</button>
-<button data-tab="accounts">账号池</button>
-<button data-tab="monitors">监控成员</button>
-<button data-tab="channels">推送通道</button>
-<button data-tab="system">系统设置</button>
-<button data-tab="advanced">高级</button>
-</nav>
 <!-- ── 状态 ─────────────────────────────── -->
 <section class="tab active" id="tab-status">
-<div class="card">
-<h2>巡查</h2>
-<div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
-<span id="stCycle">—</span>
-<span id="stNext" style="color:var(--muted)">—</span>
-<button class="btn" hidden="" id="btnPollNow">⏩ 立即巡查</button>
-<button class="btn" hidden="" id="btnTestPush">📨 测试推送</button>
-<span class="hint" id="pollFeedback" style="margin:0"></span>
-</div>
-<p class="hint" id="stHint"></p>
-</div>
-<div class="card">
-<h2>账号 Token</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>账号</th><th>剩余时间</th><th>状态</th></tr></thead>
-<tbody id="stTokens"></tbody>
-</table></div>
-<p class="hint">Token 剩余不足 5 分钟时主程序会在下一轮巡查前自动续期，无需干预；只有显示「失效」时才需要重新填凭证。</p>
-</div>
-<div class="card">
-<h2>推送通道（自上次状态摘要以来）</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
-<tbody id="stChannels"></tbody>
-</table></div>
-</div>
-<div class="card">
-<h2>成员</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>成员</th><th>拉取</th><th>推送</th><th>最近错误</th></tr></thead>
-<tbody id="stMembers"></tbody>
-</table></div>
-</div>
-<div class="card">
-<h2>近期错误（最多 20 条）</h2>
-<div class="empty" id="stErrors">（无）</div>
-</div>
+  <!-- Card 1: 核心运行 KPI 与快捷控制 -->
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+      <h2 style="margin:0; flex:1;">📊 系统运行状态</h2>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="btn small" hidden="" id="btnPollNow" type="button">⏩ 立即巡查</button>
+        <button class="btn small" hidden="" id="btnTestPush" type="button">📨 测试推送</button>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; background:var(--card-soft); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-soft);">
+      <div><span style="font-size:12px; color:var(--muted); display:block;">巡查周期</span><span id="stCycle" style="font-weight:600; font-size:14px;">—</span></div>
+      <div><span style="font-size:12px; color:var(--muted); display:block;">下一次巡查倒计时</span><span id="stNext" style="font-weight:600; font-size:14px; color:var(--accent);">—</span></div>
+      <span class="hint" id="pollFeedback" style="margin:0; font-size:13px;"></span>
+    </div>
+    <p class="hint" id="stHint" style="margin-top:10px; margin-bottom:0;"></p>
+  </div>
+
+  <!-- Card 2: 账号 Token 健康状态 -->
+  <div class="card">
+    <h2>🔑 账号 Token 凭证健康状态</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>账号 ID</th><th>剩余有效时间</th><th>状态</th></tr></thead>
+        <tbody id="stTokens"></tbody>
+      </table>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ Token 续期机制说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        Token 剩余不足 5 分钟时，主程序会在下一轮巡查前自动续期，无需手动干预；只有显示「失效」时才需要重新填写凭证。
+      </div>
+    </details>
+  </div>
+
+  <!-- Card 3: 推送通道概览 -->
+  <div class="card">
+    <h2>📢 推送通道统计（自上次摘要）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
+        <tbody id="stChannels"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Card 4: 近期运行错误 -->
+  <div class="card">
+    <h2>⚠️ 近期运行错误（最多 20 条）</h2>
+    <div class="empty" id="stErrors">（无）</div>
+  </div>
 </section>
-<!-- ── 基本设置 ─────────────────────────────── -->
-<!-- ── 账号池 ─────────────────────────────── -->
-<section class="tab" id="tab-accounts">
+<!-- ── 账号与成员 ─────────────────────────────── -->
+<section class="tab" id="tab-monitors">
 <div class="card">
 <h2>账号池（凭证在 .env，按账号名大写自动匹配）</h2>
 <div class="table-wrap"><table>
-<thead><tr><th>账号 ID</th><th>团体</th><th>登录方式</th><th>App 标签</th><th>凭证 (.env)</th><th></th></tr></thead>
+<thead><tr><th>账号 ID</th><th>团体</th><th>登录方式</th><th>App 标签</th><th>凭证 (.env) <span class="tooltip-icon" title="凭证可以点每行的「填凭证」直接填写（存入 .env 并立即生效）。也可以手动编辑 .env：web 账号为 账号ID_TOKEN 和 账号ID_COOKIE；mobile 账号为 账号ID_REFRESH_TOKEN。新账号需保存热重载后填写。">ℹ️</span></th><th></th></tr></thead>
 <tbody id="accountRows"></tbody>
 </table></div>
 <div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
 <div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
-<p class="hint">凭证可以点每行的「填凭证」直接填写（存入 <code>.env</code> 并立即轮换生效），也可以手动编辑 <code>.env</code>（手动改需重启）：<br/>
-        · web 账号 → <code>账号ID大写_TOKEN</code> + <code>账号ID大写_COOKIE</code><br/>
-        · mobile 账号 → <code>账号ID大写_REFRESH_TOKEN</code><br/>
-        ⚠️ 新账号要先「保存并热重载」把账号写进 config.json，然后才能填凭证。</p>
 </div>
-</section>
-<!-- ── 监控成员 ─────────────────────────────── -->
-<section class="tab" id="tab-monitors">
 <div class="card">
-<h2>监控成员</h2>
+<h2>监控成员配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。">ℹ️</span></h2>
 <div class="table-wrap"><table>
 <thead><tr><th>成员 ID</th><th>名字</th><th>账号</th><th></th></tr></thead>
 <tbody id="memberRows"></tbody>
@@ -285,188 +338,316 @@
 <button class="btn" id="btnAddMember">＋ 手动添加</button>
 <button class="btn" id="btnPickMember">📋 从账号拉取成员列表</button>
 </div>
-<p class="hint">成员 ID 可用 <code>python tools/list_members.py &lt;账号ID&gt;</code> 查询；QQ 群留空则该成员只走 TG / 官方 Bot。</p>
 </div>
-<div class="card">
-<h2>博客抓取</h2>
-<div class="grid">
-<label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
-<div style="display:flex; flex-direction:column; gap:4px;">
-<span style="font-size:12.5px; color:var(--muted)">团体独立开关</span>
-<div style="display:flex; gap:12px; margin-top:4px; flex-wrap:wrap">
-<label class="switch"><input id="blogHinatazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>日向坂</label>
-<label class="switch"><input id="blogNogizaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>乃木坂</label>
-<label class="switch"><input id="blogSakurazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>樱坂</label>
-</div>
-</div>
-<label class="field">博客日间间隔（min / max 秒）
-          <span class="pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
-</label>
-<label class="field">博客深夜间隔（min / max 秒）
-          <span class="pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
-</label>
-</div>
-</div>
-<div style="margin-top:14px; font-size:13px; color:var(--muted)">
-  提示：博客具体的推送目标渠道，请在「推送通道」对应卡片中为各通道开启「推博客」。
-</div>
-</div></section><section class="tab" id="tab-channels"><div class="card">
-<h2>QQ 官方 Bot（数量不限；Client Secret 在 .env）</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>名称</th><th>App ID</th><th>个人 OpenID</th><th>群 OpenID</th><th>推送成员</th><th>推博客</th><th>推告警</th><th>Client Secret (.env)</th><th>状态</th><th></th></tr></thead>
-<tbody id="qqBotRows"></tbody>
-</table></div>
-<div style="margin-top:12px"><button class="btn" id="btnAddQqBot">＋ 添加 Bot</button></div>
-<p class="hint" id="qqBotHint">App ID 直接在表格里填；Client Secret 点该行「填写」存入 <code>.env</code>。
-      <b>目标 OpenID 有两种拿法</b>：已知的话直接填；不知道就点「🎯 自动获取」——
-      系统会连上 Bot 网关等待，让目标用户给 Bot 发一条私聊消息即可自动捕获并回填。
-      官方 Bot 推送的是全局单聊、不区分成员，只要有一个可用 Bot，所有成员都有推送目标。</p>
-<div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border-soft)">
-<h3 style="margin:0 0 12px; font-size:14.5px">Bot 指令响应</h3>
-<div class="grid">
-<label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许私聊 Bot 查询信息</label>
-<label class="field">授权 OpenID（逗号分隔）
-            <input id="cmdAllow" placeholder="留空＝仅上表已填的目标 OpenID" type="text"/>
-</label>
-</div>
-<p class="hint">开启后，白名单用户私聊 Bot 发 <code>/help</code> 即可看到全部指令：
-        <code>/status</code> 运行状态、<code>/members</code> 监控成员、<code>/latest [成员] [条数]</code> 最近消息、
-        <code>/search 关键词</code> 归档搜索、<code>/stats</code> 归档统计。
-        指令全部只读，<b>无法改配置、无法重启</b>；白名单之外的人发什么都不会有响应。修改后点右上角「⟳ 重启主程序」生效。</p>
-</div>
-</div>
-<div class="card">
-<h2>NapCat 路由 (独立解耦)</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>NapCat 群号</th><th>订阅成员 (不过滤则为空)</th><th>推博客</th><th>推告警</th><th></th></tr></thead>
-<tbody id="napcatRows"></tbody>
-</table></div>
-<div style="margin-top:12px"><button class="btn" id="btnAddNapcat">➕ 添加路由</button></div>
-</div>
-<div class="card">
-<h2>Telegram Bots (独立解耦，凭证存 .env)</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Bot Name</th><th>Target Chat ID</th><th>订阅成员</th><th>推博客</th><th>推告警</th><th></th></tr></thead>
-<tbody id="tgBotRows"></tbody>
-</table></div>
-<div style="margin-top:12px"><button class="btn" id="btnAddTGBot">➕ 添加 TG Bot</button></div>
-</div>
-</section><section class="tab" id="tab-system"><div class="card">
-<h2>推送通道</h2>
-<div class="grid" id="channelSwitches"></div>
-<div style="margin-top:14px; max-width: 500px;">
-<label class="field">NapCat API 地址
-          <input id="napcatApi" placeholder="http://127.0.0.1:3000/send_group_msg" type="text"/>
-</label>
-</div>
-<div style="margin-top:12px; display:flex; align-items:center; gap:10px">
-<span style="font-size:12.5px; color:var(--muted)">TG Bot Token (.env)</span>
-<span id="tgTokenStatus"></span>
-<button class="btn small" id="btnFillTgToken">填写</button>
-<span class="hint" style="margin:0">（TG Token 修改后点右上角「⟳ 重启主程序」生效）</span>
-</div>
-</div><div class="card">
-<h2>轮询节奏（秒 / JST 小时）</h2>
-<div class="grid">
-<label class="field">日间间隔（min / max 秒）
-          <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
-</label>
-<label class="field">深夜间隔（min / max 秒）
-          <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
-</label>
-<label class="field">休眠时段（起 / 止 时）
-          <span class="pair"><input id="sleepStart" max="23" min="0" type="number"/><span>–</span><input id="sleepEnd" max="23" min="0" type="number"/></span>
-</label>
-<label class="field">告警冷却（秒）
-          <input id="alertCooldown" min="0" type="number"/>
-</label>
-<label class="field">QQ 发送间隔（秒）
-          <input id="qqSendInterval" min="0" step="0.1" type="number"/>
-</label>
-</div>
-</div><div class="card">
-<h2>翻译</h2>
-<div class="grid">
-<label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 Gemini 翻译</label>
-<label class="field">Gemini 最小调用间隔（秒）
-          <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
-</label>
-<label class="field">翻译超时（秒）
-          <input id="translateTimeout" min="1" type="number"/>
-</label>
-</div>
-<div style="margin-top:12px; display:flex; align-items:center; gap:10px">
-<span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
-<span id="geminiKeyStatus"></span>
-<button class="btn small" id="btnFillGeminiKey">填写</button>
-</div>
-<p class="hint">Gemini 模型列表请在「高级（JSON）」里编辑。</p>
-</div><div class="card">
-<h2>消息归档与每日摘要</h2>
-<div class="grid">
-<label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
-<label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
-<label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
-<label class="field">摘要时间（JST 整点）
-          <input id="summaryHour" max="23" min="0" type="number"/>
-</label>
-</div>
-<p class="hint">归档内容在 <a href="/archive">📚 消息归档</a> 页浏览，历史消息用 <code>python tools/backfill_archive.py</code> 回填。
-      每日摘要通过已启用的推送通道发送——<b>哪天没收到摘要，就说明系统挂了</b>（反向监控）。</p>
-</div><div class="card">
-<h2>网页管理端</h2>
-<div class="grid">
-<label class="switch"><input id="webAdminOn" type="checkbox"/><span class="track"></span>启用（下次重启生效）</label>
-<label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
-<label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
-</div>
-<p class="hint">⚠️ 关闭开关并保存后，需要通过直接编辑 <code>config.json</code> 才能重新打开。监听地址改为非 127.0.0.1 前请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。</p>
-</div></section>
-<!-- ── 日志 ─────────────────────────────── -->
+</section>
+<!-- ── 推送通道 ─────────────────────────────── -->
+<section class="tab" id="tab-channels">
+  <!-- Block 1: 顶栏 全局开关与 API 配置 -->
+  <div class="card">
+    <h2>🌐 全局推送通道开关与 API 配置</h2>
+    <div class="grid" id="channelSwitches"></div>
+    <div style="margin-top: 14px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+      <label class="field" style="flex: 1; min-width: 260px; margin: 0;">NapCat API 地址
+        <input id="napcatApi" placeholder="http://127.0.0.1:3000/send_group_msg" type="text"/>
+      </label>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 16px;">
+        <span style="font-size: 12.5px; color: var(--muted);">TG Bot Token (.env):</span>
+        <span id="tgTokenStatus"></span>
+        <button class="btn small" id="btnFillTgToken" type="button">填写</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Block 2: QQ 官方 Bot 模块 -->
+  <div class="card">
+    <h2>🤖 QQ 官方 Bot 列表（密钥存 .env）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="white-space:nowrap;">名称</th>
+            <th style="white-space:nowrap;">App ID</th>
+            <th style="white-space:nowrap;">个人 OpenID</th>
+            <th style="white-space:nowrap;">群 OpenID</th>
+            <th style="white-space:nowrap;">推送成员</th>
+            <th style="white-space:nowrap;">推博客</th>
+            <th style="white-space:nowrap;">推告警</th>
+            <th style="white-space:nowrap;">Client Secret</th>
+            <th style="white-space:nowrap;">状态</th>
+            <th style="white-space:nowrap;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="qqBotRows"></tbody>
+      </table>
+    </div>
+    <div style="margin-top: 12px;">
+      <button class="btn" id="btnAddQqBot" type="button">＋ 添加 QQ Bot</button>
+    </div>
+    <details class="help-box" style="margin-top: 12px;">
+      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
+        ℹ️ QQ 官方 Bot 填写与 OpenID 自动获取说明
+      </summary>
+      <div class="hint" id="qqBotHint" style="margin-top: 8px;">
+        App ID 直接在表格里填；Client Secret 点该行「填写」存入 <code>.env</code>。<br/>
+        <b>目标 OpenID 获取</b>：已知可直接填；不知则点「🎯 自动获取」，向 Bot 发送一条私聊消息即可自动捕获回填。
+      </div>
+    </details>
+
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-soft);">
+      <h3 style="margin: 0 0 12px; font-size: 14.5px;">🤖 Bot 指令响应</h3>
+      <div class="grid">
+        <label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许私聊 Bot 查询信息</label>
+        <label class="field">授权 OpenID（逗号分隔）
+          <input id="cmdAllow" placeholder="留空＝仅上表已填的目标 OpenID" type="text"/>
+        </label>
+      </div>
+      <details class="help-box" style="margin-top: 8px;">
+        <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">
+          ℹ️ 私聊指令与权限说明
+        </summary>
+        <div class="hint" style="margin-top: 6px;">
+          白名单用户私聊 Bot 发 <code>/help</code> 可查看指令：<code>/status</code> 运行状态、<code>/members</code> 监控成员、<code>/latest</code> 最近消息、<code>/search</code> 归档搜索。
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Block 3: NapCat 路由模块 -->
+  <div class="card">
+    <h2>🐱 NapCat 群推送路由 (独立解耦)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="white-space:nowrap;">NapCat 群号</th>
+            <th style="white-space:nowrap;">订阅成员 (不过滤则为空)</th>
+            <th style="white-space:nowrap;">推博客</th>
+            <th style="white-space:nowrap;">推告警</th>
+            <th style="white-space:nowrap;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="napcatRows"></tbody>
+      </table>
+    </div>
+    <div style="margin-top: 12px;">
+      <button class="btn" id="btnAddNapcat" type="button">➕ 添加 NapCat 路由</button>
+    </div>
+  </div>
+
+  <!-- Block 4: Telegram Bot 模块 -->
+  <div class="card">
+    <h2>✈️ Telegram Bots (独立解耦，凭证存 .env)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="white-space:nowrap;">Bot 名称</th>
+            <th style="white-space:nowrap;">Target Chat ID</th>
+            <th style="white-space:nowrap;">订阅成员</th>
+            <th style="white-space:nowrap;">推博客</th>
+            <th style="white-space:nowrap;">推告警</th>
+            <th style="white-space:nowrap;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="tgBotRows"></tbody>
+      </table>
+    </div>
+    <div style="margin-top: 12px;">
+      <button class="btn" id="btnAddTGBot" type="button">➕ 添加 TG Bot</button>
+    </div>
+    <details class="help-box" style="margin-top: 12px;">
+      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
+        ℹ️ Telegram Bot 配置与 Chat ID 格式说明
+      </summary>
+      <div class="hint" style="margin-top: 8px;">
+        · <b>TG_BOT_TOKEN</b> 在上方「全局开关与 API 配置」中统一填写入 <code>.env</code>。<br/>
+        · <b>Target Chat ID 格式</b>：个人用户填 numeric ID（如 <code>12345678</code>）；群组/频道填 <code>-100</code> 开头的群 ID。<br/>
+        · 可以通过添加多行配置，将不同成员的消息分发给不同的 TG 群组或频道。
+      </div>
+    </details>
+  </div>
+</section>
+<!-- ── 系统设置 ─────────────────────────────── -->
+<section class="tab" id="tab-system">
+  <div class="card">
+    <h2>📝 博客抓取设置</h2>
+    <div class="grid">
+      <label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <span style="font-size:12.5px; color:var(--muted)">团体独立开关</span>
+        <div style="display:flex; gap:12px; margin-top:4px; flex-wrap:wrap">
+          <label class="switch"><input id="blogHinatazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>日向坂</label>
+          <label class="switch"><input id="blogNogizaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>乃木坂</label>
+          <label class="switch"><input id="blogSakurazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>樱坂</label>
+        </div>
+      </div>
+      <label class="field">博客日间间隔（min / max 秒）
+        <span class="pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
+      </label>
+      <label class="field">博客深夜间隔（min / max 秒）
+        <span class="pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
+      </label>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 博客推送目标配置提示</summary>
+      <div class="hint" style="margin-top: 6px;">
+        博客具体的推送目标渠道，请在「推送通道」对应卡片（QQ Bot / NapCat / Telegram）中为各通道勾选「推博客」。
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>⏱️ 轮询节奏（秒 / JST 小时）</h2>
+    <div class="grid">
+      <label class="field">日间间隔（min / max 秒）
+        <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
+      </label>
+      <label class="field">深夜间隔（min / max 秒）
+        <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
+      </label>
+      <label class="field">休眠时段（起 / 止 时）
+        <span class="pair"><input id="sleepStart" max="23" min="0" type="number"/><span>–</span><input id="sleepEnd" max="23" min="0" type="number"/></span>
+      </label>
+      <label class="field">告警冷却（秒）
+        <input id="alertCooldown" min="0" type="number"/>
+      </label>
+      <label class="field">QQ 发送间隔（秒）
+        <input id="qqSendInterval" min="0" step="0.1" type="number"/>
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🌐 Gemini AI 翻译设置</h2>
+    <div class="grid">
+      <label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 Gemini 翻译</label>
+      <label class="field">Gemini 最小调用间隔（秒）
+        <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
+      </label>
+      <label class="field">翻译超时（秒）
+        <input id="translateTimeout" min="1" type="number"/>
+      </label>
+    </div>
+    <div style="margin-top:12px; display:flex; align-items:center; gap:10px">
+      <span style="font-size:12.5px; color:var(--muted)">Gemini API Key (.env)</span>
+      <span id="geminiKeyStatus"></span>
+      <button class="btn small" id="btnFillGeminiKey" type="button">填写</button>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 翻译模型设置说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        Gemini API Key 存在 <code>.env</code> 文件中；模型列表及 Prompt 参数请在「🛠️ 高级（JSON）」配置中编辑。
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>💾 消息归档与每日摘要</h2>
+    <div class="grid">
+      <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
+      <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
+      <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
+      <label class="field">摘要时间（JST 整点）
+        <input id="summaryHour" max="23" min="0" type="number"/>
+      </label>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 归档与反向心跳摘要说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        归档内容可在 <a href="/archive">📚 消息归档</a> 页浏览；每日摘要通过已启用的推送通道发送，若未收到说明服务异常。
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>🖥️ 网页管理端服务配置</h2>
+    <div class="grid">
+      <label class="switch"><input id="webAdminOn" type="checkbox"/><span class="track"></span>启用 Web UI（下次重启生效）</label>
+      <label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
+      <label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">⚠️ 安全与监听配置警告</summary>
+      <div class="hint" style="margin-top: 6px;">
+        关闭开关并保存后需通过修改 <code>config.json</code> 才能重新打开。监听地址改为非 127.0.0.1 前请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。
+      </div>
+    </details>
+  </div>
+</section>
+
 <!-- ── 用户 ─────────────────────────────── -->
+<section class="tab" id="tab-users">
+  <div class="card">
+    <h2>🔑 账号与权限管理</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody id="userRows"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn" id="btnAddUser" type="button">＋ 添加用户</button>
+    </div>
+    <details class="help-box" style="margin-top: 14px;">
+      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 角色权限说明与安全防锁定机制</summary>
+      <div class="hint" style="margin-top: 8px;">
+        · <b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br/>
+        · 密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br/>
+        · <b>防锁死机制</b>：系统禁止删除或降级最后一个 admin 账号，且禁止删除当前正在登录的账号。
+      </div>
+    </details>
+  </div>
+</section>
+
 <!-- ── 高级 ─────────────────────────────── -->
-<section class="tab" id="tab-advanced"><div class="card">
-<h2>运行日志（已自动脱敏；打开本页时每 2 秒刷新）</h2>
-<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
-<div class="chips" id="logSourceChips"></div>
-<label class="switch"><input id="logErrOnly" type="checkbox"/><span class="track"></span>仅错误</label>
-<input id="logKeyword" placeholder="关键词过滤…" style="width:170px" type="text"/>
-<span class="hint" id="logFilterInfo" style="margin:0"></span>
-<label class="switch" style="margin-left:auto"><input checked="" id="logFollow" type="checkbox"/><span class="track"></span>自动滚动到底部</label>
-</div>
-<div id="logView"></div>
-<p class="hint" id="logHint"></p>
-</div><div class="card">
-<h2>账号管理</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th></th></tr></thead>
-<tbody id="userRows"></tbody>
-</table></div>
-<div style="margin-top:12px"><button class="btn" id="btnAddUser">＋ 添加用户</button></div>
-<p class="hint">
-<b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br/>
-        密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br/>
-        为防止把自己锁在门外：不能删除或降级最后一个 admin，也不能删除当前登录的账号。
-      </p>
-</div>
-<div class="card">
-<h2>完整配置（严格 JSON，应用后回到表单继续编辑）</h2>
-<textarea id="rawJson" spellcheck="false"></textarea>
-<div style="margin-top:10px; display:flex; gap:10px">
-<button class="btn" id="btnApplyJson">应用到表单</button>
-<button class="btn" id="btnResetJson">从表单刷新</button>
-</div>
-<p class="hint">保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。</p>
-</div>
-<div class="card">
-<h2>历史版本（每次保存前自动快照，保留最近 10 份）</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>快照时间</th><th>大小</th><th></th></tr></thead>
-<tbody id="historyRows"></tbody>
-</table></div>
-<div class="empty" hidden="" id="historyEmpty">还没有历史快照（保存一次配置后出现）。</div>
-<p class="hint">恢复前会把当前版本也快照一份，所以恢复操作本身可以再撤销。</p>
-</div>
+<section class="tab" id="tab-advanced">
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+      <h2 style="margin:0;">📟 控制台实时运行日志</h2>
+      <button class="btn small" id="btnClearLog" type="button">🗑️ 清空显示</button>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
+      <div class="chips" id="logSourceChips"></div>
+      <label class="switch"><input id="logErrOnly" type="checkbox"/><span class="track"></span>仅错误</label>
+      <input id="logKeyword" placeholder="关键词过滤…" style="width:170px" type="text"/>
+      <span class="hint" id="logFilterInfo" style="margin:0"></span>
+      <label class="switch" style="margin-left:auto"><input checked="" id="logFollow" type="checkbox"/><span class="track"></span>自动滚动到底部</label>
+    </div>
+    <div id="logView"></div>
+    <p class="hint" id="logHint" style="margin-top:6px; margin-bottom:0;"></p>
+  </div>
+
+  <div class="card">
+    <h2>📝 完整配置（JSON 在线编辑器）</h2>
+    <textarea id="rawJson" spellcheck="false"></textarea>
+    <div style="margin-top:10px; display:flex; gap:10px">
+      <button class="btn" id="btnApplyJson" type="button">应用到表单</button>
+      <button class="btn" id="btnResetJson" type="button">从表单刷新</button>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ JSON 配置模式说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>📦 历史版本（配置自动快照）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>快照时间</th><th>大小</th><th>操作</th></tr></thead>
+        <tbody id="historyRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" hidden="" id="historyEmpty">还没有历史快照（保存一次配置后出现）。</div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 历史快照与安全回滚说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        恢复前会自动将当前版本快照一份，因此恢复操作本身可以再撤销。
+      </div>
+    </details>
+  </div>
 </section>
 </main>
 <footer class="savebar">
@@ -903,28 +1084,34 @@ async function saveConfig() {
   }
 }
 
-// ── Tab 切换 ─────────────────────────────────────
-document.querySelectorAll("nav.tabs button").forEach((btn) => {
+// ── Tab 切换（统一承载于顶栏 Header 中间） ────────
+document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (btn.dataset.tab === "advanced") { 
+    const targetTab = btn.dataset.tab;
+    if (!targetTab) return;
+
+    if (targetTab === "advanced") { 
       collectGeneral();
       collectChannels(); 
       refreshRawJson(); 
       refreshHistory(); 
-      refreshUsers();
       startLogPolling();
     } else {
       stopLogPolling();
     }
+
+    if (targetTab === "users") {
+      refreshUsers();
+    }
     
-    if (btn.dataset.tab === "status") {
+    if (targetTab === "status") {
       startStatusPolling();
     } else {
       stopStatusPolling();
     }
     
-    document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
-    document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + btn.dataset.tab));
+    document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+    document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
   });
 });
 
@@ -2243,6 +2430,9 @@ function setLogSource(src) {
   logLines = [];
   $("logView").innerHTML = "";
   $("logSourceChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.src === src));
+  if ($("btnClearLog")) {
+    $("btnClearLog").style.display = (src === "live" ? "" : "none");
+  }
   fetchLogs();
 }
 
@@ -2279,6 +2469,15 @@ function renderLogs() {
 }
 $("logErrOnly").addEventListener("change", () => { logErrOnly = $("logErrOnly").checked; renderLogs(); });
 $("logKeyword").addEventListener("input", () => { logKeyword = $("logKeyword").value.trim(); renderLogs(); });
+if ($("btnClearLog")) {
+  $("btnClearLog").addEventListener("click", () => {
+    if (logSource === "live") {
+      logEntries = [];
+      $("logView").innerHTML = "";
+      $("logFilterInfo").textContent = "已清空实时视图（仅展示后续新日志）";
+    }
+  });
+}
 
 function initLogChips() {
   const box = $("logSourceChips");
@@ -2457,12 +2656,29 @@ function stopOpenidPolling() {
 let minPwLen = 8;
 
 async function refreshUsers() {
-  let data;
-  try { data = await api("/api/users"); } catch (e) { return; }
-  if (!data.ok) return;
-  minPwLen = data.min_password_len || 8;
   const tbody = $("userRows");
+  // 显示骨架屏 loading 状态
+  tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:14px 4px;text-align:center">⏳ 加载用户列表中...</td></tr>';
+  let data;
+  try {
+    data = await api("/api/users");
+  } catch (e) {
+    console.error("[refreshUsers] API 请求失败:", e);
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--err);padding:14px 4px">❌ 加载失败：' + esc(e.message) + '</td></tr>';
+    return;
+  }
+  if (!data.ok) {
+    const errMsg = (data.errors || ["接口返回 ok=false"]).join("；");
+    console.error("[refreshUsers] API 返回错误:", errMsg);
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--err);padding:14px 4px">❌ ' + esc(errMsg) + '</td></tr>';
+    return;
+  }
+  minPwLen = data.min_password_len || 8;
   tbody.innerHTML = "";
+  if (!data.users || data.users.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:14px 4px">暂无用户数据</td></tr>';
+    return;
+  }
   const adminCount = data.users.filter((u) => u.role === "admin").length;
   for (const u of data.users) {
     const tr = document.createElement("tr");
@@ -2723,7 +2939,7 @@ document.addEventListener("visibilitychange", () => {
   try {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
     if (me.auth_enabled && me.user) {
-      $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
+      $("whoami").textContent = "👤 " + me.user.username;
       $("whoami").hidden = false;
       $("btnLogout").hidden = false;
       if (me.user.role === "admin") $("tabUsers").hidden = false;   // 用户管理仅 admin 可见

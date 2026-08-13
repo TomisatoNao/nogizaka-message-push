@@ -11,20 +11,46 @@
 
 </head>
 <body>
-<header>
-  <h1 style="margin: 0; font-size: 18px; white-space: nowrap;">📚 坂道归档</h1>
-  <div style="flex:1" class="header-spacer"></div>
-  <div class="nav-tabs" style="margin-right: 16px;">
-    <button class="nav-tab active" id="tabMsg">💬 消息归档</button>
-    <button class="nav-tab" id="tabBlog">📝 博客归档</button>
+<header class="app-header">
+  <!-- 1. 左侧 Brand 品牌区 -->
+  <div class="header-brand">
+    <a href="/archive" class="brand-logo" onclick="goHome();return false" title="坂道监控归档系统">
+      <span class="brand-icon">🌸</span>
+      <span class="brand-title">坂道归档</span>
+    </a>
   </div>
-  
-  <a href="#" id="homeNavLink" onclick="goHome();return false" class="btn" style="text-decoration:none;" title="回到首页">🏠 首页</a>
-  <div class="mobile-break"></div>
-  <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
-  <span id="whoami" style="font-size:13px; color:var(--muted);"></span>
-  <button id="logoutBtn" hidden class="btn" style="white-space:nowrap;">🚪 登出</button>
-  <a href="/" id="adminLink" hidden class="btn primary" style="text-decoration:none;">⚙️ 管理端</a>
+
+  <!-- 2. 中间 Navigation 导航区 -->
+  <nav class="header-nav">
+    <div class="nav-tabs">
+      <button class="nav-tab active" id="tabMsg"><span class="tab-icon">💬</span> 消息</button>
+      <button class="nav-tab" id="tabBlog"><span class="tab-icon">📄</span> 博客</button>
+    </div>
+
+    <!-- 成员归档工具下拉菜单 -->
+    <div class="header-dropdown" id="archiveToolsDropdown" hidden>
+      <button class="btn dropdown-toggle" id="btnArchiveMenu" type="button">
+        <span>👥 成员工具</span>
+        <span class="arrow">▾</span>
+      </button>
+      <div class="dropdown-menu">
+        <button class="dropdown-item" id="btnArchiveMember" onclick="promptArchiveMember()">
+          <span class="icon">📄</span> 抓取成员全量博客
+        </button>
+        <button class="dropdown-item" id="btnArchiveMessage" onclick="promptArchiveMessage()">
+          <span class="icon">💬</span> 回填成员历史消息
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 3. 右侧 Actions 系统与用户控制区 -->
+  <div class="header-actions">
+    <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
+    <span id="whoami" class="user-badge"></span>
+    <a href="/" id="adminLink" hidden class="btn primary app-switch-btn" title="进入管理后台">⚙️ 管理后台</a>
+    <button id="logoutBtn" hidden class="btn subdued-btn" style="white-space:nowrap;">🚪 登出</button>
+  </div>
 </header>
   
   <!-- 独立悬浮过滤条 -->
@@ -106,9 +132,9 @@
     <div class="br-title" id="brTitle"></div>
     <div class="br-header-actions" style="margin-left:auto; display:flex; align-items:center; gap:8px;">
       <div id="brModeSelector" class="br-mode-selector" style="display:none;">
-        <button type="button" class="brm-btn" data-mode="ja-zh">日中</button>
-        <button type="button" class="brm-btn" data-mode="zh-ja">中日</button>
-        <button type="button" class="brm-btn" data-mode="ja-only">纯日文</button>
+        <button type="button" class="brm-btn" data-mode="ja-zh">日中对照</button>
+        <button type="button" class="brm-btn" data-mode="ja-only">日文</button>
+        <button type="button" class="brm-btn" data-mode="zh-only">中文</button>
       </div>
       <button id="brDeleteTranslate" class="nav-btn" style="display:none; white-space:nowrap; background:rgba(255,59,48,0.15); color:#ff453a; border-color:rgba(255,59,48,0.3);">🗑️ 删除翻译</button>
       <button id="brTranslate" class="nav-btn" style="white-space:nowrap;">🌐 翻译</button>
@@ -126,6 +152,26 @@
     <div class="cm-actions">
       <button id="cmCancel" class="cm-btn secondary">取消</button>
       <button id="cmConfirm" class="cm-btn danger">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Prompt Input Modal -->
+<div id="customPromptModal" class="custom-modal-backdrop" style="display:none;">
+  <div class="custom-modal-card">
+    <div class="cm-icon" id="pmIcon">📥</div>
+    <h3 class="cm-title" id="pmTitle">输入内容</h3>
+    <p class="cm-message" id="pmMessage">请在下方输入相关信息：</p>
+    <div class="cm-input-wrapper">
+      <input type="text" id="pmInput" class="cm-input" placeholder="" autocomplete="off" />
+      <label id="pmCheckLabel" class="cm-checkbox-group" style="display:none;">
+        <input type="checkbox" id="pmCheckbox" />
+        <span id="pmCheckText">开启 AI 翻译</span>
+      </label>
+    </div>
+    <div class="cm-actions">
+      <button id="pmCancel" class="cm-btn secondary">取消</button>
+      <button id="pmConfirm" class="cm-btn primary">提交</button>
     </div>
   </div>
 </div>

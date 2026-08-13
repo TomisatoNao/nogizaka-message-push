@@ -27,6 +27,7 @@ let memberVersion = 0;
 let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲掉）
 let curMode = "msg";     // "msg" 或 "blog"
 let curBlogAuthor = "";  // 当前选中的博客作者
+let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
 
@@ -192,8 +193,12 @@ function renderCalendar() {
     const n = dayCounts[key] || 0;
     monthTotal += n;
     const cell = document.createElement(n > 0 ? "button" : "div");
-    cell.className = "cal-day" + (n > 0 ? " has" : "") +
+    let cls = "cal-day" + (n > 0 ? " has" : "") +
       (n >= 6 ? " h3" : n >= 3 ? " h2" : n >= 1 ? " h1" : "");
+    if (curMode === "blog" && curBlogDate === key) {
+      cls += " active-day";
+    }
+    cell.className = cls;
     cell.textContent = d;
     if (n > 0) {
       cell.type = "button";
@@ -227,30 +232,15 @@ async function jumpToDay(dateKey) {
   syncSearchInput();
 
   if (curMode === "blog") {
-    // 博客模式下的日期跳转
-    await loadBlogPage(1, true);
-    setTimeout(() => {
-      const cards = document.querySelectorAll("#blogHero, .bmc-card");
-      let targetEl = null;
-      cards.forEach(card => {
-        if (card.dataset.date && card.dataset.date.startsWith(dateKey)) {
-          if (!targetEl) targetEl = card;
-        }
-      });
-      if (targetEl) {
-        targetEl.scrollIntoView({ block: "center", behavior: "smooth" });
-        targetEl.style.outline = "2px solid var(--accent)";
-        targetEl.style.outlineOffset = "4px";
-        targetEl.style.borderRadius = "12px";
-        targetEl.style.transition = "outline 0.3s ease";
-        setTimeout(() => {
-          targetEl.style.outline = "";
-          targetEl.style.outlineOffset = "";
-        }, 2500);
-      } else {
-        showToast(dateKey + " 暂无符合条件的博客", "info");
-      }
-    }, 350);
+    // 博客模式下的日期跳转：重置页码为 1，清空关键词，切换/锁定指定日期
+    page = 1;
+    curBlogDate = (curBlogDate === dateKey) ? "" : dateKey;
+    renderCalendar();
+    await loadBlogPage(1);
+
+    // 平滑滚动至博客列表顶部
+    const targetSection = $("blogCards").parentElement || $("blogCards");
+    targetSection.scrollIntoView({ block: "start", behavior: "smooth" });
     return;
   }
 
@@ -430,6 +420,7 @@ async function selectBlogGroup(key) {
   curMember = "";
   curBlogGroup = key;
   curBlogAuthor = "";
+  curBlogDate = "";
   searchQuery = "";
   syncSearchInput();
   syncChipHighlight();
@@ -475,6 +466,8 @@ async function loadBlogAuthors(key) {
 
 function selectBlogAuthor(author) {
   curBlogAuthor = author;
+  curBlogDate = "";
+  renderCalendar();
   const btns = $("blogAuthorBar").querySelectorAll(".blog-author-chip");
   btns.forEach(b => {
     if ((author === "" && b.textContent === "全部成员") || b.textContent === author) {
@@ -491,7 +484,7 @@ function selectBlogAuthor(author) {
   setTimeout(() => { selfHashUpdate = false; }, 0);
   
   loadBlogCalendar();
-  loadBlogPage(1, true);
+  loadBlogPage(1);
 }
 
 // ── 渲染博客网格 ─────────────────────────────────────
@@ -507,9 +500,10 @@ async function loadBlogPage(pageNum) {
   
   setPageLoading(true);
   try {
-    let perPage = (pageNum === 1 && !searchQuery) ? 25 : 24;
+    let perPage = (pageNum === 1 && !searchQuery && !curBlogDate) ? 25 : 24;
     let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + pageNum + "&per_page=" + perPage;
     if (curBlogAuthor) url += "&author=" + encodeURIComponent(curBlogAuthor);
+    if (curBlogDate) url += "&date=" + encodeURIComponent(curBlogDate);
     if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
     
     const data = await api(url);
@@ -517,11 +511,11 @@ async function loadBlogPage(pageNum) {
     
     totalPages = data.total_pages;
     if (data.posts.length === 0) {
-      $("emptyHint").textContent = "没有找到博客";
+      $("emptyHint").textContent = curBlogDate ? (curBlogDate + " 暂无符合条件的博客") : "没有找到博客";
       $("emptyHint").hidden = false;
     } else {
       let posts = data.posts;
-      if (pageNum === 1 && posts.length > 0 && !searchQuery) {
+      if (pageNum === 1 && posts.length > 0 && !searchQuery && !curBlogDate) {
         renderBlogHero(posts[0]);
         posts = posts.slice(1);
       }
@@ -601,25 +595,35 @@ function renderBlogHero(post) {
   bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
   
   // 提取第一张图作为 Hero 封面图
-  let coverUrl = "";
-  const match = bodyHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
-  if (match) coverUrl = match[1];
-  
+  let coverUrl = _getCoverUrl(bodyHtml);
+
   let coverHtml = '';
   if (coverUrl) {
     coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" alt=""></div>';
   } else {
+    // 无封面链接：保留原有无封面样式（📝 占位）
     coverHtml = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
   }
-  
-  hero.innerHTML = 
+
+  hero.innerHTML =
     coverHtml +
     '<div class="bh-info">' +
       '<div class="bh-meta"><span class="bh-author">' + esc(post.author) + '</span><span class="bh-date">' + esc(dateStr) + '</span></div>' +
       '<h2 class="bh-title">' + highlightQuery(post.title || '无题', searchQuery) + '</h2>' +
       '<div class="bh-excerpt">' + esc(bodyHtml.replace(/<[^>]+>/g, '').substring(0, 150)) + '...</div>' +
     '</div>';
-    
+
+  // 封面图加载失败（404/防盗链/资源不存在）→ 降级为 📝 占位
+  const heroCoverImg = hero.querySelector('.bh-cover img');
+  if (heroCoverImg) {
+    heroCoverImg.addEventListener('error', () => {
+      const cover = heroCoverImg.parentElement;
+      if (cover) {
+        cover.outerHTML = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
+      }
+    });
+  }
+
   hero.onclick = function(e) {
     if (e.target.tagName === 'A') return;
     openBlogReader(post, bodyHtml);
@@ -636,21 +640,20 @@ function renderBlogMiniCard(post, container) {
   let bodyHtml = post.body_html || "";
   bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
   
-  let coverUrl = "";
-  const match = bodyHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
-  if (match) coverUrl = match[1];
-  
+  let coverUrl = _getCoverUrl(bodyHtml);
+
   const card = document.createElement("div");
   card.className = "bmc-card blog-card-mini";
   card.dataset.date = (post.date || "").substring(0, 10);
-  
+
   let html = '';
   if (coverUrl) {
     html += '<div class="bc-cover"><img src="' + esc(coverUrl) + '" alt="" loading="lazy"></div>';
   } else {
+    // 无封面链接：保留原有无封面样式（📝 占位）
     html += '<div class="bc-cover no-pic">📝</div>';
   }
-  
+
   let excerpt = "";
   if (searchQuery) {
     let fullText = "";
@@ -688,66 +691,70 @@ function renderBlogMiniCard(post, container) {
           '</div>';
     
   card.innerHTML = html;
-  
+
+  // 缩略图加载失败（404/防盗链/资源不存在）→ 降级为 📝 占位
+  const coverImg = card.querySelector('.bc-cover img');
+  if (coverImg) {
+    coverImg.addEventListener('error', () => {
+      const cover = coverImg.parentElement;
+      if (cover) {
+        cover.outerHTML = '<div class="bc-cover no-pic">📝</div>';
+      }
+    });
+  }
+
   card.onclick = function(e) {
     if (e.target.tagName === 'A') return;
     openBlogReader(post, bodyHtml);
   };
-  
+
   grid.appendChild(card);
 }
 
 let currentBlogReaderPost = null;
-let currentTransMode = localStorage.getItem("blog_trans_mode") || "ja-zh";
+let currentTransMode = "ja-zh";
 
-function applyTransMode(html, mode) {
-  if (!html) return "";
-  if (mode === "ja-zh") return html;
-  
+function getStructuredBlocks(post) {
+  if (!post) return null;
+  const raw = post.content_json;
+  if (!raw || raw === "[]") return null;
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString("<div>" + html + "</div>", "text/html");
-    const container = doc.body.firstElementChild;
-    if (!container) return html;
-    
-    const strongs = Array.from(container.querySelectorAll("strong"));
-    strongs.forEach(strong => {
-      let next = strong.nextSibling;
-      let emNode = null;
-      let nodesToSwap = [];
-      
-      while (next) {
-        if (next.nodeName === "EM") {
-          emNode = next;
-          break;
-        }
-        nodesToSwap.push(next);
-        next = next.nextSibling;
-      }
-      
-      if (emNode) {
-        const parent = strong.parentNode;
-        if (mode === "zh-ja") {
-          parent.insertBefore(emNode, strong);
-          const br = document.createElement("br");
-          parent.insertBefore(br, strong);
-          nodesToSwap.forEach(n => n.remove());
-        } else if (mode === "ja-only") {
-          nodesToSwap.forEach(n => n.remove());
-          emNode.remove();
-        }
-      }
-    });
-    return container.innerHTML;
-  } catch(e) {
-    return html;
+    const blocks = JSON.parse(raw);
+    return (Array.isArray(blocks) && blocks.length) ? blocks : null;
+  } catch (e) {
+    return null;
   }
+}
+
+function hasTranslation(post) {
+  return getStructuredBlocks(post) !== null;
+}
+
+function renderBlocks(blocks, mode) {
+  const parts = [];
+  for (const b of blocks) {
+    if (b.type === "img") {
+      parts.push('<img src="' + esc(b.src || "") + '" referrerpolicy="no-referrer" loading="lazy">');
+      continue;
+    }
+    const jp = esc(b.jp || "").replace(/\n/g, "<br>");
+    const zh = (b.zh || "").trim();
+    const zhHtml = esc(zh).replace(/\n/g, "<br>");
+    if (mode === "zh-only") {
+      // 中文：有译文显示译文，无译文降级显示原文（严禁丢弃该段）
+      parts.push(zh ? '<span>' + zhHtml + '</span>' : '<em>' + jp + '</em>');
+    } else {
+      // 日中对照：日文斜体 + 中文常规体（zh 空则仅日文）
+      parts.push(zh ? '<em>' + jp + '</em><br><span>' + zhHtml + '</span>' : '<em>' + jp + '</em>');
+    }
+  }
+  return parts.join("<br><br>");
 }
 
 function updateModeSelectorUI() {
   const selector = $("brModeSelector");
   const delBtn = $("brDeleteTranslate");
-  const hasTrans = currentBlogReaderPost && currentBlogReaderPost.translation && currentBlogReaderPost.translation !== "[翻译失败]";
+  const hasTrans = hasTranslation(currentBlogReaderPost);
   
   if (selector) {
     if (hasTrans) {
@@ -772,38 +779,53 @@ function updateModeSelectorUI() {
 
 function renderCurrentBlogContent() {
   if (!currentBlogReaderPost) return;
-  const hasTrans = currentBlogReaderPost.translation && currentBlogReaderPost.translation !== "[翻译失败]";
-  
+  const blocks = getStructuredBlocks(currentBlogReaderPost);
+  const images = JSON.parse(currentBlogReaderPost.images_json || "[]");
+  const paths = JSON.parse(currentBlogReaderPost.image_paths_json || "[]");
+
   let bodyHtml = "";
-  if (hasTrans) {
-    const processedHtml = applyTransMode(currentBlogReaderPost.translation, currentTransMode);
-    bodyHtml = _replaceImgUrls(processedHtml, JSON.parse(currentBlogReaderPost.images_json || "[]"), JSON.parse(currentBlogReaderPost.image_paths_json || "[]"));
+  if (blocks && currentTransMode !== "ja-only") {
+    // 中文 / 日中对照：从解耦的结构化数据渲染（日中对照按 jp/zh 插值）
+    bodyHtml = _replaceImgUrls(renderBlocks(blocks, currentTransMode), images, paths);
   } else {
-    bodyHtml = _replaceImgUrls(currentBlogReaderPost.body_html || "", JSON.parse(currentBlogReaderPost.images_json || "[]"), JSON.parse(currentBlogReaderPost.image_paths_json || "[]"));
+    // 日文（或暂无结构化译文）：直接渲染原始日文 body_html，100% 完整不丢任何段落/图片
+    bodyHtml = _replaceImgUrls(currentBlogReaderPost.body_html || "", images, paths);
   }
 
-  $("brContent").innerHTML = 
+  // 翻译模型标记：仅在「日中对照/中文」视图且存在译文时展示，右对齐次级灰字
+  const modelName = currentBlogReaderPost.translation_model || "";
+  const showModel = blocks && currentTransMode !== "ja-only" && modelName;
+  const modelTag = showModel
+    ? '<div class="br-model-tag">翻译模型：' + esc(modelName) + '</div>'
+    : '';
+
+  $("brContent").innerHTML =
     '<div class="br-meta">' +
       '<div><span class="br-author">' + esc(currentBlogReaderPost.author) + '</span><span style="margin-left:12px">' + esc((currentBlogReaderPost.date || "").substring(0, 16)) + '</span></div>' +
       '<a class="br-link" href="' + esc(currentBlogReaderPost.url) + '" target="_blank">阅读原文 ↗</a>' +
     '</div>' +
+    modelTag +
     '<h1 style="margin-top:0; font-size:24px;">' + esc(currentBlogReaderPost.title || "无题") + '</h1>' +
     bodyHtml;
-    
+
   updateModeSelectorUI();
 }
 
 function openBlogReader(post, bodyHtml) {
   currentBlogReaderPost = post;
+  // 进入博客时，若已有译文则默认选中「日中对照」
+  if (hasTranslation(post)) {
+    currentTransMode = "ja-zh";
+  }
   $("brTitle").textContent = post.title || "无题";
   
   const transBtn = $("brTranslate");
   if (transBtn) {
-    if (!window._isLoggedIn) {
+    if (!window._isArchiveAdmin) {
       transBtn.style.display = "none";
     } else {
       transBtn.style.display = "";
-      if (post.translation && post.translation !== "[翻译失败]") {
+      if (hasTranslation(post)) {
         transBtn.textContent = "✓ 已翻译";
         transBtn.disabled = true;
       } else {
@@ -883,7 +905,6 @@ if (brModeSelector) {
     const btn = e.target.closest(".brm-btn");
     if (!btn || !btn.dataset.mode) return;
     currentTransMode = btn.dataset.mode;
-    try { localStorage.setItem("blog_trans_mode", currentTransMode); } catch(err) {}
     renderCurrentBlogContent();
   });
 }
@@ -939,8 +960,8 @@ function showToast(msg, type = "info") {
 const brDeleteTranslateBtn = $("brDeleteTranslate");
 if (brDeleteTranslateBtn) {
   brDeleteTranslateBtn.addEventListener("click", async () => {
-    if (!currentBlogReaderPost || !currentBlogReaderPost.translation) return;
-    
+    if (!currentBlogReaderPost || !hasTranslation(currentBlogReaderPost)) return;
+
     const ok = await customConfirm({
       title: "清除翻译确认",
       message: "确认要删除该博客的 Gemini 翻译结果并恢复为原始状态吗？",
@@ -958,6 +979,7 @@ if (brDeleteTranslateBtn) {
       const data = await res.json();
       if (data.ok) {
         currentBlogReaderPost.translation = null;
+        currentBlogReaderPost.content_json = null;
         const transBtn = $("brTranslate");
         if (transBtn) {
           transBtn.textContent = "🌐 翻译";
@@ -991,6 +1013,9 @@ if (brTranslateBtn) {
       const data = await res.json();
       if (data.ok && data.html) {
         currentBlogReaderPost.translation = data.html;
+        if (data.content_json) currentBlogReaderPost.content_json = data.content_json;
+        if (data.translation_model) currentBlogReaderPost.translation_model = data.translation_model;
+        currentTransMode = "ja-zh";  // 翻译完成自动切回「日中对照」
         if ($("blogReader").style.display !== "none") {
           renderCurrentBlogContent();
           brTranslateBtn.textContent = "✓ 已翻译";
@@ -1006,6 +1031,13 @@ if (brTranslateBtn) {
       brTranslateBtn.disabled = false;
     }
   });
+}
+
+function _getCoverUrl(html) {
+  if (!html) return "";
+  const match = html.match(/<img[^>]+src=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+  if (match) return match[1] || match[2] || match[3] || "";
+  return "";
 }
 
 function _replaceImgUrls(html, images, paths) {
@@ -1620,40 +1652,57 @@ backTop.addEventListener("click", () => {
 initInfiniteScroll();
 
 
+function _updateAdminUI(isAdmin) {
+  window._isArchiveAdmin = !!isAdmin;
+  const adminIds = ["adminLink", "archiveToolsDropdown", "btnArchiveMember", "btnArchiveMessage"];
+  adminIds.forEach(id => {
+    const el = $(id);
+    if (el) {
+      el.hidden = !isAdmin;
+      el.style.display = isAdmin ? (el.classList.contains("header-dropdown") ? "inline-block" : "inline-flex") : "none";
+    }
+  });
+}
+
+// ── 成员工具下拉菜单点击切换与点击外部自动关闭 ────────────────
+const archiveDropdownEl = $("archiveToolsDropdown");
+const archiveBtnEl = $("btnArchiveMenu");
+if (archiveBtnEl && archiveDropdownEl) {
+  archiveBtnEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    archiveDropdownEl.classList.toggle("open");
+  });
+  document.addEventListener("click", (e) => {
+    if (!archiveDropdownEl.contains(e.target)) {
+      archiveDropdownEl.classList.remove("open");
+    }
+  });
+}
+
 // ── 登录状态 ─────────────────────────────────────
 window._isLoggedIn = false;
 (async function initAuth() {
   try {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
     if (!me.auth_enabled) { 
-      window._isArchiveAdmin = true; 
       window._isLoggedIn = true; 
-      $("adminLink").hidden = false;
-      $("adminLink").style.display = "inline-flex";
+      _updateAdminUI(true);
       $("logoutBtn").hidden = true;
       $("logoutBtn").style.display = "none";
       return; 
     }
     if (me.user) {
       window._isLoggedIn = true;
-      $("whoami").textContent = "👤 " + me.user.username + "（" + me.user.role + "）";
+      $("whoami").textContent = "👤 " + me.user.username;
       $("logoutBtn").hidden = false;
       $("logoutBtn").style.display = "inline-flex";
-      if (me.user.role === "admin") { 
-        window._isArchiveAdmin = true; 
-        $("adminLink").hidden = false;
-        $("adminLink").style.display = "inline-flex";
-      } else {
-        $("adminLink").hidden = true;
-        $("adminLink").style.display = "none";
-      }
+      _updateAdminUI(me.user.role === "admin");
     } else {
       window._isLoggedIn = false;
       $("whoami").textContent = "";
       $("logoutBtn").hidden = true;
       $("logoutBtn").style.display = "none";
-      $("adminLink").hidden = false;
-      $("adminLink").style.display = "inline-flex";
+      _updateAdminUI(false);
     }
   } catch (e) { /* 忽略 */ }
 })();
@@ -1748,28 +1797,86 @@ function renderHome(agg, members) {
   if (badgeHTML) heroHTML += '<div style="margin-top:10px">' + badgeHTML + '</div>';
   $("homeMember").innerHTML = heroHTML;
 
-  // 今日按钮点��
+  // 今日按钮点击
   const todayBtn = $("hcTodayBtn");
   if (todayBtn) {
     const defaultMember = members[0].name;
     const latestMonth = members[0].monthly && members[0].monthly[0];
     const ty = latestMonth ? latestMonth.year : today.getFullYear();
     const tm = latestMonth ? latestMonth.month : (today.getMonth() + 1);
-    const goToday = (e) => {
+
+    const goToday = async (e) => {
       e.preventDefault();
       curMode = "msg";
       switchMainTab("msg", true);
       hideHome();
+
+      // 1. 切换成员
       curMember = defaultMember;
       curType = "";
       searchQuery = "";
       syncSearchInput();
       targetMsgId = "";
+
+      // 2. 更新 hash
       selfHashUpdate = true;
       location.hash = "member=" + encodeURIComponent(defaultMember) + "&y=" + ty + "&m=" + tm;
       setTimeout(() => { selfHashUpdate = false; }, 100);
-      loadMembers();
+
+      // 3. 等待成员月份加载（selectMember -> selectMonth -> loadPage）
+      await selectMember(defaultMember, false);
+
+      // 4. 加载当月剩余页直到今日 day-sep 出现
+      const todayDateKey = today.getFullYear() + "-"
+        + String(today.getMonth() + 1).padStart(2, "0") + "-"
+        + String(today.getDate()).padStart(2, "0");
+      const loadVersion = contentVersion;
+      while (loadVersion === contentVersion && page < totalPages) {
+        const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
+        if (sep) break;
+        page++;
+        await loadPage();
+      }
+
+      // 5. 精确滚动：用 getBoundingClientRect 扣除固定 Header 高度
+      const scrollToToday = () => {
+        const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
+        if (!sep) return false;
+        const headerEl = document.querySelector("header, .header, nav.header, #header");
+        const headerH = headerEl ? headerEl.getBoundingClientRect().height : 64;
+        const targetY = sep.getBoundingClientRect().top + window.scrollY - headerH - 16;
+        window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+        return true;
+      };
+
+      if (!scrollToToday()) {
+        // 未找到 day-sep：今日可能无消息，提示
+        return;
+      }
+
+      // 6. 图片懒加载后二次校正（防止 DOM 高度变化导致偏移）
+      setTimeout(scrollToToday, 400);
+      setTimeout(scrollToToday, 1000);
+
+      // 7. 高亮今日第一条消息 bubble
+      setTimeout(() => {
+        const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
+        if (!sep) return;
+        // 高亮 sep 本身
+        sep.classList.add("flash");
+        setTimeout(() => sep.classList.remove("flash"), 2500);
+        // 同时对 sep 后面紧接的第一个 bubble 施加脉冲高亮
+        let next = sep.nextElementSibling;
+        while (next && !next.classList.contains("bubble")) {
+          next = next.nextElementSibling;
+        }
+        if (next) {
+          next.classList.add("today-flash");
+          setTimeout(() => next.classList.remove("today-flash"), 1600);
+        }
+      }, 600);
     };
+
     todayBtn.addEventListener("click", goToday);
     todayBtn.addEventListener("touchend", goToday);
   }
@@ -2034,4 +2141,108 @@ window.addEventListener("hashchange", () => {
     }
   }
 });
+
+function customPrompt({ title = "请输入", message = "", placeholder = "", defaultValue = "", icon = "📥", confirmText = "提交", showCheckbox = false, checkText = "" } = {}) {
+  return new Promise((resolve) => {
+    const modal = $("customPromptModal");
+    if (!modal) return resolve(null);
+    
+    $("pmIcon").textContent = icon;
+    $("pmTitle").textContent = title;
+    $("pmMessage").textContent = message;
+    $("pmConfirm").textContent = confirmText;
+    
+    const input = $("pmInput");
+    input.placeholder = placeholder;
+    input.value = defaultValue;
+    
+    const checkLabel = $("pmCheckLabel");
+    const checkbox = $("pmCheckbox");
+    if (showCheckbox) {
+      checkLabel.style.display = "flex";
+      $("pmCheckText").textContent = checkText;
+      checkbox.checked = false;
+    } else {
+      checkLabel.style.display = "none";
+    }
+    
+    modal.style.display = "flex";
+    setTimeout(() => { input.focus(); input.select(); }, 60);
+
+    const onConfirm = () => {
+      const val = input.value.trim();
+      const checked = checkbox.checked;
+      cleanup();
+      resolve({ value: val, checked: checked });
+    };
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+    const onKeydown = (e) => {
+      if (e.key === "Enter") onConfirm();
+      if (e.key === "Escape") onCancel();
+    };
+    const cleanup = () => {
+      modal.style.display = "none";
+      $("pmConfirm").removeEventListener("click", onConfirm);
+      $("pmCancel").removeEventListener("click", onCancel);
+      input.removeEventListener("keydown", onKeydown);
+    };
+
+    $("pmConfirm").addEventListener("click", onConfirm);
+    $("pmCancel").addEventListener("click", onCancel);
+    input.addEventListener("keydown", onKeydown);
+  });
+}
+
+async function promptArchiveMember() {
+  const result = await customPrompt({
+    title: "📥 归档成员博客",
+    message: "请输入任意坂道成员博客列表页 URL（支持乃木坂46 / 樱坂46 / 日向坂46）：",
+    placeholder: "例：https://sakurazaka46.com/s/s46/diary/blog/list?ima=0000&ct=59",
+    icon: "📝",
+    confirmText: "开始归档",
+    showCheckbox: true,
+    checkText: "开启 Gemini AI 中日双语翻译（勾选将较慢）"
+  });
+
+  if (!result || !result.value) return;
+
+  try {
+    const res = await fetch("/api/archive/blogs/archive_member", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: result.value, translate: result.checked })
+    });
+    const data = await res.json();
+    showToast(data.msg || (data.ok ? "已成功启动后台博客归档任务！" : "操作失败"), data.ok ? "success" : "error");
+  } catch(e) {
+    showToast("请求异常: " + e, "error");
+  }
+}
+
+async function promptArchiveMessage() {
+  const result = await customPrompt({
+    title: "💬 归档成员消息",
+    message: "请输入要补全历史消息的成员姓名（留空代表处理全部监控成员）：",
+    placeholder: "例：冨里奈央（支持多姓名或留空）",
+    icon: "💬",
+    confirmText: "开始回填消息"
+  });
+
+  if (result === null) return;
+
+  try {
+    const res = await fetch("/api/archive/messages/backfill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ member: result.value || "" })
+    });
+    const data = await res.json();
+    showToast(data.msg || (data.ok ? "已成功启动消息归档回填任务！" : "操作失败"), data.ok ? "success" : "error");
+  } catch(e) {
+    showToast("请求异常: " + e, "error");
+  }
+}
 

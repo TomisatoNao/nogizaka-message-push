@@ -33,6 +33,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = _BASE_DIR
 CONFIG_PATH = _BASE_DIR / "config" / "config.json"
 SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 ENV_PATH = _BASE_DIR / ".env"
@@ -1455,6 +1456,7 @@ class _Handler(BaseHTTPRequestHandler):
             qs = self._query_params()
             group = qs.get("group", "hinatazaka")
             author = qs.get("author", "")
+            date_filter = qs.get("date", "")
             year = int(qs.get("year", "0") or "0")
             month = int(qs.get("month", "0") or "0")
             page = max(1, int(qs.get("page", "1") or "1"))
@@ -1469,7 +1471,10 @@ class _Handler(BaseHTTPRequestHandler):
                 if author:
                     where += " AND author=?"
                     params.append(author)
-                if year and month:
+                if date_filter:
+                    where += " AND substr(date,1,10)=?"
+                    params.append(date_filter)
+                elif year and month:
                     where += " AND substr(date,1,7)=?"
                     params.append(f"{year:04d}-{month:02d}")
                 if q:
@@ -1486,6 +1491,8 @@ class _Handler(BaseHTTPRequestHandler):
                     d = dict(r)
                     d["images_json"] = d.get("images_json") or "[]"
                     d["image_paths_json"] = d.get("image_paths_json") or "[]"
+                    d["content_json"] = d.get("content_json") or "[]"
+                    d["translation_model"] = d.get("translation_model") or ""
                     posts.append(d)
             except Exception:
                 pass
@@ -1498,8 +1505,9 @@ class _Handler(BaseHTTPRequestHandler):
 
         if sub == "blogs/translate":
             if getattr(cfg, "AUTH_ENABLED", False):
-                if not self._current_user():
-                    self._send_json({"ok": False, "msg": "需登录后方可使用翻译功能"}, 401)
+                user = self._current_user()
+                if not user or user.get("role") != "admin":
+                    self._send_json({"ok": False, "msg": "需要管理员权限方可使用翻译功能"}, 401)
                     return
 
             if self.command != "POST":
@@ -1529,8 +1537,8 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 row = dict(row)
 
-                if row.get("translation") and row["translation"] != "[翻译失败]":
-                    self._send_json({"ok": True, "html": row["translation"]})
+                if row.get("content_json") and row["content_json"] != "[]":
+                    self._send_json({"ok": True, "html": row.get("translation", ""), "content_json": row["content_json"], "translation_model": row.get("translation_model") or ""})
                     return
 
                 import asyncio
@@ -1545,16 +1553,19 @@ class _Handler(BaseHTTPRequestHandler):
 
                 async def _do_translate():
                     async with httpx.AsyncClient(timeout=120) as temp_client:
-                        return await translator.translate_blog_html(
+                        return await translator.translate_blog_structured(
                             row["body_html"], row["author"], row["group_key"], custom_client=temp_client
                         )
 
-                translated = asyncio.run(_do_translate())
-                if translated and "[翻译失败]" not in translated:
-                    log_all(f"✅ 网页端手动翻译完成: {row['author']} - {row.get('title', '')}")
-                    db.execute("UPDATE blog_posts SET translation = ? WHERE id = ?", (translated, blog_id))
+                structured, model_name = asyncio.run(_do_translate())
+                if structured:
+                    translated = translator.blocks_to_html(structured)
+                    content_json = json.dumps(structured, ensure_ascii=False)
+                    translation_model = model_name or ""
+                    log_all(f"✅ 网页端手动翻译完成: {row['author']} - {row.get('title', '')}（模型: {translation_model}）")
+                    db.execute("UPDATE blog_posts SET translation = ?, content_json = ?, translation_model = ? WHERE id = ?", (translated, content_json, translation_model, blog_id))
                     db.commit()
-                    self._send_json({"ok": True, "html": translated})
+                    self._send_json({"ok": True, "html": translated, "content_json": content_json, "translation_model": translation_model})
                 else:
                     log_all(f"⚠️ 网页端手动翻译失败: {row['author']} - {row.get('title', '')}", is_error=True)
                     self._send_json({"ok": False, "msg": "翻译失败，请稍后重试"})
@@ -1565,6 +1576,76 @@ class _Handler(BaseHTTPRequestHandler):
                 with open("logs/ui_error.txt", "w", encoding="utf-8") as f:
                     traceback.print_exc(file=f)
                 self._send_json({"ok": False, "msg": f"异常: {e}"})
+            return
+
+        if sub == "blogs/archive_member":
+            if getattr(cfg, "AUTH_ENABLED", False):
+                user = self._current_user()
+                if not user or user.get("role") != "admin":
+                    self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
+                    return
+
+            if self.command != "POST":
+                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                payload = {}
+
+            target_url = payload.get("url", "").strip()
+            translate = bool(payload.get("translate", False))
+            
+            if not target_url:
+                self._send_json({"ok": False, "msg": "请输入有效的成员博客 URL"})
+                return
+
+            import subprocess
+            cmd = [sys.executable, str(_BASE_DIR / "tools" / "archive_member.py"), target_url]
+            if translate:
+                cmd.append("--translate")
+
+            try:
+                subprocess.Popen(cmd, cwd=str(_BASE_DIR))
+                self._send_json({"ok": True, "msg": "已成功启动后台博客归档任务！可在终端或日志中查看进度。"})
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"启动归档任务失败: {e}"})
+            return
+
+        if sub == "messages/backfill":
+            if getattr(cfg, "AUTH_ENABLED", False):
+                user = self._current_user()
+                if not user or user.get("role") != "admin":
+                    self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
+                    return
+
+            if self.command != "POST":
+                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                payload = {}
+
+            member_name = payload.get("member", "").strip()
+            
+            import subprocess
+            cmd = [sys.executable, str(_BASE_DIR / "tools" / "backfill_archive.py"), "--force"]
+            if member_name:
+                cmd.append(member_name)
+
+            try:
+                subprocess.Popen(cmd, cwd=str(_BASE_DIR))
+                msg_target = f"【{member_name}】" if member_name else "【全部监控成员】"
+                self._send_json({"ok": True, "msg": f"已成功启动 {msg_target} 的历史消息回填任务！"})
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"启动消息回填失败: {e}"})
             return
 
         if sub == "blogs/delete_translation":
@@ -1596,7 +1677,7 @@ class _Handler(BaseHTTPRequestHandler):
 
             try:
                 db = _get_blog_db()
-                db.execute("UPDATE blog_posts SET translation = NULL WHERE id = ?", (blog_id,))
+                db.execute("UPDATE blog_posts SET translation = NULL, content_json = NULL, translation_model = NULL WHERE id = ?", (blog_id,))
                 db.commit()
                 from src.logger import log_all
                 log_all(f"🗑️ 管理员删除了博客 (ID: {blog_id}) 的翻译缓存")
@@ -1793,6 +1874,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
                 return
             reloaded = _trigger_reload()
+            from src.logger import log_all
+            log_all("⚙️ 网页端更新 config.json 并成功触发热重载")
         self._send_json({
             "ok": True, "reloaded": reloaded,
             "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
@@ -1823,7 +1906,10 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/reload":
             if not self._check_auth():
                 return
-            self._send_json({"ok": True, "reloaded": _trigger_reload()})
+            reloaded = _trigger_reload()
+            from src.logger import log_all
+            log_all("⟳ 网页端请求系统配置热重载")
+            self._send_json({"ok": True, "reloaded": reloaded})
             return
         if path == "/api/secrets":
             self._handle_secrets()
@@ -1857,6 +1943,8 @@ class _Handler(BaseHTTPRequestHandler):
             if channel == "napcat" and not target.lstrip("-").isdigit():
                 self._send_json({"ok": False, "errors": ["NapCat 目标必须是 QQ 群号"]}, 400)
                 return
+            from src.logger import log_all
+            log_all(f"📨 网页端发起测试推送 [通道: {channel} | 目标: {target}]")
             ok, err = _on_test_push_cb(channel, target, text[:1000])
             if ok:
                 self._send_json({"ok": True, "channel": channel, "target": target})
@@ -1917,12 +2005,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(
                     {"ok": False, "errors": ["独立模式下无法重启主程序（主程序未运行在本进程）"]}, 400)
                 return
+            from src.logger import log_all
+            log_all("⟳ 网页端发起主程序进程重启")
             # 先把响应发出去再触发停机，客户端才能收到确认
             self._send_json({"ok": True, "restarting": True})
             try:
                 _on_restart_cb()
             except Exception as e:
-                print(f"🚨 重启回调异常: {e}")
+                log_all(f"🚨 重启回调异常: {e}", is_error=True)
             return
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 

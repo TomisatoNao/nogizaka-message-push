@@ -50,10 +50,9 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
                     health.get_tracker().record_channel("napcat", ok, f"群 {gid} 发送失败")
                     if not ok:
                         napcat_ok = False
-                        log_all(f"⚠️ NapCat QQ 推送失败 (群 {gid})", is_error=True)
+                        log_all(f"⚠️ [通道: NapCat | 目标群: {gid} | 成员: {m_name}] 消息推送失败", is_error=True)
                     else:
-                        log_all(f"✅ NapCat QQ 推送成功 (群 {gid})", is_debug=True)
-        # 如果没有配置任何 NapCat 路由，我们默认算成功，不阻断
+                        log_all(f"✅ [通道: NapCat | 目标群: {gid} | 成员: {m_name}] 消息推送成功", is_debug=True)
         if not matched_any:
             napcat_ok = True
 
@@ -73,9 +72,9 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
             ok = await bot.send_message_chain(member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}", ok)
             if not ok:
-                log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 单聊推送失败", is_error=True)
+                log_all(f"⚠️ [通道: 官方Bot:{bot.name} | 目标: {bot.target_openid[:10]}... | 成员: {m_name}] 单聊推送失败", is_error=True)
             else:
-                log_all(f"✅ 官方 QQ Bot [{bot.name}] 单聊推送成功", is_debug=True)
+                log_all(f"✅ [通道: 官方Bot:{bot.name} | 目标: {bot.target_openid[:10]}... | 成员: {m_name}] 单聊推送成功", is_debug=True)
 
         # 群聊目标（group_openid）—— 受 member_filter 过滤
         for bot in bots:
@@ -87,9 +86,9 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
                 bot.group_openid, member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}:group", ok)
             if not ok:
-                log_all(f"⚠️ 官方 QQ Bot [{bot.name}] 群推送失败 ({bot.group_openid[:16]}…)", is_error=True)
+                log_all(f"⚠️ [通道: 官方Bot:{bot.name} | 目标群: {bot.group_openid[:10]}... | 成员: {m_name}] 群推送失败", is_error=True)
             else:
-                log_all(f"✅ 官方 QQ Bot [{bot.name}] 群推送成功", is_debug=True)
+                log_all(f"✅ [通道: 官方Bot:{bot.name} | 目标群: {bot.group_openid[:10]}... | 成员: {m_name}] 群推送成功", is_debug=True)
 
     # 3. TG Bot 路由
     if cfg.ENABLE_TG_BOT:
@@ -102,9 +101,9 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
             tg_ok = await bot.send_member_message(message_chain)
             health.get_tracker().record_channel(f"tg:{bot.name}", tg_ok)
             if not tg_ok:
-                log_all(f"⚠️ TG Bot [{bot.name}] 推送失败 [{m_name}]", is_error=True)
+                log_all(f"⚠️ [通道: TG:{bot.name} | TargetChat: {bot.target_chat} | 成员: {m_name}] 推送失败", is_error=True)
             else:
-                log_all(f"✅ TG Bot [{bot.name}] 推送成功 [{m_name}]", is_debug=True)
+                log_all(f"✅ [通道: TG:{bot.name} | TargetChat: {bot.target_chat} | 成员: {m_name}] 推送成功", is_debug=True)
 
     if cfg.ENABLE_NAPCAT_QQ:
         return napcat_ok
@@ -253,19 +252,19 @@ def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = N
         soup = BeautifulSoup(html_or_text, "html.parser")
         items = []
 
-        elements = soup.find_all(["strong", "p"])
+        elements = soup.find_all(["em", "p"])
         for el in elements:
-            if el.name == "strong":
+            if el.name == "em":
                 ja_text = el.get_text("\n").strip()
                 next_node = el.next_sibling
-                em_text = ""
+                zh_text = ""
                 while next_node:
-                    if getattr(next_node, "name", None) == "em":
-                        em_text = next_node.get_text("\n").strip()
+                    if getattr(next_node, "name", None) == "span":
+                        zh_text = next_node.get_text("\n").strip()
                         break
                     next_node = next_node.next_sibling
                 if ja_text:
-                    items.append((ja_text, em_text))
+                    items.append((ja_text, zh_text))
             elif el.name == "p":
                 txt = el.get_text().strip()
                 import re
@@ -354,7 +353,7 @@ async def send_blog_post(post: dict) -> bool:
                         pass
                     await asyncio.sleep(0.4)
 
-                # Step 3: 发送中日对照正文 (**日文粗体** / *中文斜体*，段落间 \n​\n 分隔)
+                # Step 3: 发送中日对照正文 (*日文斜体* / 中文常规体，段落间 \n​\n 分隔)
                 if pairs:
                     await bot.send_translation_qq(scope, target, pairs)
 
@@ -388,7 +387,7 @@ async def send_blog_post(post: dict) -> bool:
                 # Step 3: 中日对照正文
                 if pairs:
                     from src.platforms.qq_official import _escape_qq_md
-                    blocks = [f"**{_escape_qq_md(ja)}**\n*{_escape_qq_md(zh)}*" if zh else f"**{_escape_qq_md(ja)}**" for ja, zh in pairs]
+                    blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
                     body_txt = "\n\n".join(blocks)
                     await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
             except Exception as e:
@@ -415,7 +414,7 @@ async def send_blog_post(post: dict) -> bool:
 
                 await asyncio.sleep(1.0)
 
-                # Step 3: 发送 Telegram 中日对照正文 (<i>日文斜体</i> / <b>中文粗体</b>，切分<=4000字符)
+                # Step 3: 发送 Telegram 中日对照正文 (<i>日文斜体</i> / 中文常规体，切分<=4000字符)
                 if pairs:
                     await bot.send_translation_tg(pairs)
 

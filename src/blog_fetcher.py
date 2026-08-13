@@ -85,7 +85,7 @@ BLOG_DB_PATH = Path("data/archive/blogs.db")
 def init_blog_db() -> sqlite3.Connection:
     """初始化博客数据库，返回共享连接。"""
     BLOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(BLOG_DB_PATH), timeout=10.0, check_same_thread=False)
+    conn = sqlite3.connect(str(BLOG_DB_PATH), timeout=60.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
@@ -100,6 +100,8 @@ def init_blog_db() -> sqlite3.Connection:
             body_html TEXT,
             body_text TEXT,
             translation TEXT,
+            content_json TEXT,
+            translation_model TEXT,
             images_json TEXT,
             image_paths_json TEXT,
             raw_json TEXT NOT NULL,
@@ -109,7 +111,7 @@ def init_blog_db() -> sqlite3.Connection:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_group_date ON blog_posts(group_key, date DESC);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_url ON blog_posts(url);")
     # 增量升级：旧表可能没有这些列
-    for col in ["body_html", "body_text", "translation", "image_paths_json"]:
+    for col in ["body_html", "body_text", "translation", "content_json", "translation_model", "image_paths_json"]:
         try:
             conn.execute(f"ALTER TABLE blog_posts ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
@@ -225,39 +227,46 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                     post.get("author", ""), post.get("title", ""),
                     timestamp=post.get("date", "").replace("/", "").replace(" ", "_").replace(":", ""))
 
-            # 自动调用 Gemini 翻译（利用原样注入 HTML 的逻辑）
+            # 自动调用 Gemini 翻译（结构化解耦：jp/zh 分离存储，绝不硬拼接单一文本）
             translated_html = ""
+            content_json = ""
+            translation_model = ""
             if post.get("body_html"):
                 try:
                     from src import translator
                     if getattr(translator, "_http_client", None) is None:
                         translator.initialize(client)
                     log_all(f"🔄 正在后台翻译博客: {post.get('author', '')} - {post.get('title', '')}")
-                    translated_html = await translator.translate_blog_html(
+                    structured, model_name = await translator.translate_blog_structured(
                         post["body_html"],
                         post.get("author", ""),
                         key
                     )
-                    if translated_html == "[翻译失败]":
-                        translated_html = ""
-                    else:
-                        log_all(f"✅ 后台博客翻译完成")
+                    if structured:
+                        content_json = json.dumps(structured, ensure_ascii=False)
+                        translated_html = translator.blocks_to_html(structured)
+                        translation_model = model_name or ""
+                        log_all(f"✅ 后台博客翻译完成（模型: {translation_model}）")
                 except Exception as e:
                     log_all(f"⚠️ 自动翻译博客失败: {e}", is_debug=True)
-            
+
             post["translation"] = translated_html
+            post["content_json"] = content_json
+            post["translation_model"] = translation_model
 
             # 存档到 SQLite
             try:
                 db.execute("""
                     INSERT OR IGNORE INTO blog_posts
-                    (group_key, author, title, url, date, body_html, body_text, translation, images_json, image_paths_json, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (group_key, author, title, url, date, body_html, body_text, translation, content_json, translation_model, images_json, image_paths_json, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     key, post.get("author", ""), post.get("title", ""), post["url"],
                     _normalize_date(post.get("date", "")),
                     post.get("body_html", ""), post.get("body", ""),
                     translated_html,
+                    content_json,
+                    translation_model,
                     json.dumps(post.get("images") or [], ensure_ascii=False),
                     json.dumps(image_paths, ensure_ascii=False),
                     json.dumps(post, ensure_ascii=False, default=str),

@@ -152,7 +152,7 @@ class TGBot:
         return all_ok
 
     async def send_translation_tg(self, pairs: list[tuple[str, str] | str]) -> bool:
-        """发送 Telegram 中日对照正文（日文斜体<i>，中文粗体<b>，照片占位符[写真X]，自动切分<=4000字符）。"""
+        """发送 Telegram 中日对照正文（日文斜体<i>，中文常规体，照片占位符[写真X]，自动切分<=4000字符）。"""
         if not self._bot or not self.target_chat or not pairs:
             return True
             
@@ -165,7 +165,7 @@ class TGBot:
                 zh_esc = _html.escape(zh)
                 block = f"<i>{ja_esc}</i>"
                 if zh_esc:
-                    block += f"\n<b>{zh_esc}</b>"
+                    block += f"\n{zh_esc}"
                 blocks.append(block)
             elif isinstance(item, str):
                 blocks.append(item)
