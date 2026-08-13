@@ -148,6 +148,26 @@ def has_users() -> bool:
     return bool(load_users())
 
 
+def ensure_initial_admin() -> tuple[bool, str, str]:
+    """系统启动时确保存在至少一个管理员账号。
+
+    如果用户库为空，自动创建用户名为 admin 的初始账号并生成强随机密码。
+    返回 (created, username, password)。
+    若已存在用户，返回 (False, "", "")。
+    """
+    if has_users():
+        return False, "", ""
+
+    # 生成 12 位可读性优良的强随机密码（排除易混淆字符 0, O, 1, I, l）
+    alphabet = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ"
+    init_pw = "".join(secrets.choice(alphabet) for _ in range(12))
+
+    ok, _ = add_user("admin", init_pw, "admin")
+    if ok:
+        return True, "admin", init_pw
+    return False, "", ""
+
+
 def add_user(username: str, password: str, role: str) -> tuple[bool, str]:
     """新增用户。返回 (成功, 说明)。"""
     username = (username or "").strip()

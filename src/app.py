@@ -592,6 +592,23 @@ async def main() -> None:
         token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
     )
 
+    # 首次运行自动生成 admin 管理员并输出初始密码
+    from src import auth
+    created, admin_user, admin_pw = auth.ensure_initial_admin()
+    if created:
+        banner = (
+            "\n" + "=" * 70 + "\n"
+            "🔑 系统首次运行：已为您自动创建初始管理员账号！\n"
+            f"   • 用户名:   {admin_user}\n"
+            f"   • 初始密码: {admin_pw}\n"
+            "   • Web 管理端: http://127.0.0.1:8787/\n\n"
+            "⚠️ 请妥善保存初始密码！若遗忘，可在终端执行：\n"
+            f"   python tools/manage_users.py passwd {admin_user}\n"
+            "=" * 70 + "\n"
+        )
+        print(banner, flush=True)
+        log_all("🔑 系统首次运行：已初始化创建 admin 账号（初始密码已输出至控制台）")
+
     # 2. 创建共享 HTTP 客户端
     http_client = httpx.AsyncClient(
         timeout=20,

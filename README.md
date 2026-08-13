@@ -76,39 +76,42 @@
 ## 📑 目录
 
 - [✨ 核心特性 / Features](#-核心特性--features)
-- [🚀 快速开始 / Quick Start](#-快速开始--quick-start)
-  - [1.1 环境准备与安装](#11-环境准备与安装)
-  - [1.2 准备推送通道](#12-准备推送通道)
-  - [1.3 基础配置填写](#13-基础配置填写)
-  - [1.4 账号凭证获取与配置](#14-账号凭证获取与配置)
-  - [1.5 启动系统](#15-启动系统)
-- [🧩 系统核心概念与工作流 / Architecture](#-系统核心概念与工作流--architecture)
-  - [2.1 账号池、监控成员与推送通道映射](#21-账号池监控成员与推送通道映射)
-  - [2.2 双模式认证（Web vs Mobile）与凭证自动续期](#22-双模式认证web-vs-mobile与凭证自动续期)
-  - [2.3 配置文件三层加载体系与热重载机制](#23-配置文件三层加载体系与热重载机制)
+- [🚀 极简快速上手 / Quick Start](#-极简快速上手--quick-start)
+  - [Step 1: 安装依赖与环境准备](#step-1-安装依赖与环境准备)
+  - [Step 2: 启动程序（自动生成初始管理员）](#step-2-启动程序自动生成初始管理员)
+  - [Step 3: 登录管理后台进行可视化配置](#step-3-登录管理后台进行可视化配置)
+  - [💡 忘记密码与系统重置指南](#-忘记密码与系统重置指南)
+- [🔑 用户与权限管理体系 / User & Auth System](#-用户与权限管理体系--user--auth-system)
+  - [2.1 双角色模型（admin 与 viewer）](#21-双角色模型admin-与-viewer)
+  - [2.2 银行级安全架构与防锁死机制](#22-银行级安全架构与防锁死机制)
+  - [2.3 网页端用户管理操作详解](#23-网页端用户管理操作详解)
+  - [2.4 命令行管理工具 (tools/manage_users.py)](#24-命令行管理工具-toolsmanage_userspy)
+- [🧩 系统核心概念与架构 / Architecture](#-系统核心概念与架构--architecture)
+  - [3.1 账号池、监控成员与推送通道映射](#31-账号池监控成员与推送通道映射)
+  - [3.2 双模式认证（Web vs Mobile）与凭证自动续期](#32-双模式认证web-vs-mobile与凭证自动续期)
+  - [3.3 配置文件三层加载体系与热重载机制](#33-配置文件三层加载体系与热重载机制)
 - [🛠️ 博客监控、智能解析与双语阅读器](#️-博客监控智能解析与双语阅读器)
-  - [3.1 4 列自适应网格与日期日历联动](#31-4-列自适应网格与日期日历联动)
-  - [3.2 智能分段解析与图片原位保护算法](#32-智能分段解析与图片原位保护算法)
-  - [3.3 三态多语言视图与数据解耦存储](#33-三态多语言视图与数据解耦存储)
-  - [3.4 全渠道 zakablog 规范排版与格式化推送](#34-全渠道-zakablog-规范排版与格式化推送)
+  - [4.1 4 列自适应网格与日期日历联动](#41-4-列自适应网格与日期日历联动)
+  - [4.2 智能分段解析与图片原位保护算法](#42-智能分段解析与图片原位保护算法)
+  - [4.3 三态多语言视图与数据解耦存储](#43-三态多语言视图与数据解耦存储)
+  - [4.4 全渠道 zakablog 规范排版与格式化推送](#44-全渠道-zakablog-规范排版与格式化推送)
 - [💬 Message 消息归档与全文检索](#-message-消息归档与全文检索)
-  - [4.1 聚合动态首页与最新写真横向画廊](#41-聚合动态首页与最新写真横向画廊)
-  - [4.2 时间线浏览、FTS5 全文搜索与图片 AI 识图打标](#42-时间线浏览fts5-全文搜索与图片-ai-识图打标)
-  - [4.3 历史全量消息断点续传回填](#43-历史全量消息断点续传回填)
+  - [5.1 聚合动态首页与最新写真横向画廊](#51-聚合动态首页与最新写真横向画廊)
+  - [5.2 时间线浏览、FTS5 全文搜索与图片 AI 识图打标](#52-时间线浏览fts5-全文搜索与图片-ai-识图打标)
+  - [5.3 历史全量消息断点续传回填](#53-历史全量消息断点续传回填)
 - [🖥️ 网页管理端与日常运维](#️-网页管理端与日常运维)
-  - [5.1 六大管理页签功能详解](#51-六大管理页签功能详解)
-  - [5.2 账号权限体系与访客隔离（admin vs viewer）](#52-账号权限体系与访客隔离admin-vs-viewer)
-  - [5.3 QQ 官方机器人私聊交互指令](#53-qq-官方机器人私聊交互指令)
+  - [6.1 六大管理页签功能全览](#61-六大管理页签功能全览)
+  - [6.2 QQ 官方机器人私聊交互指令](#62-qq-官方机器人私聊交互指令)
 - [⚙️ 服务化部署与运维托管](#️-服务化部署与运维托管)
-  - [6.1 Windows 计划任务后台守护（防孤儿进程）](#61-windows-计划任务后台守护防孤儿进程)
-  - [6.2 Linux Systemd 用户级/系统级服务化托管](#62-linux-systemd-用户级系统级服务化托管)
-  - [6.3 每日健康摘要（死人开关）与数据备份清单](#63-每日健康摘要死人开关与数据备份清单)
+  - [7.1 Windows 计划任务后台守护（防孤儿进程）](#71-windows-计划任务后台守护防孤儿进程)
+  - [7.2 Linux Systemd 用户级/系统级服务化托管](#72-linux-systemd-用户级系统级服务化托管)
+  - [7.3 每日健康摘要（死人开关）与数据备份清单](#73-每日健康摘要死人开关与数据备份清单)
 - [🔍 常见故障排查 / FAQ](#-常见故障排查--faq)
 - [📖 附录与配置参考](#-附录与配置参考)
-  - [8.1 全量配置项手册 (config.json)](#81-全量配置项手册-configjson)
-  - [8.2 环境变量速查 (.env)](#82-环境变量速查-env)
-  - [8.3 命令行工具矩阵 (tools/)](#83-命令行工具矩阵-tools)
-  - [8.4 现役成员 ID 速查表](#84-现役成员-id-速查表)
+  - [9.1 全量配置项手册 (config.json)](#91-全量配置项手册-configjson)
+  - [9.2 环境变量速查 (.env)](#92-环境变量速查-env)
+  - [9.3 命令行工具矩阵 (tools/)](#93-命令行工具矩阵-tools)
+  - [9.4 现役成员 ID 速查表](#94-现役成员-id-速查表)
 
 ---
 
@@ -133,15 +136,18 @@
 ### 4. 翻译来源透明化
 - **AI 模型实时动态标记**：详情页右上角动态显示当前译文生成的 AI 模型名称（如 `Gemini 2.5 Flash` / `Gemini 1.5 Pro` 等），仅在存在译文且处于「日中对照」或「中文」视图时优雅展示。
 
-### 5. 极致的稳定性与性能
+### 5. 极致的稳定性与权限体系
+- **开箱即用自动初始化管理员**：系统首次启动自动生成管理员 `admin` 及高强度随机密码并在终端高亮提示，杜绝未授权访问。
 - **多模型自动 Failover 降级**：内置模型熔断轮询机制，遭遇 HTTP 429 或限额时自动毫秒级切换备用模型，保障翻译不中断。
 - **SQLite WAL 模式与零依赖 WebUI**：后端采用标准库 asyncio HTTP 服务，零外部前端框架依赖；归档采用 SQLite WAL 模式 + FTS5 全文索引，百万级消息秒级响应。
 
 ---
 
-## 🚀 快速开始 / Quick Start
+## 🚀 极简快速上手 / Quick Start
 
-### 1.1 环境准备与安装
+本项目采用**“零手动改配置文件、全 Web 可视化引导”**的极简设计理念，3 步即可完成部署与运行：
+
+### Step 1: 安装依赖与环境准备
 
 需要 **Python 3.10+**（支持 Windows / Linux / macOS）。
 
@@ -153,97 +159,153 @@ cd nogizaka-message-push
 # 2. 安装核心依赖
 pip install -r requirements.txt
 
-# 3. 复制环境变量配置文件
+# 3. 初始化环境变量文件
 cp .env.example .env        # Windows CMD/PowerShell: copy .env.example .env
 ```
 
-### 1.2 准备推送通道
-
-至少准备以下任意一个推送通道：
-
-| 通道类型 | 推荐指数 | 快速准备步骤 |
-|---|:---:|---|
-| **Telegram** | ⭐⭐⭐⭐⭐ | 找 [@BotFather](https://t.me/BotFather) 发送 `/newbot` 获取 `TG_BOT_TOKEN`；将机器人加入频道并设为**管理员**。 |
-| **QQ 群 (OneBot v11)** | ⭐⭐⭐⭐ | 启动 [NapCatQQ](https://github.com/NapNeko/NapCatQQ) 或 [Lagrange.Core](https://github.com/LagrangeDev/Lagrange.Core)，开启 HTTP API（默认 `http://127.0.0.1:3000`）。 |
-| **QQ 官方机器人** | ⭐⭐⭐⭐ | 在 [QQ 开放平台](https://q.qq.com/#/apps) 创建机器人，获取 `AppID` 和 `ClientSecret`（支持个人单聊与群聊推送）。 |
-
-### 1.3 基础配置填写
-
-1. 编辑 `.env` 文件（密钥凭证）：
-   ```bash
-   TG_BOT_TOKEN=123456:ABC-DEF                 # 使用 Telegram 推送时填写
-   GEMINI_API_KEY=AIzaSy...                    # Google AI Studio 免费申请 (https://aistudio.google.com/apikey)
-   ```
-
-2. 编辑 `config/config.json`，配置通道与要监控的成员：
-   ```json5
-   {
-     "channels": {
-       "napcat": false,
-       "tg": true,
-       "qq_official": false
-     },
-     "accounts": {
-       "nogizaka_main": { "group": "nogizaka46" }    // 账号 ID 自定义（小写下划线）
-     },
-     "monitor": [
-       {
-         "id": "55",
-         "name": "冨里奈央",
-         "account": "nogizaka_main",
-         "tg": "-1004219007326"                      // 填入接收消息的 TG 频道 ID
-       }
-     ],
-     "blog_monitor": {
-       "enabled": true,
-       "nogizaka": true,
-       "hinatazaka": true,
-       "sakurazaka": true
-     }
-   }
-   ```
-
-> 💡 **成员 ID 怎么获取？** 先运行程序，在网页管理端「👥 账号与成员 → 📋 从账号拉取成员列表」中直接点选添加，或参考文末 [8.4 现役成员 ID 速查表](#84-现役成员-id-速查表)。
-
-### 1.4 账号凭证获取与配置
-
-Message 账号凭证从电脑浏览器或手机端抓包获取：
-
-| 凭证类型 | 对应登录方式 | 获取途径 |
-|---|---|---|
-| `TOKEN` (JWT) | Web 网页版 (默认) | 电脑登录 Message 官网 ➔ F12 开发者工具 ➔ Network ➔ 任意 API ➔ 请求头 `authorization: Bearer eyJ...` |
-| `COOKIE` | Web 网页版 (默认) | 同上请求的 Request Headers 中 `cookie:` 完整字符串 |
-| `REFRESH_TOKEN` | Mobile 移动端 | 手机抓包（Charles / Proxyman / HTTP Catcher）拦截 `update_token` 请求体中的 `refresh_token` |
-
-配置写入 `.env`（变量名规则：`账号ID大写_TOKEN` / `_COOKIE` / `_REFRESH_TOKEN`）：
-```bash
-NOGIZAKA_MAIN_TOKEN=eyJhbGciOi...
-NOGIZAKA_MAIN_COOKIE=session=xxx; other=yyy
-```
-
-> 💡 **零手动极简配置**：可先留空直接启动，打开网页管理端「👥 账号与成员 ➔ 填凭证」直接粘贴，系统将自动安全写入 `.env` 并即时热重载生效！
-
-### 1.5 启动系统
+### Step 2: 启动程序（自动生成初始管理员）
 
 ```bash
 python main.py
 ```
 
-终端将打印初始化自检日志并启动轮询：
+首次运行时，系统会自动检测并初始化用户库，在终端中高亮输出**初始管理员账号与随机密码**：
+
 ```text
-22:00:00 [INFO] 🟢 TG Bot 连通正常 (@sakurapush_bot)
-22:00:01 [INFO] 🟢 账号凭证完整（1 个账号已就绪）
-22:00:02 [INFO] 🟢 博客监控引擎已启动 [乃木坂46 / 日向坂46 / 櫻坂46]
-22:00:03 [INFO] 🔍 巡查完毕 [冨里奈央] - 无新消息
+======================================================================
+🔑 系统首次运行：已为您自动创建初始管理员账号！
+   • 用户名:   admin
+   • 初始密码: 7Kq9vWx2mP4z
+   • Web 管理端: http://127.0.0.1:8787/
+
+⚠️ 请妥善保存初始密码！若遗忘，可在终端执行：
+   python tools/manage_users.py passwd admin
+======================================================================
 ```
 
-打开浏览器访问 **`http://127.0.0.1:8787/`**，即可进入全功能 Web 管理控制台与归档中心。
+### Step 3: 登录管理后台进行可视化配置
+
+打开浏览器访问 **`http://127.0.0.1:8787/`**，输入终端中提示的 `admin` 及初始密码登录。
+
+在后台页面中直接完成所有日常配置（全部无需手动修改 JSON）：
+
+1. **配置 AI 翻译**：切换到「⚙️ 系统设置」，填入你的 Google Gemini API Key（可在 [Google AI Studio](https://aistudio.google.com/apikey) 免费获取）；
+2. **开启推送通道**：切换到「📢 推送通道」，开启 Telegram 频道、NapCat QQ 群 或 QQ 官方机器人，并点击「📨 发送测试」验证连通性；
+3. **添加账号与监控成员**：切换到「👥 账号与成员」，点击「填凭证」直接粘贴 Message 抓包的 Token/Cookie，然后点击「📋 从账号拉取成员列表」一键勾选要监控的偶像成员；
+4. **即时生效**：点击右上角「⟳ 重新载入」，系统即刻进入全自动抓取、翻译、推送与归档状态！
 
 ---
 
-## 🧩 系统核心概念与工作流 / Architecture
+### 💡 忘记密码与系统重置指南
 
-### 2.1 账号池、监控成员与推送通道映射
+如果你在首次启动时未留意控制台输出的随机密码，或者后续遗忘了密码，可以通过以下官方工具快速解决：
+
+#### 方案 A：直接在终端重置 admin 密码
+```bash
+# 方式 1：指定新密码（需 ≥ 8 位）
+python tools/manage_users.py passwd admin YourNewPass123
+
+# 方式 2：交互式安全输入密码
+python tools/manage_users.py passwd admin
+```
+
+#### 方案 B：重置用户库初始状态
+```bash
+# 清空现有用户并重新生成初始 admin 随机密码
+python tools/manage_users.py reset
+
+# 或者直接删除用户库文件后重启主程序（自动重新生成）：
+rm data/users.json          # Windows: del data\users.json
+python main.py
+```
+
+---
+
+## 🔑 用户与权限管理体系 / User & Auth System
+
+系统内置了企业级轻量化用户鉴权与访问控制系统（RBAC），兼顾了**管理端配置的绝对安全性**与**归档查看的便捷分享性**。
+
+### 2.1 双角色模型（admin 与 viewer）
+
+系统采用两级角色模型划分用户权限边界：
+
+| 权限能力 | 👑 管理员 (`admin`) | 👓 访客/查看者 (`viewer`) |
+|---|:---:|:---:|
+| **登录 Web 管理后台** (`/`) | ✅ 完全允许 | ❌ 严密拦截 (403 友好重定向) |
+| **实时状态与通道监控** | ✅ 查看全部健康度与指标 | ❌ 禁止访问 |
+| **修改配置与凭证热更** | ✅ 修改配置、填凭证、配置通道 | ❌ 禁止访问 |
+| **系统级控制（热重载 / 重启）** | ✅ 一键重启与热更配置 | ❌ 禁止访问 |
+| **查看实时脱敏运行日志** | ✅ 实时日志轮询与过滤 | ❌ 禁止访问 |
+| **用户与权限管理** | ✅ 增删用户、改密码、分配角色 | ❌ 禁止访问 |
+| **访问 Message 消息归档** (`/archive`) | ✅ 完全允许 | ✅ 完整浏览与检索 |
+| **访问 官方博客归档与双语阅读器** | ✅ 完整浏览 / 即时重译 / 删译文 | ✅ 完整浏览阅读 |
+
+> 💡 **归档免登录公开选项**：如果希望将 `/archive` 开放给同好朋友自由浏览而无需逐一分发账号，只需在「⚙️ 系统设置」中开启 `auth.archive_public: true`，此时管理后台仍强力受密码保护，而归档页可匿名公开访问。
+
+---
+
+### 2.2 银行级安全架构与防锁死机制
+
+1. **scrypt 加盐哈希加密**：
+   - 用户密码采用标准库 `hashlib.scrypt` 进行加盐哈希（$N=16384, r=8, p=1$），数据库和 `data/users.json` 中**绝不存储任何明文密码**，即使归档数据泄露也无法逆向还原。
+   - 校验逻辑采用 `hmac.compare_digest` 常时比较，彻底免疫针对密码比对的时序侧信道攻击（Timing Attack）。
+2. **安全会话生命周期**：
+   - 登录成功后签发由 `secrets` 模块生成的强随机 Session Token；
+   - 附带 `HttpOnly` 与 `SameSite=Strict` Cookie 保护，免疫 XSS 与 CSRF 劫持；
+   - 会话仅驻留进程内存中，修改密码会自动即时踢出该用户的所有已登录会话，主程序重启会话自动失效。
+3. **暴力破解防护机制**：
+   - 内置基于请求 IP 的异常登录限制。若在 10 分钟内连续输错密码达到 5 次，系统将对该 IP 实施 15 分钟临时锁定并记录安全告警日志。
+4. **系统级防锁死（Anti-Lockout）保护**：
+   - **禁止删除/降级最后一个管理员**：系统严格禁止删除或将角色降级为 `viewer` 的最后一个 `admin` 账号，确保永远有管理员能登录后台；
+   - **禁止删除当前登录账号**：严禁管理员在网页端误操作删除自己正在使用的登录账号。
+
+---
+
+### 2.3 网页端用户管理操作详解
+
+登录 `admin` 账号后，进入顶部导航栏的 **「🔑 用户」** 选项卡即可进行全流程可视化管理：
+
+- **👥 用户列表矩阵**：清晰呈现用户名、当前登录状态标记（绿色 `当前登录` 徽标）、角色标签、账号创建时间及操作按钮；
+- **➕ 添加新用户**：输入用户名，选择角色（`admin` / `viewer`），可手动输入密码或点击「🎲 随机生成」一键生成 12 位高强度安全密码；
+- **🔑 在线修改密码**：管理员可随时为自己或其它用户重置新密码，修改后旧会话立即失效；
+- **🛡️ 角色变更与注销**：灵活切换成员权限，具备二次确认与防锁死拦截保护。
+
+---
+
+### 2.4 命令行管理工具 (tools/manage_users.py)
+
+无需启动 Web 服务，在服务器终端即可通过 `tools/manage_users.py` 完整管理账号体系：
+
+```bash
+# 1. 查看现有所有用户列表
+python tools/manage_users.py list
+
+# 2. 新增管理员用户（交互式输入密码）
+python tools/manage_users.py add alice
+
+# 3. 新增仅归档查看者用户（viewer）
+python tools/manage_users.py add bob --viewer
+
+# 4. 修改/重置指定用户密码（支持直接传参或留空交互式输入）
+python tools/manage_users.py passwd alice NewSecurePassword888
+
+# 5. 调整用户角色权限
+python tools/manage_users.py role bob admin     # 提升为管理员
+python tools/manage_users.py role bob viewer    # 调整为查看者
+
+# 6. 删除用户
+python tools/manage_users.py del bob
+
+# 7. 重置系统初始状态（清空用户库并生成全新的 admin 随机密码）
+python tools/manage_users.py reset
+python tools/manage_users.py reset --force     # 免确认静默重置
+```
+
+---
+
+## 🧩 系统核心概念与架构 / Architecture
+
+### 3.1 账号池、监控成员与推送通道映射
 
 ```text
 ┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
@@ -258,7 +320,7 @@ python main.py
 - **监控成员（Monitor）**：指定具体监控成员的 ID 与名称，并将其绑定到指定的账号；
 - **推送通道（Channels）**：支持 NapCat / Lagrange QQ 群、Telegram 频道及 QQ 官方机器人，每个成员可配置独立推送目标，官方机器人亦支持成员与博客独立过滤规则。
 
-### 2.2 双模式认证（Web vs Mobile）与凭证自动续期
+### 3.2 双模式认证（Web vs Mobile）与凭证自动续期
 
 1. **认证模式分发**：
    - `web` 模式（默认）：模拟 Chrome 桌面端，依赖 Token 与 Cookie；
@@ -272,7 +334,7 @@ python main.py
    ```
    > ⚠️ **重要提示**：Token 自动续期后会落地到 `data/web_credentials/`。更换凭证时强烈推荐在**网页端「账号与成员」卡片中点击「填凭证」**修改，系统会自动清理旧磁盘凭证并同步更新 `.env`。
 
-### 2.3 配置文件三层加载体系与热重载机制
+### 3.3 配置文件三层加载体系与热重载机制
 
 系统采用 **内置默认值 ➔ `config.json` 覆盖 ➔ `.env` 敏感密钥注入** 的三层分级架构。底层集成文件观察者（Watchdog），在不重启进程的前提下实现：
 - 增删监控成员与账号即时生效；
@@ -285,13 +347,13 @@ python main.py
 
 本系统深度集成坂道三团官方博客爬虫，提供**抓取 ➔ 结构化解耦 ➔ AI 翻译 ➔ 高清下载 ➔ 优雅阅读**全链路方案：
 
-### 3.1 4 列自适应网格与日期日历联动
+### 4.1 4 列自适应网格与日期日历联动
 
 - **4 列自适应响应式矩阵**：每页 24 条博客卡片排版，搭载 1:1 精致封面、作者头像标签、发布时间与搜索关键词高亮。
 - **破图优雅降级**：封面遇 404、防盗链拦截或原图下架时，前端自动隐藏破损图片节点并以 📝 极简图标占位，视觉整洁一致。
 - **日期跳转与日历热力**：左侧吸顶日历按日统计博客发文量，点击任意日期自动重置筛选并精准定位高亮目标博客。
 
-### 3.2 智能分段解析与图片原位保护算法
+### 4.2 智能分段解析与图片原位保护算法
 
 ```
 [原始 HTML] ──────────────────────────┐
@@ -308,7 +370,7 @@ python main.py
 - **5 类 DOM 统一归一化**：自动消除 `<br>` 堆叠、逐行 `<p>` 碎片化与 `<div>` 容器差异，确保段落粒度与人类视效完全一致。
 - **原位节点保留**：图片不参与纯文本翻译，预先抽离并在拼接时无损插回原位，彻底根除漏图、跳段与长文截断现象。
 
-### 3.3 三态多语言视图与数据解耦存储
+### 4.3 三态多语言视图与数据解耦存储
 
 双语阅读器内置自由切换机制：
 
@@ -321,7 +383,7 @@ python main.py
 - **翻译模型动态溯源**：详情页右上角次级灰字动态标示 `翻译模型：gemini-2.5-flash`，让翻译来源清晰透明。
 - **管理员一键管理**：登录 Admin 后可在阅读器内随时「🗑️ 删除翻译」或「🌐 即时重译」。
 
-### 3.4 全渠道 zakablog 规范排版与格式化推送
+### 4.4 全渠道 zakablog 规范排版与格式化推送
 
 博客推送全渠道（Telegram / QQ 群 / 官方 Bot）严格统一按照 **zakablog 标准排版规范** 发送：
 1. **Header 信息头**：团体 Emoji、成员名、标题、发布时间、原图统计与原文链接；
@@ -332,20 +394,20 @@ python main.py
 
 ## 💬 Message 消息归档与全文检索
 
-### 4.1 聚合动态首页与最新写真横向画廊
+### 5.1 聚合动态首页与最新写真横向画廊
 
 访问 `/archive` 即可进入跨成员聚合首页：
 - **Hero 卡片**：直观展示全站归档总数、时间跨度、本周收发环比及「今日 X 条」一键准确定位跳转。
 - **最新写真横向画廊**：轮播展示最新抓取的高清生写与日常随拍，支持键盘方向键翻页与全屏灯箱。
 - **最近动态流**：聚合展示各成员最新 Message 气泡与双语译文。
 
-### 4.2 时间线浏览、FTS5 全文搜索与图片 AI 识图打标
+### 5.2 时间线浏览、FTS5 全文搜索与图片 AI 识图打标
 
 - **聊天气泡时间线**：按天精准分隔（JST 时间），支持日中双语对照、音频在线播放、视频流媒体拖拽进度。
 - **SQLite FTS5 全文检索**：毫秒级秒搜数万条历史消息，支持空格多词分词与中日双语联合匹配。
 - **Gemini Vision 智能打标**：自动对收到的图片进行 10 种类目识别（自拍/合照/舞台/外出/美食/玩偶/动物/花草/风景/截图），点击标签即可一键聚合检索。
 
-### 4.3 历史全量消息断点续传回填
+### 5.3 历史全量消息断点续传回填
 
 实时归档仅覆盖启用之后的新消息，历史消息使用内置回填工具一键补全：
 
@@ -363,7 +425,7 @@ python tools/backfill_archive.py 冨里奈央 --from 2023-01-01
 
 管理后台监听于 **`http://127.0.0.1:8787/`**，包含六大核心模块：
 
-### 5.1 六大管理页签功能详解
+### 6.1 六大管理页签功能全览
 
 ```
 ┌────────┬─────────────┬──────────┬──────────┬─────────┬──────────┐
@@ -380,14 +442,7 @@ python tools/backfill_archive.py 冨里奈央 --from 2023-01-01
 | **🔑 用户** | 采用 scrypt 加盐哈希的用户鉴权系统，在线增删用户、分配角色、生成随机高强度密码（防锁死保护）。 |
 | **🛠️ 高级** | 实时脱敏运行日志控制台（支持过滤与清空）、全局 JSON 配置可视化编辑及 **10 份历史快照一键回滚**。 |
 
-### 5.2 账号权限体系与访客隔离（admin vs viewer）
-
-通过 `config.json` 中的 `auth` 模块轻松启用多用户访问控制：
-- **`admin` (管理员)**：拥有管理后台全部权限、配置热更、系统重启与归档管理能力。
-- **`viewer` (访客/朋友)**：仅允许访问 `/archive` 归档查阅界面，完全隔离敏感配置、日志与凭证信息。
-- **安全防误锁机制**：系统内置底层约束，严禁删除或降级当前登录账号及最后一个管理员账号。
-
-### 5.3 QQ 官方机器人私聊交互指令
+### 6.2 QQ 官方机器人私聊交互指令
 
 启用 QQ 官方 Bot 并开启指令后，授权用户在 QQ 私聊机器人即可发送查询指令（回复走被动消息，不消耗主动额度）：
 
@@ -404,7 +459,7 @@ python tools/backfill_archive.py 冨里奈央 --from 2023-01-01
 
 ## ⚙️ 服务化部署与运维托管
 
-### 6.1 Windows 计划任务后台守护（防孤儿进程）
+### 7.1 Windows 计划任务后台守护（防孤儿进程）
 
 针对 Windows 生产环境，项目内置了具备崩溃自拉起、防孤儿进程的 PowerShell 守护脚本：
 
@@ -416,7 +471,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Stop      
 powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall # 卸载开机自启
 ```
 
-### 6.2 Linux Systemd 用户级/系统级服务化托管
+### 7.2 Linux Systemd 用户级/系统级服务化托管
 
 针对 Linux 服务器环境，提供一键注册为 systemd 守护服务的脚本：
 
@@ -428,12 +483,13 @@ bash tools/install_systemd.sh --logs       # 查看实时 journal 日志
 bash tools/install_systemd.sh --stop       # 停止服务
 ```
 
-### 6.3 每日健康摘要（死人开关）与数据备份清单
+### 7.3 每日健康摘要（死人开关）与数据备份清单
 
 - **死人开关 (Daily Summary)**：每日设定时间（默认 JST 23:00）向指定通道推送运行日报。如果某天未收到日报，即说明系统出现异常。
 - **核心数据备份清单**：
   - `data/archive/`：历史 Message 归档与 `blogs.db` 数据库（**最重要数据，建议定期冷备份**）；
   - `data/blog_images/`：本地下载的博客原图；
+  - `data/users.json`：用户与密码哈希库；
   - `config/config.json` 与 `.env`：系统配置与密钥凭证。
 
 ---
@@ -442,6 +498,7 @@ bash tools/install_systemd.sh --stop       # 停止服务
 
 | 故障现象 | 潜在排查原因 | 解决方案 |
 |---|---|---|
+| **启动时没看清初始管理员密码** | 终端输出被刷过或未留意。 | 执行 `python tools/manage_users.py passwd admin <新密码>` 直接重设，或执行 `reset` 重置。 |
 | **启动提示「没有任何可用推送目标」** | 监控成员未配置 `groups` 或 `tg`，且未启用官方 Bot。 | 在「👥 账号与成员」中为监控成员勾选或填入推送目标。 |
 | **Telegram 报错 `Chat not found`** | Bot 未加入目标频道，或未被赋予「发布消息」管理员权限。 | 将 Bot 添加至频道 Admin；使用 [@getidsbot](https://t.me/getidsbot) 获取准确的频道 Chat ID。 |
 | **NapCat 提示连接失败** | OneBot 框架未启动，或 `napcat_api` 地址配置有误。 | 确认 NapCat 运行中，且 HTTP API 地址（如 `http://127.0.0.1:3000`）可正常访问。 |
@@ -454,7 +511,7 @@ bash tools/install_systemd.sh --stop       # 停止服务
 
 ## 📖 附录与配置参考
 
-### 8.1 全量配置项手册 (config.json)
+### 9.1 全量配置项手册 (config.json)
 
 | 配置节点 | 类型 | 默认值 | 详细说明 |
 |---|:---:|:---:|---|
@@ -485,7 +542,7 @@ bash tools/install_systemd.sh --stop       # 停止服务
 | `auth.archive_public` | `bool` | `false` | 是否允许免登录公开查阅 `/archive` 归档 |
 | `auth.session_hours` | `int` | `24` | 登录会话 Token 有效期（小时） |
 
-### 8.2 环境变量速查 (.env)
+### 9.2 环境变量速查 (.env)
 
 ```bash
 # AI 翻译与多模态识图
@@ -506,15 +563,15 @@ NOGIZAKA_MAIN_REFRESH_TOKEN=
 QQ_OFFICIAL_BOT1_CLIENT_SECRET=your_secret_here
 ```
 
-### 8.3 命令行工具矩阵 (tools/)
+### 9.3 命令行工具矩阵 (tools/)
 
 | 脚本文件 | 命令示例 | 功能说明 |
 |---|---|---|
+| `manage_users.py` | `python tools/manage_users.py passwd admin` | 命令行管理网页端账号、重置密码、权限角色调整与系统重置 |
 | `archive_member.py` | `python tools/archive_member.py <博客列表/详情URL> --translate` | 归档指定成员全量历史博客与原图（支持断点与 AI 翻译） |
 | `backfill_archive.py` | `python tools/backfill_archive.py 冨里奈央 --from 2023-01-01` | 回填指定成员或全员的历史 Message 消息与多媒体 |
 | `sync_archive_db.py` | `python tools/sync_archive_db.py` | 扫描磁盘 JSON 归档并全量同步重构 SQLite 数据库索引 |
 | `tag_images.py` | `python tools/tag_images.py --member 冨里奈央` | 批量对归档图片调用 Gemini Vision 进行补全打标 |
-| `manage_users.py` | `python tools/manage_users.py add <用户名> --viewer` | 命令行增删网页端用户、重置密码或变更权限角色 |
 | `list_members.py` | `python tools/list_members.py nogizaka_main` | 查询指定账号已订阅/可见的成员列表与成员 ID |
 | `get_qq_openid.py` | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 自动捕获私聊用户的 `target_openid` |
 | `get_qq_group_openid.py`| `python tools/get_qq_group_openid.py [APP_ID] [SECRET]` | 自动捕获机器人在目标群中的 `group_openid` |
@@ -522,7 +579,7 @@ QQ_OFFICIAL_BOT1_CLIENT_SECRET=your_secret_here
 | `install_autostart.ps1` | `powershell -File tools\install_autostart.ps1 -Start` | Windows 计划任务开机自启安装与管理脚本 |
 | `install_systemd.sh` | `bash tools/install_systemd.sh` | Linux systemd 服务化守护一键安装配置脚本 |
 
-### 8.4 现役成员 ID 速查表
+### 9.4 现役成员 ID 速查表
 
 <details>
 <summary><b>乃木坂46 现役成员 ID 速查（点击展开）</b></summary>

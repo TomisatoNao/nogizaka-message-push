@@ -93,6 +93,9 @@ def main() -> None:
         # 用户库文件里不含明文密码
         raw_file = auth.USERS_PATH.read_text(encoding="utf-8")
         assert "adminpass123" not in raw_file and "viewerpass123" not in raw_file
+
+        # 验证 ensure_initial_admin
+        assert not auth.ensure_initial_admin()[0], "已存在用户时不应重复创建初始管理员"
         print("✅ Test 2 通过\n")
 
         # ── Test 3: 认证与会话 ──────────────────────────
