@@ -31,11 +31,15 @@ def start_watcher(
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
     except ImportError:
-        print("ℹ️  watchdog 未安装，config.json 自动热重载不可用")
-        print("   如需启用，请执行: pip install watchdog")
+        try:
+            from src.logger import log_all
+            log_all("ℹ️ watchdog 未安装，config.json 自动热重载不可用 (可通过 pip install watchdog 启用)", is_debug=True)
+        except Exception:
+            pass
         return None
 
     from config.config import reload as _reload
+    from src.logger import log_all
 
     _last_reload = 0.0
 
@@ -53,9 +57,9 @@ def start_watcher(
 
             ok = _reload()
             if ok:
-                print("🔄 config.json 热重载成功")
+                log_all("🔄 config.json 热重载成功")
             else:
-                print("🚨 config.json 热重载失败，继续使用旧配置")
+                log_all("🚨 config.json 热重载失败，继续使用旧配置", is_error=True)
 
             if on_reload is not None:
                 on_reload(ok)  # type: ignore[call-arg]
@@ -63,5 +67,5 @@ def start_watcher(
     observer = Observer()
     observer.schedule(_Handler(), str(config_path.parent), recursive=False)
     observer.start()
-    print("👁️  config.json 文件监控已启动（自动热重载）")
+    log_all("👁️ config.json 文件监控已启动（自动热重载）")
     return observer
