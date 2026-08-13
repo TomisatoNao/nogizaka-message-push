@@ -298,6 +298,8 @@ async def send_blog_post(post: dict) -> bool:
     import json
     imgs_raw = post.get("images") or (json.loads(post.get("images_json")) if isinstance(post.get("images_json"), str) else [])
     media_urls = [img for img in imgs_raw if isinstance(img, str) and img.startswith("http")]
+    trans_model = post.get("translation_model") or ""
+    model_line = f"模型：{trans_model}\n" if trans_model else ""
 
     # 1. 头消息 (Header text)
     header_text = (
@@ -305,6 +307,7 @@ async def send_blog_post(post: dict) -> bool:
         f"作者：{author}\n"
         f"标题：{title}\n"
         f"时间：{date}\n"
+        f"{model_line}"
         f"照片：共 {len(media_urls)} 张\n\n"
         f"👉 博客链接：\n{blog_url}"
     )

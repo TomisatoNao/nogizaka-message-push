@@ -18,7 +18,7 @@ from config.credentials import (
     get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
 )
 from src.dedup import load_sent_ids, save_sent_id
-from src.translator import translate_text
+from src.translator import translate_text_with_model
 from src.notifier import send_member_message
 from src.health import ErrorTier, get_tracker as _health_tracker
 from src.platforms.napcat import build_message_chain
@@ -77,21 +77,23 @@ async def _handle_message(member: dict, msg: dict,
 
     # 翻译
     translated = ""
+    trans_model = ""
     if cfg.ENABLE_TRANSLATION and original_text.strip():
-        raw = await translate_text(original_text, m_name, group_type)
+        raw, model_name = await translate_text_with_model(original_text, m_name, group_type)
         if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
             log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 翻译失败，仅推送原文 ({raw})", is_error=True)
         elif raw.strip() == original_text.strip():
             log_all(f"ℹ️ [成员ID: {m_id} | 名字: {m_name}] 翻译结果与原文一致，跳过翻译推送", is_debug=True)
         else:
             translated = raw
-            log_all(f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成: {translated[:100]}...", is_debug=True)
+            trans_model = model_name or ""
+            log_all(f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成 ({trans_model}): {translated[:100]}...", is_debug=True)
 
     # 归档（后台执行，不阻塞推送；开关 archive.enabled）
     archive.schedule_archive(member, msg, translated)
 
-    # 推送 QQ
-    chain = build_message_chain(m_name, updated, msg, translated)
+    # 推送各通道
+    chain = build_message_chain(m_name, updated, msg, translated, model_name=trans_model)
     if not await send_member_message(member, chain):
         log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息推送失败，保留时间戳等待下次重试", is_error=True)
         return False

@@ -8,7 +8,7 @@ from src.utils import utc_to_jst
 import httpx
 
 import config.config as cfg
-from src.constants import ROLE_KEY, ROLE_TRANSLATION, TRANSLATION_SEPARATOR
+from src.constants import ROLE_KEY, ROLE_TRANSLATION
 from src.logger import format_httpx_error, log_all
 
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
@@ -29,6 +29,7 @@ def build_message_chain(
     updated: str,
     msg: dict,
     translated_text: str = "",
+    model_name: str = "",
 ) -> list[dict]:
     """
     将一条 API 消息体转换为 QQ 消息链。
@@ -53,11 +54,13 @@ def build_message_chain(
             log_all(f"⚠️ 未知媒体类型 '{msg.get('type')}'，跳过媒体段")
 
     if translated_text:
+        sep = f"\n\n─── 🌐 译文 ({model_name}) ───\n\n" if model_name else "\n\n─── 🌐 译文 ───\n\n"
         # 打上角色标记，供下游通道识别翻译段（发送前会被剥离）
         chain.append({
             "type": "text",
-            "data": {"text": f"{TRANSLATION_SEPARATOR}{translated_text}"},
+            "data": {"text": f"{sep}{translated_text}"},
             ROLE_KEY: ROLE_TRANSLATION,
+            "_model_name": model_name,
         })
 
     return chain

@@ -301,23 +301,28 @@ async def _do_translate_gemini_json(
 
     return {}, ""
 
-async def translate_text(text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
-    """普通文本消息翻译接口（多引擎智能轮番调度与 Failover）"""
+async def translate_text_with_model(
+    text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None
+) -> tuple[str, str]:
+    """普通文本消息翻译接口（返回 (译文, 翻译模型名)），支持多引擎智能轮番调度与 Failover。"""
     if not text or not text.strip():
-        return text
+        return text, ""
     if _is_already_chinese(text):
-        return text
+        return text, ""
     try_models = _get_round_robin_models()
     if not try_models:
-        return text
+        return text, ""
     if len(text) > cfg.TRANSLATE_MAX_LENGTH:
         log_all(f"⚠️ 文本过長 ({len(text)} 字符)，跳过翻译", is_debug=True)
-        return "[消息过长，暂不翻译]"
+        return "[消息过长，暂不翻译]", ""
 
     cache_key = (member_name, _get_text_hash(text))
     if cache_key in _trans_cache:
+        cached = _trans_cache[cache_key]
         log_all(f"⚡ 命中翻译内存缓存 ({member_name})", is_debug=True)
-        return _trans_cache[cache_key]
+        if isinstance(cached, tuple):
+            return cached
+        return cached, ""
 
     group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
     prompt = _PROMPT_TEMPLATE.format(
@@ -336,10 +341,12 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "",
                 try:
                     result = await _call_model_text(model, prompt, custom_client=custom_client)
                     if result:
+                        model_name = model.get("name", "")
+                        entry = (result, model_name)
                         if len(_trans_cache) >= _MAX_CACHE_SIZE:
                             _trans_cache.pop(next(iter(_trans_cache)))
-                        _trans_cache[cache_key] = result
-                        return result
+                        _trans_cache[cache_key] = entry
+                        return entry
                     break
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 429:
@@ -350,7 +357,12 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "",
                     log_all(f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}", is_debug=True)
                     break
 
-    return "[翻译失败]"
+    return "[翻译失败]", ""
+
+async def translate_text(text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> str:
+    """普通文本消息翻译接口（兼容旧接口，直接返回译文字符串）"""
+    res, _ = await translate_text_with_model(text, member_name, group_type, custom_client=custom_client)
+    return res
 
 # ── 博客正文节点化拆解：保留 <img> 原位 + 段落级切分 ──
 

@@ -98,19 +98,20 @@ def test_chain_extract() -> None:
     msg_text = {"text": "こんにちは", "updated_at": "2026-07-26T12:00:00Z"}
     msg_media = {"text": "写真です", "file": "https://example.com/a.jpg", "type": "image"}
 
-    # 1) 纯文本 + 翻译
-    chain = build_message_chain("冨里奈央", "2026-07-26T12:00:00Z", msg_text, "你好")
+    # 1) 纯文本 + 翻译（带模型名）
+    chain = build_message_chain("冨里奈央", "2026-07-26T12:00:00Z", msg_text, "你好", model_name="glm-4-flash")
     caption, media, translation = _chain_extract(chain)
     assert "こんにちは" in caption and "冨里奈央" in caption, caption
     assert media == [], media
     assert translation.endswith("你好"), translation
-    assert TRANSLATION_SEPARATOR in translation, "翻译段应带分隔线"
+    assert "─── 🌐 译文 (glm-4-flash) ───" in translation, f"翻译段应带模型徽章分隔线: {translation}"
 
-    # 2) 图片 + 翻译
+    # 2) 图片 + 翻译（未指定模型名）
     chain = build_message_chain("冨里奈央", "2026-07-26T12:00:00Z", msg_media, "照片")
     caption, media, translation = _chain_extract(chain)
     assert media == [("image", "https://example.com/a.jpg")], media
     assert translation.endswith("照片"), translation
+    assert "─── 🌐 译文 ───" in translation, f"翻译段应带默认译文分隔线: {translation}"
 
     # 3) 无翻译
     chain = build_message_chain("冨里奈央", "2026-07-26T12:00:00Z", msg_text, "")
