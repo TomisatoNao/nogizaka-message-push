@@ -546,6 +546,7 @@
     <div class="grid">
       <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
       <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
+      <label class="switch"><input id="archivePublicOn" type="checkbox"/><span class="track"></span>游客免登录访问归档</label>
       <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
       <label class="field">摘要时间（JST 整点）
         <input id="summaryHour" max="23" min="0" type="number"/>
@@ -554,7 +555,7 @@
     <details class="help-box" style="margin-top: 10px;">
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 归档与反向心跳摘要说明</summary>
       <div class="hint" style="margin-top: 6px;">
-        归档内容可在 <a href="/archive">📚 消息归档</a> 页浏览；每日摘要通过已启用的推送通道发送，若未收到说明服务异常。
+        归档内容可在 <a href="/archive">📚 消息归档</a> 页浏览；开启「游客免登录」后访客可直接阅读归档而无需账号，管理后台依然受密码保护。
       </div>
     </details>
   </div>
@@ -577,6 +578,24 @@
 
 <!-- ── 用户 ─────────────────────────────── -->
 <section class="tab" id="tab-users">
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+      <div style="flex:1; min-width:240px;">
+        <h2 style="margin:0; font-size:16px; display:flex; align-items:center; gap:8px;">
+          <span>🌐</span> 归档公开访问（游客免登录）
+        </h2>
+        <div class="hint" style="margin-top:6px; line-height:1.6;">
+          开启后，访客无需输入账号密码即可直接浏览 <a href="/archive" target="_blank" style="color:var(--accent); font-weight:600;">📚 消息与博客归档</a>；管理后台（配置、凭证、日志及用户管理等）依然严格受管理员密码保护。
+        </div>
+      </div>
+      <label class="switch" style="font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:8px;">
+        <input id="authArchivePublic" type="checkbox"/>
+        <span class="track"></span>
+        <span>游客免登录</span>
+      </label>
+    </div>
+  </div>
+
   <div class="card">
     <h2>🔑 账号与权限管理</h2>
     <div class="table-wrap">
@@ -1398,6 +1417,10 @@ function renderGeneral() {
   const ar = config.archive || {};
   $("archiveOn").checked = !!ar.enabled;
   $("archiveMedia").checked = ar.media !== false;
+  const au = config.auth || {};
+  const isPublic = au.archive_public === true;
+  if ($("authArchivePublic")) $("authArchivePublic").checked = isPublic;
+  if ($("archivePublicOn")) $("archivePublicOn").checked = isPublic;
   const ds = config.daily_summary || {};
   $("summaryOn").checked = !!ds.enabled;
   $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
@@ -1784,6 +1807,13 @@ function collectGeneral() {
     dir: (config.archive || {}).dir || "data/archive",
     media: $("archiveMedia").checked,
   };
+  const isPublic = Boolean(($("authArchivePublic") && $("authArchivePublic").checked) ||
+                           ($("archivePublicOn") && $("archivePublicOn").checked));
+  config.auth = config.auth || {};
+  config.auth.enabled = config.auth.enabled !== false;
+  config.auth.archive_public = isPublic;
+  config.auth.session_hours = config.auth.session_hours || 12;
+
   config.daily_summary = {
     enabled: $("summaryOn").checked,
     hour: Math.min(23, Math.max(0, num("summaryHour", 23))),
@@ -1797,6 +1827,7 @@ document.querySelectorAll("#tab-system input").forEach(() => {});
 $("tab-system").addEventListener("input", () => markDirty());
 $("tab-channels").addEventListener("input", () => markDirty());
 $("tab-monitors").addEventListener("input", () => markDirty());
+$("tab-users").addEventListener("input", () => markDirty());
 $("tab-monitors").addEventListener("change", (e) => {
   if (e.target.type === "checkbox") {
     markDirty();
@@ -1804,9 +1835,19 @@ $("tab-monitors").addEventListener("change", (e) => {
 });
 $("tab-system").addEventListener("change", (e) => {
   if (e.target.type === "checkbox") {
+    if (e.target.id === "archivePublicOn" && $("authArchivePublic")) {
+      $("authArchivePublic").checked = e.target.checked;
+    }
     markDirty();
   }
 });
+if ($("authArchivePublic")) {
+  $("authArchivePublic").addEventListener("change", (e) => {
+    if ($("archivePublicOn")) $("archivePublicOn").checked = e.target.checked;
+    collectGeneral();
+    markDirty();
+  });
+}
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
