@@ -82,14 +82,9 @@ class SocialFetcher(BaseFetcher):
                             accounts_set.append(s)
         return accounts_set
 
-    def display_name(self, account: str) -> str:
-        names = self.cfg.get("display_names") or {}
-        if account in names:
-            return names[account]
-        if f"@{account}" in names:
-            return names[f"@{account}"]
-
-        # 检查是否绑定了 monitor 成员名称
+    def member_name(self, account: str) -> str | None:
+        """根据社媒账号反查其归属的 monitor 成员名。若为公共账号则返回 None。"""
+        acc_clean = account.lstrip("@").strip()
         for m in self._config.get("monitor", []):
             soc = m.get("social", {})
             if isinstance(soc, dict):
@@ -98,8 +93,21 @@ class SocialFetcher(BaseFetcher):
                     p_accs = [p_accs]
                 if isinstance(p_accs, list):
                     cleaned = [str(x).lstrip("@").strip() for x in p_accs]
-                    if account in cleaned:
-                        return f"{m.get('name', account)} ({account})"
+                    if acc_clean in cleaned:
+                        return m.get("name") or acc_clean
+        return None
+
+    def display_name(self, account: str) -> str:
+        names = self.cfg.get("display_names") or {}
+        if account in names:
+            return names[account]
+        if f"@{account}" in names:
+            return names[f"@{account}"]
+
+        # 检查是否绑定了 monitor 成员名称
+        m_name = self.member_name(account)
+        if m_name and m_name != account:
+            return f"{m_name} ({account})"
 
         return account
 
@@ -254,6 +262,11 @@ class SocialFetcher(BaseFetcher):
                             str(e).replace("\n", " ")[:200])
                 continue
             if got:
+                m_name = self.member_name(account)
+                for p in got:
+                    if m_name:
+                        p.extra["member_name"] = m_name
+                    p.extra["account"] = account
                 log.info("[%s] 🆕 @%s 发现 %s 条新内容",
                          self.platform_name, account, len(got))
                 posts.extend(got)

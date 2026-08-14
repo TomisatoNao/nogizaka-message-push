@@ -119,7 +119,9 @@ class SocialForwarder:
         else:
             full_text = build_post_message(post, translated, alt_zh)
 
-        # 3. 异步分发至各通道
+        # 3. 异步分发至各通道（支持根据成员所属进行 member_filter 过滤路由）
+        m_name = post.extra.get("member_name")
+
         async def _do_broadcast():
             any_success = False
             errors = []
@@ -129,6 +131,8 @@ class SocialForwarder:
                 try:
                     for b in tgbot.get_configured_bots():
                         if not b.token or not b.target_chat:
+                            continue
+                        if m_name and b.member_filter and m_name not in b.member_filter:
                             continue
                         # 发送文本
                         t_ok = await b._post_message(b.target_chat, full_text)
@@ -167,14 +171,15 @@ class SocialForwarder:
                                 chain.append({"type": "video", "data": {"file": abs_uri}})
                             elif m.type == "audio":
                                 chain.append({"type": "record", "data": {"file": abs_uri}})
-                    # 广播至所有配置群
+                    # 按照各路由配置的 member_filter 精准路由
                     routes = getattr(cfg, "NAPCAT_ROUTES", [])
-                    target_gids = set()
                     for r in routes:
                         gid = r.get("group_id")
-                        if gid:
-                            target_gids.add(gid)
-                    for gid in target_gids:
+                        if not gid:
+                            continue
+                        filters = r.get("member_filter") or []
+                        if m_name and filters and m_name not in filters:
+                            continue
                         ok = await napcat.send_qq_message(gid, chain)
                         if ok:
                             any_success = True
@@ -186,8 +191,13 @@ class SocialForwarder:
                 try:
                     bots = qq_official.get_configured_bots()
                     for bot in bots:
+                        if m_name and bot.member_filter and m_name not in bot.member_filter:
+                            continue
                         if bot.target_openid:
                             await bot._send_c2c_text(bot.target_openid, full_text)
+                            any_success = True
+                        if getattr(bot, "group_openid", None):
+                            await bot._send_group_text(bot.group_openid, full_text)
                             any_success = True
                 except Exception as e:
                     errors.append(f"QQ 官方机器人推送失败: {e}")
