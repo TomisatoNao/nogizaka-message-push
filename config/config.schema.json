@@ -144,6 +144,21 @@
         "nogizaka":   { "type": "string" },
         "sakurazaka": { "type": "string" }
       }
+    },
+    "platforms": {
+      "type": "object",
+      "properties": {
+        "x":           { "type": "object" },
+        "instagram":   { "type": "object" },
+        "tiktok":      { "type": "object" },
+        "tiktok_live": { "type": "object" }
+      }
+    },
+    "social": {
+      "type": "object"
+    },
+    "media": {
+      "type": "object"
     }
   }
 }

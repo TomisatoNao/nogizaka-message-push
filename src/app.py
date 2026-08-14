@@ -22,6 +22,7 @@ from src.platforms import qq_official
 from src.platforms import tgbot
 from src import health
 from src import blog_fetcher
+from src.social.manager import start_social_service, stop_social_service
 from src.platforms.qq_official import health_check as qq_official_health_check
 import config.config as cfg
 from config.credentials import (
@@ -662,6 +663,15 @@ async def main() -> None:
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
     observer = start_watcher(config_path, on_reload=_on_config_reload)
 
+    # 6.5 启动社交媒体监控守护（X / Instagram / TikTok / TikTok Live）
+    try:
+        import json5
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw_cfg = json5.load(f)
+        start_social_service(raw_cfg)
+    except Exception as e:
+        log_all(f"⚠️ 启动社交媒体监控失败: {e}", is_error=True)
+
     stop_event = asyncio.Event()
     _install_stop_handlers(stop_event)
 
@@ -794,6 +804,7 @@ async def main() -> None:
         if observer is not None:
             observer.stop()
             observer.join()
+        stop_social_service()
         await tagger.wait_pending(timeout=30)
         await archive.wait_pending(timeout=30)   # 归档后台任务收尾（媒体下载中途别掐）
         await asyncio.gather(http_client.aclose(), qq_client.aclose())

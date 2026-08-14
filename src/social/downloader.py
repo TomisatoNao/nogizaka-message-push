@@ -1,0 +1,442 @@
+"""
+social/downloader.py — 统一媒体下载器
+
+两条下载通道，封装成统一接口，未来接新平台只需调用这里：
+
+  1. download_direct()     —— requests 直下（已知直链的图片 / 视频）
+  2. download_via_ytdlp()  —— yt-dlp 下载（需要解析的页面 URL）
+
+统一保证：
+  * 图片下载原图（各 fetcher 负责把 URL 改写成原图地址）
+  * 视频选择最高画质并合并原始音轨（bv*+ba/b + merge_output_format）
+  * 失败自动重试（次数与退避可配置），临时文件 + os.replace 原子落地
+  * 多媒体并发下载（线程池，线程数可配置）
+
+yt-dlp 是惰性 import 的：未安装时只影响社交平台，既有功能完全不受影响。
+"""
+
+import logging
+import json
+import os
+import shutil
+import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import requests
+
+from src.social.settings import media_settings
+
+log = logging.getLogger("collink")
+
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp"}
+_VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".flv", ".ts", ".m4v"}
+_AUDIO_EXTS = {".m4a", ".mp3", ".aac", ".wav", ".ogg", ".opus"}
+
+# yt-dlp 下载产物里需要忽略的中间/附属文件
+_IGNORED_EXTS = {".part", ".ytdl", ".temp", ".json", ".description",
+                 ".vtt", ".srt", ".lrc", ".ass"}
+
+
+def classify_media(path: str) -> str:
+    """按扩展名判定媒体类型，与既有 MediaItem.type 取值保持一致。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _IMAGE_EXTS:
+        return "image"
+    if ext in _VIDEO_EXTS:
+        return "video"
+    if ext in _AUDIO_EXTS:
+        return "audio"
+    return "file"
+
+
+def _is_media_file(path: str) -> bool:
+    ext = os.path.splitext(path)[1].lower()
+    return ext not in _IGNORED_EXTS and os.path.isfile(path)
+
+
+class YtdlpUnavailable(RuntimeError):
+    """yt-dlp 未安装 —— 由调用方转成一条警告日志，不影响其它平台。"""
+
+
+class _YdlLogger:
+    """Discard yt-dlp's internal chatter.
+
+    Each caller translates an extraction result into a platform-specific,
+    actionable log line.  Keeping raw extractor text (especially Instagram's
+    ambiguous "login required") made the admin log look like a traceback and
+    obscured the actual outcome.
+    """
+
+    @staticmethod
+    def debug(_msg):
+        return None
+
+    @staticmethod
+    def info(_msg):
+        return None
+
+    @staticmethod
+    def warning(_msg):
+        return None
+
+    @staticmethod
+    def error(_msg):
+        return None
+
+
+class MediaDownloader:
+    """全平台共享的下载器（线程安全）。"""
+
+    def __init__(self, config: dict):
+        self._config = config
+        self._lock = threading.Lock()
+        self._ytdlp_warned = False
+        self._compat_warned = False
+
+    # ── 配置读取（每次读取，配置热更新即时生效）──────────
+
+    @property
+    def _cfg(self) -> dict:
+        return media_settings(self._config)
+
+    @property
+    def retry_times(self) -> int:
+        return max(1, int(self._cfg.get("retry_times", 3)))
+
+    @property
+    def threads(self) -> int:
+        return max(1, int(self._cfg.get("download_threads", 4)))
+
+    @property
+    def timeout(self) -> int:
+        return max(5, int(self._cfg.get("timeout_seconds", 60)))
+
+    @property
+    def proxy(self) -> str:
+        return self._config.get("proxy") or ""
+
+    def ffmpeg_path(self) -> str | None:
+        """ffmpeg 可执行文件路径（配置优先，其次 PATH）。"""
+        p = self._cfg.get("ffmpeg_path") or ""
+        if p and os.path.exists(p):
+            return p
+        return shutil.which("ffmpeg")
+
+    def ffprobe_path(self) -> str | None:
+        p = self._cfg.get("ffprobe_path") or ""
+        if p and os.path.exists(p):
+            return p
+        found = shutil.which("ffprobe")
+        if found:
+            return found
+        # 常见情况：ffmpeg 与 ffprobe 同目录
+        ff = self.ffmpeg_path()
+        if ff:
+            cand = os.path.join(os.path.dirname(ff),
+                                "ffprobe.exe" if os.name == "nt" else "ffprobe")
+            if os.path.exists(cand):
+                return cand
+        return None
+
+    def ensure_mobile_video_compatibility(self, files: list[str]) -> list[str]:
+        """把需要兼容的下载视频原地转为 H.264/AAC。
+
+        TikTok 偶尔会交付 HEVC/H.265（hvc1/hev1）MP4；部分手机浏览器
+        无法播放该编码。只转换检测到的 HEVC 文件，其他视频不重新编码。
+        使用临时文件完成后再原子替换，调用方和归档始终引用原始文件名。
+        """
+        if not self._cfg.get("mobile_video_transcode", True):
+            return files
+
+        ffmpeg = self.ffmpeg_path()
+        ffprobe = self.ffprobe_path()
+        if not ffmpeg or not ffprobe:
+            if not self._compat_warned:
+                self._compat_warned = True
+                log.warning("[download] 未找到 ffmpeg/ffprobe，跳过移动端视频兼容转码")
+            return files
+
+        for path in files:
+            if classify_media(path) != "video":
+                continue
+            codec = self._video_codec(path, ffprobe)
+            if codec not in {"hevc", "h265", "hvc1", "hev1"}:
+                continue
+            self._transcode_h264_in_place(path, ffmpeg)
+        return files
+
+    @staticmethod
+    def _video_codec(path: str, ffprobe: str) -> str:
+        """返回首个视频流的标准编码名；探测失败时返回空字符串。"""
+        try:
+            result = subprocess.run(
+                [ffprobe, "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=codec_name,codec_tag_string",
+                 "-of", "json", path],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30, check=False,
+            )
+            data = json.loads(result.stdout or "{}")
+            stream = (data.get("streams") or [{}])[0]
+            return str(stream.get("codec_name") or stream.get("codec_tag_string") or "").lower()
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, IndexError):
+            log.debug("[download] 无法探测视频编码: %s", os.path.basename(path))
+            return ""
+
+    @staticmethod
+    def _transcode_h264_in_place(path: str, ffmpeg: str) -> bool:
+        """以临时 MP4 转码后原子替换源视频；失败时保留源文件。"""
+        root, _ext = os.path.splitext(path)
+        temp = root + ".mobile.tmp.mp4"
+        try:
+            if os.path.exists(temp):
+                os.unlink(temp)
+            result = subprocess.run(
+                [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-threads", "1", "-i", path,
+                 "-map", "0:v:0?", "-map", "0:a?", "-c:v", "libx264",
+                 "-preset", "superfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                 "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", temp],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30 * 60, check=False,
+            )
+            if result.returncode != 0 or not os.path.exists(temp) or os.path.getsize(temp) == 0:
+                log.warning("[download] 移动端转码失败，保留原视频 %s: %s",
+                            os.path.basename(path), _short(RuntimeError(result.stderr)))
+                return False
+            os.replace(temp, path)
+            log.info("[download] 📱 已转为 H.264/AAC 以兼容手机浏览器: %s",
+                     os.path.basename(path))
+            return True
+        except (OSError, subprocess.SubprocessError) as e:
+            log.warning("[download] 移动端转码异常，保留原视频 %s: %s",
+                        os.path.basename(path), _short(e))
+            return False
+        finally:
+            try:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+            except OSError:
+                pass
+
+    # ── 通道 1：requests 直下 ────────────────────────────
+
+    def download_direct(self, url: str, dest_path: str, *,
+                        referer: str = "", headers: dict | None = None) -> bool:
+        """下载单个直链到 dest_path。已存在且非空则直接复用（可安全重跑）。"""
+        if not url:
+            return False
+        if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+            return True
+
+        os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+        hdrs = {"User-Agent": _UA}
+        if referer:
+            hdrs["Referer"] = referer
+        if headers:
+            hdrs.update(headers)
+
+        tmp = dest_path + ".part"
+        backoff = max(1, int(self._cfg.get("retry_backoff_seconds", 2)))
+        for attempt in range(1, self.retry_times + 1):
+            try:
+                with requests.get(url, headers=hdrs, timeout=self.timeout,
+                                  stream=True) as r:
+                    r.raise_for_status()
+                    with open(tmp, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=256 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                if os.path.getsize(tmp) == 0:
+                    raise OSError("下载内容为空")
+                os.replace(tmp, dest_path)
+                log.info("[download] ✅ 下载成功: %s (%.1f KB)",
+                         os.path.basename(dest_path),
+                         os.path.getsize(dest_path) / 1024)
+                return True
+            except Exception as e:
+                log.warning("[download] ❌ 下载失败 (%s/%s) %s: %s",
+                            attempt, self.retry_times,
+                            os.path.basename(dest_path), e)
+                try:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+                except OSError:
+                    pass
+                if attempt < self.retry_times:
+                    time.sleep(backoff * attempt)
+        return False
+
+    def download_many(self, tasks: list[tuple[str, str]], *,
+                      referer: str = "") -> list[str]:
+        """并发下载多个直链。
+
+        :param tasks: [(url, dest_path), ...]
+        :return: 下载成功的本地路径列表（保持输入顺序）
+        """
+        if not tasks:
+            return []
+        results: list[str | None] = [None] * len(tasks)
+
+        def _one(idx: int, url: str, dest: str):
+            if self.download_direct(url, dest, referer=referer):
+                results[idx] = dest
+
+        workers = min(self.threads, len(tasks))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for i, (url, dest) in enumerate(tasks):
+                pool.submit(_one, i, url, dest)
+        return [p for p in results if p]
+
+    # ── 通道 2：yt-dlp ──────────────────────────────────
+
+    def _ytdlp_module(self):
+        """惰性 import yt-dlp；未安装时抛 YtdlpUnavailable（只警告一次）。"""
+        try:
+            import yt_dlp  # noqa: PLC0415 — 惰性导入是刻意设计
+            return yt_dlp
+        except ImportError as e:
+            if not self._ytdlp_warned:
+                self._ytdlp_warned = True
+                log.error("[download] 未安装 yt-dlp，社交平台媒体下载不可用："
+                          "请执行 pip install -U yt-dlp（%s）", e)
+            raise YtdlpUnavailable(str(e)) from e
+
+    def base_ydl_opts(self, platform_cfg: dict | None = None) -> dict:
+        """构建 yt-dlp 通用选项：最高画质 + 原始音轨 + cookies + 代理 + 重试。"""
+        cfg = self._cfg
+        opts: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "noprogress": True,
+            "consoletitle": False,
+            "logger": _YdlLogger(),   # yt-dlp 输出统一降级到 debug 日志
+            "ignoreerrors": False,
+            "noplaylist": False,
+            # 最高画质视频 + 最佳音轨，回退到单一最佳流
+            "format": "bv*+ba/b",
+            "merge_output_format": "mp4",
+            "socket_timeout": int(cfg.get("ytdlp_socket_timeout", 30)),
+            "retries": self.retry_times,
+            "fragment_retries": self.retry_times,
+            "extractor_retries": self.retry_times,
+            "http_headers": {"User-Agent": _UA},
+            "writethumbnail": False,
+            "writeinfojson": False,
+            "overwrites": False,
+            "continuedl": True,
+        }
+        if self.proxy:
+            opts["proxy"] = self.proxy
+        ff = self.ffmpeg_path()
+        if ff:
+            opts["ffmpeg_location"] = ff
+
+        # cookies —— Instagram Story / TikTok Story 必需
+        if platform_cfg:
+            cf = platform_cfg.get("cookies_file") or ""
+            if cf and os.path.exists(cf):
+                opts["cookiefile"] = cf
+            browser = (platform_cfg.get("cookies_from_browser") or "").strip()
+            if browser and not opts.get("cookiefile"):
+                opts["cookiesfrombrowser"] = (browser,)
+        return opts
+
+    def extract_info(self, url: str, *, platform_cfg: dict | None = None,
+                     extra_opts: dict | None = None) -> dict | None:
+        """解析 URL 元信息（不下载）。失败返回 None，异常不外抛。"""
+        try:
+            yt_dlp = self._ytdlp_module()
+        except YtdlpUnavailable:
+            return None
+
+        opts = self.base_ydl_opts(platform_cfg)
+        opts["skip_download"] = True
+        if extra_opts:
+            opts.update(extra_opts)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        except Exception as e:
+            log.debug("[download] extract_info 失败 %s: %s", url, _short(e))
+            return None
+
+    def extract_info_strict(self, url: str, *, platform_cfg: dict | None = None,
+                            extra_opts: dict | None = None) -> dict:
+        """同 extract_info，但把异常向上抛（直播检测需要区分「未开播」与「网络错误」）。"""
+        yt_dlp = self._ytdlp_module()
+        opts = self.base_ydl_opts(platform_cfg)
+        opts["skip_download"] = True
+        if extra_opts:
+            opts.update(extra_opts)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
+
+    def download_via_ytdlp(self, url: str, dest_dir: str, *,
+                           platform_cfg: dict | None = None,
+                           extra_opts: dict | None = None,
+                           outtmpl: str | None = None) -> list[str]:
+        """用 yt-dlp 把 url 的全部媒体下载到 dest_dir。
+
+        返回 dest_dir 下新出现的媒体文件路径（已排序）。
+        「扫描目录」而不是解析 yt-dlp 返回值，是为了同时兼容
+        单视频 / 多图轮播 / Reel / 图文 Post 等各种形态。
+        """
+        try:
+            yt_dlp = self._ytdlp_module()
+        except YtdlpUnavailable:
+            return []
+
+        os.makedirs(dest_dir, exist_ok=True)
+        before = set(_list_media(dest_dir))
+
+        opts = self.base_ydl_opts(platform_cfg)
+        opts["paths"] = {"home": dest_dir}
+        opts["outtmpl"] = outtmpl or "%(id)s_%(playlist_index|0)s.%(ext)s"
+        if extra_opts:
+            opts.update(extra_opts)
+
+        backoff = max(1, int(self._cfg.get("retry_backoff_seconds", 2)))
+        for attempt in range(1, self.retry_times + 1):
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([url])
+                break
+            except Exception as e:
+                log.warning("[download] yt-dlp 下载失败 (%s/%s) %s: %s",
+                            attempt, self.retry_times, url, _short(e))
+                if attempt < self.retry_times:
+                    time.sleep(backoff * attempt)
+
+        after = set(_list_media(dest_dir))
+        new_files = sorted(after - before)
+        if not new_files:
+            # 可能是之前已下载过 —— 复用目录里已有文件
+            new_files = sorted(after)
+        if new_files:
+            log.info("[download] ✅ yt-dlp 取得 %s 个文件 → %s",
+                     len(new_files), dest_dir)
+        return new_files
+
+
+def _list_media(d: str) -> list[str]:
+    """列出目录内的媒体文件（跳过 .part 等中间产物）。"""
+    out = []
+    try:
+        for name in os.listdir(d):
+            fp = os.path.join(d, name)
+            if _is_media_file(fp) and os.path.getsize(fp) > 0:
+                out.append(os.path.abspath(fp))
+    except OSError:
+        pass
+    return out
+
+
+def _short(e: Exception, limit: int = 200) -> str:
+    """截断异常信息，避免 yt-dlp 的长堆栈污染日志。"""
+    s = str(e).replace("\n", " ")
+    return s[:limit] + ("…" if len(s) > limit else "")

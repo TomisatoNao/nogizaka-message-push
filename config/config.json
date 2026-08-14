@@ -77,9 +77,40 @@
   "translate_timeout": 90,
   "blog_monitor": {"enabled": true, "hinatazaka": true, "nogizaka": true, "sakurazaka": true, "day_interval": [60, 120], "night_interval": [1650, 1950]},
   "blog_records": {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""},
-  "gemini_tag_min_interval": 5,
-  "gemini_tag_models": [{"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"}, {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"}],
   "image_tagging": true,
   "napcat_routes": [],
-  "tg_bots": []
+  "tg_bots": [],
+  "platforms": {
+    "x": {
+      "enabled": false,
+      "interval_seconds": 60,
+      "night_interval_seconds": 300,
+      "accounts": [],
+      "display_names": {}
+    },
+    "instagram": {
+      "enabled": false,
+      "interval_seconds": 1800,
+      "night_interval_seconds": 5400,
+      "accounts": [],
+      "display_names": {},
+      "include_feed": true,
+      "include_stories": true
+    },
+    "tiktok": {
+      "enabled": false,
+      "interval_seconds": 120,
+      "night_interval_seconds": 600,
+      "accounts": [],
+      "display_names": {},
+      "include_stories": true,
+      "include_photos": true
+    },
+    "tiktok_live": {
+      "enabled": false,
+      "interval_seconds": 8,
+      "accounts": [],
+      "display_names": {}
+    }
+  }
 }
