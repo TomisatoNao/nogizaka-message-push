@@ -1145,6 +1145,7 @@ function deepEqual(a, b) {
 function markDirty() {
   collectGeneral();
   collectChannels();
+  collectSocial();
   let baseObj = {};
   try { baseObj = JSON.parse(baseline); } catch(e){}
   setDirty(!deepEqual(config, baseObj));
@@ -1919,22 +1920,16 @@ function collectGeneral() {
     allow_openids: $("cmdAllow").value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
   };
 }
-document.querySelectorAll("#tab-system input").forEach(() => {});
-$("tab-system").addEventListener("input", () => markDirty());
-$("tab-channels").addEventListener("input", () => markDirty());
-$("tab-monitors").addEventListener("input", () => markDirty());
-$("tab-users").addEventListener("input", () => markDirty());
-$("tab-monitors").addEventListener("change", (e) => {
-  if (e.target.type === "checkbox") {
-    markDirty();
-  }
-});
-$("tab-system").addEventListener("change", (e) => {
-  if (e.target.type === "checkbox") {
-    if (e.target.id === "archivePublicOn" && $("authArchivePublic")) {
-      $("authArchivePublic").checked = e.target.checked;
-    }
-    markDirty();
+["tab-system", "tab-channels", "tab-monitors", "tab-social", "tab-users"].forEach((id) => {
+  const el = $(id);
+  if (el) {
+    el.addEventListener("input", () => markDirty());
+    el.addEventListener("change", (e) => {
+      if (e.target.id === "archivePublicOn" && $("authArchivePublic")) {
+        $("authArchivePublic").checked = e.target.checked;
+      }
+      markDirty();
+    });
   }
 });
 if ($("authArchivePublic")) {
@@ -3444,8 +3439,12 @@ async function refreshHistory() {
 
 // ── 高级 JSON ────────────────────────────────────
 function refreshRawJson() { $("rawJson").value = JSON.stringify(config, null, 2); }
-$("btnResetJson").addEventListener("click", () => { collectGeneral();
-  collectChannels(); refreshRawJson(); });
+$("btnResetJson").addEventListener("click", () => {
+  collectGeneral();
+  collectChannels();
+  collectSocial();
+  refreshRawJson();
+});
 $("btnApplyJson").addEventListener("click", () => {
   try {
     const obj = JSON.parse($("rawJson").value);
