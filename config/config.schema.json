@@ -84,13 +84,14 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "name", "account"],
+        "required": ["name"],
         "properties": {
           "id":              { "type": "string" },
           "name":            { "type": "string" },
           "account":         { "type": "string" },
           "groups":          { "type": "array", "items": { "type": "integer" }, "default": [] },
-          "tg":              { "type": "string" }
+          "tg":              { "type": "string" },
+          "social":          { "type": "object" }
         }
       }
     },

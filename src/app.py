@@ -112,7 +112,7 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
 
     # ── 检查所有账号凭证已加载且内容完整 ────────────────────
     from config.credentials import ACCOUNT_CREDS, validate_account_cred
-    needed = {m["account_id"] for m in cfg.MONITOR_LIST}
+    needed = {m["account_id"] for m in cfg.MONITOR_LIST if m.get("account_id")}
     missing = needed - set(ACCOUNT_CREDS.keys())
     if missing:
         log_all(f"🔴 以下账号凭证缺失：{missing}", is_error=True)

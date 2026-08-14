@@ -229,14 +229,16 @@ def _normalize_config(raw: dict) -> dict:
             legacy_napcat_groups = {} # group_id -> list of members
             
             for m in cfg["monitor"]:
-                acc = accounts.get(m["account"], {})
+                acc_name = m.get("account") or ""
+                acc = accounts.get(acc_name, {}) if acc_name else {}
                 normalized.append({
-                    "account_id":    m["account"],
+                    "account_id":    acc_name,
                     "group_type":    acc.get("group", ""),
-                    "m_id":          str(m["id"]),
-                    "m_name":        m["name"],
+                    "m_id":          str(m.get("id") or ""),
+                    "m_name":        m.get("name", ""),
                     "target_groups": m.get("groups", []),
                     "tg_chat_id":    str(m.get("tg", "")).strip(),
+                    "social":        m.get("social", {}),
                 })
                 
                 # Extract legacy routes

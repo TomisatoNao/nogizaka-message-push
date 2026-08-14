@@ -244,6 +244,7 @@
       <button class="nav-tab active" data-tab="status"><span class="tab-icon">📊</span> 状态</button>
       <button class="nav-tab" data-tab="monitors"><span class="tab-icon">👥</span> 账号与成员</button>
       <button class="nav-tab" data-tab="channels"><span class="tab-icon">📢</span> 推送通道</button>
+      <button class="nav-tab" data-tab="social"><span class="tab-icon">🌐</span> 社交监控</button>
       <button class="nav-tab" data-tab="system"><span class="tab-icon">⚙️</span> 系统设置</button>
       <button class="nav-tab" id="tabUsers" hidden data-tab="users"><span class="tab-icon">🔑</span> 用户</button>
       <button class="nav-tab" data-tab="advanced"><span class="tab-icon">🛠️</span> 高级</button>
@@ -463,6 +464,94 @@
         · <b>TG_BOT_TOKEN</b> 在上方「全局开关与 API 配置」中统一填写入 <code>.env</code>。<br/>
         · <b>Target Chat ID 格式</b>：个人用户填 numeric ID（如 <code>12345678</code>）；群组/频道填 <code>-100</code> 开头的群 ID。<br/>
         · 可以通过添加多行配置，将不同成员的消息分发给不同的 TG 群组或频道。
+      </div>
+    </details>
+  </div>
+</section>
+<!-- ── 社交监控 ─────────────────────────────── -->
+<section class="tab" id="tab-social">
+  <!-- Card 1: 𝕏 (Twitter) 监控设置 -->
+  <div class="card">
+    <h2>𝕏 (Twitter) 监控设置</h2>
+    <div class="grid">
+      <label class="switch"><input id="socialXOn" type="checkbox"/><span class="track"></span>启用 𝕏 监控</label>
+      <label class="field">日间轮询间隔（秒）
+        <input id="socialXInterval" min="10" placeholder="60" type="number"/>
+      </label>
+      <label class="field">夜间轮询间隔（秒）
+        <input id="socialXNightInterval" min="10" placeholder="300" type="number"/>
+      </label>
+    </div>
+    <div style="margin-top:14px;">
+      <label class="field">监控账号列表（每行一个或逗号分隔，可带 @）
+        <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="3" spellcheck="false"></textarea>
+      </label>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 𝕏 抓取原理与原图直链说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        采用免登录 Syndication API 与 Nitter 兜底链路，自动将推文配图升级为 <code>?name=orig</code> 最高清原图格式；支持图片无障碍 alt 描述自动提取并翻译。
+      </div>
+    </details>
+  </div>
+
+  <!-- Card 2: 📸 Instagram 监控设置 -->
+  <div class="card">
+    <h2>📸 Instagram 监控设置（Feed / Story / Reels）</h2>
+    <div class="grid">
+      <label class="switch"><input id="socialIgOn" type="checkbox"/><span class="track"></span>启用 Instagram 监控</label>
+      <label class="switch"><input id="socialIgFeed" type="checkbox"/><span class="track"></span>包含主页 Feed 动态</label>
+      <label class="switch"><input id="socialIgStories" type="checkbox"/><span class="track"></span>包含 24h Story 快拍</label>
+      <label class="field">日间轮询间隔（秒）
+        <input id="socialIgInterval" min="60" placeholder="1800" type="number"/>
+      </label>
+      <label class="field">夜间轮询间隔（秒）
+        <input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/>
+      </label>
+    </div>
+    <div style="margin-top:14px;">
+      <label class="field">监控账号列表（用户名，每行一个或逗号分隔）
+        <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="3" spellcheck="false"></textarea>
+      </label>
+    </div>
+    <div style="margin-top:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Instagram Session ID (.env)</span>
+      <span id="igSessionStatus"></span>
+      <button class="btn small" id="btnFillIgSession" type="button">填写</button>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">🛡️ Instagram 防风控安全机制说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        系统内置 <code>ig_safety.py</code> 安全闸门：每小时硬顶配额限制、请求间隔抖动与 6 小时熔断冷却。Story 抓取需要配置 Session ID；若无 Session ID 则仅抓取公开 Feed。
+      </div>
+    </details>
+  </div>
+
+  <!-- Card 3: 🎵 TikTok / TikTok Live 监控与直播切片录制 -->
+  <div class="card">
+    <h2>🎵 TikTok 短视频 & TikTok Live 自动录制</h2>
+    <div class="grid">
+      <label class="switch"><input id="socialTiktokOn" type="checkbox"/><span class="track"></span>启用 TikTok 短视频监控</label>
+      <label class="field">短视频轮询间隔（秒）
+        <input id="socialTiktokInterval" min="30" placeholder="120" type="number"/>
+      </label>
+      <label class="switch"><input id="socialLiveOn" type="checkbox"/><span class="track"></span>启用 TikTok Live 直播探测与录制</label>
+      <label class="field">直播探测频率（秒）
+        <input id="socialLiveInterval" min="5" placeholder="8" type="number"/>
+      </label>
+    </div>
+    <div style="margin-top:14px;" class="grid">
+      <label class="field">TikTok 短视频监控账号
+        <textarea id="socialTiktokAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
+      </label>
+      <label class="field">TikTok Live 直播监控账号
+        <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
+      </label>
+    </div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">🎥 TikTok Live 录制与分片机制</summary>
+      <div class="hint" style="margin-top: 6px;">
+        直播录制采用 8s 超轻量探测；开播后后台自动拉起 ffmpeg 混流无损切片（默认每 30 分钟分片），断流自动续录，停播后自动通过全通道推送通知。
       </div>
     </details>
   </div>
@@ -1080,6 +1169,7 @@ async function loadConfig() {
 async function saveConfig() {
   collectGeneral();
   collectChannels();
+  collectSocial();
   
   // 增加前端校验
   const errors = [];
@@ -1114,7 +1204,7 @@ async function saveConfig() {
     credStatus = data.cred_status || credStatus;
     baseline = JSON.stringify(config);
     setDirty(false);
-    renderAccounts(); renderMembers(); refreshRawJson();
+    renderAccounts(); renderMembers(); renderSocial(); refreshRawJson();
     msg(data.reloaded ? "✅ 已保存并热重载" : "⚠️ 已保存，但热重载失败（详见主程序日志）",
         data.reloaded ? "ok" : "err");
   } catch (e) {
@@ -1131,6 +1221,7 @@ document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((btn)
     if (targetTab === "advanced") { 
       collectGeneral();
       collectChannels(); 
+      collectSocial();
       refreshRawJson(); 
       refreshHistory(); 
       startLogPolling();
@@ -2151,6 +2242,80 @@ if ($("btnFillZhipuKey")) {
     [{ env: "ZHIPU_API_KEY", label: "API Key", required: true, placeholder: "xxx.yyy...",
        help: "在智谱开放平台（open.bigmodel.cn）控制台创建，GLM-4-Flash 永久免费。" }], null));
 }
+if ($("btnFillIgSession")) {
+  $("btnFillIgSession").addEventListener("click", () => openSecretDialog(
+    "填写 Instagram Session ID", "保存并热重载后生效（用于突破未登录限制与抓取 24h 快拍 Story）。",
+    [{ env: "INSTAGRAM_SESSIONID", label: "sessionid Cookie", required: true, placeholder: "123456789%3A...",
+       help: "登录 Instagram 网页版后，在 F12 Application -> Cookies 中复制 sessionid 的值。" }], null));
+}
+
+// ── 社交媒体监控 ──────────────────────────────────
+function renderSocial() {
+  const p = config.platforms || {};
+  const px = p.x || {};
+  $("socialXOn").checked = !!px.enabled;
+  $("socialXInterval").value = px.interval_seconds || 60;
+  $("socialXNightInterval").value = px.night_interval_seconds || 300;
+  $("socialXAccounts").value = (px.accounts || []).join("\n");
+
+  const pig = p.instagram || {};
+  $("socialIgOn").checked = !!pig.enabled;
+  $("socialIgFeed").checked = pig.include_feed !== false;
+  $("socialIgStories").checked = pig.include_stories !== false;
+  $("socialIgInterval").value = pig.interval_seconds || 1800;
+  $("socialIgNightInterval").value = pig.night_interval_seconds || 5400;
+  $("socialIgAccounts").value = (pig.accounts || []).join("\n");
+
+  const ptt = p.tiktok || {};
+  $("socialTiktokOn").checked = !!ptt.enabled;
+  $("socialTiktokInterval").value = ptt.interval_seconds || 120;
+  $("socialTiktokAccounts").value = (ptt.accounts || []).join("\n");
+
+  const pttl = p.tiktok_live || {};
+  $("socialLiveOn").checked = !!pttl.enabled;
+  $("socialLiveInterval").value = pttl.interval_seconds || 8;
+  $("socialLiveAccounts").value = (pttl.accounts || []).join("\n");
+
+  const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
+  if ($("igSessionStatus")) $("igSessionStatus").innerHTML = envBadge(envStatus.INSTAGRAM_SESSIONID);
+}
+
+function collectSocial() {
+  config.platforms = config.platforms || {};
+  const parseAccs = (val) => val.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean);
+
+  config.platforms.x = {
+    enabled: $("socialXOn").checked,
+    interval_seconds: parseInt($("socialXInterval").value, 10) || 60,
+    night_interval_seconds: parseInt($("socialXNightInterval").value, 10) || 300,
+    accounts: parseAccs($("socialXAccounts").value),
+    display_names: (config.platforms.x && config.platforms.x.display_names) || {}
+  };
+
+  config.platforms.instagram = {
+    enabled: $("socialIgOn").checked,
+    include_feed: $("socialIgFeed").checked,
+    include_stories: $("socialIgStories").checked,
+    interval_seconds: parseInt($("socialIgInterval").value, 10) || 1800,
+    night_interval_seconds: parseInt($("socialIgNightInterval").value, 10) || 5400,
+    accounts: parseAccs($("socialIgAccounts").value),
+    display_names: (config.platforms.instagram && config.platforms.instagram.display_names) || {}
+  };
+
+  config.platforms.tiktok = {
+    enabled: $("socialTiktokOn").checked,
+    interval_seconds: parseInt($("socialTiktokInterval").value, 10) || 120,
+    accounts: parseAccs($("socialTiktokAccounts").value),
+    display_names: (config.platforms.tiktok && config.platforms.tiktok.display_names) || {}
+  };
+
+  config.platforms.tiktok_live = {
+    enabled: $("socialLiveOn").checked,
+    interval_seconds: parseInt($("socialLiveInterval").value, 10) || 8,
+    accounts: parseAccs($("socialLiveAccounts").value),
+    display_names: (config.platforms.tiktok_live && config.platforms.tiktok_live.display_names) || {}
+  };
+}
 
 // ── 账号池 ───────────────────────────────────────
 function credBadge(accId) {
@@ -2522,11 +2687,14 @@ function renderMembers() {
     const tr = document.createElement("tr");
 
     const tdId = document.createElement("td");
-    tdId.appendChild(mkInput(m.id || "", (v) => { m.id = v.trim(); }, "55", "width:70px"));
+    tdId.appendChild(mkInput(m.id || "", (v) => { m.id = v.trim(); }, "55 (可空)", "width:85px"));
     const tdName = document.createElement("td");
     tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里奈央", "max-width:200px"));
     const tdAcc = document.createElement("td");
     const sel = document.createElement("select");
+    const optNone = document.createElement("option");
+    optNone.value = ""; optNone.textContent = "(无 - 纯社媒/博客)";
+    sel.appendChild(optNone);
     for (const aid of accountIds) {
       const opt = document.createElement("option");
       opt.value = aid; opt.textContent = aid;
@@ -2537,7 +2705,7 @@ function renderMembers() {
       opt.value = m.account; opt.textContent = m.account + " (未定义!)";
       sel.appendChild(opt);
     }
-    sel.value = m.account || accountIds[0] || "";
+    sel.value = m.account || "";
     sel.addEventListener("change", () => { m.account = sel.value; markDirty(); });
     tdAcc.appendChild(sel);
     const tdOps = document.createElement("td");
@@ -3088,7 +3256,7 @@ function mkInput(value, onChange, placeholder, style) {
   return input;
 }
 
-function renderAll() { renderGeneral(); renderChannels(); renderAccounts(); renderMembers(); refreshRawJson(); }
+function renderAll() { renderGeneral(); renderChannels(); renderSocial(); renderAccounts(); renderMembers(); refreshRawJson(); }
 
 // ── 入口 ─────────────────────────────────────────
 $("btnSave").addEventListener("click", saveConfig);

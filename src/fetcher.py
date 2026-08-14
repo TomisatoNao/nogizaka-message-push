@@ -115,10 +115,15 @@ async def _fetch_member_messages(member: dict):
     返回 (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock) 或 None。
     """
     global _http_client
-    account_id   = member["account_id"]
-    group_type   = member["group_type"]
-    m_id         = member["m_id"]
-    m_name       = member["m_name"]
+    account_id   = member.get("account_id") or ""
+    group_type   = member.get("group_type") or ""
+    m_id         = member.get("m_id") or ""
+    m_name       = member.get("m_name") or ""
+
+    if not account_id or not m_id:
+        # 该成员未绑定 Message 账号（例如纯社媒/博客监控成员），静默跳过 Message 抓取
+        return None
+
     # 只推 TG 的成员可以没有 QQ 群；0 表示告警不走 NapCat
     target_groups = member.get("target_groups") or []
     target_group  = target_groups[0] if target_groups else 0

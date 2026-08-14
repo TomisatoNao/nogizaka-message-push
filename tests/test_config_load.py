@@ -94,8 +94,9 @@ def main() -> None:
         for key in ("account_id", "group_type", "m_id", "m_name", "target_groups", "tg_chat_id"):
             assert key in m, f"member {m.get('m_name')} missing key {key}"
         assert isinstance(m["target_groups"], list), "target_groups should be list"
-        assert m["account_id"] in ACCOUNTS, f"未定义的账号: {m['account_id']}"
-        assert m["group_type"], f"{m['m_name']} 的 group_type 为空（账号缺少 group 字段？）"
+        if m["account_id"]:
+            assert m["account_id"] in ACCOUNTS, f"未定义的账号: {m['account_id']}"
+            assert m["group_type"], f"{m['m_name']} 的 group_type 为空（账号缺少 group 字段？）"
     print(f"  {len(MONITOR_LIST)} 个成员字段齐全，账号引用有效")
     print("✅ Test 4 通过\n")
 

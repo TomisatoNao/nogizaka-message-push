@@ -60,13 +60,48 @@ class SocialFetcher(BaseFetcher):
 
     @property
     def accounts(self) -> list[str]:
-        """监控账号列表（统一去掉前导 @）。"""
+        """监控账号列表（结合全局平台配置与成员绑定配置，统一去掉前导 @）。"""
+        accounts_set: list[str] = []
         raw = self.cfg.get("accounts") or []
-        return [str(a).lstrip("@").strip() for a in raw if str(a).strip()]
+        for a in raw:
+            s = str(a).lstrip("@").strip()
+            if s and s not in accounts_set:
+                accounts_set.append(s)
+
+        # 自动聚合 monitor 列表中的成员社交账号绑定
+        for m in self._config.get("monitor", []):
+            soc = m.get("social", {})
+            if isinstance(soc, dict):
+                p_accs = soc.get(self.platform_name)
+                if isinstance(p_accs, str):
+                    p_accs = [p_accs]
+                if isinstance(p_accs, list):
+                    for a in p_accs:
+                        s = str(a).lstrip("@").strip()
+                        if s and s not in accounts_set:
+                            accounts_set.append(s)
+        return accounts_set
 
     def display_name(self, account: str) -> str:
         names = self.cfg.get("display_names") or {}
-        return names.get(account) or names.get(f"@{account}") or account
+        if account in names:
+            return names[account]
+        if f"@{account}" in names:
+            return names[f"@{account}"]
+
+        # 检查是否绑定了 monitor 成员名称
+        for m in self._config.get("monitor", []):
+            soc = m.get("social", {})
+            if isinstance(soc, dict):
+                p_accs = soc.get(self.platform_name)
+                if isinstance(p_accs, str):
+                    p_accs = [p_accs]
+                if isinstance(p_accs, list):
+                    cleaned = [str(x).lstrip("@").strip() for x in p_accs]
+                    if account in cleaned:
+                        return f"{m.get('name', account)} ({account})"
+
+        return account
 
     @property
     def media_root(self) -> str:

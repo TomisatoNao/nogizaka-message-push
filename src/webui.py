@@ -271,8 +271,8 @@ def _trigger_reload() -> bool:
 # 允许通过网页写入的 .env 变量名（白名单）。
 # WEB_ADMIN_TOKEN 故意排除：管理端令牌只能手动设置，防止误操作把自己锁在门外。
 _SECRET_KEY_RE = re.compile(
-    r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID)"
-    r"|GEMINI_API_KEY|ZHIPU_API_KEY)$"
+    r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID|SESSIONID|USER_ID)"
+    r"|GEMINI_API_KEY|ZHIPU_API_KEY|INSTAGRAM_SESSIONID|INSTAGRAM_DS_USER_ID|X_AUTH_TOKEN|TIKTOK_SESSIONID)$"
 )
 _FORBIDDEN_ENV_KEYS = {"WEB_ADMIN_TOKEN"}
 
@@ -442,6 +442,9 @@ def _env_status() -> dict:
         "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
         "ZHIPU_API_KEY": bool(os.getenv("ZHIPU_API_KEY")),
         "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
+        "INSTAGRAM_SESSIONID": bool(os.getenv("INSTAGRAM_SESSIONID")),
+        "X_AUTH_TOKEN": bool(os.getenv("X_AUTH_TOKEN")),
+        "TIKTOK_SESSIONID": bool(os.getenv("TIKTOK_SESSIONID")),
     }
 
 
