@@ -41,6 +41,8 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         routes = getattr(cfg, "NAPCAT_ROUTES", [])
         matched_any = False
         for route in routes:
+            if not route.get("push_message", True):
+                continue
             filters = route.get("member_filter") or []
             if not filters or m_name in filters:
                 gid = route.get("group_id")
@@ -65,7 +67,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
         # 单聊目标（target_openid）—— 受 member_filter 过滤
         for bot in bots:
-            if not bot.target_openid:
+            if not bot.target_openid or not bot.push_message:
                 continue
             if bot.member_filter and m_name not in bot.member_filter:
                 continue
@@ -78,7 +80,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
 
         # 群聊目标（group_openid）—— 受 member_filter 过滤
         for bot in bots:
-            if not bot.group_openid:
+            if not bot.group_openid or not bot.push_message:
                 continue
             if bot.member_filter and m_name not in bot.member_filter:
                 continue
@@ -94,7 +96,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     if cfg.ENABLE_TG_BOT:
         tg_bots = tgbot.get_configured_bots()
         for bot in tg_bots:
-            if not bot.target_chat:
+            if not bot.target_chat or not bot.push_message:
                 continue
             if bot.member_filter and m_name not in bot.member_filter:
                 continue

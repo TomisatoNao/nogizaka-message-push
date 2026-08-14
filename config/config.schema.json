@@ -19,11 +19,61 @@
         "type": "object",
         "required": ["name"],
         "properties": {
-          "name":          { "type": "string", "pattern": "^[a-z0-9_]+$" },
-          "app_id":        { "type": "string" },
-          "target_openid": { "type": "string" },
-          "group_openid":  { "type": "string" },
-          "member_filter": { "type": "array", "items": { "type": "string" }, "default": [] }
+          "name":           { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "app_id":         { "type": "string" },
+          "target_openid":  { "type": "string" },
+          "group_openid":   { "type": "string" },
+          "push_message":   { "type": "boolean", "default": true },
+          "push_blog":      { "type": "boolean", "default": false },
+          "push_x":         { "type": "boolean", "default": true },
+          "push_instagram": { "type": "boolean", "default": true },
+          "push_tiktok":    { "type": "boolean", "default": true },
+          "push_live":      { "type": "boolean", "default": true },
+          "push_alert":     { "type": "boolean", "default": false },
+          "member_filter":  { "type": "array", "items": { "type": "string" }, "default": [] },
+          "blog_filter":    { "type": "array", "items": { "type": "string" }, "default": [] },
+          "social_filter":  { "type": "array", "items": { "type": "string" }, "default": [] }
+        }
+      }
+    },
+    "napcat_routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["group_id"],
+        "properties": {
+          "group_id":       { "type": "integer" },
+          "push_message":   { "type": "boolean", "default": true },
+          "push_blog":      { "type": "boolean", "default": false },
+          "push_x":         { "type": "boolean", "default": true },
+          "push_instagram": { "type": "boolean", "default": true },
+          "push_tiktok":    { "type": "boolean", "default": true },
+          "push_live":      { "type": "boolean", "default": true },
+          "push_alert":     { "type": "boolean", "default": false },
+          "member_filter":  { "type": "array", "items": { "type": "string" }, "default": [] },
+          "blog_filter":    { "type": "array", "items": { "type": "string" }, "default": [] },
+          "social_filter":  { "type": "array", "items": { "type": "string" }, "default": [] }
+        }
+      }
+    },
+    "tg_bots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name":           { "type": "string" },
+          "target_chat":    { "type": "string" },
+          "push_message":   { "type": "boolean", "default": true },
+          "push_blog":      { "type": "boolean", "default": false },
+          "push_x":         { "type": "boolean", "default": true },
+          "push_instagram": { "type": "boolean", "default": true },
+          "push_tiktok":    { "type": "boolean", "default": true },
+          "push_live":      { "type": "boolean", "default": true },
+          "push_alert":     { "type": "boolean", "default": false },
+          "member_filter":  { "type": "array", "items": { "type": "string" }, "default": [] },
+          "blog_filter":    { "type": "array", "items": { "type": "string" }, "default": [] },
+          "social_filter":  { "type": "array", "items": { "type": "string" }, "default": [] }
         }
       }
     },

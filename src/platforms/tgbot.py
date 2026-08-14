@@ -23,12 +23,27 @@ class TGBot:
     
     def __init__(self, name: str, token: str, target_chat: str, 
                  member_filter: list[str] | None = None,
-                 push_blog: bool = False, push_alert: bool = False):
+                 blog_filter: list[str] | None = None,
+                 social_filter: list[str] | None = None,
+                 push_message: bool = True,
+                 push_blog: bool = False,
+                 push_x: bool = True,
+                 push_instagram: bool = True,
+                 push_tiktok: bool = True,
+                 push_live: bool = True,
+                 push_alert: bool = False):
         self.name = name
         self.token = token
         self.target_chat = target_chat
         self.member_filter = member_filter or []
+        self.blog_filter = blog_filter or []
+        self.social_filter = social_filter or []
+        self.push_message = push_message
         self.push_blog = push_blog
+        self.push_x = push_x
+        self.push_instagram = push_instagram
+        self.push_tiktok = push_tiktok
+        self.push_live = push_live
         self.push_alert = push_alert
         
         self._bot = None
@@ -246,7 +261,14 @@ def initialize() -> None:
                 token=bot_cfg.get("token", ""),
                 target_chat=bot_cfg.get("target_chat", ""),
                 member_filter=bot_cfg.get("member_filter") or [],
+                blog_filter=bot_cfg.get("blog_filter") or [],
+                social_filter=bot_cfg.get("social_filter") or [],
+                push_message=bool(bot_cfg.get("push_message", True)),
                 push_blog=bool(bot_cfg.get("push_blog", False)),
+                push_x=bool(bot_cfg.get("push_x", True)),
+                push_instagram=bool(bot_cfg.get("push_instagram", True)),
+                push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
+                push_live=bool(bot_cfg.get("push_live", True)),
                 push_alert=bool(bot_cfg.get("push_alert", False))
             )
             bot.initialize()

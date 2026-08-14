@@ -26,7 +26,15 @@ class QQOfficialBot:
 
     def __init__(self, name: str, app_id: str, client_secret: str, target_openid: str,
                  group_openid: str = "", member_filter: list[str] | None = None,
-                 blog_filter: list[str] | None = None, push_alert: bool = False):
+                 blog_filter: list[str] | None = None,
+                 social_filter: list[str] | None = None,
+                 push_message: bool = True,
+                 push_blog: bool = False,
+                 push_x: bool = True,
+                 push_instagram: bool = True,
+                 push_tiktok: bool = True,
+                 push_live: bool = True,
+                 push_alert: bool = False):
         self.name = name
         self.app_id = app_id
         self.client_secret = client_secret
@@ -34,6 +42,13 @@ class QQOfficialBot:
         self.group_openid = group_openid
         self.member_filter: list[str] = member_filter or []
         self.blog_filter: list[str] = blog_filter or []
+        self.social_filter: list[str] = social_filter or []
+        self.push_message: bool = push_message
+        self.push_blog: bool = push_blog
+        self.push_x: bool = push_x
+        self.push_instagram: bool = push_instagram
+        self.push_tiktok: bool = push_tiktok
+        self.push_live: bool = push_live
         self.push_alert: bool = push_alert
 
         # 实例级状态
@@ -420,7 +435,14 @@ def initialize(client: httpx.AsyncClient) -> None:
             group_openid=bot_cfg.get("group_openid", ""),
             member_filter=bot_cfg.get("member_filter"),
             blog_filter=bot_cfg.get("blog_filter"),
-            push_alert=bot_cfg.get("push_alert", False)
+            social_filter=bot_cfg.get("social_filter"),
+            push_message=bool(bot_cfg.get("push_message", True)),
+            push_blog=bool(bot_cfg.get("push_blog", False)),
+            push_x=bool(bot_cfg.get("push_x", True)),
+            push_instagram=bool(bot_cfg.get("push_instagram", True)),
+            push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
+            push_live=bool(bot_cfg.get("push_live", True)),
+            push_alert=bool(bot_cfg.get("push_alert", False))
         )
         bot.initialize(client)
         _bots.append(bot)
@@ -443,7 +465,14 @@ def reload() -> None:
             group_openid=bot_cfg.get("group_openid", ""),
             member_filter=bot_cfg.get("member_filter"),
             blog_filter=bot_cfg.get("blog_filter"),
-            push_alert=bot_cfg.get("push_alert", False)
+            social_filter=bot_cfg.get("social_filter"),
+            push_message=bool(bot_cfg.get("push_message", True)),
+            push_blog=bool(bot_cfg.get("push_blog", False)),
+            push_x=bool(bot_cfg.get("push_x", True)),
+            push_instagram=bool(bot_cfg.get("push_instagram", True)),
+            push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
+            push_live=bool(bot_cfg.get("push_live", True)),
+            push_alert=bool(bot_cfg.get("push_alert", False))
         )
         bot.initialize(_client)
         if bot.app_id in old_bots:

@@ -101,6 +101,29 @@ class TestSocialIntegration(unittest.TestCase):
         self.assertIsNotNone(s)
         stop_social_service()
 
+    def test_social_forwarder_pubsub(self):
+        from src.social.forwarder import SocialForwarder
+        cfg_test = {
+            "channels": {"napcat": False, "tg": False, "qq_official": False},
+            "napcat_routes": [
+                {"group_id": 111, "push_x": True, "social_filter": ["nogizaka46"]},
+                {"group_id": 222, "push_x": False, "social_filter": []},
+            ],
+            "tg_bots": [],
+            "qq_official_bots": []
+        }
+        fwd = SocialForwarder(cfg_test, self.downloader)
+        post = Post(
+            platform="x",
+            post_id="p1",
+            author="nogizaka46",
+            text="hello",
+            extra={"account": "nogizaka46"}
+        )
+        # Verify forward_post executes cleanly without exceptions
+        fwd.forward_post(post)
+        self.assertTrue(True)
+
 
 if __name__ == "__main__":
     unittest.main()

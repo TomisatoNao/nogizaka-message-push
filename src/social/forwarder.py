@@ -119,8 +119,10 @@ class SocialForwarder:
         else:
             full_text = build_post_message(post, translated, alt_zh)
 
-        # 3. 异步分发至各通道（支持根据成员所属进行 member_filter 过滤路由）
+        # 3. 异步分发至各通道（支持多维 Pub/Sub 订阅：平台开关 + social_filter + member_filter）
         m_name = post.extra.get("member_name")
+        acc_name = post.extra.get("account") or post.author
+        plat = post.platform.lower()
 
         async def _do_broadcast():
             any_success = False
@@ -132,8 +134,16 @@ class SocialForwarder:
                     for b in tgbot.get_configured_bots():
                         if not b.token or not b.target_chat:
                             continue
+                        # 1) 平台开关校验
+                        if not getattr(b, f"push_{plat}", True):
+                            continue
+                        # 2) 成员过滤（若本动态归属于某个成员且该通道配置了成员过滤）
                         if m_name and b.member_filter and m_name not in b.member_filter:
                             continue
+                        # 3) 社媒账号过滤（若该通道配置了社媒账号白名单）
+                        if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
+                            continue
+
                         # 发送文本
                         t_ok = await b._post_message(b.target_chat, full_text)
                         # 发送媒体
@@ -171,15 +181,24 @@ class SocialForwarder:
                                 chain.append({"type": "video", "data": {"file": abs_uri}})
                             elif m.type == "audio":
                                 chain.append({"type": "record", "data": {"file": abs_uri}})
-                    # 按照各路由配置的 member_filter 精准路由
+                    # 按照各路由配置精准路由
                     routes = getattr(cfg, "NAPCAT_ROUTES", [])
                     for r in routes:
                         gid = r.get("group_id")
                         if not gid:
                             continue
-                        filters = r.get("member_filter") or []
-                        if m_name and filters and m_name not in filters:
+                        # 1) 平台开关校验
+                        if not r.get(f"push_{plat}", True):
                             continue
+                        # 2) 成员过滤
+                        m_filters = r.get("member_filter") or []
+                        if m_name and m_filters and m_name not in m_filters:
+                            continue
+                        # 3) 社媒账号过滤
+                        s_filters = r.get("social_filter") or []
+                        if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
+                            continue
+
                         ok = await napcat.send_qq_message(gid, chain)
                         if ok:
                             any_success = True
@@ -191,8 +210,16 @@ class SocialForwarder:
                 try:
                     bots = qq_official.get_configured_bots()
                     for bot in bots:
+                        # 1) 平台开关校验
+                        if not getattr(bot, f"push_{plat}", True):
+                            continue
+                        # 2) 成员过滤
                         if m_name and bot.member_filter and m_name not in bot.member_filter:
                             continue
+                        # 3) 社媒账号过滤
+                        if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
+                            continue
+
                         if bot.target_openid:
                             await bot._send_c2c_text(bot.target_openid, full_text)
                             any_success = True
@@ -216,7 +243,7 @@ class SocialForwarder:
         # 4. 写入内容归档库
         try:
             from src.social import archive
-            archive.record_post(post)
+            archive.get_archive().add_post(post)
         except Exception as e:
             log_all(f"⚠️ [社媒归档] 写入失败: {e}", is_debug=True)
 
@@ -234,21 +261,38 @@ class SocialForwarder:
             note=result.note,
         )
 
+        acc_name = getattr(result, "account", "") or result.display_name
+
         async def _do_send():
-            # 广播通知文本
+            # 广播通知文本（支持 push_live & social_filter）
             if getattr(cfg, "ENABLE_TG_BOT", False):
                 for b in tgbot.get_configured_bots():
-                    if b.target_chat:
-                        await b._post_message(b.target_chat, msg)
+                    if not b.target_chat or not getattr(b, "push_live", True):
+                        continue
+                    if b.social_filter and acc_name not in b.social_filter and result.display_name not in b.social_filter:
+                        continue
+                    await b._post_message(b.target_chat, msg)
+
             if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
                 for r in getattr(cfg, "NAPCAT_ROUTES", []):
                     gid = r.get("group_id")
-                    if gid:
-                        await napcat.send_qq_message(gid, [{"type": "text", "data": {"text": msg}}])
+                    if not gid or not r.get("push_live", True):
+                        continue
+                    s_filters = r.get("social_filter") or []
+                    if s_filters and acc_name not in s_filters and result.display_name not in s_filters:
+                        continue
+                    await napcat.send_qq_message(gid, [{"type": "text", "data": {"text": msg}}])
+
             if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
                 for bot in qq_official.get_configured_bots():
+                    if not getattr(bot, "push_live", True):
+                        continue
+                    if bot.social_filter and acc_name not in bot.social_filter and result.display_name not in bot.social_filter:
+                        continue
                     if bot.target_openid:
                         await bot._send_c2c_text(bot.target_openid, msg)
+                    if getattr(bot, "group_openid", None):
+                        await bot._send_group_text(bot.group_openid, msg)
 
         try:
             self._dispatch_async(_do_send())

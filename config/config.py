@@ -271,9 +271,36 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["napcat_routes"] = []
                 for gid, members in legacy_napcat_groups.items():
                     cfg["napcat_routes"].append({
-                        "group_id": gid,
-                        "member_filter": members
+                        "group_id":       gid,
+                        "push_message":   True,
+                        "push_blog":      False,
+                        "push_x":         True,
+                        "push_instagram": True,
+                        "push_tiktok":    True,
+                        "push_live":      True,
+                        "push_alert":     False,
+                        "member_filter":  members,
+                        "blog_filter":    [],
+                        "social_filter":  [],
                     })
+
+            if "napcat_routes" in cfg and isinstance(cfg["napcat_routes"], list):
+                n_routes = []
+                for r in cfg["napcat_routes"]:
+                    n_routes.append({
+                        "group_id":       r.get("group_id"),
+                        "push_message":   bool(r.get("push_message", True)),
+                        "push_blog":      bool(r.get("push_blog", False)),
+                        "push_x":         bool(r.get("push_x", True)),
+                        "push_instagram": bool(r.get("push_instagram", True)),
+                        "push_tiktok":    bool(r.get("push_tiktok", True)),
+                        "push_live":      bool(r.get("push_live", True)),
+                        "push_alert":     bool(r.get("push_alert", False)),
+                        "member_filter":  r.get("member_filter") or [],
+                        "blog_filter":    r.get("blog_filter") or [],
+                        "social_filter":  r.get("social_filter") or [],
+                    })
+                cfg["napcat_routes"] = n_routes
 
         return cfg
 
@@ -338,14 +365,21 @@ def _build_qq_official_bots(cfg: dict) -> dict:
         for b in declared:
             prefix = str(b["name"]).upper()
             bots.append({
-                "name":          b["name"],
-                "app_id":        b.get("app_id") or _env(f"{prefix}_APP_ID", ""),
-                "client_secret": _env(f"{prefix}_CLIENT_SECRET", ""),
-                "target_openid": b.get("target_openid") or _env(f"{prefix}_TARGET_OPENID", ""),
-                "group_openid":  b.get("group_openid", ""),
-                "member_filter": b.get("member_filter") or [],
-                "blog_filter":   b.get("blog_filter") or [],
-                "push_alert":    bool(b.get("push_alert", False)),
+                "name":           b["name"],
+                "app_id":         b.get("app_id") or _env(f"{prefix}_APP_ID", ""),
+                "client_secret":  _env(f"{prefix}_CLIENT_SECRET", ""),
+                "target_openid":  b.get("target_openid") or _env(f"{prefix}_TARGET_OPENID", ""),
+                "group_openid":   b.get("group_openid", ""),
+                "push_message":   bool(b.get("push_message", True)),
+                "push_blog":      bool(b.get("push_blog", False)),
+                "push_x":         bool(b.get("push_x", True)),
+                "push_instagram": bool(b.get("push_instagram", True)),
+                "push_tiktok":    bool(b.get("push_tiktok", True)),
+                "push_live":      bool(b.get("push_live", True)),
+                "push_alert":     bool(b.get("push_alert", False)),
+                "member_filter":  b.get("member_filter") or [],
+                "blog_filter":    b.get("blog_filter") or [],
+                "social_filter":  b.get("social_filter") or [],
             })
     else:
         for i in range(1, 21):
@@ -353,10 +387,20 @@ def _build_qq_official_bots(cfg: dict) -> dict:
             if not app_id:
                 continue
             bots.append({
-                "name":          f"bot_{i}",
-                "app_id":        app_id,
-                "client_secret": _env(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET", ""),
-                "target_openid": _env(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID", ""),
+                "name":           f"bot_{i}",
+                "app_id":         app_id,
+                "client_secret":  _env(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET", ""),
+                "target_openid":  _env(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID", ""),
+                "push_message":   True,
+                "push_blog":      False,
+                "push_x":         True,
+                "push_instagram": True,
+                "push_tiktok":    True,
+                "push_live":      True,
+                "push_alert":     False,
+                "member_filter":  [],
+                "blog_filter":    [],
+                "social_filter":  [],
             })
 
     cfg["qq_official_bots"] = bots
@@ -381,12 +425,19 @@ def _build_tg_bots(cfg: dict) -> dict:
         prefix = str(b.get("name", "")).upper()
         token = _env(f"{prefix}_TOKEN", "") or global_token
         bots.append({
-            "name":          b.get("name", ""),
-            "token":         token,
-            "target_chat":   str(b.get("target_chat", "")).strip(),
-            "member_filter": b.get("member_filter") or [],
-            "blog_filter":   b.get("blog_filter") or [],
-            "push_alert":    bool(b.get("push_alert", False)),
+            "name":           b.get("name", ""),
+            "token":          token,
+            "target_chat":    str(b.get("target_chat", "")).strip(),
+            "push_message":   bool(b.get("push_message", True)),
+            "push_blog":      bool(b.get("push_blog", False)),
+            "push_x":         bool(b.get("push_x", True)),
+            "push_instagram": bool(b.get("push_instagram", True)),
+            "push_tiktok":    bool(b.get("push_tiktok", True)),
+            "push_live":      bool(b.get("push_live", True)),
+            "push_alert":     bool(b.get("push_alert", False)),
+            "member_filter":  b.get("member_filter") or [],
+            "blog_filter":    b.get("blog_filter") or [],
+            "social_filter":  b.get("social_filter") or [],
         })
         
     cfg["tg_bots"] = bots

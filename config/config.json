@@ -79,38 +79,6 @@
   "blog_records": {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""},
   "image_tagging": true,
   "napcat_routes": [],
-  "tg_bots": [],
-  "platforms": {
-    "x": {
-      "enabled": false,
-      "interval_seconds": 60,
-      "night_interval_seconds": 300,
-      "accounts": [],
-      "display_names": {}
-    },
-    "instagram": {
-      "enabled": false,
-      "interval_seconds": 1800,
-      "night_interval_seconds": 5400,
-      "accounts": [],
-      "display_names": {},
-      "include_feed": true,
-      "include_stories": true
-    },
-    "tiktok": {
-      "enabled": false,
-      "interval_seconds": 120,
-      "night_interval_seconds": 600,
-      "accounts": [],
-      "display_names": {},
-      "include_stories": true,
-      "include_photos": true
-    },
-    "tiktok_live": {
-      "enabled": false,
-      "interval_seconds": 8,
-      "accounts": [],
-      "display_names": {}
-    }
-  }
+  "platforms": {"x": {"enabled": false, "interval_seconds": 60, "night_interval_seconds": 300, "accounts": ["nogizaka46"], "display_names": {}}, "instagram": {"enabled": false, "include_feed": true, "include_stories": true, "interval_seconds": 1800, "night_interval_seconds": 5400, "accounts": [], "display_names": {}}, "tiktok": {"enabled": false, "interval_seconds": 120, "accounts": [], "display_names": {}}, "tiktok_live": {"enabled": false, "interval_seconds": 8, "accounts": [], "display_names": {}}},
+  "tg_bots": []
 }
