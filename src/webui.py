@@ -1961,6 +1961,66 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._handle_archive(path[len("/api/archive/"):])
             return
+        if path == "/api/social/parse_post":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            url = str(body.get("url", "")).strip()
+            if not url:
+                self._send_json({"ok": False, "errors": ["缺少 url 参数"]}, 400)
+                return
+            try:
+                from src.social.single_fetcher import SocialUrlParser
+                raw_cfg = _load_raw_config()
+                parser = SocialUrlParser(raw_cfg)
+                post = parser.parse(url)
+
+                tr = None
+                if body.get("translate", True) and post.text:
+                    try:
+                        from src import translator
+                        import asyncio
+                        tr = asyncio.run(translator.translate_text(post.text, "社媒", "偶像"))
+                    except Exception:
+                        pass
+
+                media_list = [{"type": m.type, "url": m.url, "alt": m.alt_text} for m in post.media]
+                self._send_json({
+                    "ok": True,
+                    "platform": post.platform,
+                    "post_id": post.post_id,
+                    "author": post.author,
+                    "text": post.text,
+                    "translation": tr,
+                    "timestamp": post.timestamp,
+                    "media": media_list,
+                    "extra": post.extra,
+                })
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"解析失败: {e}"]}, 500)
+            return
+        if path == "/api/social/manual_push":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            url = str(body.get("url", "")).strip()
+            if not url:
+                self._send_json({"ok": False, "errors": ["缺少 url 参数"]}, 400)
+                return
+            try:
+                from src.social.single_fetcher import manual_push_social_url
+                raw_cfg = _load_raw_config()
+                translate = bool(body.get("translate", True))
+                archive = bool(body.get("archive", True))
+                res = manual_push_social_url(url, raw_cfg, translate=translate, archive=archive)
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"推送失败: {e}"]}, 500)
+            return
         if path == "/api/test_push":
             if not self._check_auth():
                 return

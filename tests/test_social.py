@@ -120,10 +120,23 @@ class TestSocialIntegration(unittest.TestCase):
             text="hello",
             extra={"account": "nogizaka46"}
         )
-        # Verify forward_post executes cleanly without exceptions
         fwd.forward_post(post)
         self.assertTrue(True)
+
+    def test_social_single_url_parser(self):
+        from src.social.single_fetcher import SocialUrlParser, _orig_image, _syndication_token
+        self.assertEqual(_orig_image("https://pbs.twimg.com/media/xyz.jpg"), "https://pbs.twimg.com/media/xyz?format=jpg&name=orig")
+        token = _syndication_token("1234567890")
+        self.assertTrue(isinstance(token, str) and len(token) > 0)
+
+        parser = SocialUrlParser(self.config)
+        with self.assertRaises(ValueError):
+            parser.parse("https://unknown-platform.com/xyz")
+
+        with self.assertRaises(ValueError):
+            parser.parse("")
 
 
 if __name__ == "__main__":
     unittest.main()
+

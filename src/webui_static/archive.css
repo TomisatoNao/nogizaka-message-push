@@ -265,73 +265,347 @@
   /* ── 首页 ── */
   .home { display: none; }
   .home.active { display: block; }
-  .home-hero { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
+  .home-hero { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
 
   /* Hero 卡片 */
-  .hero-card { text-align: center; padding: 32px 20px 24px; margin-bottom: 28px;
-               background: color-mix(in srgb, var(--card) 78%, transparent);
-               border: 1px solid var(--border); border-radius: 20px;
-               backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-               box-shadow: var(--shadow-sm); }
-  .hero-card .hc-icon { font-size: 32px; margin-bottom: 6px; }
-  .hero-card .hc-name { font-size: 22px; font-weight: 700; color: var(--text-strong); letter-spacing: .01em; }
-  .hero-card .hc-sub { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
-  .hero-card .hc-stats { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; margin-top: 14px; }
-  .hero-card .hc-stat { font-size: 13px; color: var(--muted); }
-  .hero-card .hc-stat b { color: var(--text-strong); font-weight: 650; }
-  .hero-card .hc-range { font-size: 12px; color: var(--muted); margin-top: 8px; }
-  .hero-card .hc-today { display: inline-block; margin-top: 10px; padding: 5px 14px;
-      touch-action: manipulation;
-      background: var(--accent-soft); color: var(--accent); border: 1px solid transparent;
-      border-radius: 999px; font-size: 12px; font-weight: 650; cursor: pointer;
-      font-family: inherit; transition: all .15s; }
-  .hero-card .hc-today:hover { border-color: var(--accent); box-shadow: 0 2px 8px var(--accent-ring); }
-  .hero-card .hc-today:active { transform: scale(.95); background: var(--accent); color: #fff; }
+  .hero-card {
+    position: relative;
+    padding: 28px 24px 22px;
+    margin-bottom: 30px;
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .hero-card .hc-top {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 6px;
+    width: 100%;
+    justify-content: center;
+  }
+  .hero-card .hc-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    border: 2px solid var(--accent);
+    box-shadow: 0 4px 16px var(--accent-ring);
+    flex-shrink: 0;
+  }
+  .hero-card .hc-title-box {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .hero-card .hc-name {
+    font-size: 25px;
+    font-weight: 750;
+    color: var(--text-strong);
+    letter-spacing: .02em;
+    line-height: 1.2;
+  }
+  .hero-card .hc-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 3px;
+    font-weight: 500;
+  }
+  .hero-card .hc-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    width: 100%;
+    margin-top: 20px;
+  }
+  .hero-card .hc-metric {
+    background: var(--card-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    transition: transform .15s, border-color .15s;
+  }
+  .hero-card .hc-metric:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+  }
+  .hero-card .hc-metric-label {
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .hero-card .hc-metric-val {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
+  }
+  .hero-card .hc-metric-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .hero-card .hc-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-soft);
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .hero-card .hc-today-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #ff5252));
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+    box-shadow: 0 4px 14px var(--accent-ring);
+    transition: all .2s;
+  }
+  .hero-card .hc-today-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px var(--accent-ring);
+  }
+  .hero-card .hc-today-btn:active {
+    transform: scale(0.96);
+  }
 
   /* Section 标题 */
-  .home-sec { display: flex; align-items: center; gap: 8px; margin: 24px 0 10px;
-              font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: .04em; }
-  .home-sec::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+  .home-sec {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 30px 0 14px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: .02em;
+  }
+  .home-sec::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border-soft);
+  }
 
-  /* 横向滚动图片卡片条 */
-  .photo-strip { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
-                 -webkit-overflow-scrolling: touch; scrollbar-width: none;
-                 scroll-behavior: smooth; padding: 4px 0 14px; cursor: grab;
-                 user-select: none; }
+  /* 写真画廊 */
+  .photo-strip {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    scroll-behavior: smooth;
+    padding: 4px 2px 16px;
+    cursor: grab;
+    user-select: none;
+  }
   .photo-strip::-webkit-scrollbar { display: none; }
-  .photo-card { flex: none; width: 172px; scroll-snap-align: start; position: relative;
-                border-radius: 14px; overflow: hidden; cursor: pointer;
-                background: var(--card); border: 1px solid var(--border-soft);
-                box-shadow: var(--shadow-sm);
-                transition: transform .16s, box-shadow .16s, border-color .16s; }
-  .photo-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md);
-                      border-color: var(--accent); }
-  .photo-card img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
-  .photo-card .pc-cap { padding: 8px 10px; font-size: 11.5px; color: var(--text);
-                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .photo-card .pc-member { position: absolute; top: 8px; left: 8px; z-index: 2;
-      background: rgba(0,0,0,.55); color: #fff; font-size: 10px; font-weight: 650;
-      padding: 2px 7px; border-radius: 5px; pointer-events: none;
-      backdrop-filter: blur(4px); }
+  .photo-card {
+    flex: none;
+    width: 180px;
+    height: 245px;
+    scroll-snap-align: start;
+    position: relative;
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--card);
+    border: 1px solid var(--border-soft);
+    box-shadow: var(--shadow-sm);
+    transition: transform .22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .22s, border-color .22s;
+  }
+  .photo-card:hover {
+    transform: translateY(-6px) scale(1.02);
+    box-shadow: 0 12px 28px rgba(0,0,0,0.3);
+    border-color: var(--accent);
+  }
+  .photo-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform .3s ease;
+  }
+  .photo-card:hover img {
+    transform: scale(1.06);
+  }
+  .photo-card .pc-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 24px 10px 10px;
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 60%, transparent 100%);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .photo-card .pc-cap {
+    font-size: 11.5px;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+  }
+  .photo-card .pc-member {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+    background: rgba(0,0,0,0.65);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 650;
+    padding: 2px 8px;
+    border-radius: 6px;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+  }
 
-  /* 消息时间线 */
-  .msg-list { display: flex; flex-direction: column; }
-  .msg-preview { display: flex; gap: 14px; padding: 13px 0; cursor: pointer;
-                 border-bottom: 1px solid var(--border-soft);
-                 opacity: 0; animation: homeFadeUp .35s ease forwards;
-                 transition: background .15s; border-radius: 8px; padding-left: 8px; padding-right: 8px; }
-  .msg-preview:hover { background: var(--card-soft); }
-  .msg-preview .mp-left { flex: none; min-width: 80px; }
-  .msg-preview .mp-date { font-size: 12px; color: var(--muted); }
-  .msg-preview .mp-mem { font-size: 10.5px; color: var(--accent); font-weight: 650; margin-top: 1px; }
-  .msg-preview .mp-body { min-width: 0; }
-  /* 单成员：不需要左侧成员名列 */
-  .msg-preview.msg-single { display: block; }
-  .msg-single .mp-date { margin-bottom: 2px; }
-  .msg-preview .mp-text { font-size: 13.5px; color: var(--text); line-height: 1.55;
-                           white-space: pre-wrap; overflow: hidden; max-height: 4.7em; }
-  .msg-preview .mp-trans { font-size: 12.5px; color: var(--ok); margin-top: 3px; line-height: 1.45;
-                            overflow: hidden; max-height: 2.9em; }
+  /* 消息卡片列表 */
+  .msg-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .home-msg-card {
+    background: var(--card);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    padding: 16px 18px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    opacity: 0;
+    animation: homeFadeUp .35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .home-msg-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--accent);
+  }
+  .home-msg-card.tunnel {
+    border-left: 3.5px solid #e5a93c;
+    background: color-mix(in srgb, var(--card) 96%, #e5a93c 4%);
+  }
+  .hmc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .hmc-meta-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .hmc-date-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--card-soft);
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-soft);
+  }
+  .hmc-mem-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+  .hmc-tunnel-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #e5a93c;
+    background: rgba(229, 169, 60, 0.12);
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+  .hmc-action-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: color .15s;
+  }
+  .home-msg-card:hover .hmc-action-hint {
+    color: var(--accent);
+  }
+  .hmc-text {
+    font-size: 14px;
+    color: var(--text-strong);
+    line-height: 1.65;
+    word-break: break-word;
+    white-space: pre-wrap;
+    margin-bottom: 6px;
+  }
+  .hmc-trans-box {
+    background: rgba(40, 205, 65, 0.07);
+    border-left: 3px solid var(--ok);
+    border-radius: 0 8px 8px 0;
+    padding: 8px 12px;
+    margin-top: 8px;
+  }
+  .hmc-trans-text {
+    font-size: 13px;
+    color: var(--ok);
+    line-height: 1.55;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .nick-tag {
+    display: inline-block;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 650;
+    padding: 0 5px;
+    border-radius: 4px;
+    margin: 0 2px;
+    font-size: 0.9em;
+    vertical-align: baseline;
+  }
+
   /* 确保动画的 to 帧存在 */
   @keyframes homeFadeUp { from { opacity: 0; transform: translateY(16px); }
                            to { opacity: 1; transform: translateY(0); } }

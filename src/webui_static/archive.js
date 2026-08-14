@@ -72,6 +72,12 @@ function highlightQuery(str, query) {
   return safe;
 }
 
+function formatMessageText(str, query) {
+  if (!str) return "";
+  const highlighted = highlightQuery(str, query);
+  return highlighted.replace(/%%%/g, '<span class="nick-tag" title="订阅者昵称占位符">你</span>');
+}
+
 function escRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -1367,8 +1373,8 @@ function renderBubble(msg) {
   } else if (msg.download_failed) {
     html += '<div class="miss">⚠️ 媒体文件下载失败（可用回填工具重试）</div>';
   }
-  if (msg.text) html += '<div class="text">' + highlightQuery(msg.text, searchQuery) + "</div>";
-  if (msg.translation) html += '<div class="trans">' + highlightQuery(msg.translation, searchQuery) + "</div>";
+  if (msg.text) html += '<div class="text">' + formatMessageText(msg.text, searchQuery) + "</div>";
+  if (msg.translation) html += '<div class="trans">' + formatMessageText(msg.translation, searchQuery) + "</div>";
   b.innerHTML = html;
 
   // ── 标签 ──
@@ -1772,39 +1778,47 @@ async function showHome() {
 function renderHome(agg, members) {
   // ── Hero 卡片 ──
   const single = members.length === 1;
-  let heroHTML = '<div class="hc-icon">' + (single ? '⛩️' : '🏠') + '</div>';
+  let heroHTML = '<div class="hc-top">';
+  heroHTML += '<div class="hc-icon">' + (single ? '⛩️' : '🏠') + '</div>';
+  heroHTML += '<div class="hc-title-box">';
   heroHTML += '<div class="hc-name">' + (single ? esc(members[0].display) : members.length + ' 位成员') + '</div>';
   if (members.length > 1) {
     heroHTML += '<div class="hc-sub">' + members.map(m => esc(m.display)).join(' · ') + '</div>';
+  } else {
+    heroHTML += '<div class="hc-sub">乃木坂46 · 官方 Message 归档</div>';
   }
+  heroHTML += '</div></div>';
+
   const totalMonths = members.reduce((s, m) => s + m.stats.months, 0);
   const ws = agg.week_stats || {};
-  heroHTML += '<div class="hc-stats">';
-  heroHTML += '<span class="hc-stat">📨 <b>' + agg.total_msgs.toLocaleString() + '</b> 条消息</span>';
-  heroHTML += '<span class="hc-stat">📅 跨越 <b>' + totalMonths + '</b> 个月</span>';
-  if (ws.this_week > 0) {
-    let weekStr = '本周 <b>' + ws.this_week + '</b> 条';
-    if (ws.last_week > 0 && ws.this_week !== ws.last_week) {
-      const diff = ws.this_week - ws.last_week;
-      weekStr += ' · 较上周 ' + (diff > 0 ? '↑' : '↓') + Math.abs(diff);
-    }
-    heroHTML += '<span class="hc-stat">📊 ' + weekStr + '</span>';
+  heroHTML += '<div class="hc-stats-grid">';
+  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">💌 消息总数</span><span class="hc-metric-val">' + agg.total_msgs.toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">条</small></span></div>';
+  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">🗓️ 归档月数</span><span class="hc-metric-val">' + totalMonths + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">个月</small></span><span class="hc-metric-sub">' + (agg.first_date || '?') + ' — ' + (agg.last_date || '?') + '</span></div>';
+  
+  let weekVal = (ws.this_week || 0) + ' 条';
+  let weekDiff = '';
+  if (ws.this_week > 0 && ws.last_week > 0 && ws.this_week !== ws.last_week) {
+    const diff = ws.this_week - ws.last_week;
+    weekDiff = '较上周 ' + (diff > 0 ? '↑' + diff : '↓' + Math.abs(diff));
   }
+  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">📈 本周发送</span><span class="hc-metric-val">' + weekVal + '</span>' + (weekDiff ? '<span class="hc-metric-sub">' + weekDiff + '</span>' : '') + '</div>';
+  
+  const lu = agg.last_updated ? fmtDate(agg.last_updated) : '—';
+  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">⚡ 最近更新</span><span class="hc-metric-val" style="font-size:14px; margin-top:2px;">' + lu + '</span></div>';
   heroHTML += '</div>';
-  heroHTML += '<div class="hc-range">' + (agg.first_date || '?') + ' — ' + (agg.last_date || '?') + '</div>';
-  // 今日动态 + 最后更新
+
+  // 今日动态 + 快捷跳转
   const today = new Date();
   const todayKey = today.getFullYear() + "-" + String(today.getMonth()+1).padStart(2,"0") + "-" + String(today.getDate()).padStart(2,"0");
   const todayCount = members.reduce((s, m) => s + ((m.days || {})[todayKey] || 0), 0);
-  const lu = agg.last_updated ? fmtDate(agg.last_updated) : '';
-  let badgeHTML = '';
+  
+  let actionHTML = '';
   if (todayCount > 0) {
-    badgeHTML += '<button class="hc-today" id="hcTodayBtn">🆕 今日 ' + todayCount + ' 条</button> ';
+    actionHTML += '<button class="hc-today-btn" id="hcTodayBtn">🔥 今日有 <b>' + todayCount + '</b> 条新动态 · 点击查看 →</button>';
+  } else {
+    actionHTML += '<span style="font-size:12px;color:var(--muted)">✨ 历史消息已同步最新</span>';
   }
-  if (lu) {
-    badgeHTML += '<span style="font-size:11.5px;color:var(--muted)">最近更新 ' + lu + '</span>';
-  }
-  if (badgeHTML) heroHTML += '<div style="margin-top:10px">' + badgeHTML + '</div>';
+  heroHTML += '<div class="hc-actions">' + actionHTML + '<span style="font-size:11.5px;color:var(--muted)">📅 ' + (agg.first_date || '?') + ' 起</span></div>';
   $("homeMember").innerHTML = heroHTML;
 
   // 今日按钮点击
@@ -1821,22 +1835,18 @@ function renderHome(agg, members) {
       switchMainTab("msg", true);
       hideHome();
 
-      // 1. 切换成员
       curMember = defaultMember;
       curType = "";
       searchQuery = "";
       syncSearchInput();
       targetMsgId = "";
 
-      // 2. 更新 hash
       selfHashUpdate = true;
       location.hash = "member=" + encodeURIComponent(defaultMember) + "&y=" + ty + "&m=" + tm;
       setTimeout(() => { selfHashUpdate = false; }, 100);
 
-      // 3. 等待成员月份加载（selectMember -> selectMonth -> loadPage）
       await selectMember(defaultMember, false);
 
-      // 4. 加载当月剩余页直到今日 day-sep 出现
       const todayDateKey = today.getFullYear() + "-"
         + String(today.getMonth() + 1).padStart(2, "0") + "-"
         + String(today.getDate()).padStart(2, "0");
@@ -1848,7 +1858,6 @@ function renderHome(agg, members) {
         await loadPage();
       }
 
-      // 5. 精确滚动：用 getBoundingClientRect 扣除固定 Header 高度
       const scrollToToday = () => {
         const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
         if (!sep) return false;
@@ -1859,23 +1868,16 @@ function renderHome(agg, members) {
         return true;
       };
 
-      if (!scrollToToday()) {
-        // 未找到 day-sep：今日可能无消息，提示
-        return;
-      }
+      if (!scrollToToday()) return;
 
-      // 6. 图片懒加载后二次校正（防止 DOM 高度变化导致偏移）
       setTimeout(scrollToToday, 400);
       setTimeout(scrollToToday, 1000);
 
-      // 7. 高亮今日第一条消息 bubble
       setTimeout(() => {
         const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
         if (!sep) return;
-        // 高亮 sep 本身
         sep.classList.add("flash");
         setTimeout(() => sep.classList.remove("flash"), 2500);
-        // 同时对 sep 后面紧接的第一个 bubble 施加脉冲高亮
         let next = sep.nextElementSibling;
         while (next && !next.classList.contains("bubble")) {
           next = next.nextElementSibling;
@@ -1898,7 +1900,7 @@ function renderHome(agg, members) {
       '<div class="photo-card" data-member="' + esc(p.member) + '" data-year="' + p.year + '" data-month="' + p.month + '" data-id="' + p.id + '">' +
         (members.length > 1 ? '<span class="pc-member">' + esc(p.member_display) + '</span>' : '') +
         '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
-        (p.text ? '<div class="pc-cap">' + esc(p.text) + '</div>' : '') +
+        (p.text ? '<div class="pc-overlay"><div class="pc-cap">' + formatMessageText(p.text) + '</div></div>' : '') +
       '</div>'
     ).join('');
     strip.querySelectorAll('.photo-card').forEach(el => {
@@ -1927,7 +1929,7 @@ function renderHome(agg, members) {
   function photoAdvance() {
     if (photoScrolling) return;
     if (strip.scrollWidth <= strip.clientWidth) return;
-    const step = (strip.querySelector('.photo-card')?.offsetWidth || 172) + 10;
+    const step = (strip.querySelector('.photo-card')?.offsetWidth || 180) + 14;
     let target;
     if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 10) {
       target = 0;
@@ -1938,7 +1940,7 @@ function renderHome(agg, members) {
     strip.scrollTo({ left: target, behavior: 'smooth' });
     setTimeout(() => { photoScrolling = false; }, 700);
   }
-  function startPhotoScroll() { if (!photoTimer) photoTimer = setInterval(photoAdvance, 2200); }
+  function startPhotoScroll() { if (!photoTimer) photoTimer = setInterval(photoAdvance, 2400); }
   function stopPhotoScroll() { clearInterval(photoTimer); photoTimer = null; photoScrolling = false; }
   startPhotoScroll();
   strip.addEventListener("touchstart", stopPhotoScroll, { once: true });
@@ -2005,24 +2007,24 @@ function renderHome(agg, members) {
     const multi = members.length > 1;
     agg.latest_msgs.forEach((msg, i) => {
       const d = new Date(msg.published_at + "Z");
-      const dateStr = isNaN(d.getTime()) ? '' : (d.getMonth()+1) + '/' + d.getDate();
+      const dateStr = isNaN(d.getTime()) ? '' : (d.getMonth()+1) + '月' + d.getDate() + '日';
       const timeStr = isNaN(d.getTime()) ? '' : String(d.getHours()).padStart(2,"0") + ':' + String(d.getMinutes()).padStart(2,"0");
-      html += '<div class="msg-preview' + (multi ? '' : ' msg-single') + '" style="animation-delay:' + (i * .05) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
-      if (multi) {
-        html += '<div class="mp-left">';
-        html += '<div class="mp-date">' + dateStr + '</div>';
-        html += '<div class="mp-date" style="font-weight:600">' + timeStr + '</div>';
-        html += '<div class="mp-mem">' + esc(msg.member_display) + '</div>';
-        html += '</div>';
+      html += '<div class="home-msg-card" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
+      html += '<div class="hmc-header">';
+      html += '<div class="hmc-meta-left">';
+      if (multi) html += '<span class="hmc-mem-badge">' + esc(msg.member_display) + '</span>';
+      html += '<span class="hmc-date-badge">📅 ' + dateStr + ' ' + timeStr + '</span>';
+      html += '</div>';
+      html += '<span class="hmc-action-hint">查看消息 →</span>';
+      html += '</div>';
+      html += '<div class="hmc-text">' + formatMessageText(msg.text) + '</div>';
+      if (msg.translation) {
+        html += '<div class="hmc-trans-box"><div class="hmc-trans-text">' + formatMessageText(msg.translation) + '</div></div>';
       }
-      html += '<div class="mp-body">';
-      if (!multi) html += '<div class="mp-date">' + dateStr + ' ' + timeStr + '</div>';
-      html += '<div class="mp-text">' + esc(msg.text) + '</div>';
-      if (msg.translation) html += '<div class="mp-trans">' + esc(msg.translation) + '</div>';
-      html += '</div></div>';
+      html += '</div>';
     });
     msgDiv.innerHTML = html;
-    msgDiv.querySelectorAll('.msg-preview').forEach(el => {
+    msgDiv.querySelectorAll('.home-msg-card').forEach(el => {
       el.addEventListener('click', () => {
         hideHome();
         curMember = el.dataset.member;
@@ -2037,7 +2039,7 @@ function renderHome(agg, members) {
       });
     });
   } else {
-    msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无文字消息</div>';
+    msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无文字消息</div>';
   }
 
   // ── Section: 时光隧道 ──
@@ -2047,24 +2049,29 @@ function renderHome(agg, members) {
     const multi = members.length > 1;
     agg.random_msgs.forEach((msg, i) => {
       const d = new Date(msg.published_at + "Z");
-      const dateStr = isNaN(d.getTime()) ? '' : (d.getFullYear()) + '/' + (d.getMonth()+1) + '/' + d.getDate();
+      const year = isNaN(d.getTime()) ? '' : d.getFullYear();
+      const dateStr = isNaN(d.getTime()) ? '' : year + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
       const timeStr = isNaN(d.getTime()) ? '' : String(d.getHours()).padStart(2,"0") + ':' + String(d.getMinutes()).padStart(2,"0");
-      html += '<div class="msg-preview tunnel' + (multi ? '' : ' msg-single') + '" style="animation-delay:' + (i * .08) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
-      if (multi) {
-        html += '<div class="mp-left">';
-        html += '<div class="mp-date">' + dateStr + '</div>';
-        html += '<div class="mp-date" style="font-weight:600">' + timeStr + '</div>';
-        html += '<div class="mp-mem">' + esc(msg.member_display) + '</div>';
-        html += '</div>';
+      const thisYear = new Date().getFullYear();
+      const yearsAgo = thisYear - (year || thisYear);
+      const agoTag = yearsAgo > 0 ? (yearsAgo + '年前') : '往期';
+      html += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .05) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
+      html += '<div class="hmc-header">';
+      html += '<div class="hmc-meta-left">';
+      html += '<span class="hmc-tunnel-badge">⏳ 那年今日 · ' + agoTag + '</span>';
+      if (multi) html += '<span class="hmc-mem-badge">' + esc(msg.member_display) + '</span>';
+      html += '<span class="hmc-date-badge">📅 ' + dateStr + ' ' + timeStr + '</span>';
+      html += '</div>';
+      html += '<span class="hmc-action-hint">跳转当日 →</span>';
+      html += '</div>';
+      html += '<div class="hmc-text">' + formatMessageText(msg.text) + '</div>';
+      if (msg.translation) {
+        html += '<div class="hmc-trans-box"><div class="hmc-trans-text">' + formatMessageText(msg.translation) + '</div></div>';
       }
-      html += '<div class="mp-body">';
-      if (!multi) html += '<div class="mp-date">' + dateStr + ' ' + timeStr + '</div>';
-      html += '<div class="mp-text">' + esc(msg.text) + '</div>';
-      if (msg.translation) html += '<div class="mp-trans">' + esc(msg.translation) + '</div>';
-      html += '</div></div>';
+      html += '</div>';
     });
     tunnelDiv.innerHTML = html;
-    tunnelDiv.querySelectorAll('.msg-preview').forEach(el => {
+    tunnelDiv.querySelectorAll('.home-msg-card').forEach(el => {
       el.addEventListener('click', () => {
         curMode = "msg";
         switchMainTab("msg", true);
@@ -2081,9 +2088,8 @@ function renderHome(agg, members) {
       });
     });
   } else {
-    tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">暂无历史消息</div>';
+    tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无历史消息</div>';
   }
-
 }
 
 function goHome() {

@@ -606,6 +606,46 @@
       </div>
     </details>
   </div>
+
+  <!-- Card 5: 🧰 实用工具 · 单条社媒链接解析与手动推送 -->
+  <div class="card" style="border-top: 3px solid var(--accent);">
+    <h2>🧰 实用工具 · 单条社媒链接解析与即时推送</h2>
+    <div style="font-size:13px; color:var(--muted); margin-bottom:14px;">
+      支持输入 <b>X (Twitter) 推文</b>、<b>Instagram 帖子/Reel</b> 或 <b>TikTok 视频</b> 链接，抓取全部图片、最高画质原图、视频/音频及正文，并支持 AI 双语翻译与多通道广播推送。
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:stretch;">
+      <input id="toolSocialUrl" type="text" placeholder="https://x.com/user/status/... 或 https://www.instagram.com/p/... 或 https://www.tiktok.com/@.../video/..." style="flex:1; min-width:280px; font-size:13.5px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; background:var(--card-soft); color:var(--text);" />
+      <button class="btn" id="btnToolSocialPaste" type="button" style="white-space:nowrap;">📋 粘贴</button>
+      <button class="btn" id="btnToolSocialParse" type="button" style="white-space:nowrap;">🔍 解析预览</button>
+      <button class="btn primary" id="btnToolSocialPush" type="button" style="white-space:nowrap; background:var(--accent); color:#fff;">🚀 一键推送至通道</button>
+    </div>
+    
+    <div style="display:flex; gap:18px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+      <label class="switch"><input id="toolSocialTranslate" type="checkbox" checked/><span class="track"></span>AI 智能翻译</label>
+      <label class="switch"><input id="toolSocialArchive" type="checkbox" checked/><span class="track"></span>同步保存到 SQLite 归档库</label>
+      <span id="toolSocialLoading" style="display:none; font-size:13px; color:var(--accent); font-weight:600;">⏳ 正在解析社媒内容，请稍候…</span>
+    </div>
+
+    <!-- 解析结果展示区 -->
+    <div id="toolSocialResult" style="display:none; margin-top:16px; padding:16px; background:var(--card-soft); border:1px solid var(--border-soft); border-radius:12px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span id="tsResPlatform" style="padding:2px 8px; border-radius:6px; font-size:11.5px; font-weight:700; background:var(--accent-soft); color:var(--accent);">𝕏 Twitter</span>
+          <span id="tsResAuthor" style="font-size:14px; font-weight:700; color:var(--text-strong);"></span>
+          <span id="tsResTime" style="font-size:12px; color:var(--muted);"></span>
+        </div>
+        <a id="tsResLink" href="#" target="_blank" rel="noopener" style="font-size:12px; color:var(--accent); text-decoration:none;">查看原始链接 ↗</a>
+      </div>
+
+      <div id="tsResText" style="font-size:13.5px; color:var(--text); line-height:1.6; white-space:pre-wrap; margin-bottom:8px;"></div>
+      <div id="tsResTransBox" style="display:none; background:rgba(40,205,65,0.08); border-left:3px solid var(--ok); border-radius:0 8px 8px 0; padding:8px 12px; margin-bottom:10px;">
+        <div style="font-size:11.5px; color:var(--ok); font-weight:650; margin-bottom:2px;">🤖 AI 译文</div>
+        <div id="tsResTranslation" style="font-size:13px; color:var(--ok); line-height:1.55; white-space:pre-wrap;"></div>
+      </div>
+
+      <div id="tsResMedia" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;"></div>
+    </div>
+  </div>
 </section>
 <!-- ── 系统设置 ─────────────────────────────── -->
 <section class="tab" id="tab-system">
@@ -3570,6 +3610,126 @@ $("btnLogout").addEventListener("click", async () => {
   setDirty(false);
   location.href = "/login";
 });
+
+// ── 实用工具：社媒单链接解析与手动推送 ──────────────
+$("btnToolSocialPaste").addEventListener("click", async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) $("toolSocialUrl").value = text.trim();
+  } catch (e) {
+    uiAlert("无法读取剪贴板，请手动粘贴");
+  }
+});
+
+$("btnToolSocialParse").addEventListener("click", async () => {
+  const url = $("toolSocialUrl").value.trim();
+  if (!url) { uiAlert("请先输入 X / Instagram / TikTok 链接"); return; }
+  const btn = $("btnToolSocialParse");
+  const loading = $("toolSocialLoading");
+  const resultDiv = $("toolSocialResult");
+  btn.disabled = true;
+  loading.style.display = "inline-block";
+  loading.textContent = "⏳ 正在解析社媒内容…";
+  resultDiv.style.display = "none";
+
+  try {
+    const res = await api("/api/social/parse_post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: url,
+        translate: $("toolSocialTranslate").checked,
+      }),
+    });
+    if (!res.ok) throw new Error((res.errors || []).join("；") || "解析失败");
+
+    renderSocialToolResult(res);
+    msg("✅ 链接解析成功！", "ok");
+  } catch (err) {
+    msg("解析失败：" + err.message, "err");
+  } finally {
+    btn.disabled = false;
+    loading.style.display = "none";
+  }
+});
+
+$("btnToolSocialPush").addEventListener("click", async () => {
+  const url = $("toolSocialUrl").value.trim();
+  if (!url) { uiAlert("请先输入 X / Instagram / TikTok 链接"); return; }
+  const btn = $("btnToolSocialPush");
+  const loading = $("toolSocialLoading");
+  btn.disabled = true;
+  loading.style.display = "inline-block";
+  loading.textContent = "🚀 正在解析并推送至各通道，请稍候…";
+
+  try {
+    const res = await api("/api/social/manual_push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: url,
+        translate: $("toolSocialTranslate").checked,
+        archive: $("toolSocialArchive").checked,
+      }),
+    });
+    if (!res.ok) throw new Error((res.errors || []).join("；") || "推送失败");
+    renderSocialToolResult(res);
+    msg("🎉 社媒动态已成功推送至所有通道并完成归档！", "ok");
+  } catch (err) {
+    msg("推送失败：" + err.message, "err");
+  } finally {
+    btn.disabled = false;
+    loading.style.display = "none";
+  }
+});
+
+function renderSocialToolResult(data) {
+  const resultDiv = $("toolSocialResult");
+  resultDiv.style.display = "block";
+  
+  const pMap = { x: "𝕏 Twitter", instagram: "📸 Instagram", tiktok: "🎵 TikTok" };
+  $("tsResPlatform").textContent = pMap[data.platform] || data.platform.toUpperCase();
+  $("tsResAuthor").textContent = data.author || "社媒作者";
+  $("tsResTime").textContent = data.timestamp || "";
+  $("tsResLink").href = (data.extra && data.extra.url) || $("toolSocialUrl").value.trim();
+
+  $("tsResText").textContent = data.text || "（无正文）";
+  if (data.translation) {
+    $("tsResTransBox").style.display = "block";
+    $("tsResTranslation").textContent = data.translation;
+  } else {
+    $("tsResTransBox").style.display = "none";
+  }
+
+  const mediaDiv = $("tsResMedia");
+  mediaDiv.innerHTML = "";
+  if (data.media && data.media.length) {
+    data.media.forEach(m => {
+      if (m.type === "image") {
+        const img = document.createElement("img");
+        img.src = m.url;
+        img.style.width = "120px";
+        img.style.height = "120px";
+        img.style.objectFit = "cover";
+        img.style.borderRadius = "8px";
+        img.style.border = "1px solid var(--border-soft)";
+        mediaDiv.appendChild(img);
+      } else if (m.type === "video") {
+        const vTag = document.createElement("div");
+        vTag.style.display = "inline-flex";
+        vTag.style.alignItems = "center";
+        vTag.style.gap = "6px";
+        vTag.style.padding = "8px 12px";
+        vTag.style.borderRadius = "8px";
+        vTag.style.background = "rgba(0,0,0,0.5)";
+        vTag.style.color = "#fff";
+        vTag.style.fontSize = "12px";
+        vTag.innerHTML = '🎬 视频媒体 (' + (m.url ? '<a href="' + m.url + '" target="_blank" style="color:#fff;text-decoration:underline;">直链</a>' : '本地已下载') + ')';
+        mediaDiv.appendChild(vTag);
+      }
+    });
+  }
+}
 
 loadConfig();
 startStatusPolling();   // 状态页是默认标签页
