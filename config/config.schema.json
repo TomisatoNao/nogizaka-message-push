@@ -177,6 +177,12 @@
       }
     },
     "gemini_tag_min_interval":    { "type": "number", "minimum": 0 },
+    "message_monitor": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
     "blog_monitor": {
       "type": "object",
       "properties": {

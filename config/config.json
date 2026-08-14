@@ -50,6 +50,9 @@
   },
 
   // ── 监控成员 ──
+  "message_monitor": {
+    "enabled": true
+  },
   "monitor": [
     {"id": "55", "name": "冨里奈央", "account": "nogizaka_main", "groups": [533072575], "tg": "-1004219007326"}
   ],

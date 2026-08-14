@@ -81,6 +81,7 @@ _DEFAULTS: dict = {
     "day_interval":             [120, 180],
     "night_interval":           [1500, 1800],
     "enable_translation":       True,
+    "message_monitor_enabled":  True,
     # 消息过滤
     "skip_publish_types":       ["birthday"],
     "media_type_map":           {"video": "video", "voice": "record", "image": "image", "picture": "image"},
@@ -215,6 +216,14 @@ def _normalize_config(raw: dict) -> dict:
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
+
+        # Message 监控开关（message_monitor.enabled → message_monitor_enabled）
+        if "message_monitor" in cfg:
+            mm = cfg.pop("message_monitor")
+            if isinstance(mm, dict) and "enabled" in mm:
+                cfg["message_monitor_enabled"] = mm["enabled"]
+            elif isinstance(mm, bool):
+                cfg["message_monitor_enabled"] = mm
 
         # 图片打标签（image_tagging → enable_image_tagging）
         if "image_tagging" in cfg:
@@ -521,6 +530,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "enable_image_tagging":         "ENABLE_IMAGE_TAGGING",
     "gemini_tag_models":            "GEMINI_TAG_MODELS",
     "gemini_tag_min_interval":      "GEMINI_TAG_MIN_INTERVAL",
+    "message_monitor_enabled":      "MESSAGE_MONITOR_ENABLED",
 }
 
 # 可在热重载时通过 in-place mutation 更新的容器类型 key

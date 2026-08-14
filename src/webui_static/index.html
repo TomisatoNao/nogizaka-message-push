@@ -327,9 +327,11 @@
 </table></div>
 <div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
 <div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
-</div>
 <div class="card">
-<h2>监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
+  <h2 style="margin:0;">监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
+  <label class="switch" style="margin:0;"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
+</div>
 <div class="table-wrap"><table>
 <thead><tr><th style="width:110px;">成员 ID</th><th style="width:160px;">名字</th><th style="width:170px;">Message 账号</th><th>社交账号绑定 (X / IG / TikTok)</th><th style="width:80px;">操作</th></tr></thead>
 <tbody id="memberRows"></tbody>
@@ -1573,6 +1575,8 @@ function renderGeneral() {
   $("dayMin").value = di[0]; $("dayMax").value = di[1];
   $("nightMin").value = ni[0]; $("nightMax").value = ni[1];
   $("sleepStart").value = sh[0]; $("sleepEnd").value = sh[1];
+  const mm = config.message_monitor || {};
+  if ($("msgMonitorOn")) $("msgMonitorOn").checked = mm.enabled !== false;
   const bm = config.blog_monitor || {};
   $("blogMonitorOn").checked = bm.enabled !== false;
   $("blogHinatazaka").checked = bm.hinatazaka !== false;
@@ -1720,7 +1724,7 @@ function renderQqBots() {
         msg("已删除，点「保存并热重载」生效", "ok");
       }, "danger"));
 
-      tr.append(tdName, tdApp, tdOpenid, tdGroupOpenid, tdMemberFilter, tdBlogs, tdAlert, tdSecret, tdState, tdOps);
+      tr.append(tdName, tdApp, tdOpenid, tdGroupOpenid, tdSub, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
     });
   } else if (!qqBotStatus.filter((s) => !s.declared).length) {
@@ -1873,6 +1877,9 @@ function collectGeneral() {
   config.day_interval = [num("dayMin", 120), num("dayMax", 180)];
   config.night_interval = [num("nightMin", 1500), num("nightMax", 1800)];
   config.sleep_hours = [num("sleepStart", 2), num("sleepEnd", 7)];
+  config.message_monitor = {
+    enabled: $("msgMonitorOn") ? $("msgMonitorOn").checked : true
+  };
   config.blog_monitor = {
     enabled: $("blogMonitorOn").checked,
     hinatazaka: $("blogHinatazaka").checked,

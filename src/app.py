@@ -310,65 +310,73 @@ def _next_interval() -> tuple[int, str]:
 
 async def _run_cycle() -> None:
     """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
-    member_names = " · ".join(m["m_name"].replace(" ", "") for m in cfg.MONITOR_LIST)
+    # ── Phase 1: Message 消息巡查 ──
+    if getattr(cfg, "MESSAGE_MONITOR_ENABLED", True):
+        valid_monitors = [m for m in cfg.MONITOR_LIST if m.get("account_id") and m.get("m_id")]
+        member_names = " · ".join(m["m_name"].replace(" ", "") for m in valid_monitors)
 
-    # 每个账号取一个 target_group 作为报警目标
-    account_target_groups: dict[str, int] = {
-        m["account_id"]: _alert_group_for_account(m["account_id"])
-        for m in cfg.MONITOR_LIST
-    }
+        # 每个账号取一个 target_group 作为报警目标
+        account_target_groups: dict[str, int] = {
+            m["account_id"]: _alert_group_for_account(m["account_id"])
+            for m in valid_monitors
+            if m.get("account_id")
+        }
 
-    # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
-    await asyncio.gather(*[
-        proactive_refresh_if_expiring(acc_id, grp)
-        for acc_id, grp in account_target_groups.items()
-    ])
+        # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
+        if account_target_groups:
+            await asyncio.gather(*[
+                proactive_refresh_if_expiring(acc_id, grp)
+                for acc_id, grp in account_target_groups.items()
+            ])
 
-    # ── 改进 4：随机打乱成员轮询顺序 ──
-    shuffled = list(cfg.MONITOR_LIST)
-    random.shuffle(shuffled)
+        # ── 改进 4：随机打乱成员轮询顺序 ──
+        shuffled = list(valid_monitors)
+        random.shuffle(shuffled)
 
-    # Phase 1: 并发抓取所有成员的消息
-    fetch_results = await asyncio.gather(
-        *[fetcher.fetch_member_messages(m) for m in shuffled],
-        return_exceptions=True,
-    )
-
-    # Phase 2: 按 shuffled 顺序逐个成员串行推送
-    error_members = []
-    for i, result in enumerate(fetch_results):
-        member = shuffled[i]
-        name = member['m_name'].replace(" ", "")
-
-        if isinstance(result, Exception):
-            log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
-            error_members.append(name)
-            continue
-
-        if result is None:
-            log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
-            error_members.append(name)
-            continue
-
-        new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
-        # 单个成员的推送异常不应波及其他成员（record_member_push 内部已记 TRANSIENT 错误）
-        try:
-            ok = await fetcher.push_member_messages(
-                member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
+        if shuffled:
+            # Phase 1: 并发抓取所有成员的消息
+            fetch_results = await asyncio.gather(
+                *[fetcher.fetch_member_messages(m) for m in shuffled],
+                return_exceptions=True,
             )
-        except Exception:
-            log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
-            health.get_tracker().record_member_push(name, False)
-            error_members.append(name)
-            continue
 
-        if not ok:
-            error_members.append(name)
+            # Phase 2: 按 shuffled 顺序逐个成员串行推送
+            error_members = []
+            for i, result in enumerate(fetch_results):
+                member = shuffled[i]
+                name = member['m_name'].replace(" ", "")
 
-    if not error_members:
-        log_all(f"🔍 巡查完毕 [{member_names}]")
+                if isinstance(result, Exception):
+                    log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
+                    error_members.append(name)
+                    continue
+
+                if result is None:
+                    log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
+                    error_members.append(name)
+                    continue
+
+                new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
+                # 单个成员的推送异常不应波及其他成员（record_member_push 内部已记 TRANSIENT 错误）
+                try:
+                    ok = await fetcher.push_member_messages(
+                        member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
+                    )
+                except Exception:
+                    log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
+                    health.get_tracker().record_member_push(name, False)
+                    error_members.append(name)
+                    continue
+
+                if not ok:
+                    error_members.append(name)
+
+            if not error_members:
+                log_all(f"🔍 巡查完毕 [{member_names}]")
+            else:
+                log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
     else:
-        log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
+        log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
 
     # ── 博客巡查 ──
     blog_cfg = cfg._config.get("blog_monitor") or {}
@@ -489,6 +497,9 @@ async def _init_accounts() -> None:
     - mobile 账号：使用 refresh_token 换取初始 access_token
     - web 账号：若 Token 临期或需要握手，主动调用 refresh_token 获取并持久化 Set-Cookie
     若已有充足有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
+    if not getattr(cfg, "MESSAGE_MONITOR_ENABLED", True):
+        log_all("⏸️ Message 监控已关闭，跳过账号初始握手", is_debug=True)
+        return
     for acc_id, acc_cfg in cfg.ACCOUNTS.items():
         is_mobile = acc_cfg.get("auth_method") == "mobile"
         remaining = get_token_remaining_seconds(acc_id)
