@@ -499,30 +499,28 @@
   .home-msg-card {
     background: var(--card);
     border: 1px solid var(--border-soft);
-    border-radius: 16px;
-    padding: 16px 18px;
+    border-radius: 14px;
+    padding: 15px 18px;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
-    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
     opacity: 0;
-    animation: homeFadeUp .35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: homeFadeUp .25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
   .home-msg-card:hover {
-    transform: translateY(-3px);
+    transform: translateY(-2px);
     box-shadow: var(--shadow-md);
-    border-color: var(--accent);
+    border-color: var(--border);
   }
   .home-msg-card.tunnel {
-    border-left: 3.5px solid #e5a93c;
-    background: color-mix(in srgb, var(--card) 96%, #e5a93c 4%);
+    border-left: 3.5px solid #d49a37;
   }
   .hmc-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-    gap: 8px;
+    margin-bottom: 8px;
+    gap: 10px;
   }
   .hmc-meta-left {
     display: flex;
@@ -530,80 +528,53 @@
     gap: 8px;
     flex-wrap: wrap;
   }
-  .hmc-date-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    font-weight: 600;
+  .hmc-time {
+    font-size: 12.5px;
     color: var(--muted);
-    background: var(--card-soft);
-    padding: 3px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--border-soft);
+    font-weight: 500;
+    letter-spacing: 0.01em;
   }
   .hmc-mem-badge {
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--accent);
     background: var(--accent-soft);
-    padding: 2px 8px;
-    border-radius: 6px;
+    padding: 1px 7px;
+    border-radius: 5px;
   }
   .hmc-tunnel-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
     font-size: 11px;
-    font-weight: 700;
-    color: #e5a93c;
-    background: rgba(229, 169, 60, 0.12);
-    padding: 2px 8px;
-    border-radius: 6px;
+    font-weight: 600;
+    color: #d49a37;
+    background: rgba(212, 154, 55, 0.12);
+    padding: 1px 7px;
+    border-radius: 5px;
   }
-  .hmc-action-hint {
-    font-size: 11.5px;
+  .hmc-jump {
+    font-size: 12px;
     color: var(--muted);
-    display: flex;
-    align-items: center;
-    gap: 4px;
     transition: color .15s;
+    white-space: nowrap;
   }
-  .home-msg-card:hover .hmc-action-hint {
-    color: var(--accent);
+  .home-msg-card:hover .hmc-jump {
+    color: var(--text-strong);
   }
   .hmc-text {
-    font-size: 14px;
+    font-size: 14.5px;
     color: var(--text-strong);
     line-height: 1.65;
     word-break: break-word;
     white-space: pre-wrap;
-    margin-bottom: 6px;
   }
-  .hmc-trans-box {
-    background: rgba(40, 205, 65, 0.07);
-    border-left: 3px solid var(--ok);
-    border-radius: 0 8px 8px 0;
-    padding: 8px 12px;
-    margin-top: 8px;
-  }
-  .hmc-trans-text {
-    font-size: 13px;
+  .hmc-trans {
+    font-size: 13.5px;
     color: var(--ok);
     line-height: 1.55;
     word-break: break-word;
     white-space: pre-wrap;
-  }
-  .nick-tag {
-    display: inline-block;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-weight: 650;
-    padding: 0 5px;
-    border-radius: 4px;
-    margin: 0 2px;
-    font-size: 0.9em;
-    vertical-align: baseline;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-soft);
   }
 
   /* 确保动画的 to 帧存在 */

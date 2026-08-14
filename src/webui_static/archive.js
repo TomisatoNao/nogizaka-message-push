@@ -74,8 +74,9 @@ function highlightQuery(str, query) {
 
 function formatMessageText(str, query) {
   if (!str) return "";
-  const highlighted = highlightQuery(str, query);
-  return highlighted.replace(/%%%/g, '<span class="nick-tag" title="订阅者昵称占位符">你</span>');
+  // 直接移除订阅者占位符 %%%，恢复自然流畅的原文排版
+  const cleaned = str.replace(/%%%/g, "");
+  return highlightQuery(cleaned, query);
 }
 
 function escRegex(s) {
@@ -1733,19 +1734,38 @@ if (logoutBtn) {
 }
 
 // ── 首页 ─────────────────────────────────────────
+function parseDateSafe(utc) {
+  if (!utc) return null;
+  const s = String(utc).trim();
+  let d = new Date(s);
+  if (!isNaN(d.getTime())) return d;
+  let iso = s.replace(" ", "T");
+  if (!iso.endsWith("Z") && !iso.includes("+") && !iso.includes("-", 10)) {
+    iso += "Z";
+  }
+  d = new Date(iso);
+  if (!isNaN(d.getTime())) return d;
+  return null;
+}
+
 function fmtDate(utc) {
-  if (!utc) return "";
-  const d = new Date(utc.endsWith("Z") ? utc : utc + "Z");
-  if (isNaN(d.getTime())) return utc.slice(0, 10);
-  return (d.getMonth()+1) + "/" + d.getDate() + " " +
-    String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+  const d = parseDateSafe(utc);
+  if (!d) return String(utc || "").slice(0, 16);
+  return (d.getMonth() + 1) + "月" + d.getDate() + "日 " +
+    String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function fmtDateFull(utc) {
+  const d = parseDateSafe(utc);
+  if (!d) return String(utc || "").slice(0, 16);
+  return d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日 " +
+    String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
 }
 
 function fmtDateShort(utc) {
-  if (!utc) return "";
-  const d = new Date(utc + "Z");
-  if (isNaN(d.getTime())) return utc.slice(0, 10);
-  return (d.getMonth()+1) + "/" + d.getDate();
+  const d = parseDateSafe(utc);
+  if (!d) return String(utc || "").slice(0, 10);
+  return (d.getMonth() + 1) + "月" + d.getDate() + "日";
 }
 
 async function showHome() {
@@ -2006,20 +2026,18 @@ function renderHome(agg, members) {
     let html = '';
     const multi = members.length > 1;
     agg.latest_msgs.forEach((msg, i) => {
-      const d = new Date(msg.published_at + "Z");
-      const dateStr = isNaN(d.getTime()) ? '' : (d.getMonth()+1) + '月' + d.getDate() + '日';
-      const timeStr = isNaN(d.getTime()) ? '' : String(d.getHours()).padStart(2,"0") + ':' + String(d.getMinutes()).padStart(2,"0");
-      html += '<div class="home-msg-card" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
+      const dateStr = fmtDate(msg.published_at);
+      html += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
       html += '<div class="hmc-header">';
       html += '<div class="hmc-meta-left">';
       if (multi) html += '<span class="hmc-mem-badge">' + esc(msg.member_display) + '</span>';
-      html += '<span class="hmc-date-badge">📅 ' + dateStr + ' ' + timeStr + '</span>';
+      html += '<span class="hmc-time">' + dateStr + '</span>';
       html += '</div>';
-      html += '<span class="hmc-action-hint">查看消息 →</span>';
+      html += '<span class="hmc-jump">查看消息 →</span>';
       html += '</div>';
       html += '<div class="hmc-text">' + formatMessageText(msg.text) + '</div>';
       if (msg.translation) {
-        html += '<div class="hmc-trans-box"><div class="hmc-trans-text">' + formatMessageText(msg.translation) + '</div></div>';
+        html += '<div class="hmc-trans">' + formatMessageText(msg.translation) + '</div>';
       }
       html += '</div>';
     });
@@ -2048,25 +2066,24 @@ function renderHome(agg, members) {
     let html = '';
     const multi = members.length > 1;
     agg.random_msgs.forEach((msg, i) => {
-      const d = new Date(msg.published_at + "Z");
-      const year = isNaN(d.getTime()) ? '' : d.getFullYear();
-      const dateStr = isNaN(d.getTime()) ? '' : year + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
-      const timeStr = isNaN(d.getTime()) ? '' : String(d.getHours()).padStart(2,"0") + ':' + String(d.getMinutes()).padStart(2,"0");
+      const dateStr = fmtDateFull(msg.published_at);
+      const d = parseDateSafe(msg.published_at);
+      const year = d ? d.getFullYear() : (msg.year || '');
       const thisYear = new Date().getFullYear();
       const yearsAgo = thisYear - (year || thisYear);
-      const agoTag = yearsAgo > 0 ? (yearsAgo + '年前') : '往期';
-      html += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .05) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
+      const agoTag = yearsAgo > 0 ? (yearsAgo + '年前 · ' + year + '年') : (year + '年');
+      html += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
       html += '<div class="hmc-header">';
       html += '<div class="hmc-meta-left">';
-      html += '<span class="hmc-tunnel-badge">⏳ 那年今日 · ' + agoTag + '</span>';
+      html += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
       if (multi) html += '<span class="hmc-mem-badge">' + esc(msg.member_display) + '</span>';
-      html += '<span class="hmc-date-badge">📅 ' + dateStr + ' ' + timeStr + '</span>';
+      html += '<span class="hmc-time">' + dateStr + '</span>';
       html += '</div>';
-      html += '<span class="hmc-action-hint">跳转当日 →</span>';
+      html += '<span class="hmc-jump">跳转当日 →</span>';
       html += '</div>';
       html += '<div class="hmc-text">' + formatMessageText(msg.text) + '</div>';
       if (msg.translation) {
-        html += '<div class="hmc-trans-box"><div class="hmc-trans-text">' + formatMessageText(msg.translation) + '</div></div>';
+        html += '<div class="hmc-trans">' + formatMessageText(msg.translation) + '</div>';
       }
       html += '</div>';
     });
