@@ -53,3 +53,6 @@ jobs:
 
       - name: QQ official groups test
         run: python tests/test_qq_official_groups.py
+
+      - name: Social media monitor test
+        run: python tests/test_social.py
