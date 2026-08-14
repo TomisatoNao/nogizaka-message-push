@@ -4,7 +4,6 @@
 import asyncio
 import os
 import random
-import traceback
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -115,6 +114,7 @@ async def _fetch_member_messages(member: dict):
     Phase 1（并发抓取）：读取时间戳 → API 请求（含 401 续期/重试）→ 排序过滤。
     返回 (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock) 或 None。
     """
+    global _http_client
     account_id   = member["account_id"]
     group_type   = member["group_type"]
     m_id         = member["m_id"]
@@ -256,8 +256,24 @@ async def _fetch_member_messages(member: dict):
                 _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"网络错误: {format_httpx_error(e)}")
                 return None
 
+        except RuntimeError as e:
+            if "Event loop is closed" in str(e) or "closed" in str(e):
+                log_all(f"⚠️ {m_name} 检测到连接池 Loop 变动，自动重置客户端并重试...", is_debug=True)
+                try:
+                    if _http_client and not _http_client.is_closed:
+                        await _http_client.aclose()
+                except Exception:
+                    pass
+                _http_client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+                if attempt < MAX_FETCH_ATTEMPTS:
+                    await asyncio.sleep(1.0)
+                    continue
+            log_all(f"🔥 {m_name} 运行时异常: {e}", is_error=True)
+            _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"RuntimeError: {e}")
+            return None
+
         except Exception as e:
-            log_all(f"🔥 {m_name} 未预料的错误:\n{traceback.format_exc()}", is_error=True)
+            log_all(f"🔥 {m_name} 巡查异常 ({type(e).__name__}): {e}", is_error=True)
             _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"未预料错误: {type(e).__name__}")
             return None
 

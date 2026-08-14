@@ -34,8 +34,19 @@ def initialize(client: httpx.AsyncClient) -> None:
 async def _post(url: str, *, headers: dict,
                 json_body: dict | None = None,
                 content: bytes | None = None) -> httpx.Response:
-    if _http_client is not None:
-        return await _http_client.post(
+    client_to_use = None
+    if _http_client is not None and not _http_client.is_closed:
+        try:
+            curr_loop = asyncio.get_running_loop()
+            transport = getattr(_http_client, "_transport", None)
+            client_loop = getattr(transport, "_loop", None)
+            if client_loop is None or client_loop is curr_loop:
+                client_to_use = _http_client
+        except Exception:
+            client_to_use = None
+
+    if client_to_use is not None:
+        return await client_to_use.post(
             url, headers=headers, json=json_body, content=content, timeout=15,
         )
     async with httpx.AsyncClient(timeout=15) as client:
@@ -743,10 +754,19 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
             headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
 
         try:
-            if custom_client is not None:
-                r = await custom_client.get(url, headers=headers, timeout=10)
-            elif _http_client is not None:
-                r = await _http_client.get(url, headers=headers, timeout=10)
+            client_to_use = custom_client
+            if client_to_use is None and _http_client is not None and not _http_client.is_closed:
+                try:
+                    curr_loop = asyncio.get_running_loop()
+                    transport = getattr(_http_client, "_transport", None)
+                    client_loop = getattr(transport, "_loop", None)
+                    if client_loop is None or client_loop is curr_loop:
+                        client_to_use = _http_client
+                except Exception:
+                    client_to_use = None
+
+            if client_to_use is not None:
+                r = await client_to_use.get(url, headers=headers, timeout=10)
             else:
                 async with httpx.AsyncClient(timeout=10) as c:
                     r = await c.get(url, headers=headers)
