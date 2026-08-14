@@ -2060,7 +2060,19 @@ class _Handler(BaseHTTPRequestHandler):
         import json
         import httpx
 
-        cleaned = raw.replace("^^", "^").replace('^"', '"').replace("^&", "&").replace("^|", "|")
+        # 彻底清洗 Windows cmd 特有的所有转义模式 (如 ^\^", ^", ^{, ^}, ^&, ^|, ^$)
+        cleaned = (
+            raw.replace(r'^\^"', '"')
+            .replace(r'\^"', '"')
+            .replace(r'^\^', '')
+            .replace('^^', '^')
+            .replace('^"', '"')
+            .replace('^{', '{')
+            .replace('^}', '}')
+            .replace('^&', '&')
+            .replace('^|', '|')
+            .replace('^$', '$')
+        )
         result = {"token": "", "cookie": "", "refresh_token": "", "extracted": []}
 
         group_type = "nogizaka"
@@ -2073,10 +2085,17 @@ class _Handler(BaseHTTPRequestHandler):
                 pass
 
         # 1. 检查是否包含 signin 请求体（用户在登录瞬间复制的 cURL）
-        signin_match = re.search(r'--data-raw\s+["\'](\{.+?\})["\']', cleaned) or re.search(r'-d\s+["\'](\{.+?\})["\']', cleaned)
+        signin_match = re.search(r'--data-raw\s+["\']?(\{.+?\})["\']?(?:\s+&|\s*$|\s+-)', cleaned, re.DOTALL) or \
+                       re.search(r'-d\s+["\']?(\{.+?\})["\']?(?:\s+&|\s*$|\s+-)', cleaned, re.DOTALL) or \
+                       re.search(r'--data-raw\s+["\'](\{.+?\})["\']', cleaned) or \
+                       re.search(r'-d\s+["\'](\{.+?\})["\']', cleaned)
         if "signin" in cleaned and signin_match:
             try:
-                body_json = json.loads(signin_match.group(1))
+                json_str = signin_match.group(1).strip()
+                try:
+                    body_json = json.loads(json_str)
+                except Exception:
+                    body_json = json.loads(json_str.replace(r'\"', '"'))
                 domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
                 url = f"https://api.message.{domain_part}.com/v2/signin"
                 headers = {
@@ -2100,7 +2119,16 @@ class _Handler(BaseHTTPRequestHandler):
                             if sc_part and "=" in sc_part:
                                 cookies.append(sc_part)
                         if cookies:
-                            result["cookie"] = "; ".join(cookies)
+                            # 过滤并保留去重后的 cookie
+                            cookie_parts = []
+                            seen_keys = set()
+                            for c_item in cookies:
+                                k, _, v = c_item.partition("=")
+                                k = k.strip()
+                                if k and k not in seen_keys:
+                                    seen_keys.add(k)
+                                    cookie_parts.append(f"{k}={v.strip()}")
+                            result["cookie"] = "; ".join(cookie_parts)
                             result["extracted"].append("session Cookie (由登录响应下发，可长期自动续期)")
             except Exception as e:
                 from src.logger import log_all
