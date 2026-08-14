@@ -319,29 +319,56 @@
 </section>
 <!-- ── 账号与成员 ─────────────────────────────── -->
 <section class="tab" id="tab-monitors">
-<div class="card">
-<h2>账号池（凭证在 .env，按账号名大写自动匹配）</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>账号 ID</th><th>团体</th><th>登录方式</th><th>App 标签</th><th>凭证 (.env) <span class="tooltip-icon" title="凭证可以点每行的「填凭证」直接填写（存入 .env 并立即生效）。也可以手动编辑 .env：web 账号为 账号ID_TOKEN 和 账号ID_COOKIE；mobile 账号为 账号ID_REFRESH_TOKEN。新账号需保存热重载后填写。">ℹ️</span></th><th></th></tr></thead>
-<tbody id="accountRows"></tbody>
-</table></div>
-<div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
-<div style="margin-top:12px"><button class="btn" id="btnAddAccount">＋ 添加账号</button></div>
-<div class="card">
-<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
-  <h2 style="margin:0;">监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
-  <label class="switch" style="margin:0;"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
-</div>
-<div class="table-wrap"><table>
-<thead><tr><th style="width:110px;">成员 ID</th><th style="width:160px;">名字</th><th style="width:170px;">Message 账号</th><th>社交账号绑定 (X / IG / TikTok)</th><th style="width:80px;">操作</th></tr></thead>
-<tbody id="memberRows"></tbody>
-</table></div>
-<div class="empty" hidden="" id="memberEmpty">还没有监控成员。</div>
-<div style="margin-top:12px; display:flex; gap:10px">
-<button class="btn" id="btnAddMember">＋ 手动添加成员</button>
-<button class="btn" id="btnPickMember">📋 从账号拉取成员列表</button>
-</div>
-</div>
+  <!-- Card 1: 账号池 -->
+  <div class="card">
+    <h2>🔑 账号池（凭证在 .env，按账号名大写自动匹配）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>账号 ID</th>
+            <th>团体</th>
+            <th>登录方式</th>
+            <th>App 标签</th>
+            <th>凭证 (.env) <span class="tooltip-icon" title="凭证可以点每行的「填凭证」直接填写（存入 .env 并立即生效）。也可以手动编辑 .env：web 账号为 账号ID_TOKEN 和 账号ID_COOKIE；mobile 账号为 账号ID_REFRESH_TOKEN。新账号需保存热重载后填写。">ℹ️</span></th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="accountRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
+    <div style="margin-top:12px">
+      <button class="btn" id="btnAddAccount" type="button">＋ 添加账号</button>
+    </div>
+  </div>
+
+  <!-- Card 2: 监控成员与社媒绑定配置 -->
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+      <h2 style="margin:0;">👥 监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
+      <label class="switch" style="margin:0;"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:110px;">成员 ID</th>
+            <th style="width:160px;">名字</th>
+            <th style="width:170px;">Message 账号</th>
+            <th>社交账号绑定 (X / IG / TikTok)</th>
+            <th style="width:80px;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="memberRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" hidden="" id="memberEmpty">还没有监控成员。</div>
+    <div style="margin-top:12px; display:flex; gap:10px">
+      <button class="btn" id="btnAddMember" type="button">＋ 手动添加成员</button>
+      <button class="btn" id="btnPickMember" type="button">📋 从账号拉取成员列表</button>
+    </div>
+  </div>
 </section>
 <!-- ── 推送通道 ─────────────────────────────── -->
 <section class="tab" id="tab-channels">
