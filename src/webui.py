@@ -1917,6 +1917,24 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/secrets":
             self._handle_secrets()
             return
+        if path == "/api/accounts/verify":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            account = str(body.get("account", "")).strip()
+            if not account:
+                self._send_json({"ok": False, "errors": ["缺少 account 参数"]}, 400)
+                return
+            try:
+                from config.credentials import verify_and_handshake_account
+                import asyncio
+                h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
+                self._send_json({"ok": h_ok, "msg": h_msg, "details": h_details})
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"验证异常: {e}"}, 500)
+            return
         if path.startswith("/api/archive/"):
             if not self._guard(need_admin=False):
                 return
@@ -2084,6 +2102,16 @@ class _Handler(BaseHTTPRequestHandler):
                 _rotate_account_creds(account)
             reloaded = _trigger_reload()
 
+        handshake_info = None
+        if account is not None:
+            try:
+                from config.credentials import verify_and_handshake_account
+                import asyncio
+                h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
+                handshake_info = {"ok": h_ok, "msg": h_msg, "details": h_details}
+            except Exception as e:
+                handshake_info = {"ok": False, "msg": f"握手过程异常: {e}", "details": {}}
+
         try:
             raw = _load_raw_config()
             status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
@@ -2092,6 +2120,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({
             "ok": True, "reloaded": reloaded, "updated": sorted(values),
             "env_status": _env_status(),
+            "handshake": handshake_info,
             **status,
         })
 

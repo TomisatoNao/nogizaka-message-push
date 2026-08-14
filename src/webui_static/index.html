@@ -853,10 +853,22 @@
 <dialog id="secretDialog">
 <h3 id="secretDialogTitle">填写凭证</h3>
 <div class="dialog-note" id="secretDialogHint"></div>
+<details class="help-box" id="secretSmartBox" style="margin-bottom: 12px; border: 1px dashed var(--border, #333); border-radius: 6px; padding: 6px 10px;">
+  <summary style="font-size: 13px; color: var(--accent, #60a5fa); cursor: pointer; user-select: none; font-weight: 500;">
+    📋 智能一键解析（从 DevTools cURL / 请求标头快速提取）
+  </summary>
+  <div style="margin-top: 8px;">
+    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; border-radius: 4px; padding: 6px; background: rgba(0,0,0,0.2); color: inherit; border: 1px solid var(--border, #444);" placeholder="在浏览器 F12 Network 右键 timeline 请求 → 复制为 cURL 或复制请求标头，粘贴到此处..."></textarea>
+    <div style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
+      <span id="secretSmartFeedback" style="font-size: 12px; color: var(--muted);"></span>
+      <button class="btn" id="btnSecretSmartParse" type="button" style="padding: 3px 10px; font-size: 12px;">🚀 解析并填充</button>
+    </div>
+  </div>
+</details>
 <div id="secretFields"></div>
 <div class="actions">
 <button class="btn" id="secretCancel">取消</button>
-<button class="btn primary" id="secretSave">🔐 保存到 .env</button>
+<button class="btn primary" id="secretSave">🔐 保存并自动握手</button>
 </div>
 </dialog>
 <!-- 账号编辑对话框 -->
@@ -1865,6 +1877,9 @@ function openSecretDialog(title, hint, fields, account, opts) {
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
   $("secretDialogHint").hidden = !hint;
+  if ($("secretSmartInput")) $("secretSmartInput").value = "";
+  if ($("secretSmartFeedback")) $("secretSmartFeedback").textContent = "";
+  if ($("secretSmartBox")) $("secretSmartBox").open = false;
   const box = $("secretFields");
   box.innerHTML = "";
   for (const f of fields) {
@@ -1939,6 +1954,51 @@ function openSecretDialog(title, hint, fields, account, opts) {
   const first = box.querySelector("input");
   if (first) first.focus();
 }
+
+if ($("btnSecretSmartParse")) {
+  $("btnSecretSmartParse").addEventListener("click", () => {
+    const raw = ($("secretSmartInput").value || "").trim();
+    if (!raw) {
+      $("secretSmartFeedback").textContent = "⚠️ 请先粘贴 cURL 命令或 Request Headers 文本";
+      $("secretSmartFeedback").style.color = "var(--warn, #f59e0b)";
+      return;
+    }
+    let found = 0;
+    // 1. 提取 Authorization Bearer Token
+    const authMatch = raw.match(/(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)/i)
+                   || raw.match(/['"]?(?:authorization|auth)['"]?\s*:\s*['"](?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)['"]/i);
+    // 2. 提取 Cookie
+    const cookieMatch = raw.match(/(?:-H|--header)\s+['"]cookie:\s*([^'"]+)['"]/i)
+                     || raw.match(/^cookie:\s*(.+)$/im)
+                     || raw.match(/['"]cookie['"]\s*:\s*['"]([^'"]+)['"]/i);
+    // 3. 提取 refresh_token
+    const rtMatch = raw.match(/['"]?refresh_token['"]?\s*[:=]\s*['"]([a-f0-9\-]{32,36})['"]/i);
+
+    const inputs = $("secretFields").querySelectorAll("input");
+    for (const input of inputs) {
+      const env = input.dataset.env || "";
+      if (env.endsWith("_TOKEN") && !env.endsWith("_REFRESH_TOKEN") && authMatch) {
+        input.value = authMatch[1].trim();
+        found++;
+      } else if (env.endsWith("_COOKIE") && cookieMatch) {
+        input.value = cookieMatch[1].trim();
+        found++;
+      } else if (env.endsWith("_REFRESH_TOKEN") && rtMatch) {
+        input.value = rtMatch[1].trim();
+        found++;
+      }
+    }
+
+    if (found > 0) {
+      $("secretSmartFeedback").textContent = "✅ 已自动提取并填充 " + found + " 项凭证字段！";
+      $("secretSmartFeedback").style.color = "var(--ok, #10b981)";
+    } else {
+      $("secretSmartFeedback").textContent = "⚠️ 未能识别出有效 Token 或 Cookie，请检查粘贴格式";
+      $("secretSmartFeedback").style.color = "var(--warn, #f59e0b)";
+    }
+  });
+}
+
 $("secretCancel").addEventListener("click", () => $("secretDialog").close());
 $("secretSave").addEventListener("click", async () => {
   const values = {};
@@ -1964,9 +2024,9 @@ $("secretSave").addEventListener("click", async () => {
   const saveBtn = $("secretSave");
   saveBtn.disabled = true;
   const origText = saveBtn.textContent;
-  saveBtn.textContent = "写入中…";
+  saveBtn.textContent = "写入并握手中…";
   try {
-    msg("写入 .env 中…", "");
+    msg("写入 .env 并执行自动握手…", "");
     const data = await api("/api/secrets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1979,8 +2039,17 @@ $("secretSave").addEventListener("click", async () => {
     $("secretDialog").close();
     if (secretCtx.onDone) { try { secretCtx.onDone(); } catch (e) { /* 忽略 */ } }
     renderGeneral(); renderAccounts();
+
+    if (data.handshake) {
+      if (data.handshake.ok) {
+        uiAlert(data.handshake.msg, { title: "✅ 凭证自动握手成功" });
+      } else {
+        uiAlert(data.handshake.msg, { title: "⚠️ 握手提醒", danger: true });
+      }
+    }
+
     msg("✅ 已写入 .env（" + (data.updated || []).join(", ") + "）" +
-        (secretCtx.account ? "，账号凭证已轮换" : "") +
+        (secretCtx.account ? "，账号已就绪" : "") +
         (data.reloaded ? "" : "；⚠️ 热重载失败，详见主程序日志"),
         data.reloaded ? "ok" : "err");
   } catch (e) {
@@ -2001,18 +2070,18 @@ function openAccountCredDialog(accId) {
   const fields = acc.auth === "mobile"
     ? [{ env: prefix + "_REFRESH_TOKEN", label: "Refresh Token", required: true,
          placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-         help: "手机抓包（Charles / Proxyman）拦截 update_token 请求，取请求体里的 refresh_token（UUID 格式）。" },
+         help: "手机抓包拦截 update_token 请求，取请求体里的 refresh_token（UUID 格式）。" },
        { env: prefix + "_TOKEN", label: "Access Token", required: false, stripBearer: true,
          placeholder: "eyJ...",
-         help: "留空即可，首次巡查时会用 Refresh Token 自动获取。" }]
+         help: "留空即可，保存后系统将自动用 Refresh Token 刷新获取。" }]
     : [{ env: prefix + "_TOKEN", label: "Token（JWT）", required: true, stripBearer: true,
          placeholder: "eyJ...",
-         help: "浏览器 DevTools → Network → 任意 API 请求 → Request Headers 的 authorization。粘贴时 Bearer 前缀会自动去掉。" },
+         help: "浏览器登录后 DevTools → Network → 任意 timeline 请求 → authorization（Bearer 后的内容）。" },
        { env: prefix + "_COOKIE", label: "Cookie", required: true,
-         placeholder: "session=xxx; other=yyy",
-         help: "同一个请求的 Request Headers 里 cookie 整串复制（分号分隔的完整内容）。" }];
+         placeholder: "session=xxx; S5SI=yyy...",
+         help: "同一个 timeline 请求的 Request Headers 中的 cookie（复制整串即可，系统保存后立即全自动调用 update_token 完成长期握手）。" }];
   openSecretDialog("填写账号凭证：" + accId,
-    "保存后写入 <code>.env</code>，同时删除旧的磁盘凭证并热重载 —— 新凭证<b>立即生效，无需重启</b>。值只写入不回显。",
+    "💡 <b>首次登录免等 1 小时自动握手</b>：只需把初次登录后 timeline 请求的 Token 与 Cookie 贴入（或使用上方一键解析），系统保存后<b>立刻全自动调用 update_token 完成握手</b>并永久持久化长期 Cookie！",
     fields, accId);
 }
 $("btnFillTgToken").addEventListener("click", () => openSecretDialog(
@@ -2059,6 +2128,31 @@ function renderAccounts() {
       "<td>" + credBadge(id) + "</td>";
     const tdOps = document.createElement("td");
     const btnCred = mkBtn("填凭证", () => openAccountCredDialog(id));
+    const btnVerify = mkBtn("⚡握手测试", async () => {
+      btnVerify.disabled = true;
+      const oldTxt = btnVerify.textContent;
+      btnVerify.textContent = "测试中…";
+      try {
+        msg("正在与 " + id + " 鉴权服务握手测试…", "");
+        const res = await api("/api/accounts/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: id }),
+        });
+        if (res.ok) {
+          uiAlert(res.msg || "✅ 握手测试成功！", { title: "账号握手成功" });
+          msg(res.msg || "✅ 账号握手成功", "ok");
+        } else {
+          uiAlert(res.msg || ("❌ 验证失败：" + (res.errors || []).join("\n")), { title: "握手失败", danger: true });
+          msg(res.msg || "❌ 验证失败", "err");
+        }
+      } catch (e) {
+        uiAlert("测试请求失败：" + e.message, { title: "网络错误", danger: true });
+      } finally {
+        btnVerify.disabled = false;
+        btnVerify.textContent = oldTxt;
+      }
+    });
     const btnEdit = mkBtn("编辑", () => openAccountDialog(id));
     const btnDel = mkBtn("删除", async () => {
       const used = (config.monitor || []).filter((m) => m.account === id);
@@ -2076,7 +2170,7 @@ function renderAccounts() {
       delete config.accounts[id];
       markDirty(); renderAccounts(); renderMembers();
     }, "danger");
-    tdOps.append(btnCred, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
+    tdOps.append(btnCred, document.createTextNode(" "), btnVerify, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
     tr.appendChild(tdOps);
     tbody.appendChild(tr);
   }

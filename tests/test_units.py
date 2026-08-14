@@ -227,7 +227,22 @@ def test_powershell_scripts_have_bom() -> None:
             f"PowerShell 5.1 会解析失败"
         )
         checked += 1
-    print(f"  ✅ {checked} 个含中文的 .ps1 均带 BOM")
+def test_cookie_cleaner() -> None:
+    print("=== _clean_cookie_string ===")
+    from config.credentials import _clean_cookie_string
+
+    # 1) 标准单行
+    c1 = _clean_cookie_string("session=abc123; S5SI=def456; Path=/; Domain=.nogizaka46.com; Secure; HttpOnly")
+    assert c1 == {"session": "abc123", "S5SI": "def456"}, c1
+
+    # 2) 带有 Cookie: 或 Set-Cookie: 标头前缀的多行格式
+    c2 = _clean_cookie_string("Cookie: session=xyz789; other=111\nSet-Cookie: S5SI=222; max-age=3600; samesite=lax")
+    assert c2 == {"session": "xyz789", "other": "111", "S5SI": "222"}, c2
+
+    # 3) 忽略空值与纯属性
+    c3 = _clean_cookie_string("; ;; Secure; HttpOnly;  ")
+    assert c3 == {}, c3
+    print("  ✅ Cookie 增强解析符合预期")
 
 
 def main() -> None:
@@ -235,6 +250,7 @@ def main() -> None:
     test_log_truncation()
     test_escape_html()
     test_chain_extract()
+    test_cookie_cleaner()
     test_health_rolling()
     test_time_record_skip()
     test_stop_signal_file()

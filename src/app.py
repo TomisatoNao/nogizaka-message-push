@@ -27,12 +27,16 @@ import config.config as cfg
 from config.credentials import (
     initialize as init_credentials,
     load_all_accounts, proactive_refresh_if_expiring,
-    refresh_mobile_token, get_token_remaining_seconds,
+    refresh_token, refresh_mobile_token, get_token_remaining_seconds,
 )
 from config.watcher import start_watcher
 from src.logger import init_loggers, log_all
 from src.webui import start_webui
 from src.utils import in_hour_range
+
+# ---- 博客状态 ----
+_blog_db: object = None
+_blog_client: httpx.AsyncClient | None = None
 
 
 # ──────────────────────────────────────────────
@@ -479,6 +483,26 @@ def _install_stop_handlers(stop_event: asyncio.Event) -> None:
                 pass  # 非主线程等场景注册失败：保底仍有 KeyboardInterrupt
 
 
+async def _init_accounts() -> None:
+    """启动时为所有账号做初始 Token 刷新与握手。
+    - mobile 账号：使用 refresh_token 换取初始 access_token
+    - web 账号：若 Token 临期或需要握手，主动调用 refresh_token 获取并持久化 Set-Cookie
+    若已有充足有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
+    for acc_id, acc_cfg in cfg.ACCOUNTS.items():
+        is_mobile = acc_cfg.get("auth_method") == "mobile"
+        remaining = get_token_remaining_seconds(acc_id)
+        if remaining is not None and remaining > 60:
+            log_all(f"🔑 账号 {acc_id} Token 有效（剩余 {int(remaining)}s），跳过初始化")
+            continue
+        target_group = _alert_group_for_account(acc_id)
+        if is_mobile:
+            log_all(f"🔑 移动端账号 {acc_id} 执行初始 Token 刷新...")
+            await refresh_mobile_token(acc_id, target_group)
+        else:
+            log_all(f"🔑 Web 账号 {acc_id} 执行初始 Token 刷新与握手...")
+            await refresh_token(acc_id, target_group)
+
+
 # 官方 Bot 指令监听：app_id → (client_secret, 任务)。
 # 由 _sync_command_listeners() 按当前配置增删，启动时和每次热重载后都会调一次，
 # 所以在管理端加 Bot / 删 Bot / 开关指令开关都不用重启进程。
@@ -558,21 +582,6 @@ def _on_config_reload(success: bool) -> None:
         _main_loop.call_soon_threadsafe(_sync_command_listeners)
 
 
-async def _init_mobile_accounts() -> None:
-    """启动时为所有 mobile 账号做初始 Token 刷新（仿照 nogizaka-monitor 的 init_tokens）。
-    若已有有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
-    for acc_id, acc_cfg in cfg.ACCOUNTS.items():
-        if acc_cfg.get("auth_method") != "mobile":
-            continue
-        remaining = get_token_remaining_seconds(acc_id)
-        if remaining is not None and remaining > 60:
-            log_all(f"🔑 移动端账号 {acc_id} Token 有效（剩余 {int(remaining)}s），跳过初始化")
-            continue
-        target_group = _alert_group_for_account(acc_id)
-        log_all(f"🔑 移动端账号 {acc_id} 执行初始 Token 刷新...")
-        await refresh_mobile_token(acc_id, target_group)
-
-
 async def main() -> None:
     print("=== 坂道联合监控系统 ===")
     os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
@@ -640,10 +649,10 @@ async def main() -> None:
     global _blog_client
     _blog_client = httpx.AsyncClient(timeout=30, follow_redirects=True)
 
-    # 4. 移动端账号初始 Token 刷新
-    #    必须放在通道注入（步骤 3）之后：刷新失败时 refresh_mobile_token 会走
+    # 4. 账号初始 Token 刷新与自动握手
+    #    必须放在通道注入（步骤 3）之后：刷新失败时 refresh_token 会走
     #    send_alert_message，此时 napcat._client / tgbot._bot 必须已就绪，否则告警静默丢失。
-    await _init_mobile_accounts()
+    await _init_accounts()
 
     # 5. 启动健康检查（改进 3）
     await _health_check(qq_client)

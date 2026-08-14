@@ -73,15 +73,31 @@ _GROUP_TYPE_TO_MOBILE: dict[str, str] = {
 # 内部工具
 # ──────────────────────────────────────────────
 def _clean_cookie_string(raw: str) -> dict[str, str]:
-    """将 Set-Cookie 格式字符串解析为键值字典，忽略属性字段。"""
-    ignore = {"path", "domain", "expires", "samesite", "secure", "httponly", "max-age"}
+    """将 Cookie / Set-Cookie 格式字符串解析为键值字典，忽略属性字段与标头前缀。"""
+    if not raw or not isinstance(raw, str):
+        return {}
+    cleaned_raw = raw.replace("\r", "\n")
+    ignore = {"path", "domain", "expires", "samesite", "secure", "httponly", "max-age", "priority"}
     result = {}
-    for item in raw.split(";"):
-        if "=" not in item:
+
+    for line in cleaned_raw.split("\n"):
+        line = line.strip()
+        if not line:
             continue
-        k, v = item.split("=", 1)
-        if k.strip().lower() not in ignore:
-            result[k.strip()] = v.strip()
+        if line.lower().startswith("cookie:"):
+            line = line[7:].strip()
+        elif line.lower().startswith("set-cookie:"):
+            line = line[11:].strip()
+
+        for item in line.split(";"):
+            item = item.strip()
+            if "=" not in item:
+                continue
+            k, v = item.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+            if k and k.lower() not in ignore:
+                result[k] = v
     return result
 
 
@@ -659,3 +675,92 @@ async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> N
             f"✅ {account_id} Token 剩余 {int(remaining // 60)}min，无需刷新",
             is_debug=True,
         )
+
+
+async def verify_and_handshake_account(account_id: str, custom_client: httpx.AsyncClient | None = None) -> tuple[bool, str, dict]:
+    """对账号执行在线握手测试与凭证长期化。
+    - Web 账号：立即尝试 update_token 并自动捕获 Set-Cookie 长期化；若暂不可用则回退测试 timeline/groups API。
+    - Mobile 账号：尝试 refresh_mobile_token 刷新 access_token。
+
+    返回 (ok: bool, message: str, details: dict)。
+    """
+    acc_cfg = cfg.ACCOUNTS.get(account_id)
+    if not acc_cfg:
+        return False, f"未找到账号配置: {account_id}", {}
+
+    cred = ACCOUNT_CREDS.get(account_id)
+    if not cred:
+        return False, f"未找到账号凭证数据: {account_id}", {}
+
+    is_mobile = acc_cfg.get("auth_method") == "mobile"
+
+    if is_mobile:
+        rt = cred.get("refresh_token")
+        if not rt:
+            return False, "缺少 refresh_token，无法执行移动端刷新", {}
+        ok = await refresh_mobile_token(account_id, 0)
+        rem = get_token_remaining_seconds(account_id)
+        if ok:
+            return True, f"✅ 移动端 Token 刷新成功！有效期约 {int(rem or 3600)//60} 分钟", {
+                "auth_method": "mobile",
+                "remaining_seconds": rem,
+            }
+        return False, "❌ 移动端 Token 刷新失败，请检查 refresh_token 是否正确", {"auth_method": "mobile"}
+
+    # Web 账号处理
+    token = cred.get("token", "")
+    cookies = cred.get("cookies", {})
+
+    if not token and not cookies:
+        return False, "缺少 Token 和 Cookie", {}
+
+    # 1. 优先尝试 update_token（全自动换取长期 Set-Cookie 与最新 Token）
+    if cookies:
+        ok = await refresh_token(account_id, 0)
+        if ok:
+            rem = get_token_remaining_seconds(account_id)
+            updated_cookies = ACCOUNT_CREDS.get(account_id, {}).get("cookies", {})
+            return True, f"✅ 凭证自动握手成功！已成功从 update_token 提取最新长期 Cookie 与 Token（有效时长约 {int(rem or 3600)//60} 分钟，后台将自动持久续期）", {
+                "auth_method": "web",
+                "handshake_type": "update_token",
+                "remaining_seconds": rem,
+                "cookie_keys": list(updated_cookies.keys()),
+            }
+
+    # 2. 如果 update_token 失败，测试当前 timeline 接口 (GET /v2/groups) 是否能用
+    if token:
+        group_type = acc_cfg.get("group_type", "nogizaka46")
+        api_base = acc_cfg.get("api_base") or f"https://api.message.{group_type}.com"
+        url = f"{api_base}/v2/groups"
+        headers = get_web_headers(
+            group_type,
+            token=token,
+            app_tag=acc_cfg.get("app_tag"),
+            api_base=api_base,
+            web_origin=acc_cfg.get("web_origin"),
+        )
+        if cookies:
+            headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+
+        try:
+            if custom_client is not None:
+                r = await custom_client.get(url, headers=headers, timeout=10)
+            elif _http_client is not None:
+                r = await _http_client.get(url, headers=headers, timeout=10)
+            else:
+                async with httpx.AsyncClient(timeout=10) as c:
+                    r = await c.get(url, headers=headers)
+
+            if r.status_code == 200:
+                rem = get_token_remaining_seconds(account_id)
+                return True, f"✅ Token 验证有效（可正常拉取消息，剩余有效约 {int(rem or 3600)//60} 分钟），系统将在 Token 临期时自动尝试续期", {
+                    "auth_method": "web",
+                    "handshake_type": "api_valid",
+                    "remaining_seconds": rem,
+                }
+            else:
+                return False, f"❌ 凭证验证失败：API 返回 HTTP {r.status_code}，Token 或 Cookie 可能已失效", {"auth_method": "web"}
+        except Exception as e:
+            return False, f"❌ 验证网络异常: {format_httpx_error(e)}", {"auth_method": "web"}
+
+    return False, "❌ 凭证不完整，无法完成验证", {"auth_method": "web"}
