@@ -597,7 +597,8 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                 else:
                     log_all(f"🚨 账号 {account_id} 续期响应无 access_token", is_error=True)
             else:
-                log_all(f"🚨 账号 {account_id} 续期被拒: HTTP {r.status_code}", is_error=True)
+                body_snippet = r.text[:120].strip() if r.text else ""
+                log_all(f"🚨 账号 {account_id} 续期被拒: HTTP {r.status_code} | {body_snippet}", is_error=True)
 
         except Exception as e:
             log_all(
