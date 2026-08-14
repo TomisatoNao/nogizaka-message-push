@@ -2137,23 +2137,46 @@ class _Handler(BaseHTTPRequestHandler):
                 from src.logger import log_all
                 log_all(f"⚠️ smart_parse 模拟登录请求失败: {e}")
 
-        # 2. 提取普通 Authorization Bearer 或 access_token
+        # 2. 提取所有 Authorization Bearer 或 access_token，并自动优选最新未过期的 Token
         if not result["token"]:
-            m = re.search(r'(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)', cleaned, re.IGNORECASE) or \
-                re.search(r'["\']?access_token["\']?\s*[:=]\s*["\']([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)["\']', cleaned, re.IGNORECASE)
-            if m:
-                result["token"] = m.group(1).strip()
+            token_candidates = []
+            for m in re.finditer(r'(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)', cleaned, re.IGNORECASE):
+                token_candidates.append(m.group(1).strip())
+            for m in re.finditer(r'["\']?access_token["\']?\s*[:=]\s*["\']([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)["\']', cleaned, re.IGNORECASE):
+                token_candidates.append(m.group(1).strip())
+
+            if token_candidates:
+                from config.credentials import _decode_token_exp
+                token_candidates = list(dict.fromkeys(token_candidates))
+                token_candidates.sort(key=lambda t: _decode_token_exp(t) or 0, reverse=True)
+                result["token"] = token_candidates[0]
                 result["extracted"].append("Token (JWT)")
 
-        # 3. 提取 Cookie (-b, --cookie, -H "cookie: ...", cookie: ...)
+        # 3. 提取并智能合并所有 Cookie (-b, --cookie, -H "cookie: ...", cookie: ..., Set-Cookie)
         if not result["cookie"]:
-            m = re.search(r'(?:-b|--cookie)\s+["\']([^"\']+)["\']', cleaned, re.IGNORECASE) or \
-                re.search(r'(?:-H|--header)\s+["\']cookie:\s*([^"\']+)["\']', cleaned, re.IGNORECASE) or \
-                re.search(r'^cookie:\s*(.+)$', cleaned, re.IGNORECASE | re.MULTILINE) or \
-                re.search(r'set-cookie:\s*([^;\r\n]+)', cleaned, re.IGNORECASE)
-            if m:
-                result["cookie"] = m.group(1).strip()
-                result["extracted"].append("Cookie")
+            cookie_candidates = []
+            for m in re.finditer(r'(?:-b|--cookie)\s+["\']([^"\']+)["\']', cleaned, re.IGNORECASE):
+                cookie_candidates.append(m.group(1).strip())
+            for m in re.finditer(r'(?:-H|--header)\s+["\']cookie:\s*([^"\']+)["\']', cleaned, re.IGNORECASE):
+                cookie_candidates.append(m.group(1).strip())
+            for m in re.finditer(r'^cookie:\s*(.+)$', cleaned, re.IGNORECASE | re.MULTILINE):
+                cookie_candidates.append(m.group(1).strip())
+            for m in re.finditer(r'set-cookie:\s*([^;\r\n]+)', cleaned, re.IGNORECASE):
+                cookie_candidates.append(m.group(1).strip())
+
+            if cookie_candidates:
+                from config.credentials import _clean_cookie_string
+                merged_cookies = {}
+                cookie_candidates.sort(key=lambda c: ("session=" in c.lower(), len(c)))
+                for cand in cookie_candidates:
+                    parsed = _clean_cookie_string(cand)
+                    merged_cookies.update(parsed)
+
+                if merged_cookies:
+                    result["cookie"] = "; ".join(f"{k}={v}" for k, v in merged_cookies.items())
+                    result["extracted"].append("Cookie")
+                    if "session" in merged_cookies:
+                        result["extracted"].append("session (长期会话)")
 
         # 4. 提取 refresh_token
         if not result["refresh_token"]:
