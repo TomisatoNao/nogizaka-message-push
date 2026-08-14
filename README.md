@@ -325,16 +325,25 @@ python tools/manage_users.py reset --force     # 免确认静默重置
 1. **认证模式分发**：
    - `web` 模式（默认）：模拟 Chrome 桌面端，依赖 Token 与 Cookie；
    - `mobile` 模式：模拟 iOS 客户端，使用 `refresh_token` 自动向鉴权中心换取短期 JWT，免去 Cookie 过期困扰。
-2. **Web 端免等待即时自动握手（Auto Handshake & Pre-refresh）**：
-   - **首次登录 0 等待**：在浏览器初次登录后，直接从 Network 面板的任意 timeline 请求中复制 Token 和 Cookie（或直接一键粘贴 cURL）；
-   - **自动捕获长期 Set-Cookie**：系统在保存凭证的第 1 秒立即主动向 `/v2/update_token` 发起握手，自动从响应 Header 提取完整的持久化 `Set-Cookie`（包含 `S5SI`、`4FB852B4CF8A4CFF`、`AWSALB` 等）并落盘，无需在浏览器中挂机等待 1 小时！
-3. **智能一键解析（Smart cURL / Headers Parser）**：
-   - 网页端「填凭证」弹窗内置智能解析器，支持直接粘贴浏览器的 cURL 命令或 Request Headers 请求标头，系统自动通过正则提取 Token、Cookie 或 Refresh Token 并自动填入对应输入框。
-4. **主动式寿命探测与自动续期**：
+
+2. **📖 Web 端 0 等待登录凭证抓取与自动续期操作手册**：
+   > 💡 **原理提示**：乃木坂官方将核心 `session` Cookie 限定于 `Path=/v2/update_token` 路径下，普通消息列表（`timeline`）不会携带此 Cookie。该 Cookie 的唯一下发源头是登录瞬间的 `POST /v2/signin` 请求。利用本系统内置的智能解析器，您可以在登录完成的**第 0 秒**直接完成全套凭证捕获与永久自动续期！
+
+   - **Step 1（准备抓包）**：按 `F12` 打开浏览器开发者工具 ➔ 切换到 **Network（网络）** 面板 ➔ **务必勾选顶部的「Preserve log」（保留日志）**；
+   - **Step 2（完成登录）**：访问 `https://message.nogizaka46.com/` 正常完成 Google / Apple / Line 账号登录；
+   - **Step 3（一键复制）**：在 Network 面板任意空白处或请求上右键 ➔ **「Copy」➔「Copy all as cURL (cmd)」**；
+   - **Step 4（智能解析与保存）**：
+     - 打开本系统 Web 管理端（`http://127.0.0.1:8787/`）➔ 进入「👥 账号与成员」卡片 ➔ 点击目标账号的 **「填凭证」**；
+     - 展开顶部的 **「📋 智能一键解析」** ➔ 将复制的内容直接粘贴进文本框 ➔ 点击 **「🚀 解析并填充」**；
+     - 系统将自动向官方接口完成安全登录握手，并同步回填最新的 `access_token` 与长达 30 天可循环顺延的持久 `session` Cookie；
+     - 点击 **「🔐 保存并自动握手」**，系统立刻完成长期托管，从此以后每小时全自动无感续期，永不过期！
+
+3. **主动式寿命探测与自动续期**：
    - 每次巡查前解码 JWT 并检查 `exp` 寿命，若剩余不足 300 秒则自动发起静默续期；
    - 抓取遭遇 401 Unauthorized 时，自动触发指数退避刷新与被动重试机制；
    - 在 WebUI 账号列表操作栏可随时点击「⚡ 握手测试」验证连通性并查看 Token 剩余有效时长。
-5. **凭证加载优先级**：
+
+4. **凭证加载优先级**：
    ```
    磁盘动态凭证 (data/web_credentials/*.json)  >  环境变量 (.env)  >  默认配置
    ```

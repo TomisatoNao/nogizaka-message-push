@@ -1935,6 +1935,24 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"ok": False, "msg": f"验证异常: {e}"}, 500)
             return
+        if path == "/api/accounts/smart_parse":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            raw_text = str(body.get("raw", "")).strip()
+            account = str(body.get("account", "")).strip()
+            if not raw_text:
+                self._send_json({"ok": False, "errors": ["缺少 raw 文本"]}, 400)
+                return
+            try:
+                import asyncio
+                res = asyncio.run(self._smart_parse_credentials_text(raw_text, account))
+                self._send_json({"ok": True, **res})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"智能解析异常: {e}"]}, 500)
+            return
         if path.startswith("/api/archive/"):
             if not self._guard(need_admin=False):
                 return
@@ -2035,6 +2053,85 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "restarting": True})
             return
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    async def _smart_parse_credentials_text(self, raw: str, account: str = "") -> dict:
+        """智能解析用户粘贴的 cURL / Headers / Signin Payload 文本。"""
+        import re
+        import json
+        import httpx
+
+        cleaned = raw.replace("^^", "^").replace('^"', '"').replace("^&", "&").replace("^|", "|")
+        result = {"token": "", "cookie": "", "refresh_token": "", "extracted": []}
+
+        group_type = "nogizaka"
+        if account:
+            try:
+                raw_cfg = _load_raw_config()
+                acc_data = raw_cfg.get("accounts", {}).get(account, {})
+                group_type = acc_data.get("group_type") or acc_data.get("group") or "nogizaka"
+            except Exception:
+                pass
+
+        # 1. 检查是否包含 signin 请求体（用户在登录瞬间复制的 cURL）
+        signin_match = re.search(r'--data-raw\s+["\'](\{.+?\})["\']', cleaned) or re.search(r'-d\s+["\'](\{.+?\})["\']', cleaned)
+        if "signin" in cleaned and signin_match:
+            try:
+                body_json = json.loads(signin_match.group(1))
+                domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
+                url = f"https://api.message.{domain_part}.com/v2/signin"
+                headers = {
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                    "origin": f"https://message.{domain_part}.com",
+                    "referer": f"https://message.{domain_part}.com/",
+                    "x-talk-app-id": f"jp.co.sonymusic.communication.{group_type} 2.5",
+                    "x-talk-app-platform": "web"
+                }
+                async with httpx.AsyncClient(timeout=12) as client:
+                    r = await client.post(url, headers=headers, json=body_json)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("access_token"):
+                            result["token"] = data["access_token"]
+                            result["extracted"].append("access_token (由登录接口自动换取)")
+                        cookies = []
+                        for sc in r.headers.get_list("set-cookie"):
+                            sc_part = sc.split(";")[0].strip()
+                            if sc_part and "=" in sc_part:
+                                cookies.append(sc_part)
+                        if cookies:
+                            result["cookie"] = "; ".join(cookies)
+                            result["extracted"].append("session Cookie (由登录响应下发，可长期自动续期)")
+            except Exception as e:
+                from src.logger import log_all
+                log_all(f"⚠️ smart_parse 模拟登录请求失败: {e}")
+
+        # 2. 提取普通 Authorization Bearer 或 access_token
+        if not result["token"]:
+            m = re.search(r'(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)', cleaned, re.IGNORECASE) or \
+                re.search(r'["\']?access_token["\']?\s*[:=]\s*["\']([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)["\']', cleaned, re.IGNORECASE)
+            if m:
+                result["token"] = m.group(1).strip()
+                result["extracted"].append("Token (JWT)")
+
+        # 3. 提取 Cookie (-b, --cookie, -H "cookie: ...", cookie: ...)
+        if not result["cookie"]:
+            m = re.search(r'(?:-b|--cookie)\s+["\']([^"\']+)["\']', cleaned, re.IGNORECASE) or \
+                re.search(r'(?:-H|--header)\s+["\']cookie:\s*([^"\']+)["\']', cleaned, re.IGNORECASE) or \
+                re.search(r'^cookie:\s*(.+)$', cleaned, re.IGNORECASE | re.MULTILINE) or \
+                re.search(r'set-cookie:\s*([^;\r\n]+)', cleaned, re.IGNORECASE)
+            if m:
+                result["cookie"] = m.group(1).strip()
+                result["extracted"].append("Cookie")
+
+        # 4. 提取 refresh_token
+        if not result["refresh_token"]:
+            m = re.search(r'["\']?refresh_token["\']?\s*[:=]\s*["\']([a-f0-9\-]{32,36})["\']', cleaned, re.IGNORECASE)
+            if m:
+                result["refresh_token"] = m.group(1).strip()
+                result["extracted"].append("Refresh Token")
+
+        return result
 
     def _handle_secrets(self) -> None:
         """写入凭证到 .env（值只进不出）。body:

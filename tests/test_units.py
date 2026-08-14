@@ -245,12 +245,32 @@ def test_cookie_cleaner() -> None:
     print("  ✅ Cookie 增强解析符合预期")
 
 
+def test_smart_parse_credentials() -> None:
+    print("=== _smart_parse_credentials_text ===")
+    from src.webui import _Handler
+    import asyncio
+
+    h = _Handler.__new__(_Handler)
+
+    # 1) Windows cURL with -b and token
+    text1 = '''curl --url "https://api.message.nogizaka46.com/v2/profile" ^
+  -H "authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODY3MTUzODgsInN1YiI6IjE4MTU2NyJ9.XBuPTPyjCV0_EJquCdvEpo_OMmqzbdjQa2nQOHo6hms" ^
+  -b "wap_last_event=showWidgetPage; _tt_enable_cookie=1; session=sess_abc"'''
+    res1 = asyncio.run(h._smart_parse_credentials_text(text1))
+    assert res1["token"] == "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODY3MTUzODgsInN1YiI6IjE4MTU2NyJ9.XBuPTPyjCV0_EJquCdvEpo_OMmqzbdjQa2nQOHo6hms", res1
+    assert "session=sess_abc" in res1["cookie"], res1
+    assert "Token (JWT)" in res1["extracted"]
+    assert "Cookie" in res1["extracted"]
+    print("  ✅ cURL -b 与 Authorization 提取正确")
+
+
 def main() -> None:
     test_utc_to_jst()
     test_log_truncation()
     test_escape_html()
     test_chain_extract()
     test_cookie_cleaner()
+    test_smart_parse_credentials()
     test_health_rolling()
     test_time_record_skip()
     test_stop_signal_file()

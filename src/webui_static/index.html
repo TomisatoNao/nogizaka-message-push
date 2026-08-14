@@ -1956,41 +1956,94 @@ function openSecretDialog(title, hint, fields, account, opts) {
 }
 
 if ($("btnSecretSmartParse")) {
-  $("btnSecretSmartParse").addEventListener("click", () => {
+  $("btnSecretSmartParse").addEventListener("click", async () => {
     const raw = ($("secretSmartInput").value || "").trim();
     if (!raw) {
       $("secretSmartFeedback").textContent = "⚠️ 请先粘贴 cURL 命令或 Request Headers 文本";
       $("secretSmartFeedback").style.color = "var(--warn, #f59e0b)";
       return;
     }
-    let found = 0;
-    // 1. 提取 Authorization Bearer Token
-    const authMatch = raw.match(/(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)/i)
-                   || raw.match(/['"]?(?:authorization|auth)['"]?\s*:\s*['"](?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)['"]/i);
-    // 2. 提取 Cookie
-    const cookieMatch = raw.match(/(?:-H|--header)\s+['"]cookie:\s*([^'"]+)['"]/i)
-                     || raw.match(/^cookie:\s*(.+)$/im)
-                     || raw.match(/['"]cookie['"]\s*:\s*['"]([^'"]+)['"]/i);
-    // 3. 提取 refresh_token
-    const rtMatch = raw.match(/['"]?refresh_token['"]?\s*[:=]\s*['"]([a-f0-9\-]{32,36})['"]/i);
+    const parseBtn = $("btnSecretSmartParse");
+    parseBtn.disabled = true;
+    const oldBtnTxt = parseBtn.textContent;
+    parseBtn.textContent = "解析中…";
+    $("secretSmartFeedback").textContent = "🔄 正在深度解析凭证与会话…";
+    $("secretSmartFeedback").style.color = "var(--muted, #888)";
 
+    let tokenVal = "";
+    let cookieVal = "";
+    let rtVal = "";
+    let extractedDetails = [];
+
+    // 1. 优先调用后端智能解析接口（支持自动捕获 signin 接口下发的长期 session Cookie）
+    try {
+      const res = await api("/api/accounts/smart_parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ raw: raw, account: (secretCtx || {}).account || "" }),
+      });
+      if (res.ok) {
+        if (res.token) tokenVal = res.token;
+        if (res.cookie) cookieVal = res.cookie;
+        if (res.refresh_token) rtVal = res.refresh_token;
+        if (res.extracted && res.extracted.length) extractedDetails = res.extracted;
+      }
+    } catch (e) {
+      console.warn("后端 smart_parse 失败，退回本地正则提取", e);
+    }
+
+    // 2. 本地备用强化正则提取器（处理 Windows cmd 转义符、-b、--cookie、换行）
+    const cleaned = raw.replace(/\^\^/g, "^").replace(/\^"/g, '"').replace(/\^&/g, "&").replace(/\^\|/g, "|");
+    if (!tokenVal) {
+      const authMatch = cleaned.match(/(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)/i)
+                     || cleaned.match(/['"]?(?:authorization|auth|access_token)['"]?\s*:\s*['"](?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)['"]/i);
+      if (authMatch) {
+        tokenVal = authMatch[1].trim();
+        extractedDetails.push("Token (JWT)");
+      }
+    }
+    if (!cookieVal) {
+      const cookieMatch = cleaned.match(/(?:-b|--cookie)\s+['"]([^'"]+)['"]/i)
+                       || cleaned.match(/(?:-H|--header)\s+['"]cookie:\s*([^'"]+)['"]/i)
+                       || cleaned.match(/^cookie:\s*(.+)$/im)
+                       || cleaned.match(/['"]cookie['"]\s*:\s*['"]([^'"]+)['"]/i)
+                       || cleaned.match(/set-cookie:\s*([^;\r\n]+)/i);
+      if (cookieMatch) {
+        cookieVal = cookieMatch[1].trim();
+        extractedDetails.push("Cookie");
+      }
+    }
+    if (!rtVal) {
+      const rtMatch = cleaned.match(/['"]?refresh_token['"]?\s*[:=]\s*['"]([a-f0-9\-]{32,36})['"]/i);
+      if (rtMatch) {
+        rtVal = rtMatch[1].trim();
+        extractedDetails.push("Refresh Token");
+      }
+    }
+
+    // 3. 填入当前弹窗对应的表单输入框中
+    let found = 0;
     const inputs = $("secretFields").querySelectorAll("input");
     for (const input of inputs) {
       const env = input.dataset.env || "";
-      if (env.endsWith("_TOKEN") && !env.endsWith("_REFRESH_TOKEN") && authMatch) {
-        input.value = authMatch[1].trim();
+      if (env.endsWith("_TOKEN") && !env.endsWith("_REFRESH_TOKEN") && tokenVal) {
+        input.value = tokenVal;
         found++;
-      } else if (env.endsWith("_COOKIE") && cookieMatch) {
-        input.value = cookieMatch[1].trim();
+      } else if (env.endsWith("_COOKIE") && cookieVal) {
+        input.value = cookieVal;
         found++;
-      } else if (env.endsWith("_REFRESH_TOKEN") && rtMatch) {
-        input.value = rtMatch[1].trim();
+      } else if (env.endsWith("_REFRESH_TOKEN") && rtVal) {
+        input.value = rtVal;
         found++;
       }
     }
 
+    parseBtn.disabled = false;
+    parseBtn.textContent = oldBtnTxt;
+
     if (found > 0) {
-      $("secretSmartFeedback").textContent = "✅ 已自动提取并填充 " + found + " 项凭证字段！";
+      const detailStr = extractedDetails.length ? "（" + extractedDetails.join("、") + "）" : "";
+      $("secretSmartFeedback").textContent = "✅ 已自动提取并填充 " + found + " 项凭证字段 " + detailStr;
       $("secretSmartFeedback").style.color = "var(--ok, #10b981)";
     } else {
       $("secretSmartFeedback").textContent = "⚠️ 未能识别出有效 Token 或 Cookie，请检查粘贴格式";
