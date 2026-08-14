@@ -774,10 +774,16 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
 
             if r.status_code == 200:
                 rem = get_token_remaining_seconds(account_id)
-                return True, f"✅ Token 验证有效（可正常拉取消息，剩余有效约 {int(rem or 3600)//60} 分钟），系统将在 Token 临期时自动尝试续期", {
+                rem_min = max(0, int(rem or 0) // 60)
+                return True, (
+                    f"⚠️ 当前 Token 可用（剩余有效约 {rem_min} 分钟），但【自动续期未生效】（Cookie 中缺少 session 鉴权项）！\n"
+                    f"注意：约 {rem_min} 分钟后 Token 到期将无法自动续期并报错 400/401。\n"
+                    f"建议：在 Cookie 中补填 session=xxx，或在 F12 -> Application -> Cookies 中复制 session 的值。"
+                ), {
                     "auth_method": "web",
-                    "handshake_type": "api_valid",
+                    "handshake_type": "api_valid_no_renewal",
                     "remaining_seconds": rem,
+                    "warning": True,
                 }
             else:
                 return False, f"❌ 凭证验证失败：API 返回 HTTP {r.status_code}，Token 或 Cookie 可能已失效", {"auth_method": "web"}

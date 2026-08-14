@@ -972,7 +972,10 @@
     📋 智能一键解析（从 DevTools cURL / 请求标头快速提取）
   </summary>
   <div style="margin-top: 8px;">
-    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; border-radius: 4px; padding: 6px; background: rgba(0,0,0,0.2); color: inherit; border: 1px solid var(--border, #444);" placeholder="在浏览器 F12 Network 右键 timeline 请求 → 复制为 cURL 或复制请求标头，粘贴到此处..."></textarea>
+    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; border-radius: 4px; padding: 6px; background: rgba(0,0,0,0.2); color: inherit; border: 1px solid var(--border, #444);" placeholder="在浏览器 F12 Network 右键 signin 或 timeline 请求 → 复制为 cURL 或复制请求标头，粘贴到此处..."></textarea>
+    <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted);">
+      💡 提示：Web 账号自动续期必须包含 <code>session</code> Cookie 项。若手动填写，可在 F12 ➔ Application ➔ Cookies 中复制 <code>session</code> 的值。
+    </div>
     <div style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
       <span id="secretSmartFeedback" style="font-size: 12px; color: var(--muted);"></span>
       <button class="btn" id="btnSecretSmartParse" type="button" style="padding: 3px 10px; font-size: 12px;">🚀 解析并填充</button>
