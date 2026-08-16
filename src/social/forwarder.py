@@ -221,10 +221,10 @@ class SocialForwarder:
                             continue
 
                         if bot.target_openid:
-                            await bot._send_c2c_text(bot.target_openid, full_text)
+                            await bot.send_private_text(bot.target_openid, full_text)
                             any_success = True
                         if getattr(bot, "group_openid", None):
-                            await bot._send_group_text(bot.group_openid, full_text)
+                            await bot.send_group_text(bot.group_openid, full_text)
                             any_success = True
                 except Exception as e:
                     errors.append(f"QQ 官方机器人推送失败: {e}")
@@ -290,9 +290,9 @@ class SocialForwarder:
                     if bot.social_filter and acc_name not in bot.social_filter and result.display_name not in bot.social_filter:
                         continue
                     if bot.target_openid:
-                        await bot._send_c2c_text(bot.target_openid, msg)
+                        await bot.send_private_text(bot.target_openid, msg)
                     if getattr(bot, "group_openid", None):
-                        await bot._send_group_text(bot.group_openid, msg)
+                        await bot.send_group_text(bot.group_openid, msg)
 
         try:
             self._dispatch_async(_do_send())

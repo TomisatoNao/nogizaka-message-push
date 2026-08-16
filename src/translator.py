@@ -76,17 +76,36 @@ def initialize(client: httpx.AsyncClient | None = None) -> None:
 
 
 async def _post_json(url: str, payload: dict, headers: dict | None = None, custom_client: httpx.AsyncClient = None) -> httpx.Response:
-    """发送翻译请求。优先复用共享连接池。"""
+    """发送翻译请求。优先复用当前事件循环内可用的共享连接池。"""
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
     timeout = getattr(cfg, "TRANSLATE_TIMEOUT", 90)
-    if custom_client is not None:
+
+    if custom_client is not None and not custom_client.is_closed:
         return await custom_client.post(url, json=payload, headers=req_headers, timeout=timeout)
-    if _http_client is not None:
-        return await _http_client.post(url, json=payload, headers=req_headers, timeout=timeout)
+
+    try:
+        curr_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        curr_loop = None
+
+    if _http_client is not None and not _http_client.is_closed and curr_loop is not None and curr_loop.is_running():
+        # 尝试检查 client transport 绑定的 loop
+        transport = getattr(_http_client, "_transport", None)
+        t_loop = getattr(transport, "_loop", None)
+        if t_loop is None or t_loop is curr_loop:
+            try:
+                return await _http_client.post(url, json=payload, headers=req_headers, timeout=timeout)
+            except RuntimeError as ex:
+                if "Event loop" in str(ex):
+                    pass  # 跨 loop 导致异常，进入下方独立客户端 fallback
+                else:
+                    raise
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         return await client.post(url, json=payload, headers=req_headers)
+
 
 def _is_already_chinese(text: str) -> bool:
     """检查文本是否不需要翻译。判断依据：出现假名则必须翻译；纯汉字/英文/符号跳过。"""

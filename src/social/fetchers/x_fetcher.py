@@ -58,10 +58,18 @@ def is_card_image(url: str) -> bool:
 
 def _orig_image(url: str) -> str:
     """把 pbs.twimg.com 图片地址改写成原图（最高画质）。"""
-    if not url:
+    if not url or "pbs.twimg.com" not in url:
         return url
-    if "pbs.twimg.com" not in url:
-        return url
+
+    # 视频缩略图与卡片图不支持 name=orig（请求会 404），改用 name=large
+    if any(x in url for x in ("/amplify_video_thumb/", "/tweet_video_thumb/", "/ext_tw_video_thumb/", "/card_img/")):
+        base, _, query = url.partition("?")
+        if query:
+            parts = [p for p in query.split("&") if p and not p.startswith("name=")]
+            parts.append("name=large")
+            return f"{base}?{'&'.join(parts)}"
+        return f"{base}?name=large"
+
     base, _, query = url.partition("?")
     # .../media/XXXX.jpg → .../media/XXXX?format=jpg&name=orig
     m = re.match(r"(.*/[\w-]+)\.(jpg|jpeg|png|webp)$", base, re.I)

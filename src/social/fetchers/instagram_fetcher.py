@@ -99,12 +99,14 @@ class InstagramFetcher(SocialFetcher):
         if ua:
             self._session.headers["User-Agent"] = ua
 
-        # 1) 复用已有登录态：cookies_file（后台粘贴保存的）优先，其次浏览器
+        # 1) 复用已有登录态：cookies_file 优先，其次默认 data/instagram_cookies.txt，其次浏览器
         cookies: dict = {}
         cfile = (cfg.get("cookies_file") or "").strip()
+        from src.social import ig_session
+        if not cfile and os.path.exists(ig_session.COOKIE_FILE):
+            cfile = ig_session.COOKIE_FILE
         if cfile:
-            from src.social.ig_session import read_cookie_file
-            cookies = read_cookie_file(cfile)
+            cookies = ig_session.read_cookie_file(cfile)
             if cookies:
                 log.info("[instagram] 已加载登录态 cookies（%s 个）", len(cookies))
         if not cookies:

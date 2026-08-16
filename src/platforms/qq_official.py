@@ -303,6 +303,10 @@ class QQOfficialBot:
             url = f"{self._target_base('users', target_openid)}/messages"
             return await self._post_json(url, {"content": text[:1900], "msg_type": 0}, max_retries) is not None
 
+    # 兼容别名
+    _send_c2c_text = send_private_text
+    _send_group_text = send_group_text
+
     async def send_translation_qq(self, scope: str, target_openid: str, pairs: list[tuple[str, str]]) -> bool:
         """发送 QQ 中日对照正文（日文斜体*，中文常规体，双语对之间零宽空格行，切分<=1800字符）。"""
         if not pairs or not target_openid:

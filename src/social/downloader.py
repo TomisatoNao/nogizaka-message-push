@@ -242,15 +242,26 @@ class MediaDownloader:
 
         tmp = dest_path + ".part"
         backoff = max(1, int(self._cfg.get("retry_backoff_seconds", 2)))
+        cur_url = url
         for attempt in range(1, self.retry_times + 1):
             try:
-                with requests.get(url, headers=hdrs, timeout=self.timeout,
+                with requests.get(cur_url, headers=hdrs, timeout=self.timeout,
                                   stream=True) as r:
-                    r.raise_for_status()
-                    with open(tmp, "wb") as f:
-                        for chunk in r.iter_content(chunk_size=256 * 1024):
-                            if chunk:
-                                f.write(chunk)
+                    if r.status_code == 404 and "pbs.twimg.com" in cur_url and "name=orig" in cur_url:
+                        log.debug("[download] Twitter 图片 name=orig 404，自动降级为 name=large")
+                        cur_url = cur_url.replace("name=orig", "name=large")
+                        with requests.get(cur_url, headers=hdrs, timeout=self.timeout, stream=True) as r2:
+                            r2.raise_for_status()
+                            with open(tmp, "wb") as f:
+                                for chunk in r2.iter_content(chunk_size=256 * 1024):
+                                    if chunk:
+                                        f.write(chunk)
+                    else:
+                        r.raise_for_status()
+                        with open(tmp, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=256 * 1024):
+                                if chunk:
+                                    f.write(chunk)
                 if os.path.getsize(tmp) == 0:
                     raise OSError("下载内容为空")
                 os.replace(tmp, dest_path)
@@ -339,6 +350,10 @@ class MediaDownloader:
         # cookies —— Instagram Story / TikTok Story 必需
         if platform_cfg:
             cf = platform_cfg.get("cookies_file") or ""
+            if not cf:
+                from src.social import ig_session
+                if os.path.exists(ig_session.COOKIE_FILE):
+                    cf = ig_session.COOKIE_FILE
             if cf and os.path.exists(cf):
                 opts["cookiefile"] = cf
             browser = (platform_cfg.get("cookies_from_browser") or "").strip()

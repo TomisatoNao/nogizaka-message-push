@@ -14,6 +14,7 @@ import requests
 
 from src.social.downloader import MediaDownloader
 from src.social.forwarder import SocialForwarder
+from src.social import ig_session
 from src.social.models import MediaItem, Post
 
 log = logging.getLogger("collink")
@@ -54,6 +55,16 @@ def _orig_image(url: str) -> str:
     """把 pbs.twimg.com 图片地址改写成原图（最高画质）。"""
     if not url or "pbs.twimg.com" not in url:
         return url
+
+    # 视频缩略图与卡片图不支持 name=orig（请求会 404），改用 name=large
+    if any(x in url for x in ("/amplify_video_thumb/", "/tweet_video_thumb/", "/ext_tw_video_thumb/", "/card_img/")):
+        base, _, query = url.partition("?")
+        if query:
+            parts = [p for p in query.split("&") if p and not p.startswith("name=")]
+            parts.append("name=large")
+            return f"{base}?{'&'.join(parts)}"
+        return f"{base}?name=large"
+
     base, _, query = url.partition("?")
     m = re.match(r"(.*/[\w-]+)\.(jpg|jpeg|png|webp)$", base, re.I)
     if m:
@@ -179,6 +190,19 @@ class SocialUrlParser:
             "skip_download": True,
         }
 
+        # Instagram 需要登录态 cookies，否则大部分帖子会被拒绝
+        if platform == "instagram":
+            cf = ig_session.COOKIE_FILE
+            if os.path.exists(cf):
+                ydl_opts["cookiefile"] = cf
+                log.debug("[single_fetcher] Instagram 使用 cookie 文件: %s", cf)
+            else:
+                log.warning(
+                    "[single_fetcher] Instagram cookie 文件不存在 (%s)，"
+                    "抓取可能因需要登录而失败。请在后台「Instagram 监控」页配置账号 cookies。",
+                    cf,
+                )
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False)
@@ -201,24 +225,29 @@ class SocialUrlParser:
         if entries:
             # 多图 / 轮播 Carousel
             for e in entries:
+                vcodec = e.get("vcodec") or ""
                 v_url = e.get("url")
                 if v_url:
-                    mtype = "video" if e.get("vcodec") != "none" else "image"
+                    mtype = "video" if (vcodec and vcodec != "none") else "image"
                     media_items.append(MediaItem(type=mtype, url=v_url))
-                elif e.get("thumbnails"):
-                    best_th = e["thumbnails"][-1].get("url")
-                    if best_th:
-                        media_items.append(MediaItem(type="image", url=best_th))
+                else:
+                    thumbnails = e.get("thumbnails") or []
+                    if thumbnails:
+                        best_th = thumbnails[-1].get("url")
+                        if best_th:
+                            media_items.append(MediaItem(type="image", url=best_th))
         else:
             # 单视频或单图
             v_url = info.get("url")
-            vcodec = info.get("vcodec")
+            vcodec = info.get("vcodec") or ""
             if v_url and vcodec and vcodec != "none":
                 media_items.append(MediaItem(type="video", url=v_url))
             elif info.get("thumbnails"):
                 best_th = info["thumbnails"][-1].get("url")
                 if best_th:
                     media_items.append(MediaItem(type="image", url=best_th))
+
+        log.info("[single_fetcher] %s 解析完成，获得 %d 条媒体", platform, len(media_items))
 
         return Post(
             platform=platform,
