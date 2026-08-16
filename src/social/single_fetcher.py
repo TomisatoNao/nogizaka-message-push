@@ -76,6 +76,18 @@ def _orig_image(url: str) -> str:
     return f"{base}?name=orig"
 
 
+def _shortcode_to_media_id(shortcode: str) -> int:
+    """将 Instagram shortcode（如 DcG7iiqk5NW）解码为数字 media_id。"""
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    media_id = 0
+    for char in shortcode:
+        idx = alphabet.find(char)
+        if idx == -1:
+            raise ValueError(f"Invalid character in shortcode: {char}")
+        media_id = media_id * 64 + idx
+    return media_id
+
+
 class SocialUrlParser:
     """解析单条社媒链接为统一 Post 对象。"""
 
@@ -169,7 +181,98 @@ class SocialUrlParser:
     def _parse_instagram(self, url: str) -> Post:
         m = re.search(r"instagram\.com/(?:p|reel|tv)/([^/?#\s]+)", url)
         shortcode = m.group(1) if m else ""
+        if not shortcode:
+            return self._extract_with_ytdlp(url, platform="instagram", post_id="ig_post")
+
+        # 优先使用 Instagram 官方 Media Info 接口（直接抓取完整多图 Carousel 与视频，杜绝 yt-dlp No video formats 报错）
+        try:
+            post = self._parse_instagram_api(shortcode, url)
+            if post and post.media:
+                return post
+        except Exception as ex:
+            log.warning("[single_fetcher] Instagram 官方 API 单帖解析失败 (%s)，回退 yt-dlp: %s", shortcode, ex)
+
         return self._extract_with_ytdlp(url, platform="instagram", post_id=shortcode or "ig_post")
+
+    def _parse_instagram_api(self, shortcode: str, url: str) -> Post:
+        media_id = _shortcode_to_media_id(shortcode)
+        cookies = ig_session.read_cookie_file()
+        session = requests.Session()
+        if cookies:
+            session.cookies.update(cookies)
+        session.headers.update({
+            "User-Agent": _UA,
+            "X-IG-App-ID": "936619743392459",
+            "Accept": "*/*",
+            "Accept-Language": "ja,en;q=0.8",
+        })
+        if cookies.get("csrftoken"):
+            session.headers["X-CSRFToken"] = cookies["csrftoken"]
+
+        api_url = f"https://i.instagram.com/api/v1/media/{media_id}/info/"
+        resp = session.get(api_url, timeout=15)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Instagram media/info API HTTP {resp.status_code}")
+
+        data = resp.json()
+        items = data.get("items") or []
+        if not items:
+            raise RuntimeError("Instagram 返回数据中未包含 items")
+
+        item = items[0]
+        user = item.get("user") or {}
+        author = user.get("full_name") or user.get("username") or "Instagram 用户"
+        username = user.get("username") or ""
+
+        caption_obj = item.get("caption") or {}
+        text = caption_obj.get("text", "") or ""
+
+        taken_at = item.get("taken_at")
+        timestamp = ""
+        if taken_at:
+            dt = datetime.fromtimestamp(taken_at, tz=timezone.utc).astimezone(_JST)
+            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        media_items = []
+        carousel = item.get("carousel_media") or []
+        raw_items = carousel if carousel else [item]
+
+        for m in raw_items:
+            # 优先提取视频
+            video_versions = m.get("video_versions") or []
+            if video_versions:
+                video_versions.sort(key=lambda x: (x.get("width", 0) * x.get("height", 0)), reverse=True)
+                best_video = video_versions[0].get("url")
+                if best_video:
+                    media_items.append(MediaItem(type="video", url=best_video))
+                    continue
+
+            # 其次提取最高分辨率图片
+            image_candidates = (m.get("image_versions2") or {}).get("candidates") or []
+            if image_candidates:
+                image_candidates.sort(key=lambda x: (x.get("width", 0) * x.get("height", 0)), reverse=True)
+                best_img = image_candidates[0].get("url")
+                if best_img:
+                    media_items.append(MediaItem(type="image", url=best_img))
+
+        log.info("[single_fetcher] Instagram API 成功解析 @%s shortcode %s，获得 %d 条媒体",
+                 username, shortcode, len(media_items))
+
+        return Post(
+            platform="instagram",
+            post_id=shortcode,
+            author=author,
+            text=text,
+            media=media_items,
+            timestamp=timestamp,
+            extra={
+                "url": url,
+                "username": username,
+                "author": author,
+                "avatar_url": user.get("profile_pic_url", ""),
+            },
+        )
+
 
     def _parse_tiktok(self, url: str) -> Post:
         m = re.search(r"video/(\d+)", url)
