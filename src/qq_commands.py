@@ -243,7 +243,6 @@ def allowed_senders() -> set[str]:
 
 async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: str = ""):
     """后台任务：解析社媒链接、下载多媒体、AI 翻译并直接私聊回复给发送者。"""
-    import os
     from src.logger import log_all
     try:
         from src.social.single_fetcher import SocialUrlParser
@@ -323,7 +322,8 @@ async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: st
                         m_bytes = mf.read()
                     if m_bytes:
                         m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
-                        await target_bot.send_media_file("users", sender_openid, m_type, m_bytes)
+                        fname = os.path.basename(fp)
+                        await target_bot.send_media_file("users", sender_openid, m_type, m_bytes, filename=fname)
                 except Exception as ex:
                     log_all(f"⚠️ [社媒私聊解析] 发送媒体附件异常: {ex}", is_error=True)
 

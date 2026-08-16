@@ -124,7 +124,7 @@ class TestSocialIntegration(unittest.TestCase):
         self.assertTrue(True)
 
     def test_social_single_url_parser(self):
-        from src.social.single_fetcher import SocialUrlParser, _orig_image, _syndication_token
+        from src.social.single_fetcher import _orig_image, _syndication_token
         self.assertEqual(_orig_image("https://pbs.twimg.com/media/xyz.jpg"), "https://pbs.twimg.com/media/xyz?format=jpg&name=orig")
         token = _syndication_token("1234567890")
         self.assertTrue(isinstance(token, str) and len(token) > 0)

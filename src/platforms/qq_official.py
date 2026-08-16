@@ -164,7 +164,8 @@ class QQOfficialBot:
             "Content-Type": "application/json",
         }
 
-    async def _post_json(self, url: str, payload: dict, max_retries: int = 3) -> httpx.Response | None:
+    async def _post_json(self, url: str, payload: dict, max_retries: int = 3, timeout: float | None = None) -> httpx.Response | None:
+        t = timeout or cfg.QQ_OFFICIAL_TIMEOUT
         for attempt in range(max_retries):
             await self._wait_rate_limit()
             try:
@@ -172,7 +173,7 @@ class QQOfficialBot:
                     url,
                     json_body=payload,
                     headers=self._auth_headers(),
-                    timeout=cfg.QQ_OFFICIAL_TIMEOUT,
+                    timeout=t,
                 )
                 self._last_send_ts = time.monotonic()
 
@@ -225,13 +226,23 @@ class QQOfficialBot:
         return f"{cfg.QQ_OFFICIAL_API_BASE}/v2/{scope}/{target_openid}"
 
     async def _upload_media(self, media_type: str, content: bytes,
-                            *, scope: str = "users", target_openid: str | None = None) -> str | None:
+                            *, scope: str = "users", target_openid: str | None = None,
+                            filename: str = "") -> str | None:
         if not await self.ensure_access_token():
             return None
 
-        file_type = _MEDIA_FILE_TYPES.get(media_type)
-        if not file_type:
-            return None
+        file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
+        size_bytes = len(content) if content else 0
+
+        # 根据腾讯开放平台规范：
+        # 1=图片(20MB), 2=视频(30MB), 3=语音(20MB), 4=文件(200MB)
+        # 超出软限制时降级为文件类型 4 上传
+        if media_type == "image" and size_bytes > 20 * 1024 * 1024:
+            file_type = 4
+        elif media_type == "video" and size_bytes > 30 * 1024 * 1024:
+            file_type = 4
+        elif media_type in ("record", "voice") and size_bytes > 20 * 1024 * 1024:
+            file_type = 4
 
         openid = target_openid or self.target_openid
         url = f"{self._target_base(scope, openid)}/files"
@@ -240,7 +251,12 @@ class QQOfficialBot:
             "file_data": base64.b64encode(content).decode("ascii"),
             "srv_send_msg": False,
         }
-        resp = await self._post_json(url, payload)
+        if filename:
+            payload["file_name"] = filename
+
+        # 动态计算超时：大文件基础 60s，按 100KB/s 保障充足上传窗口（上限 300s）
+        upload_timeout = min(300.0, max(60.0, size_bytes / (100 * 1024)))
+        resp = await self._post_json(url, payload, timeout=upload_timeout)
         if resp is None:
             return None
 
@@ -251,6 +267,20 @@ class QQOfficialBot:
             return None
 
         file_info = data.get("file_info") or data.get("data", {}).get("file_info")
+        if not file_info:
+            err_code = data.get("code")
+            # 850031 超限 或 850019 格式不支持时，尝试降级为 file_type=4 (文件模式) 重试
+            if file_type != 4 and err_code in (850031, 850019):
+                log_all(f"ℹ️ 官方 QQ Bot [{self.name}] 媒体超软限制(code {err_code})，自动降级为文件类型重传...", is_debug=True)
+                payload["file_type"] = 4
+                resp2 = await self._post_json(url, payload, timeout=upload_timeout)
+                if resp2:
+                    try:
+                        data2 = resp2.json()
+                        file_info = data2.get("file_info") or data2.get("data", {}).get("file_info")
+                    except ValueError:
+                        pass
+
         if not file_info:
             log_all(
                 f"⚠️ 官方 QQ Bot [{self.name}] 媒体上传响应缺少 file_info: {data}",
@@ -333,14 +363,14 @@ class QQOfficialBot:
     _send_c2c_text = send_private_text
     _send_group_text = send_group_text
 
-    async def send_media_file(self, scope: str, target_openid: str, media_type: str, content: bytes) -> bool:
+    async def send_media_file(self, scope: str, target_openid: str, media_type: str, content: bytes, filename: str = "") -> bool:
         """向指定用户/群聊发送单张图片或视频媒体文件。scope: 'users' | 'groups'。"""
         if not content or not target_openid:
             return False
         async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
-            file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid)
+            file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid, filename=filename)
             if not file_info:
                 return False
             return await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid)
