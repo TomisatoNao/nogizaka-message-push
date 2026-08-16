@@ -15,7 +15,73 @@ _MEDIA_FILE_TYPES = {
     "image": 1,
     "video": 2,
     "record": 3,
+    "file": 4,
 }
+
+
+def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 1024)) -> bytes:
+    """如果视频体积超过腾讯开放平台直传限制(8MB)，自动通过 ffmpeg 动态计算码率快速压制。"""
+    if not content or len(content) <= max_bytes:
+        return content
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    ffmpeg = shutil.which("ffmpeg") or ""
+    if not ffmpeg and os.path.exists(r"D:\Scoop\User\apps\ffmpeg\current\bin\ffmpeg.EXE"):
+        ffmpeg = r"D:\Scoop\User\apps\ffmpeg\current\bin\ffmpeg.EXE"
+    if not ffmpeg:
+        return content
+
+    ffprobe = shutil.which("ffprobe") or ""
+    if not ffprobe and os.path.exists(r"D:\Scoop\User\apps\ffmpeg\current\bin\ffprobe.EXE"):
+        ffprobe = r"D:\Scoop\User\apps\ffmpeg\current\bin\ffprobe.EXE"
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as in_f:
+        in_f.write(content)
+        in_f_path = in_f.name
+
+    out_f_path = in_f_path + ".compressed.mp4"
+    try:
+        dur = 30.0
+        if ffprobe:
+            try:
+                probe_cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration",
+                             "-of", "default=noprint_wrappers=1:nokey=1", in_f_path]
+                res = subprocess.check_output(probe_cmd, timeout=10).decode("utf-8").strip()
+                if res:
+                    dur = max(1.0, float(res))
+            except Exception:
+                pass
+
+        target_bitrate_k = max(200, int((max_bytes * 0.85 * 8) / dur / 1000))
+        video_bitrate_k = max(150, target_bitrate_k - 64)
+
+        cmd = [
+            ffmpeg, "-y", "-i", in_f_path,
+            "-c:v", "libx264", "-b:v", f"{video_bitrate_k}k",
+            "-maxrate", f"{int(video_bitrate_k * 1.25)}k",
+            "-bufsize", f"{int(video_bitrate_k * 2)}k",
+            "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "64k", out_f_path
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=60, check=False)
+        if os.path.exists(out_f_path) and os.path.getsize(out_f_path) > 0:
+            with open(out_f_path, "rb") as out_f:
+                compressed = out_f.read()
+            if len(compressed) < len(content):
+                log_all(f"🎬 视频体积较大 ({len(content)/1024/1024:.1f}MB)，已自动压制至 {len(compressed)/1024/1024:.1f}MB 以适配 QQ 上传限制", is_debug=True)
+                return compressed
+    except Exception as ex:
+        log_all(f"⚠️ 视频自动压制异常: {ex}", is_debug=True)
+    finally:
+        for p in (in_f_path, out_f_path):
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except OSError:
+                pass
+    return content
 
 
 # ──────────────────────────────────────────────
@@ -230,6 +296,10 @@ class QQOfficialBot:
                             filename: str = "") -> str | None:
         if not await self.ensure_access_token():
             return None
+
+        # 若视频体积超过腾讯开放平台 8MB 直接上传限制，自动压制适配
+        if media_type == "video" and len(content) > int(7.8 * 1024 * 1024):
+            content = _compress_video_if_needed(content)
 
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
         size_bytes = len(content) if content else 0

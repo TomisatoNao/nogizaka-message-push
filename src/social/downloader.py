@@ -133,13 +133,10 @@ class MediaDownloader:
         if (unresolved or not post.media) and source_url:
             log.info(f"[download] 使用 yt-dlp 兜底下载 {post.platform} 原始链接: {source_url}")
             try:
-                outtmpl = os.path.join(dest_dir, f"{safe_name(post.post_id)}%(autonumber)s.%(ext)s")
+                outtmpl = f"{safe_name(post.post_id)}%(autonumber)s.%(ext)s"
                 downloaded_files = self.download_via_ytdlp(source_url, dest_dir, outtmpl=outtmpl)
                 if not downloaded_files:
-                    downloaded_files = [
-                        os.path.join(dest_dir, f) for f in sorted(os.listdir(dest_dir))
-                        if _is_media_file(os.path.join(dest_dir, f)) and os.path.getsize(os.path.join(dest_dir, f)) > 0
-                    ]
+                    downloaded_files = _list_media(dest_dir)
                 if downloaded_files:
                     if not post.media:
                         for fpath in downloaded_files:
@@ -489,7 +486,10 @@ class MediaDownloader:
 
         opts = self.base_ydl_opts(platform_cfg)
         opts["paths"] = {"home": dest_dir}
-        opts["outtmpl"] = outtmpl or "%(id)s_%(playlist_index|0)s.%(ext)s"
+        tmpl = outtmpl or "%(id)s_%(playlist_index|0)s.%(ext)s"
+        if os.path.isabs(tmpl) or dest_dir in tmpl:
+            tmpl = os.path.basename(tmpl)
+        opts["outtmpl"] = tmpl
         if extra_opts:
             opts.update(extra_opts)
 
@@ -517,16 +517,17 @@ class MediaDownloader:
 
 
 def _list_media(d: str) -> list[str]:
-    """列出目录内的媒体文件（跳过 .part 等中间产物）。"""
+    """列出目录内的媒体文件（跳过 .part 等中间产物，支持递归查找）。"""
     out = []
     try:
-        for name in os.listdir(d):
-            fp = os.path.join(d, name)
-            if _is_media_file(fp) and os.path.getsize(fp) > 0:
-                out.append(os.path.abspath(fp))
+        for root, _, files in os.walk(d):
+            for name in files:
+                fp = os.path.join(root, name)
+                if _is_media_file(fp) and os.path.getsize(fp) > 0:
+                    out.append(os.path.abspath(fp))
     except OSError:
         pass
-    return out
+    return sorted(out)
 
 
 def _short(e: Exception, limit: int = 200) -> str:
