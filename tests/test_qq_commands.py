@@ -180,6 +180,18 @@ def main() -> None:
         asyncio.run(_check_listener_sync(cfg))
         print("✅ Test 5 通过\n")
 
+        # ── Test 6: 社交媒体链接识别 ─────────────────────
+        print("=== Test 6: 社交媒体链接识别 ===")
+        cfg.QQ_OFFICIAL_BOTS.clear()
+        cfg.QQ_OFFICIAL_BOTS.append({"app_id": "A1", "target_openid": ME})
+        cfg.QQ_COMMANDS_ALLOW = [ME]
+        assert qq_commands.handle("https://www.instagram.com/p/123456/", STRANGER) is None, "未授权用户不应响应"
+        res_link = qq_commands.handle("https://x.com/nogizaka46/status/123456", ME)
+        assert res_link and "社媒链接" in res_link, f"应识别 X 链接: {res_link}"
+        res_ins = qq_commands.handle("分享帖子：https://www.instagram.com/p/abcdef/ 看看", ME)
+        assert res_ins and "社媒链接" in res_ins, f"应识别 Ins 链接: {res_ins}"
+        print("✅ Test 6 通过\n")
+
     finally:
         cfg.ARCHIVE_DIR = saved["archive_dir"]
         cfg.ARCHIVE_ENABLED = saved["archive_enabled"]

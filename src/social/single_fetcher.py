@@ -387,7 +387,9 @@ def manual_push_social_url(
 
     # 翻译
     translated_text = None
-    if translate and post.text:
+    if not translate:
+        post.extra["_skip_translate"] = True
+    elif post.text:
         translated_text = forwarder._translate(post.text)
         if translated_text:
             post.extra["_translated"] = translated_text

@@ -1316,6 +1316,7 @@ async function loadConfig() {
     canCaptureOpenid = !!data.can_test_push;   // 与测试推送同为"内嵌模式"能力
     setDirty(false);
     renderAll();
+    loadPushTargets();
     msg("已载入 " + data.config_path, "ok");
   } catch (e) {
     msg("载入失败：" + e.message, "err");
@@ -3671,6 +3672,26 @@ $("btnToolSocialParse").addEventListener("click", async () => {
     loading.style.display = "none";
   }
 });
+
+async function loadPushTargets() {
+  const container = $("toolSocialChannelList");
+  if (!container) return;
+  try {
+    const res = await api("/api/social/push_targets");
+    if (!res || !res.ok || !res.targets || res.targets.length === 0) {
+      container.innerHTML = `<span style="font-size:12px; color:var(--muted);">⚠️ 当前未配置或未启用任何推送通道，可在下方通道设置中开启</span>`;
+      return;
+    }
+    container.innerHTML = res.targets.map(t => `
+      <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text); background:var(--card); padding:5px 10px; border-radius:6px; border:1px solid var(--border-soft);">
+        <input type="checkbox" name="toolSocialChannel" value="${t.id}" checked />
+        <span>${t.name}</span>
+      </label>
+    `).join("");
+  } catch (e) {
+    /* 忽略 */
+  }
+}
 
 $("btnToolSocialToggleAllChannels").addEventListener("click", () => {
   const cbs = document.querySelectorAll('input[name="toolSocialChannel"]');

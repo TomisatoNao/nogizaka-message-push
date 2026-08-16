@@ -233,7 +233,11 @@ async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
                         data = event.get("d") or {}
                         author = data.get("author") or {}
                         sender = author.get("user_openid", "")
-                        reply = on_message(data.get("content", ""), sender)
+                        content = data.get("content", "")
+                        try:
+                            reply = on_message(content, sender, app_id=app_id)
+                        except TypeError:
+                            reply = on_message(content, sender)
                         if reply:
                             await _reply(data, sender, reply, app_id, client_secret)
                 finally:

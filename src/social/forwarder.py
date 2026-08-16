@@ -95,22 +95,29 @@ class SocialForwarder:
 
     def forward_post(self, post: Post, target_channels: list[str] | None = None) -> None:
         """推送一条社交动态至各通道（支持定向通道列表）。"""
-        # 1. AI 翻译
-        translated = self._translate(post.text)
-        if translated:
-            post.extra["_translated"] = translated
+        # 1. AI 翻译（如明确跳过或已有翻译则不再调用）
+        skip_translate = post.extra.get("_skip_translate", False)
+        if skip_translate:
+            translated = None
+        else:
+            translated = post.extra.get("_translated")
+            if translated is None and post.text:
+                translated = self._translate(post.text)
+                if translated:
+                    post.extra["_translated"] = translated
 
         # 图片 alt 描述翻译
-        alts = collect_alts(post)
         alt_zh: dict = {}
-        for idx, text in alts:
-            zh = self._translate(text)
-            if zh:
-                alt_zh[idx] = zh
-        if alts:
-            post.extra["_alt_texts"] = {str(i): t for i, t in alts}
-            if alt_zh:
-                post.extra["_alt_translated"] = {str(i): v for i, v in alt_zh.items()}
+        if not skip_translate:
+            alts = collect_alts(post)
+            for idx, text in alts:
+                zh = self._translate(text)
+                if zh:
+                    alt_zh[idx] = zh
+            if alts:
+                post.extra["_alt_texts"] = {str(i): t for i, t in alts}
+                if alt_zh:
+                    post.extra["_alt_translated"] = {str(i): v for i, v in alt_zh.items()}
 
         # 2. 生成消息文本
         is_raw = bool(post.extra.get("raw_message"))
@@ -220,9 +227,29 @@ class SocialForwarder:
                 try:
                     bots = qq_official.get_configured_bots()
                     for bot in bots:
+                        send_private = bool(bot.target_openid)
+                        send_group = bool(getattr(bot, "group_openid", None))
+
                         if target_channels:
-                            off_matches = [c for c in target_channels if c == "qq_official" or c == f"official:{bot.name}" or c == f"official:{bot.app_id}" or (bot.group_openid and c == f"official:{bot.group_openid}")]
-                            if not off_matches:
+                            priv_keys = {
+                                "qq_official",
+                                f"official:{bot.name}",
+                                f"official:{bot.name}:private",
+                                f"official:{bot.app_id}",
+                                f"official:{bot.app_id}:private",
+                                f"official:{bot.target_openid}",
+                            }
+                            grp_keys = {
+                                "qq_official",
+                                f"official:{bot.name}",
+                                f"official:{bot.name}:group",
+                                f"official:{bot.app_id}",
+                                f"official:{bot.app_id}:group",
+                                f"official:{getattr(bot, 'group_openid', '')}",
+                            }
+                            send_private = send_private and any(k in target_channels for k in priv_keys if k)
+                            send_group = send_group and any(k in target_channels for k in grp_keys if k)
+                            if not send_private and not send_group:
                                 continue
                         else:
                             # 1) 平台开关校验
@@ -235,10 +262,10 @@ class SocialForwarder:
                             if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
                                 continue
 
-                        if bot.target_openid:
+                        if send_private and bot.target_openid:
                             await bot.send_private_text(bot.target_openid, full_text)
                             any_success = True
-                        if getattr(bot, "group_openid", None):
+                        if send_group and getattr(bot, "group_openid", None):
                             await bot.send_group_text(bot.group_openid, full_text)
                             any_success = True
 
@@ -251,9 +278,9 @@ class SocialForwarder:
                                         m_bytes = mf.read()
                                     if m_bytes:
                                         m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
-                                        if bot.target_openid:
+                                        if send_private and bot.target_openid:
                                             await bot.send_media_file("users", bot.target_openid, m_type, m_bytes)
-                                        if getattr(bot, "group_openid", None):
+                                        if send_group and getattr(bot, "group_openid", None):
                                             await bot.send_media_file("groups", bot.group_openid, m_type, m_bytes)
                                 except Exception as ex:
                                     log_all(f"⚠️ QQ 官方 Bot 发送媒体异常: {ex}", is_error=True)

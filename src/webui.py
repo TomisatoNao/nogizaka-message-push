@@ -800,6 +800,76 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(state)
             return
 
+        if path == "/api/social/push_targets":
+            if not self._check_auth():
+                return
+            raw = _load_raw_config()
+            targets = []
+
+            # 1. QQ 官方机器人
+            if raw.get("enable_qq_official_bot"):
+                for b in raw.get("qq_official_bots") or []:
+                    bname = b.get("name") or b.get("app_id") or "official_bot"
+                    t_openid = (b.get("target_openid") or "").strip()
+                    g_openid = (b.get("group_openid") or "").strip()
+                    if t_openid:
+                        targets.append({
+                            "id": f"official:{bname}:private",
+                            "name": f"🤖 {bname} · 私聊 ({t_openid[:6]}...{t_openid[-4:] if len(t_openid) > 10 else ''})",
+                            "channel": "qq_official",
+                            "type": "private",
+                        })
+                    if g_openid:
+                        targets.append({
+                            "id": f"official:{bname}:group",
+                            "name": f"👥 {bname} · 群聊 ({g_openid[:6]}...{g_openid[-4:] if len(g_openid) > 10 else ''})",
+                            "channel": "qq_official",
+                            "type": "group",
+                        })
+
+            # 2. NapCat QQ
+            if raw.get("enable_napcat_qq"):
+                routes = raw.get("napcat_routes") or []
+                for r in routes:
+                    gid = str(r.get("group_id", "")).strip()
+                    if gid:
+                        targets.append({
+                            "id": f"napcat:{gid}",
+                            "name": f"🐾 NapCat · QQ群 {gid}",
+                            "channel": "napcat",
+                            "type": "group",
+                        })
+                if not routes:
+                    targets.append({
+                        "id": "napcat",
+                        "name": "🐾 NapCat QQ 群广播",
+                        "channel": "napcat",
+                        "type": "group",
+                    })
+
+            # 3. Telegram
+            if raw.get("enable_tg_bot"):
+                tg_bots = raw.get("tg_bots") or []
+                for b in tg_bots:
+                    bname = b.get("name") or b.get("target_chat") or "tg_bot"
+                    tchat = str(b.get("target_chat") or "").strip()
+                    targets.append({
+                        "id": f"tg:{tchat or bname}",
+                        "name": f"✈️ Telegram · {bname}" + (f" ({tchat})" if tchat and tchat != bname else ""),
+                        "channel": "tg",
+                        "type": "chat",
+                    })
+                if not tg_bots:
+                    targets.append({
+                        "id": "tg",
+                        "name": "✈️ Telegram 广播",
+                        "channel": "tg",
+                        "type": "chat",
+                    })
+
+            self._send_json({"ok": True, "targets": targets})
+            return
+
         if path == "/api/config/history":
             if not self._check_auth():
                 return

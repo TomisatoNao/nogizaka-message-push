@@ -8,6 +8,7 @@
 # ============================================================
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +17,10 @@ import config.config as cfg
 JST = timezone(timedelta(hours=9))
 MAX_REPLY_CHARS = 900        # 官方 Bot 单条消息上限保守值
 MAX_LIST_ITEMS = 5           # 列表类回复最多列几项
+
+_SOCIAL_URL_RE = re.compile(
+    r"https?://(?:www\.)?(?:twitter\.com|x\.com|instagram\.com|tiktok\.com|v\.douyin\.com)/[^\s]+"
+)
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -52,8 +57,10 @@ def _cmd_help(_args: str) -> str:
         "/latest [成员] [条数] — 最近消息（默认 3 条）\n"
         "/search 关键词 — 搜索归档（原文与译文）\n"
         "/stats — 归档统计\n"
-        "/help — 本帮助"
+        "/help — 本帮助\n"
+        "💡 提示：私聊直接发送 X / Instagram / TikTok 链接，Bot 将自动解析并回复原图/视频与 AI 双语翻译。"
     )
+
 
 
 def _cmd_status(_args: str) -> str:
@@ -232,11 +239,130 @@ def allowed_senders() -> set[str]:
             for b in cfg.QQ_OFFICIAL_BOTS if b.get("target_openid", "").strip()}
 
 
-def handle(text: str, sender_openid: str) -> str | None:
-    """解析并执行指令。返回回复文本；不是指令或无权限时返回 None。"""
+async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: str = ""):
+    """后台任务：解析社媒链接、下载多媒体、AI 翻译并直接私聊回复给发送者。"""
+    import os
+    from src.logger import log_all
+    try:
+        from src.social.single_fetcher import SocialUrlParser
+        from src.social.downloader import MediaDownloader
+        from src.social.forwarder import SocialForwarder, build_post_message
+        from src.platforms import qq_official
+
+        raw_cfg = cfg._load_config() if hasattr(cfg, "_load_config") else {}
+        parser = SocialUrlParser(raw_cfg)
+
+        # 1. 解析动态
+        post = parser.parse(url)
+
+        # 2. 媒体下载
+        downloader = MediaDownloader(raw_cfg)
+        downloader.download(post)
+
+        # 3. AI 翻译与构建文案
+        forwarder = SocialForwarder(raw_cfg, downloader)
+        translated = forwarder._translate(post.text) if post.text else None
+        if translated:
+            post.extra["_translated"] = translated
+
+        alts = post.alt_texts()
+        alt_zh = forwarder._translate_alts(alts) if alts else {}
+        full_text = build_post_message(post, translated, alt_zh)
+
+        # 4. 获取目标 Bot
+        bots = qq_official.get_configured_bots()
+        target_bot = None
+        if app_id:
+            for b in bots:
+                if b.app_id == app_id:
+                    target_bot = b
+                    break
+        if not target_bot and bots:
+            target_bot = bots[0]
+
+        if not target_bot:
+            log_all("⚠️ [社媒私聊解析] 未找到可用的 QQ 官方 Bot 实例", is_error=True)
+            return
+
+        # 5. 回复正文（包含标题、原帖正文与双语翻译）
+        await target_bot.send_private_text(sender_openid, full_text)
+
+        # 6. 回复所有高清图片 / 视频媒体附件
+        for m in post.media:
+            fp = m.local_path
+            if fp and os.path.exists(fp):
+                try:
+                    with open(fp, "rb") as mf:
+                        m_bytes = mf.read()
+                    if m_bytes:
+                        m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
+                        await target_bot.send_media_file("users", sender_openid, m_type, m_bytes)
+                except Exception as ex:
+                    log_all(f"⚠️ [社媒私聊解析] 发送媒体附件异常: {ex}", is_error=True)
+
+        # 7. 归档至数据库
+        try:
+            from src.social.archive import get_archive_db
+            db = get_archive_db()
+            db.save_post(post)
+        except Exception as ex:
+            log_all(f"⚠️ [社媒归档] 保存失败: {ex}", is_error=True)
+
+        log_all(f"✅ [社媒私聊解析] 成功向用户 {sender_openid[:8]}… 回复 {post.platform} 动态: {post.author}")
+
+    except Exception as e:
+        log_all(f"⚠️ [社媒私聊解析] 失败: {e}", is_error=True)
+        try:
+            from src.platforms import qq_official
+            bots = qq_official.get_configured_bots()
+            if bots:
+                await bots[0].send_private_text(sender_openid, f"❌ 社媒链接解析失败: {e}")
+        except Exception:
+            pass
+
+
+def _trigger_social_reply_task(url: str, sender_openid: str, app_id: str = "") -> None:
+    """在当前 loop 或后台线程中触发解析与回复任务。"""
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        loop.create_task(_async_parse_and_reply_social(url, sender_openid, app_id))
+    else:
+        import threading
+        t = threading.Thread(
+            target=lambda: asyncio.run(_async_parse_and_reply_social(url, sender_openid, app_id)),
+            daemon=True,
+        )
+        t.start()
+
+
+def handle(text: str, sender_openid: str, app_id: str = "") -> str | None:
+    """解析并执行指令或社媒链接解析。返回回复文本；不是指令/链接或无权限时返回 None。"""
     from src.logger import log_all
 
     content = (text or "").strip()
+    if not content:
+        return None
+
+    # 1. 识别是否包含社媒链接
+    social_match = _SOCIAL_URL_RE.search(content)
+    if social_match:
+        allow = allowed_senders()
+        if not allow or sender_openid not in allow:
+            log_all(f"🔒 拒绝未授权的社媒解析请求: {_clip(content, 40)}（来自 {sender_openid[:12]}…）",
+                    is_error=True)
+            return None
+
+        url = social_match.group(0)
+        _trigger_social_reply_task(url, sender_openid, app_id)
+        log_all(f"🤖 [社媒私聊解析] 收到来自 {sender_openid[:8]}… 的社媒链接: {url[:50]}")
+        return "🔍 已识别社媒链接，正在解析、提取原图/视频与 AI 翻译并回复给您…"
+
+    # 2. 识别是否为 / 指令
     if not content.startswith("/"):
         return None
 
@@ -265,3 +391,4 @@ def _clip_reply(text: str) -> str:
     if len(text) <= MAX_REPLY_CHARS:
         return text
     return text[:MAX_REPLY_CHARS - 20] + "\n…（内容过长已截断）"
+
