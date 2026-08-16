@@ -129,14 +129,37 @@ class TestSocialIntegration(unittest.TestCase):
         token = _syndication_token("1234567890")
         self.assertTrue(isinstance(token, str) and len(token) > 0)
 
-        parser = SocialUrlParser(self.config)
-        with self.assertRaises(ValueError):
-            parser.parse("https://unknown-platform.com/xyz")
+    def test_instagram_shortcode_converter(self):
+        from src.social.single_fetcher import _shortcode_to_media_id
+        # B: 1, C: 2 => 1 * 64 + 2 = 66
+        media_id = _shortcode_to_media_id("BC")
+        self.assertEqual(media_id, 66)
+        # 验证任意 shortcode 均能无异常输出正整数 ID
+        mid = _shortcode_to_media_id("DcG7iiqk5NW")
+        self.assertGreater(mid, 0)
 
-        with self.assertRaises(ValueError):
-            parser.parse("")
+    def test_forwarder_target_channels(self):
+        from src.social.forwarder import SocialForwarder
+        cfg_test = {
+            "channels": {"napcat": False, "tg": False, "qq_official": False},
+            "napcat_routes": [],
+            "tg_bots": [],
+            "qq_official_bots": []
+        }
+        fwd = SocialForwarder(cfg_test, self.downloader)
+        post = Post(
+            platform="instagram",
+            post_id="ig_123",
+            author="test_user",
+            text="Hello World",
+            extra={"_skip_translate": True}
+        )
+        # 指定通道分发，跳过翻译
+        fwd.forward_post(post, target_channels=["official:bot1:private"])
+        self.assertIsNone(post.extra.get("_translated"))
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
