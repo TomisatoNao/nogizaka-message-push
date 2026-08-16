@@ -58,6 +58,12 @@ class QQOfficialBot:
         self._token_expire_at: float = 0.0
         self._last_send_ts: float = 0.0
 
+    def _get_lock(self) -> asyncio.Lock:
+        """获取或惰性创建与当前事件循环绑定的协程锁。"""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
     def initialize(self, client: httpx.AsyncClient) -> None:
         """注入共享的 AsyncClient 实例，并创建串行化锁。"""
         self._client = client
@@ -203,7 +209,7 @@ class QQOfficialBot:
         if not text.strip():
             return False
 
-        async with self._lock:
+        async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
 
@@ -269,7 +275,7 @@ class QQOfficialBot:
                           message_chain: list[dict],
                           media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
         """共享的链式发送核心：文字 + 媒体。scope='users'|'groups'。"""
-        async with self._lock:
+        async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
 
@@ -307,7 +313,7 @@ class QQOfficialBot:
         """向指定群聊发送纯文本消息。"""
         if not text.strip():
             return False
-        async with self._lock:
+        async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
             url = f"{self._target_base('groups', group_openid)}/messages"
@@ -317,7 +323,7 @@ class QQOfficialBot:
         """向指定用户发送纯文本消息。"""
         if not text.strip():
             return False
-        async with self._lock:
+        async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
             url = f"{self._target_base('users', target_openid)}/messages"
@@ -331,7 +337,7 @@ class QQOfficialBot:
         """向指定用户/群聊发送单张图片或视频媒体文件。scope: 'users' | 'groups'。"""
         if not content or not target_openid:
             return False
-        async with self._lock:
+        async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
             file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid)
@@ -392,7 +398,7 @@ class QQOfficialBot:
             parts.append(buf)
             
         all_ok = True
-        async with self._lock:
+        async with self._get_lock():
             if not await self.ensure_access_token():
                 return False
             url = f"{self._target_base(scope, target_openid)}/messages"

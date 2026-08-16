@@ -400,9 +400,8 @@ def manual_push_social_url(
     # 归档到 SQLite（若开启）
     if archive:
         try:
-            from src.social.archive import get_archive_db
-            db = get_archive_db()
-            db.save_post(post)
+            from src.social.archive import get_archive
+            get_archive().add_post(post)
         except Exception as e:
             log.warning("[社媒归档] 保存失败: %s", e)
 

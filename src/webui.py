@@ -806,8 +806,13 @@ class _Handler(BaseHTTPRequestHandler):
             raw = _load_raw_config()
             targets = []
 
+            ch = raw.get("channels") or {}
+            enable_qq = ch.get("qq_official", raw.get("enable_qq_official_bot", True))
+            enable_nap = ch.get("napcat", raw.get("enable_napcat_qq", False))
+            enable_tg = ch.get("tg", raw.get("enable_tg_bot", False))
+
             # 1. QQ 官方机器人
-            if raw.get("enable_qq_official_bot"):
+            if enable_qq:
                 for b in raw.get("qq_official_bots") or []:
                     bname = b.get("name") or b.get("app_id") or "official_bot"
                     t_openid = (b.get("target_openid") or "").strip()
@@ -828,7 +833,7 @@ class _Handler(BaseHTTPRequestHandler):
                         })
 
             # 2. NapCat QQ
-            if raw.get("enable_napcat_qq"):
+            if enable_nap:
                 routes = raw.get("napcat_routes") or []
                 for r in routes:
                     gid = str(r.get("group_id", "")).strip()
@@ -848,7 +853,7 @@ class _Handler(BaseHTTPRequestHandler):
                     })
 
             # 3. Telegram
-            if raw.get("enable_tg_bot"):
+            if enable_tg:
                 tg_bots = raw.get("tg_bots") or []
                 for b in tg_bots:
                     bname = b.get("name") or b.get("target_chat") or "tg_bot"

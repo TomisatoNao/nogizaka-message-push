@@ -246,7 +246,7 @@ async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: st
     try:
         from src.social.single_fetcher import SocialUrlParser
         from src.social.downloader import MediaDownloader
-        from src.social.forwarder import SocialForwarder, build_post_message
+        from src.social.forwarder import SocialForwarder, build_post_message, collect_alts
         from src.platforms import qq_official
 
         raw_cfg = cfg._load_config() if hasattr(cfg, "_load_config") else {}
@@ -265,8 +265,17 @@ async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: st
         if translated:
             post.extra["_translated"] = translated
 
-        alts = post.alt_texts()
-        alt_zh = forwarder._translate_alts(alts) if alts else {}
+        alts = collect_alts(post)
+        alt_zh: dict = {}
+        for idx, text in alts:
+            zh = forwarder._translate(text)
+            if zh:
+                alt_zh[idx] = zh
+        if alts:
+            post.extra["_alt_texts"] = {str(i): t for i, t in alts}
+            if alt_zh:
+                post.extra["_alt_translated"] = {str(i): v for i, v in alt_zh.items()}
+
         full_text = build_post_message(post, translated, alt_zh)
 
         # 4. 获取目标 Bot
@@ -279,6 +288,19 @@ async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: st
                     break
         if not target_bot and bots:
             target_bot = bots[0]
+
+        # 若未提前注册，从配置动态构造
+        if not target_bot:
+            for b_cfg in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
+                if not app_id or b_cfg.get("app_id") == app_id:
+                    target_bot = qq_official.QQOfficialBot(
+                        name=b_cfg.get("name", "official_bot"),
+                        app_id=b_cfg.get("app_id", ""),
+                        client_secret=b_cfg.get("client_secret", ""),
+                        target_openid=b_cfg.get("target_openid", ""),
+                        group_openid=b_cfg.get("group_openid", ""),
+                    )
+                    break
 
         if not target_bot:
             log_all("⚠️ [社媒私聊解析] 未找到可用的 QQ 官方 Bot 实例", is_error=True)
@@ -302,9 +324,8 @@ async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: st
 
         # 7. 归档至数据库
         try:
-            from src.social.archive import get_archive_db
-            db = get_archive_db()
-            db.save_post(post)
+            from src.social.archive import get_archive
+            get_archive().add_post(post)
         except Exception as ex:
             log_all(f"⚠️ [社媒归档] 保存失败: {ex}", is_error=True)
 
