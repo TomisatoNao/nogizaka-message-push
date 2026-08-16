@@ -291,15 +291,128 @@ class QQOfficialBot:
         """scope: 'users' | 'groups'。构造 v2 目标基础 URL。"""
         return f"{cfg.QQ_OFFICIAL_API_BASE}/v2/{scope}/{target_openid}"
 
+    async def _upload_media_chunked(self, media_type: str, content: bytes,
+                                    *, scope: str = "users", target_openid: str | None = None,
+                                    filename: str = "") -> str | None:
+        """使用腾讯开放平台官方分片上传 (upload_prepare -> PUT -> upload_part_finish -> files 合并)。"""
+        if not await self.ensure_access_token():
+            return None
+
+        file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
+        openid = target_openid or self.target_openid
+        size_bytes = len(content)
+
+        import hashlib
+        f_md5 = hashlib.md5(content).hexdigest()
+        f_sha1 = hashlib.sha1(content).hexdigest()
+        f_md5_10m = hashlib.md5(content[:10002432]).hexdigest()
+
+        prep_url = f"{self._target_base(scope, openid)}/upload_prepare"
+        prep_payload = {
+            "file_type": file_type,
+            "file_size": str(size_bytes),
+            "file_name": filename or f"media_{int(time.time())}.mp4",
+            "md5": f_md5,
+            "sha1": f_sha1,
+            "md5_10m": f_md5_10m,
+        }
+
+        resp = await self._post_json(prep_url, prep_payload)
+        if not resp or resp.status_code != 200:
+            log_all(f"⚠️ 官方 QQ Bot [{self.name}] upload_prepare 失败", is_debug=True)
+            return None
+
+        try:
+            prep_data = resp.json()
+            upload_id = prep_data.get("upload_id")
+            parts = prep_data.get("parts") or []
+        except Exception as ex:
+            log_all(f"⚠️ 官方 QQ Bot [{self.name}] 解析 upload_prepare 异常: {ex}", is_debug=True)
+            return None
+
+        if not upload_id or not parts:
+            log_all(f"⚠️ 官方 QQ Bot [{self.name}] upload_prepare 未返回有效 parts", is_debug=True)
+            return None
+
+        log_all(f"📤 官方 QQ Bot [{self.name}] 启动分片上传 (共 {len(parts)} 片, {size_bytes/1024/1024:.1f}MB)", is_debug=True)
+
+        offset = 0
+        loop = asyncio.get_running_loop()
+        import requests
+
+        def _sync_put(url: str, chunk_data: bytes) -> bool:
+            try:
+                res = requests.put(url, data=chunk_data, timeout=90)
+                return res.status_code in (200, 204)
+            except Exception as ex:
+                log_all(f"⚠️ PUT 分片失败: {ex}", is_debug=True)
+                return False
+
+        for p in parts:
+            p_idx = p["index"]
+            p_url = p["presigned_url"]
+            p_size = int(p["block_size"])
+            chunk = content[offset : offset + p_size]
+            offset += p_size
+
+            put_ok = await loop.run_in_executor(None, _sync_put, p_url, chunk)
+            if not put_ok:
+                log_all(f"⚠️ 官方 QQ Bot [{self.name}] 分片 {p_idx} PUT 上传失败", is_error=True)
+                return None
+
+            finish_url = f"{self._target_base(scope, openid)}/upload_part_finish"
+            finish_payload = {
+                "upload_id": upload_id,
+                "part_index": p_idx,
+                "block_size": str(len(chunk)),
+                "md5": hashlib.md5(chunk).hexdigest(),
+            }
+            finish_resp = await self._post_json(finish_url, finish_payload)
+            if not finish_resp or finish_resp.status_code != 200:
+                log_all(f"⚠️ 官方 QQ Bot [{self.name}] 分片 {p_idx} upload_part_finish 失败", is_error=True)
+                return None
+
+        merge_url = f"{self._target_base(scope, openid)}/files"
+        merge_payload = {
+            "file_type": file_type,
+            "upload_id": upload_id,
+            "file_name": filename or f"media_{int(time.time())}.mp4",
+            "srv_send_msg": False,
+        }
+        merge_resp = await self._post_json(merge_url, merge_payload)
+        if not merge_resp or merge_resp.status_code != 200:
+            log_all(f"⚠️ 官方 QQ Bot [{self.name}] 分片合并失败", is_error=True)
+            return None
+
+        try:
+            merge_data = merge_resp.json()
+            file_info = merge_data.get("file_info") or merge_data.get("data", {}).get("file_info")
+            if file_info:
+                log_all(f"✅ 官方 QQ Bot [{self.name}] 大文件分片上传合并成功 ({size_bytes/1024/1024:.1f}MB)", is_debug=True)
+                return file_info
+        except Exception as ex:
+            log_all(f"⚠️ 官方 QQ Bot [{self.name}] 解析合并响应异常: {ex}", is_error=True)
+        return None
+
     async def _upload_media(self, media_type: str, content: bytes,
                             *, scope: str = "users", target_openid: str | None = None,
                             filename: str = "") -> str | None:
         if not await self.ensure_access_token():
             return None
 
-        # 若视频体积超过腾讯开放平台 8MB 直接上传限制，自动压制适配
-        if media_type == "video" and len(content) > int(7.8 * 1024 * 1024):
-            content = _compress_video_if_needed(content)
+        size_bytes = len(content) if content else 0
+
+        # 如果文件大于 7.8MB，优先使用官方分片上传（保持 100% 原画质，最大支持 200MB）
+        if size_bytes > int(7.8 * 1024 * 1024):
+            file_info = await self._upload_media_chunked(
+                media_type, content, scope=scope, target_openid=target_openid, filename=filename
+            )
+            if file_info:
+                return file_info
+            log_all(f"⚠️ 官方 QQ Bot [{self.name}] 分片上传未成功，降级尝试压制后直传", is_debug=True)
+            if media_type == "video":
+                content = _compress_video_if_needed(content)
+                size_bytes = len(content)
 
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
         size_bytes = len(content) if content else 0
