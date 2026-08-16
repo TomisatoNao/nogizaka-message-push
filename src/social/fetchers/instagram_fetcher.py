@@ -591,7 +591,8 @@ class InstagramFetcher(SocialFetcher):
         """
         self._warm_session()   # 幂等；直接调用本方法时也能带上登录态
         entries: list[dict] = []
-        has_session = bool(self.cfg.get("cookies_file")
+        has_session = bool(self._session.cookies.get("sessionid")
+                           or self.cfg.get("cookies_file")
                            or self.cfg.get("cookies_from_browser"))
         if has_session:
             try:
