@@ -102,7 +102,8 @@ class MediaDownloader:
     def download(self, post) -> None:
         """为 Post 对象下载所有尚未下载的媒体（填充 local_path）。"""
         from src.social.live_recorder import safe_name
-        
+        from src.social.models import MediaItem
+
         media_root = self._cfg.get("download_dir", "data/social_media")
         acc = post.extra.get("account") or post.extra.get("username") or post.author or "manual"
         dest_dir = os.path.join(media_root, safe_name(post.platform), safe_name(acc), safe_name(post.post_id))
@@ -118,14 +119,46 @@ class MediaDownloader:
             dest_file = os.path.join(dest_dir, f"{safe_name(post.post_id)}_{idx+1}{ext}")
             tasks.append((m.url, dest_file, m))
 
-        if not tasks:
-            return
+        # 优先使用 requests 直链下载（图片和一般直链速度最快）
+        if tasks and post.platform not in ("tiktok", "douyin"):
+            download_tasks = [(url, dest) for url, dest, _ in tasks]
+            self.download_many(download_tasks)
+            for _, dest_file, m in tasks:
+                if os.path.exists(dest_file) and os.path.getsize(dest_file) > 0:
+                    m.local_path = os.path.abspath(dest_file)
 
-        download_tasks = [(url, dest) for url, dest, _ in tasks]
-        self.download_many(download_tasks)
-        for _, dest_file, m in tasks:
-            if os.path.exists(dest_file):
-                m.local_path = os.path.abspath(dest_file)
+        # 若仍有未下载成功的媒体（例如 TikTok / 抖音等需要会话签名的视频直链 403，或直接为视频）
+        unresolved = [m for m in post.media if not (m.local_path and os.path.exists(m.local_path))]
+        source_url = post.extra.get("source_url") or getattr(post, "url", "")
+        if (unresolved or not post.media) and source_url:
+            log.info(f"[download] 使用 yt-dlp 兜底下载 {post.platform} 原始链接: {source_url}")
+            try:
+                outtmpl = os.path.join(dest_dir, f"{safe_name(post.post_id)}%(autonumber)s.%(ext)s")
+                downloaded_files = self.download_via_ytdlp(source_url, dest_dir, outtmpl=outtmpl)
+                if not downloaded_files:
+                    downloaded_files = [
+                        os.path.join(dest_dir, f) for f in sorted(os.listdir(dest_dir))
+                        if _is_media_file(os.path.join(dest_dir, f)) and os.path.getsize(os.path.join(dest_dir, f)) > 0
+                    ]
+                if downloaded_files:
+                    if not post.media:
+                        for fpath in downloaded_files:
+                            mtype = classify_media(fpath)
+                            post.media.append(MediaItem(type=mtype, url="", local_path=os.path.abspath(fpath)))
+                    else:
+                        for idx, m in enumerate(post.media):
+                            if not (m.local_path and os.path.exists(m.local_path)):
+                                if idx < len(downloaded_files):
+                                    m.local_path = os.path.abspath(downloaded_files[idx])
+                                elif downloaded_files:
+                                    m.local_path = os.path.abspath(downloaded_files[0])
+            except Exception as e:
+                log.warning(f"[download] yt-dlp 兜底下载失败: {e}")
+
+        # 移动端兼容性检查与转码
+        downloaded_paths = [m.local_path for m in post.media if m.local_path and os.path.exists(m.local_path)]
+        if downloaded_paths:
+            self.ensure_mobile_video_compatibility(downloaded_paths)
 
     # ── 配置读取（每次读取，配置热更新即时生效）──────────
 
@@ -370,13 +403,17 @@ class MediaDownloader:
             "ignoreerrors": False,
             "noplaylist": False,
             # 最高画质视频 + 最佳音轨，回退到单一最佳流
-            "format": "bv*+ba/b",
+            "format": "bv*+ba/best[ext=mp4]/best",
             "merge_output_format": "mp4",
             "socket_timeout": int(cfg.get("ytdlp_socket_timeout", 30)),
             "retries": self.retry_times,
             "fragment_retries": self.retry_times,
             "extractor_retries": self.retry_times,
-            "http_headers": {"User-Agent": _UA},
+            "http_headers": {
+                "User-Agent": _UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7",
+            },
             "writethumbnail": False,
             "writeinfojson": False,
             "overwrites": False,

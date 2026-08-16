@@ -103,17 +103,18 @@ class SocialUrlParser:
 
         # 1. 判定 X / Twitter
         if "twitter.com" in url or "x.com" in url or "vxtwitter.com" in url or "fixupx.com" in url:
-            return self._parse_x(url)
-
+            post = self._parse_x(url)
         # 2. 判定 Instagram
-        if "instagram.com" in url:
-            return self._parse_instagram(url)
+        elif "instagram.com" in url:
+            post = self._parse_instagram(url)
+        # 3. 判定 TikTok / 抖音
+        elif "tiktok.com" in url or "douyin.com" in url:
+            post = self._parse_tiktok(url)
+        else:
+            raise ValueError("不支持的平台链接，仅支持 X (Twitter)、Instagram、TikTok 或 抖音")
 
-        # 3. 判定 TikTok
-        if "tiktok.com" in url:
-            return self._parse_tiktok(url)
-
-        raise ValueError("不支持的平台链接，仅支持 X (Twitter)、Instagram 或 TikTok")
+        post.extra["source_url"] = url
+        return post
 
     def _parse_x(self, url: str) -> Post:
         m = re.search(r"status/(\d+)", url)
