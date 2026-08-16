@@ -28,3 +28,7 @@ docker-compose.yml
 
 # Git worktrees
 .worktrees/
+
+# AI 设计与开发过程文档
+docs/
+
