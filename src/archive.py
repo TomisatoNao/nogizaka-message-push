@@ -189,16 +189,22 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
 
 
 def sync_all_to_sqlite() -> int:
-    """自动扫描磁盘下所有历史归档 JSON，批量全量同步导入 SQLite 数据库。"""
+    """自动扫描磁盘下所有历史归档 JSON，高性能单事务批量全量同步导入 SQLite 数据库。"""
     root = archive_root()
     if not root.is_dir():
         return 0
 
-    total_count = 0
+    conn = init_db()
+    if not conn:
+        return 0
+
+    all_rows = []
+    fts_rows = []
     for member_dir in root.iterdir():
         if not member_dir.is_dir():
             continue
         m_name = member_dir.name
+        m_dirname = member_dir_name(m_name)
         for year_dir in member_dir.iterdir():
             if not year_dir.is_dir() or not year_dir.name.isdigit():
                 continue
@@ -214,14 +220,49 @@ def sync_all_to_sqlite() -> int:
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
                         msgs = json.load(f)
-                    if msgs:
-                        _save_msgs_to_sqlite(m_name, year, month, msgs)
-                        total_count += len(msgs)
+                    for msg in msgs:
+                        rid = str(msg.get("id", ""))
+                        if not rid:
+                            continue
+                        txt = msg.get("text") or ""
+                        trans = msg.get("_translation") or ""
+                        tags = (msg.get("_tags") or "") + " " + (msg.get("_custom_tags") or "")
+                        loc_file = msg.get("_local_file") or ""
+                        pub_at = msg.get("published_at") or msg.get("updated_at") or ""
+                        upd_at = msg.get("updated_at") or pub_at
+                        msg_type = msg.get("type") or "text"
+                        raw = json.dumps(msg, ensure_ascii=False)
+
+                        all_rows.append((rid, m_name, m_dirname, year, month, msg_type, pub_at, upd_at, txt, trans, tags, loc_file, raw))
+                        if _has_fts5:
+                            fts_rows.append((rid, m_dirname, m_name, txt, trans, tags))
                 except Exception as e:
                     log_all(f"⚠️ 无法同步归档 {json_path}: {e}", is_error=True)
 
-    log_all(f"💾 SQLite 归档全量同步完成，共计同步 {total_count} 条记录")
-    return total_count
+    if all_rows:
+        try:
+            with conn:
+                conn.executemany("""
+                    INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, updated_at, text, translation, tags, local_file, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        member_name=excluded.member_name,
+                        translation=excluded.translation,
+                        tags=excluded.tags,
+                        local_file=excluded.local_file,
+                        raw_json=excluded.raw_json;
+                """, all_rows)
+                if _has_fts5 and fts_rows:
+                    conn.executemany("DELETE FROM messages_fts WHERE id = ?;", [(r[0],) for r in fts_rows])
+                    conn.executemany("""
+                        INSERT INTO messages_fts (id, member_dir, member_name, text, translation, tags)
+                        VALUES (?, ?, ?, ?, ?, ?);
+                    """, fts_rows)
+        except Exception as e:
+            log_all(f"⚠️ SQLite 批量全量保存失败: {e}", is_error=True)
+
+    log_all(f"💾 SQLite 归档全量同步完成，共计同步 {len(all_rows)} 条记录")
+    return len(all_rows)
 
 
 def initialize(client: httpx.AsyncClient) -> None:

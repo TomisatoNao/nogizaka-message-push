@@ -22,7 +22,7 @@ async def _check_listener_sync(cfg) -> None:
 
     started: list[tuple[str, str]] = []
 
-    async def fake_listen(app_id, secret, _on_message):
+    async def fake_listen(app_id, secret, _on_message, *args, **kwargs):
         started.append((app_id, secret))
         await asyncio.sleep(3600)
 

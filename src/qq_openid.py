@@ -176,10 +176,10 @@ async def listen_once(app_id: str, client_secret: str,
             hb.cancel()
 
 
-async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
+async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: str = "") -> None:
     """长期监听 Bot 网关的私聊消息（指令功能用），断线自动重连。
 
-    on_message(text, sender_openid) -> str | None，返回非空则作为回复发送。
+    on_message(text, sender_openid, app_id) -> str | None，返回非空则作为回复发送。
     """
     from src.logger import log_all
     try:
@@ -188,7 +188,9 @@ async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
         log_all("⚠️ 缺少 websockets 依赖，官方 Bot 指令功能不可用", is_error=True)
         return
 
+    label = f"[{bot_name}] " if bot_name else f"[{app_id[:6]}...] " if app_id else ""
     backoff = 5
+    first_connect = True
     while True:
         try:
             async with httpx.AsyncClient() as client:
@@ -211,7 +213,11 @@ async def listen_forever(app_id: str, client_secret: str, on_message) -> None:
                                            "$device": "sakamichi"},
                         },
                     }))
-                    log_all("🤖 官方 Bot 指令监听已连接")
+                    if first_connect:
+                        log_all(f"🤖 官方 Bot {label}指令监听已连接")
+                        first_connect = False
+                    else:
+                        log_all(f"🤖 官方 Bot {label}指令监听已平滑重连")
                     backoff = 5
                     # QQ WebSocket 网关约 30 分钟强制踢人（4009 Session timed out），
                     # 被动等掉线再重连会有几秒~几十秒断口。主动在 25 分钟时

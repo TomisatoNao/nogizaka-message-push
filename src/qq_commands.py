@@ -255,26 +255,29 @@ async def _async_parse_and_reply_social(url: str, sender_openid: str, app_id: st
         # 1. 解析动态
         post = parser.parse(url)
 
-        # 2. 媒体下载
+        # 2. 并发执行：媒体多线程下载 与 AI 智能翻译（大幅缩短等待时间）
         downloader = MediaDownloader(raw_cfg)
-        downloader.download(post)
-
-        # 3. AI 翻译与构建文案
         forwarder = SocialForwarder(raw_cfg, downloader)
-        translated = forwarder._translate(post.text) if post.text else None
-        if translated:
-            post.extra["_translated"] = translated
 
-        alts = collect_alts(post)
-        alt_zh: dict = {}
-        for idx, text in alts:
-            zh = forwarder._translate(text)
-            if zh:
-                alt_zh[idx] = zh
-        if alts:
-            post.extra["_alt_texts"] = {str(i): t for i, t in alts}
-            if alt_zh:
-                post.extra["_alt_translated"] = {str(i): v for i, v in alt_zh.items()}
+        def _do_translate():
+            translated = forwarder._translate(post.text) if post.text else None
+            if translated:
+                post.extra["_translated"] = translated
+            alts = collect_alts(post)
+            alt_zh: dict = {}
+            for idx, text in alts:
+                zh = forwarder._translate(text)
+                if zh:
+                    alt_zh[idx] = zh
+            if alts:
+                post.extra["_alt_texts"] = {str(i): t for i, t in alts}
+                if alt_zh:
+                    post.extra["_alt_translated"] = {str(i): v for i, v in alt_zh.items()}
+            return translated, alt_zh
+
+        download_task = asyncio.to_thread(downloader.download, post)
+        translate_task = asyncio.to_thread(_do_translate)
+        _, (translated, alt_zh) = await asyncio.gather(download_task, translate_task)
 
         full_text = build_post_message(post, translated, alt_zh)
 

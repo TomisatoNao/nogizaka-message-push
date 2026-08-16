@@ -535,9 +535,12 @@ def _sync_command_listeners() -> None:
 
     enabled = getattr(cfg, "QQ_COMMANDS_ENABLED", False)
     desired: dict[str, str] = {}
+    bot_names: dict[str, str] = {}
     if enabled:
-        desired = {b["app_id"]: b["client_secret"] for b in cfg.QQ_OFFICIAL_BOTS
-                   if b.get("app_id") and b.get("client_secret")}
+        for b in cfg.QQ_OFFICIAL_BOTS:
+            if b.get("app_id") and b.get("client_secret"):
+                desired[b["app_id"]] = b["client_secret"]
+                bot_names[b["app_id"]] = b.get("name") or b["app_id"]
 
     # 撤掉：已删除的 Bot、换了 secret 的 Bot、以及已经自行退出的任务
     for app_id, (secret, task) in list(_command_listeners.items()):
@@ -549,7 +552,8 @@ def _sync_command_listeners() -> None:
     for app_id in started:
         _command_listeners[app_id] = (
             desired[app_id],
-            asyncio.create_task(listen_forever(app_id, desired[app_id], qq_commands.handle)),
+            asyncio.create_task(listen_forever(
+                app_id, desired[app_id], qq_commands.handle, bot_name=bot_names.get(app_id, ""))),
         )
 
     if not enabled:
