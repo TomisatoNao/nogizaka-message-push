@@ -80,7 +80,7 @@ class QQOfficialBot:
         except RuntimeError:
             curr_loop = None
 
-        if self._client is not None and not self._client.is_closed and curr_loop is not None and curr_loop.is_running():
+        if self._client is not None and not getattr(self._client, "is_closed", False) and curr_loop is not None and curr_loop.is_running():
             transport = getattr(self._client, "_transport", None)
             t_loop = getattr(transport, "_loop", None)
             if t_loop is None or t_loop is curr_loop:
