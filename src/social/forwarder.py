@@ -226,6 +226,22 @@ class SocialForwarder:
                         if getattr(bot, "group_openid", None):
                             await bot.send_group_text(bot.group_openid, full_text)
                             any_success = True
+
+                        # 发送媒体附件（图片 / 视频 / 音频）
+                        for m in post.media:
+                            fp = m.local_path
+                            if fp and os.path.exists(fp):
+                                try:
+                                    with open(fp, "rb") as mf:
+                                        m_bytes = mf.read()
+                                    if m_bytes:
+                                        m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
+                                        if bot.target_openid:
+                                            await bot.send_media_file("users", bot.target_openid, m_type, m_bytes)
+                                        if getattr(bot, "group_openid", None):
+                                            await bot.send_media_file("groups", bot.group_openid, m_type, m_bytes)
+                                except Exception as ex:
+                                    log_all(f"⚠️ QQ 官方 Bot 发送媒体异常: {ex}", is_error=True)
                 except Exception as e:
                     errors.append(f"QQ 官方机器人推送失败: {e}")
 

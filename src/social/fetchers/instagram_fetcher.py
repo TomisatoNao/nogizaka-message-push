@@ -99,16 +99,16 @@ class InstagramFetcher(SocialFetcher):
         if ua:
             self._session.headers["User-Agent"] = ua
 
-        # 1) 复用已有登录态：cookies_file 优先，其次默认 data/instagram_cookies.txt，其次浏览器
+        # 1) 复用已有登录态：cookies_file 优先，其次默认 data/instagram_cookies.txt 与环境变量，其次浏览器
         cookies: dict = {}
         cfile = (cfg.get("cookies_file") or "").strip()
         from src.social import ig_session
-        if not cfile and os.path.exists(ig_session.COOKIE_FILE):
-            cfile = ig_session.COOKIE_FILE
-        if cfile:
+        if not cfile:
+            cookies = ig_session.read_cookie_file()
+        else:
             cookies = ig_session.read_cookie_file(cfile)
-            if cookies:
-                log.info("[instagram] 已加载登录态 cookies（%s 个）", len(cookies))
+        if cookies:
+            log.info("[instagram] 已加载登录态 cookies（%s 个）", len(cookies))
         if not cookies:
             browser = (cfg.get("cookies_from_browser") or "").strip()
             if browser:
@@ -141,7 +141,8 @@ class InstagramFetcher(SocialFetcher):
         立刻作废），所以不能靠猜 —— 只能在真的用不了时立刻发现并通知。
         """
         from src.social import ig_session
-        if not (self.cfg.get("cookies_file")
+        if not (self._session.cookies.get("sessionid")
+                or self.cfg.get("cookies_file")
                 or self.cfg.get("cookies_from_browser")):
             return          # 本来就没配 cookies，不算「失效」
         if not ig_session.mark_invalid(reason):
@@ -430,7 +431,7 @@ class InstagramFetcher(SocialFetcher):
     def _list_feed_entries(self, account: str) -> list[dict]:
         """返回 [{id, url, timestamp, title, kind}]（多后端自动回退）。"""
         # 后端 0：带登录态的 Feed 接口 —— 有 cookies 时最可靠
-        if self.cfg.get("cookies_file") or self.cfg.get("cookies_from_browser"):
+        if self._session.cookies.get("sessionid") or self.cfg.get("cookies_file") or self.cfg.get("cookies_from_browser"):
             try:
                 got = self._api_feed_entries(account)
                 if got:

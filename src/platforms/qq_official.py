@@ -67,6 +67,26 @@ class QQOfficialBot:
         """凭证完整即可（target_openid 允许为空——群推送专用 Bot 不需要单聊目标）。"""
         return bool(self.app_id and self.client_secret)
 
+    async def _safe_post(self, url: str, json_body: dict, headers: dict | None = None, timeout: float | None = None) -> httpx.Response:
+        t = timeout or cfg.QQ_OFFICIAL_TIMEOUT
+        try:
+            curr_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            curr_loop = None
+
+        if self._client is not None and not self._client.is_closed and curr_loop is not None and curr_loop.is_running():
+            transport = getattr(self._client, "_transport", None)
+            t_loop = getattr(transport, "_loop", None)
+            if t_loop is None or t_loop is curr_loop:
+                try:
+                    return await self._client.post(url, json=json_body, headers=headers, timeout=t)
+                except RuntimeError as ex:
+                    if "Event loop" not in str(ex):
+                        raise
+
+        async with httpx.AsyncClient(timeout=t) as client:
+            return await client.post(url, json=json_body, headers=headers)
+
     async def ensure_access_token(self) -> bool:
         """获取并缓存 access_token。"""
         if not self.is_configured():
@@ -81,9 +101,9 @@ class QQOfficialBot:
             return True
 
         try:
-            resp = await self._client.post(
+            resp = await self._safe_post(
                 cfg.QQ_OFFICIAL_TOKEN_URL,
-                json={
+                json_body={
                     "appId": self.app_id,
                     "clientSecret": self.client_secret,
                 },
@@ -142,9 +162,9 @@ class QQOfficialBot:
         for attempt in range(max_retries):
             await self._wait_rate_limit()
             try:
-                resp = await self._client.post(
+                resp = await self._safe_post(
                     url,
-                    json=payload,
+                    json_body=payload,
                     headers=self._auth_headers(),
                     timeout=cfg.QQ_OFFICIAL_TIMEOUT,
                 )
@@ -306,6 +326,18 @@ class QQOfficialBot:
     # 兼容别名
     _send_c2c_text = send_private_text
     _send_group_text = send_group_text
+
+    async def send_media_file(self, scope: str, target_openid: str, media_type: str, content: bytes) -> bool:
+        """向指定用户/群聊发送单张图片或视频媒体文件。scope: 'users' | 'groups'。"""
+        if not content or not target_openid:
+            return False
+        async with self._lock:
+            if not await self.ensure_access_token():
+                return False
+            file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid)
+            if not file_info:
+                return False
+            return await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid)
 
     async def send_translation_qq(self, scope: str, target_openid: str, pairs: list[tuple[str, str]]) -> bool:
         """发送 QQ 中日对照正文（日文斜体*，中文常规体，双语对之间零宽空格行，切分<=1800字符）。"""

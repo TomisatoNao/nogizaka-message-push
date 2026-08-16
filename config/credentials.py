@@ -17,11 +17,33 @@ from src.logger import format_httpx_error, log_all, log_response
 
 # ---- 运行时状态 ----
 ACCOUNT_CREDS:        dict[str, dict]          = {}
-_file_locks:          dict[str, asyncio.Lock]  = {}
-_token_refresh_locks: dict[str, asyncio.Lock]  = {}
+_file_locks:          dict[tuple, asyncio.Lock]  = {}
+_token_refresh_locks: dict[tuple, asyncio.Lock]  = {}
 _alert_last_sent:     dict[str, float]         = {}
 _http_client:         httpx.AsyncClient | None = None
 _last_time_written:   dict[str, str]           = {}   # write_time_record 的值缓存
+
+
+def _get_refresh_lock(account_id: str) -> asyncio.Lock:
+    try:
+        loop = asyncio.get_running_loop()
+        key = (id(loop), account_id)
+    except RuntimeError:
+        key = (0, account_id)
+    if key not in _token_refresh_locks:
+        _token_refresh_locks[key] = asyncio.Lock()
+    return _token_refresh_locks[key]
+
+
+def _get_file_lock(filepath: str) -> asyncio.Lock:
+    try:
+        loop = asyncio.get_running_loop()
+        key = (id(loop), filepath)
+    except RuntimeError:
+        key = (0, filepath)
+    if key not in _file_locks:
+        _file_locks[key] = asyncio.Lock()
+    return _file_locks[key]
 
 
 def initialize(client: httpx.AsyncClient) -> None:
@@ -239,7 +261,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
     """
     from src.notifier import send_alert_message
 
-    lock = _token_refresh_locks.setdefault(account_id, asyncio.Lock())
+    lock = _get_refresh_lock(account_id)
     async with lock:
         cred = ACCOUNT_CREDS.get(account_id)
         if not cred:

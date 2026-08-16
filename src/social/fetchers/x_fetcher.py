@@ -633,15 +633,16 @@ class XFetcher(SocialFetcher):
 
 
 def _nitter_to_pbs(src: str) -> str:
-    """Nitter 的 /pic/media%2FXXX.jpg 还原成 pbs.twimg.com 原图。"""
+    """Nitter 的 /pic/media%2FXXX.jpg 或 /pic/amplify_video_thumb%2F... 还原成 pbs.twimg.com 图片。"""
     from urllib.parse import unquote
     m = re.search(r"/pic/(.+)$", src)
     if not m:
         return src if src.startswith("http") else ""
-    path = unquote(m.group(1))
-    if path.startswith("media/") or path.startswith("orig/"):
+    path = unquote(m.group(1)).lstrip("/")
+    if any(path.startswith(prefix) for prefix in ("media/", "orig/", "amplify_video_thumb/", "tweet_video_thumb/", "ext_tw_video_thumb/", "card_img/")):
         return _orig_image(f"https://pbs.twimg.com/{path}")
     return _orig_image(f"https://pbs.twimg.com/media/{path}")
+
 
 
 def _parse_rss_date(s: str) -> float:

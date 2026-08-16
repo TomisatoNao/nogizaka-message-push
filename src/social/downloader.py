@@ -18,6 +18,7 @@ yt-dlp 是惰性 import 的：未安装时只影响社交平台，既有功能�
 import logging
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -243,13 +244,25 @@ class MediaDownloader:
         tmp = dest_path + ".part"
         backoff = max(1, int(self._cfg.get("retry_backoff_seconds", 2)))
         cur_url = url
+        # 修正 Twitter 视频封面错误嵌套的 /media/ 路径
+        for pfx in ("amplify_video_thumb/", "tweet_video_thumb/", "ext_tw_video_thumb/"):
+            if f"pbs.twimg.com/media/{pfx}" in cur_url:
+                cur_url = cur_url.replace(f"pbs.twimg.com/media/{pfx}", f"pbs.twimg.com/{pfx}")
+
         for attempt in range(1, self.retry_times + 1):
             try:
                 with requests.get(cur_url, headers=hdrs, timeout=self.timeout,
                                   stream=True) as r:
-                    if r.status_code == 404 and "pbs.twimg.com" in cur_url and "name=orig" in cur_url:
-                        log.debug("[download] Twitter 图片 name=orig 404，自动降级为 name=large")
-                        cur_url = cur_url.replace("name=orig", "name=large")
+                    if r.status_code == 404 and "pbs.twimg.com" in cur_url:
+                        if "name=orig" in cur_url:
+                            log.debug("[download] Twitter 图片 name=orig 404，自动降级为 name=large")
+                            cur_url = cur_url.replace("name=orig", "name=large")
+                        elif "?name=" in cur_url or "&name=" in cur_url:
+                            log.debug("[download] Twitter 图片 404，去除 name 参数重试")
+                            cur_url = re.sub(r"[?&]name=[^&]+", "", cur_url)
+                        else:
+                            r.raise_for_status()
+
                         with requests.get(cur_url, headers=hdrs, timeout=self.timeout, stream=True) as r2:
                             r2.raise_for_status()
                             with open(tmp, "wb") as f:

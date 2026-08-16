@@ -225,9 +225,38 @@ def write_cookie_file(cookies: dict, path: str = COOKIE_FILE) -> str:
 def read_cookie_file(path: str = COOKIE_FILE) -> dict:
     try:
         with open(path, encoding="utf-8") as f:
-            return parse_cookies(f.read())
+            cookies = parse_cookies(f.read())
+            if cookies:
+                return cookies
     except OSError:
-        return {}
+        pass
+
+    # 尝试从环境变量 INSTAGRAM_SESSIONID 回退读取
+    env_sid = os.getenv("INSTAGRAM_SESSIONID", "").strip()
+    if env_sid:
+        cookies = {"sessionid": env_sid}
+        # 自动提取 ds_user_id (sessionid 开头以 %3A 或 : 分割的部分)
+        if "%3A" in env_sid:
+            uid = env_sid.split("%3A")[0]
+            if uid.isdigit():
+                cookies["ds_user_id"] = uid
+        elif ":" in env_sid:
+            uid = env_sid.split(":")[0]
+            if uid.isdigit():
+                cookies["ds_user_id"] = uid
+
+        env_uid = os.getenv("INSTAGRAM_DS_USER_ID", "").strip()
+        if env_uid:
+            cookies["ds_user_id"] = env_uid
+
+        # 自动同步写入 Netscape 格式文件，确保 yt-dlp 与其他组件可直接调用
+        try:
+            write_cookie_file(cookies, path)
+        except Exception:
+            pass
+        return cookies
+
+    return {}
 
 
 # ── 健康检测 ──────────────────────────────────────────────
