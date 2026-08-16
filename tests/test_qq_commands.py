@@ -193,6 +193,8 @@ def main() -> None:
             assert res_link and "社媒链接" in res_link, f"应识别 X 链接: {res_link}"
             res_ins = qq_commands.handle("分享帖子：https://www.instagram.com/p/abcdef/ 看看", ME)
             assert res_ins and "社媒链接" in res_ins, f"应识别 Ins 链接: {res_ins}"
+            res_tt = qq_commands.handle("https://vt.tiktok.com/ZSV2J7Bor/", ME)
+            assert res_tt and "社媒链接" in res_tt, f"应识别 TikTok 短链接: {res_tt}"
         finally:
             qq_commands._trigger_social_reply_task = orig_trigger
         print("✅ Test 6 通过\n")

@@ -21,7 +21,7 @@ MAX_REPLY_CHARS = 900        # 官方 Bot 单条消息上限保守值
 MAX_LIST_ITEMS = 5           # 列表类回复最多列几项
 
 _SOCIAL_URL_RE = re.compile(
-    r"https?://(?:www\.)?(?:twitter\.com|x\.com|instagram\.com|tiktok\.com|v\.douyin\.com)/[^\s]+"
+    r"https?://(?:[a-zA-Z0-9_-]+\.)*(?:twitter\.com|x\.com|instagram\.com|tiktok\.com|douyin\.com)/[^\s]+"
 )
 
 
