@@ -2016,7 +2016,10 @@ class _Handler(BaseHTTPRequestHandler):
                 raw_cfg = _load_raw_config()
                 translate = bool(body.get("translate", True))
                 archive = bool(body.get("archive", True))
-                res = manual_push_social_url(url, raw_cfg, translate=translate, archive=archive)
+                channels = body.get("channels")
+                if channels is not None and not isinstance(channels, list):
+                    channels = [str(channels)]
+                res = manual_push_social_url(url, raw_cfg, target_channels=channels, translate=translate, archive=archive)
                 self._send_json(res)
             except Exception as e:
                 self._send_json({"ok": False, "errors": [f"推送失败: {e}"]}, 500)

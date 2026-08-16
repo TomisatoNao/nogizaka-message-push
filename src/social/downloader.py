@@ -99,6 +99,34 @@ class MediaDownloader:
         self._ytdlp_warned = False
         self._compat_warned = False
 
+    def download(self, post) -> None:
+        """为 Post 对象下载所有尚未下载的媒体（填充 local_path）。"""
+        from src.social.live_recorder import safe_name
+        
+        media_root = self._cfg.get("download_dir", "data/social_media")
+        acc = post.extra.get("account") or post.extra.get("username") or post.author or "manual"
+        dest_dir = os.path.join(media_root, safe_name(post.platform), safe_name(acc), safe_name(post.post_id))
+        os.makedirs(dest_dir, exist_ok=True)
+
+        tasks = []
+        for idx, m in enumerate(post.media):
+            if m.local_path and os.path.exists(m.local_path):
+                continue
+            if not m.url:
+                continue
+            ext = ".mp4" if m.type == "video" else ".jpg"
+            dest_file = os.path.join(dest_dir, f"{safe_name(post.post_id)}_{idx+1}{ext}")
+            tasks.append((m.url, dest_file, m))
+
+        if not tasks:
+            return
+
+        download_tasks = [(url, dest) for url, dest, _ in tasks]
+        self.download_many(download_tasks)
+        for _, dest_file, m in tasks:
+            if os.path.exists(dest_file):
+                m.local_path = os.path.abspath(dest_file)
+
     # ── 配置读取（每次读取，配置热更新即时生效）──────────
 
     @property

@@ -93,8 +93,8 @@ class SocialForwarder:
         else:
             return asyncio.run(coro)
 
-    def forward_post(self, post: Post) -> None:
-        """推送一条社交动态至全通道。"""
+    def forward_post(self, post: Post, target_channels: list[str] | None = None) -> None:
+        """推送一条社交动态至各通道（支持定向通道列表）。"""
         # 1. AI 翻译
         translated = self._translate(post.text)
         if translated:
@@ -129,20 +129,25 @@ class SocialForwarder:
             errors = []
 
             # ── A. Telegram Bot 推送 ──────────────────────────────
-            if getattr(cfg, "ENABLE_TG_BOT", False):
+            if getattr(cfg, "ENABLE_TG_BOT", False) and (not target_channels or any(c == "tg" or c.startswith("tg:") for c in target_channels)):
                 try:
                     for b in tgbot.get_configured_bots():
                         if not b.token or not b.target_chat:
                             continue
-                        # 1) 平台开关校验
-                        if not getattr(b, f"push_{plat}", True):
-                            continue
-                        # 2) 成员过滤（若本动态归属于某个成员且该通道配置了成员过滤）
-                        if m_name and b.member_filter and m_name not in b.member_filter:
-                            continue
-                        # 3) 社媒账号过滤（若该通道配置了社媒账号白名单）
-                        if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
-                            continue
+                        if target_channels:
+                            tg_matches = [c for c in target_channels if c == "tg" or c == f"tg:{b.target_chat}" or c == f"tg:{getattr(b, 'name', '')}"]
+                            if not tg_matches:
+                                continue
+                        else:
+                            # 1) 平台开关校验
+                            if not getattr(b, f"push_{plat}", True):
+                                continue
+                            # 2) 成员过滤（若本动态归属于某个成员且该通道配置了成员过滤）
+                            if m_name and b.member_filter and m_name not in b.member_filter:
+                                continue
+                            # 3) 社媒账号过滤（若该通道配置了社媒账号白名单）
+                            if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
+                                continue
 
                         # 发送文本
                         t_ok = await b._post_message(b.target_chat, full_text)
@@ -168,7 +173,7 @@ class SocialForwarder:
                     errors.append(f"Telegram 推送失败: {e}")
 
             # ── B. NapCat QQ 群推送 ──────────────────────────────
-            if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
+            if getattr(cfg, "ENABLE_NAPCAT_QQ", False) and (not target_channels or any(c == "napcat" or c.startswith("napcat:") for c in target_channels)):
                 try:
                     chain = [{"type": "text", "data": {"text": full_text}}]
                     for m in post.media:
@@ -187,17 +192,22 @@ class SocialForwarder:
                         gid = r.get("group_id")
                         if not gid:
                             continue
-                        # 1) 平台开关校验
-                        if not r.get(f"push_{plat}", True):
-                            continue
-                        # 2) 成员过滤
-                        m_filters = r.get("member_filter") or []
-                        if m_name and m_filters and m_name not in m_filters:
-                            continue
-                        # 3) 社媒账号过滤
-                        s_filters = r.get("social_filter") or []
-                        if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
-                            continue
+                        if target_channels:
+                            nap_matches = [c for c in target_channels if c == "napcat" or c == f"napcat:{gid}"]
+                            if not nap_matches:
+                                continue
+                        else:
+                            # 1) 平台开关校验
+                            if not r.get(f"push_{plat}", True):
+                                continue
+                            # 2) 成员过滤
+                            m_filters = r.get("member_filter") or []
+                            if m_name and m_filters and m_name not in m_filters:
+                                continue
+                            # 3) 社媒账号过滤
+                            s_filters = r.get("social_filter") or []
+                            if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
+                                continue
 
                         ok = await napcat.send_qq_message(gid, chain)
                         if ok:
@@ -206,19 +216,24 @@ class SocialForwarder:
                     errors.append(f"NapCat 推送失败: {e}")
 
             # ── C. QQ 官方机器人推送 ─────────────────────────────
-            if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
+            if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False) and (not target_channels or any(c == "qq_official" or c.startswith("official:") for c in target_channels)):
                 try:
                     bots = qq_official.get_configured_bots()
                     for bot in bots:
-                        # 1) 平台开关校验
-                        if not getattr(bot, f"push_{plat}", True):
-                            continue
-                        # 2) 成员过滤
-                        if m_name and bot.member_filter and m_name not in bot.member_filter:
-                            continue
-                        # 3) 社媒账号过滤
-                        if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
-                            continue
+                        if target_channels:
+                            off_matches = [c for c in target_channels if c == "qq_official" or c == f"official:{bot.name}" or c == f"official:{bot.app_id}" or (bot.group_openid and c == f"official:{bot.group_openid}")]
+                            if not off_matches:
+                                continue
+                        else:
+                            # 1) 平台开关校验
+                            if not getattr(bot, f"push_{plat}", True):
+                                continue
+                            # 2) 成员过滤
+                            if m_name and bot.member_filter and m_name not in bot.member_filter:
+                                continue
+                            # 3) 社媒账号过滤
+                            if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
+                                continue
 
                         if bot.target_openid:
                             await bot.send_private_text(bot.target_openid, full_text)

@@ -370,7 +370,7 @@ class SocialUrlParser:
 def manual_push_social_url(
     url: str,
     config: dict,
-    target_channels: list[dict] | None = None,
+    target_channels: list[str] | None = None,
     translate: bool = True,
     archive: bool = True,
 ) -> dict:
@@ -393,7 +393,16 @@ def manual_push_social_url(
             post.extra["_translated"] = translated_text
 
     # 若指定了通道则定向推，否则走标准 forward_post
-    forwarder.forward_post(post)
+    forwarder.forward_post(post, target_channels=target_channels)
+
+    # 归档到 SQLite（若开启）
+    if archive:
+        try:
+            from src.social.archive import get_archive_db
+            db = get_archive_db()
+            db.save_post(post)
+        except Exception as e:
+            log.warning("[社媒归档] 保存失败: %s", e)
 
     media_preview = [
         {
@@ -415,3 +424,4 @@ def manual_push_social_url(
         "timestamp": post.timestamp,
         "post_id": post.post_id,
     }
+

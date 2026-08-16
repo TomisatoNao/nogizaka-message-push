@@ -617,13 +617,32 @@
       <input id="toolSocialUrl" type="text" placeholder="https://x.com/user/status/... 或 https://www.instagram.com/p/... 或 https://www.tiktok.com/@.../video/..." style="flex:1; min-width:280px; font-size:13.5px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; background:var(--card-soft); color:var(--text);" />
       <button class="btn" id="btnToolSocialPaste" type="button" style="white-space:nowrap;">📋 粘贴</button>
       <button class="btn" id="btnToolSocialParse" type="button" style="white-space:nowrap;">🔍 解析预览</button>
-      <button class="btn primary" id="btnToolSocialPush" type="button" style="white-space:nowrap;">🚀 一键推送至通道</button>
+      <button class="btn primary" id="btnToolSocialPush" type="button" style="white-space:nowrap;">🚀 一键推送至已选通道</button>
     </div>
     
     <div style="display:flex; gap:18px; margin-top:12px; flex-wrap:wrap; align-items:center;">
       <label class="switch"><input id="toolSocialTranslate" type="checkbox" checked/><span class="track"></span>AI 智能翻译</label>
       <label class="switch"><input id="toolSocialArchive" type="checkbox" checked/><span class="track"></span>同步保存到 SQLite 归档库</label>
       <span id="toolSocialLoading" style="display:none; font-size:13px; color:var(--accent); font-weight:600;">⏳ 正在解析社媒内容，请稍候…</span>
+    </div>
+
+    <!-- 推送通道勾选区 -->
+    <div style="margin-top:12px; padding:10px 14px; background:var(--card-soft); border-radius:8px; border:1px solid var(--border-soft);">
+      <div style="font-size:12px; color:var(--muted); font-weight:600; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <span>🎯 选择推送目标通道（按需勾选）：</span>
+        <button id="btnToolSocialToggleAllChannels" type="button" class="btn" style="padding:2px 8px; font-size:11px; height:auto;">反选 / 切换</button>
+      </div>
+      <div id="toolSocialChannelList" style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
+        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text);">
+          <input type="checkbox" name="toolSocialChannel" value="qq_official" checked /> 🤖 QQ 官方机器人
+        </label>
+        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text);">
+          <input type="checkbox" name="toolSocialChannel" value="napcat" checked /> 🐾 NapCat QQ 群
+        </label>
+        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text);">
+          <input type="checkbox" name="toolSocialChannel" value="tg" checked /> ✈️ Telegram
+        </label>
+      </div>
     </div>
 
     <!-- 解析结果展示区 -->
@@ -3653,14 +3672,25 @@ $("btnToolSocialParse").addEventListener("click", async () => {
   }
 });
 
+$("btnToolSocialToggleAllChannels").addEventListener("click", () => {
+  const cbs = document.querySelectorAll('input[name="toolSocialChannel"]');
+  const anyChecked = Array.from(cbs).some(cb => cb.checked);
+  cbs.forEach(cb => { cb.checked = !anyChecked; });
+});
+
 $("btnToolSocialPush").addEventListener("click", async () => {
   const url = $("toolSocialUrl").value.trim();
   if (!url) { uiAlert("请先输入 X / Instagram / TikTok 链接"); return; }
+  const selectedChannels = Array.from(document.querySelectorAll('input[name="toolSocialChannel"]:checked')).map(cb => cb.value);
+  if (selectedChannels.length === 0) {
+    uiAlert("请至少勾选一个推送目标通道！");
+    return;
+  }
   const btn = $("btnToolSocialPush");
   const loading = $("toolSocialLoading");
   btn.disabled = true;
   loading.style.display = "inline-block";
-  loading.textContent = "🚀 正在解析并推送至各通道，请稍候…";
+  loading.textContent = "🚀 正在解析并推送至已选通道，请稍候…";
 
   try {
     const res = await api("/api/social/manual_push", {
@@ -3670,11 +3700,12 @@ $("btnToolSocialPush").addEventListener("click", async () => {
         url: url,
         translate: $("toolSocialTranslate").checked,
         archive: $("toolSocialArchive").checked,
+        channels: selectedChannels,
       }),
     });
     if (!res.ok) throw new Error((res.errors || []).join("；") || "推送失败");
     renderSocialToolResult(res);
-    msg("🎉 社媒动态已成功推送至所有通道并完成归档！", "ok");
+    msg("🎉 社媒动态已成功推送至已选通道并完成归档！", "ok");
   } catch (err) {
     msg("推送失败：" + err.message, "err");
   } finally {
