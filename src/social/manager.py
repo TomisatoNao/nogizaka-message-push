@@ -19,18 +19,20 @@ _store: SocialStore | None = None
 _downloader: MediaDownloader | None = None
 _forwarder: SocialForwarder | None = None
 _scheduler: SocialScheduler | None = None
+_shared_config: dict | None = None
 _lock = threading.Lock()
 _forward_lock = threading.Lock()
 
 
 def start_social_service(config: dict) -> SocialScheduler | None:
     """初始化并启动社交媒体监控守护调度器。"""
-    global _store, _downloader, _forwarder, _scheduler
+    global _store, _downloader, _forwarder, _scheduler, _shared_config
 
     with _lock:
         if _scheduler is not None:
             return _scheduler
 
+        _shared_config = config
         _store = SocialStore()
         _downloader = MediaDownloader(config)
         _forwarder = SocialForwarder(config, _downloader)
@@ -67,12 +69,34 @@ def start_social_service(config: dict) -> SocialScheduler | None:
         return _scheduler
 
 
+def reload_social_service(config: dict | None = None) -> None:
+    """热重载社媒监控配置，使所有 Fetcher 的账号列表与配置即时生效。"""
+    global _shared_config
+    with _lock:
+        if config is None:
+            import json5
+            from pathlib import Path
+            config_path = Path(__file__).resolve().parent.parent.parent / "config" / "config.json"
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json5.load(f)
+            except Exception as e:
+                log_all(f"⚠️ 读取 config.json 热重载社媒失败: {e}", is_error=True)
+                return
+
+        if _shared_config is not None and isinstance(config, dict):
+            _shared_config.clear()
+            _shared_config.update(config)
+            log_all("⚙️ 社交媒体监控配置已热重载（X / Instagram / TikTok 账号列表即时生效）", is_debug=True)
+
+
 def stop_social_service():
     """优雅停止社媒监控服务。"""
-    global _scheduler
+    global _scheduler, _shared_config
     with _lock:
         if _scheduler:
             _scheduler.stop()
             _scheduler.join(timeout=5)
             _scheduler = None
+            _shared_config = None
             log_all("🛑 社交媒体监控服务已停止")

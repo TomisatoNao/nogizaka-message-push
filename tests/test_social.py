@@ -14,7 +14,7 @@ from src.social.fetchers.x_fetcher import XFetcher
 from src.social.fetchers.instagram_fetcher import InstagramFetcher
 from src.social.fetchers.tiktok_fetcher import TikTokFetcher
 from src.social.fetchers.tiktok_live_fetcher import TikTokLiveFetcher
-from src.social.manager import start_social_service, stop_social_service
+from src.social.manager import start_social_service, stop_social_service, reload_social_service
 
 
 class TestSocialIntegration(unittest.TestCase):
@@ -99,6 +99,25 @@ class TestSocialIntegration(unittest.TestCase):
     def test_service_manager_lifecycle(self):
         s = start_social_service(self.config)
         self.assertIsNotNone(s)
+        stop_social_service()
+
+    def test_social_hot_reload(self):
+        s = start_social_service(self.config)
+        x_fetcher = [f for f in s._fetchers if f.platform_name == "x"][0]
+        self.assertEqual(x_fetcher.accounts, ["nogizaka46"])
+
+        # 模拟配置修改并热重载
+        new_cfg = {
+            "platforms": {
+                "x": {"enabled": True, "accounts": ["Yuki_Nakashim", "Lets_chikochiko"]},
+                "instagram": {"enabled": True, "accounts": ["yokono_sumire"]},
+            },
+            "monitor": []
+        }
+        reload_social_service(new_cfg)
+        self.assertEqual(x_fetcher.accounts, ["Yuki_Nakashim", "Lets_chikochiko"])
+        ig_fetcher = [f for f in s._fetchers if f.platform_name == "instagram"][0]
+        self.assertEqual(ig_fetcher.accounts, ["yokono_sumire"])
         stop_social_service()
 
     def test_social_forwarder_pubsub(self):

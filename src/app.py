@@ -593,6 +593,12 @@ def _on_config_reload(success: bool) -> None:
     except Exception as e:
         log_all(f"⚠️ 热重载 Bot 失败: {e}", is_error=True)
 
+    try:
+        from src.social.manager import reload_social_service
+        reload_social_service()
+    except Exception as e:
+        log_all(f"⚠️ 热重载社媒监控配置失败: {e}", is_error=True)
+
     # 指令监听要跟着新配置走，否则在管理端新加的 Bot 得等到下次重启才会上线
     if _main_loop is not None:
         _main_loop.call_soon_threadsafe(_sync_command_listeners)

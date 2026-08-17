@@ -531,6 +531,13 @@ _KEY_TO_VAR: dict[str, str] = {
     "gemini_tag_models":            "GEMINI_TAG_MODELS",
     "gemini_tag_min_interval":      "GEMINI_TAG_MIN_INTERVAL",
     "message_monitor_enabled":      "MESSAGE_MONITOR_ENABLED",
+    "platforms":                    "PLATFORMS",
+    "blog_monitor":                 "BLOG_MONITOR",
+    "blog_records":                 "BLOG_RECORDS",
+    "media":                        "MEDIA",
+    "social":                       "SOCIAL",
+    "napcat_routes":                "NAPCAT_ROUTES",
+    "tg_bots":                      "TG_BOTS",
 }
 
 # 可在热重载时通过 in-place mutation 更新的容器类型 key
@@ -539,6 +546,8 @@ _CONTAINER_KEYS = frozenset({
     "accounts", "monitor_list", "qq_official_bots",
     "gemini_models", "gemini_tag_models",
     "skip_publish_types", "media_type_map",
+    "platforms", "blog_monitor", "blog_records",
+    "media", "social", "napcat_routes", "tg_bots",
 })
 
 # 需要特殊类型转换的 key（JSON 类型 → Python 类型）
@@ -717,6 +726,8 @@ def reload() -> bool:
        - 校验失败时保留旧配置并返回 False。"""
     try:
         new_cfg = _load_config()
+        global _config
+        _mutate_container(_config, new_cfg)
         _apply_config(new_cfg)
 
         # 重新应用环境变量覆盖
