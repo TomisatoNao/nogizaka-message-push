@@ -50,16 +50,21 @@ async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str]
 
     async def _fetch_one(i: int, url: str) -> tuple[int, str]:
         async with sem:
+            ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
+            if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+                ext = "jpg"
+            fname = f"{i+1:02d}.{ext}"
+            fpath = dest_dir / fname
+            if fpath.exists() and fpath.stat().st_size > 0:
+                return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
             try:
                 r = await http_client.get(url, timeout=20)
-                ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
-                if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
-                    ext = "jpg"
-                fname = f"{i+1:02d}.{ext}"
-                fpath = dest_dir / fname
+                r.raise_for_status()
                 fpath.write_bytes(r.content)
                 return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
             except Exception:
+                if fpath.exists() and fpath.stat().st_size > 0:
+                    return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
                 return (i, "")
 
     tasks = [_fetch_one(i, url) for i, url in enumerate(image_urls)]

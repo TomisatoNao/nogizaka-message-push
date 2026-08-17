@@ -1063,23 +1063,33 @@ function _replaceImgUrls(html, images, paths) {
   let result = html;
   for (let i = 0; i < images.length; i++) {
     const orig = images[i];
-    let localPath = paths[i] || "";
+    if (!orig) continue;
+    let localPath = (paths && paths[i]) ? paths[i] : "";
     if (localPath) {
-        localPath = localPath.replace(/\\/g, '/');
+      localPath = localPath.replace(/\\/g, '/');
     }
     const encodedPath = localPath ? localPath.split('/').map(encodeURIComponent).join('/') : "";
     const local = encodedPath ? "/api/archive/blog_media/" + encodedPath : orig;
-    result = result.split(orig).join(local);
-    try { result = result.split(esc(orig)).join(local); } catch(e) {}
     
-    // 乃木坂/樱坂的 body_html 含相对 src，尝试仅用 URL 路径部分匹配
+    // 1. 若存在本地缓存路径，将完整的原图绝对 URL 替换为本地 API 路径
+    if (local !== orig) {
+      result = result.split(orig).join(local);
+      try { result = result.split(esc(orig)).join(local); } catch(e) {}
+    }
+
+    // 2. 乃木坂/樱坂的原始 body_html 含相对路径（如 src="/files/46/..."），安全替换
     try {
-      // 提供 base url 避免 orig 是相对路径时 throw error
       const u = new URL(orig, "https://dummy.com");
       const relPath = u.pathname + u.search;
       if (relPath && relPath !== orig && relPath !== '/') {
-        result = result.split(relPath).join(local);
-        try { result = result.split(esc(relPath)).join(local); } catch(e) {}
+        const target = (local !== orig) ? local : orig;
+        // 使用正则限定在 src="..." 或 src='...' 中精准替换相对路径，避免匹配到已带有域名的完整 URL
+        const safeRel = relPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const relRe = new RegExp('((?:src|href)=["\'])' + safeRel + '(["\'])', 'gi');
+        result = result.replace(relRe, '$1' + target + '$2');
+        const safeEscRel = esc(relPath).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const relEscRe = new RegExp('((?:src|href)=["\'])' + safeEscRel + '(["\'])', 'gi');
+        result = result.replace(relEscRe, '$1' + target + '$2');
       }
     } catch(e) {}
   }

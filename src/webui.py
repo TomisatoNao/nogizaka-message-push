@@ -1574,7 +1574,39 @@ class _Handler(BaseHTTPRequestHandler):
                 for r in rows:
                     d = dict(r)
                     d["images_json"] = d.get("images_json") or "[]"
-                    d["image_paths_json"] = d.get("image_paths_json") or "[]"
+                    paths_str = d.get("image_paths_json") or "[]"
+                    try:
+                        images = json.loads(d["images_json"])
+                        paths = json.loads(paths_str)
+                        if images:
+                            while len(paths) < len(images):
+                                paths.append("")
+                            dirty = False
+                            img_root = Path("data/blog_images")
+                            for i, img_url in enumerate(images):
+                                if not paths[i] or not (img_root / paths[i]).exists():
+                                    safe_title = re.sub(r'[\\/:*?"<>|]', '', d.get("title", ""))[:50].strip()
+                                    safe_author = re.sub(r'[\\/:*?"<>|]', '', d.get("author", ""))[:20].strip()
+                                    ts = (d.get("date") or "").replace("/", "").replace(" ", "_").replace(":", "")
+                                    safe_ts = re.sub(r'[^0-9_]', '', ts)[:15]
+                                    ext = img_url.rsplit(".", 1)[-1].split("?")[0].lower()
+                                    if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+                                        ext = "jpg"
+                                    fname = f"{i+1:02d}.{ext}"
+                                    cand = img_root / d.get("group_key", "") / safe_author / f"{safe_title}-{safe_ts}" / fname
+                                    if cand.exists():
+                                        paths[i] = str(cand.relative_to(img_root))
+                                        dirty = True
+                            if dirty:
+                                paths_str = json.dumps(paths, ensure_ascii=False)
+                                try:
+                                    db.execute("UPDATE blog_posts SET image_paths_json = ? WHERE id = ?", (paths_str, d["id"]))
+                                    db.commit()
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    d["image_paths_json"] = paths_str
                     d["content_json"] = d.get("content_json") or "[]"
                     d["translation_model"] = d.get("translation_model") or ""
                     posts.append(d)
