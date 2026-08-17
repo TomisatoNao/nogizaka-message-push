@@ -117,12 +117,13 @@ function fmtTime(utc) {
 }
 function fmtCopyTime(utc) {
   const d = toJst(utc);
+  const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const day = String(d.getUTCDate()).padStart(2, "0");
   const hh = String(d.getUTCHours()).padStart(2, "0");
   const mm = String(d.getUTCMinutes()).padStart(2, "0");
   const ss = String(d.getUTCSeconds()).padStart(2, "0");
-  return m + "/" + day + " " + hh + ":" + mm + ":" + ss;
+  return y + "/" + m + "/" + day + " " + hh + ":" + mm + ":" + ss;
 }
 
 function fmtDateKey(utc) {
