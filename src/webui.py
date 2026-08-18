@@ -536,6 +536,10 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         supplied = self.headers.get("X-Auth-Token", "").strip()
         if not supplied:
+            authz = self.headers.get("Authorization", "").strip()
+            if authz.startswith("Bearer "):
+                supplied = authz[7:].strip()
+        if not supplied:
             # <img>/<video> 标签无法带自定义头，归档媒体通过 query 传 token
             from urllib.parse import parse_qs
             supplied = (parse_qs(self.path.partition("?")[2]).get("token") or [""])[0]
@@ -1719,14 +1723,16 @@ class _Handler(BaseHTTPRequestHandler):
                 where = "WHERE group_key=?"
                 params = [group]
                 if author:
-                    where += " AND author=?"
-                    params.append(author)
+                    norm_author = author.replace(" ", "").replace("　", "").replace("_", "")
+                    where += " AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?"
+                    params.append(norm_author)
                 for r in db.execute(f"""
                     SELECT substr(date,1,10) as d, COUNT(*)
                     FROM blog_posts {where}
                     GROUP BY d
                 """, params).fetchall():
-                    days[r[0]] = r[1]
+                    if r[0]:
+                        days[r[0]] = r[1]
             except Exception:
                 pass
             self._send_json({"ok": True, "group": group, "days": days})
@@ -1784,8 +1790,9 @@ class _Handler(BaseHTTPRequestHandler):
                 where = "WHERE group_key=?"
                 params: list = [group]
                 if author:
-                    where += " AND author=?"
-                    params.append(author)
+                    norm_author = author.replace(" ", "").replace("　", "").replace("_", "")
+                    where += " AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?"
+                    params.append(norm_author)
                 if date_filter:
                     where += " AND substr(date,1,10)=?"
                     params.append(date_filter)

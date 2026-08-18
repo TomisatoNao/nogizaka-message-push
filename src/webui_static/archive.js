@@ -473,16 +473,21 @@ function syncChipHighlight() {
 }
 
 // ── 博客相关逻辑 ─────────────────────────────────────
-async function selectBlogGroup(key) {
+async function selectBlogGroup(key, author = "") {
   curMode = "blog";
   curMember = "";
   curBlogGroup = key;
-  curBlogAuthor = "";
+  curBlogAuthor = author || "";
   curBlogDate = "";
   searchQuery = "";
   syncSearchInput();
   syncChipHighlight();
-  location.hash = "blog=" + encodeURIComponent(key);
+  
+  const p = new URLSearchParams({ blog: key });
+  if (curBlogAuthor) p.set("author", curBlogAuthor);
+  selfHashUpdate = true;
+  location.hash = p.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
   
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
@@ -496,7 +501,7 @@ async function selectBlogGroup(key) {
   
   await loadBlogAuthors(key);
   await loadBlogCalendar();
-  await loadBlogPage(1, true);
+  await loadBlogPage(1);
 }
 
 async function loadBlogAuthors(key) {
@@ -506,14 +511,15 @@ async function loadBlogAuthors(key) {
     bar.innerHTML = "";
     if (data.ok && data.authors) {
       const allBtn = document.createElement("button");
-      allBtn.className = "blog-author-chip active";
+      allBtn.className = "blog-author-chip" + (!curBlogAuthor ? " active" : "");
       allBtn.textContent = "全部成员";
       allBtn.onclick = () => selectBlogAuthor("");
       bar.appendChild(allBtn);
       
       data.authors.forEach(a => {
         const btn = document.createElement("button");
-        btn.className = "blog-author-chip";
+        const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
+        btn.className = "blog-author-chip" + (isMatch ? " active" : "");
         btn.textContent = a.name;
         btn.onclick = () => selectBlogAuthor(a.name);
         bar.appendChild(btn);
@@ -528,7 +534,9 @@ function selectBlogAuthor(author) {
   renderCalendar();
   const btns = $("blogAuthorBar").querySelectorAll(".blog-author-chip");
   btns.forEach(b => {
-    if ((author === "" && b.textContent === "全部成员") || b.textContent === author) {
+    const isAll = (!author && b.textContent === "全部成员");
+    const isMatch = author && (b.textContent === author || b.textContent.replace(/[\s　_]+/g, "") === author.replace(/[\s　_]+/g, ""));
+    if (isAll || isMatch) {
       b.classList.add("active");
     } else {
       b.classList.remove("active");
@@ -2281,9 +2289,7 @@ function boot() {
     switchMainTab("blog", true);
     loadMembers(true);
     if (curBlogGroup) {
-      selectBlogGroup(curBlogGroup).then(() => {
-        if (curBlogAuthor) selectBlogAuthor(curBlogAuthor);
-      });
+      selectBlogGroup(curBlogGroup, curBlogAuthor);
     } else {
       showBlogHome();
     }
