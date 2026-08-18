@@ -47,8 +47,11 @@ def main() -> None:
     from src import auth
 
     tmpdir = Path(tempfile.mkdtemp(prefix="auth_test_"))
-    orig_users_path = auth.USERS_PATH
-    auth.USERS_PATH = tmpdir / "users.json"
+    orig_auth_db = auth.AUTH_DB_PATH
+    auth.AUTH_DB_PATH = tmpdir / "auth.db"
+    auth._auth_conn = None
+    auth._sessions.clear()
+    auth._sessions_loaded_from_db = False
     orig_flags = (cfg.AUTH_ENABLED, cfg.AUTH_ARCHIVE_PUBLIC, cfg.AUTH_SESSION_HOURS)
 
     try:
@@ -90,9 +93,9 @@ def main() -> None:
         assert auth.add_user("admin2", "adminpass456", "admin")[0]
         assert auth.delete_user("admin2")[0], "有两个 admin 时可删除其一"
 
-        # 用户库文件里不含明文密码
-        raw_file = auth.USERS_PATH.read_text(encoding="utf-8")
-        assert "adminpass123" not in raw_file and "viewerpass123" not in raw_file
+        # 数据库文件里不含明文密码
+        raw_bytes = auth.AUTH_DB_PATH.read_bytes()
+        assert b"adminpass123" not in raw_bytes and b"viewerpass123" not in raw_bytes
 
         # 验证 ensure_initial_admin
         assert not auth.ensure_initial_admin()[0], "已存在用户时不应重复创建初始管理员"
@@ -331,7 +334,8 @@ def main() -> None:
         print("✅ Test 5 通过\n")
 
     finally:
-        auth.USERS_PATH = orig_users_path
+        auth.AUTH_DB_PATH = orig_auth_db
+        auth._auth_conn = None
         cfg.AUTH_ENABLED, cfg.AUTH_ARCHIVE_PUBLIC, cfg.AUTH_SESSION_HOURS = orig_flags
 
     print("=" * 50)

@@ -105,33 +105,6 @@ def init_db() -> sqlite3.Connection | None:
                 PRIMARY KEY (group_type, m_id, msg_id)
             );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_ids_m_created ON sent_ids(group_type, m_id, created_at);")
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                role TEXT NOT NULL,
-                password_json TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                token TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                role TEXT NOT NULL,
-                expires_at REAL NOT NULL,
-                created_at REAL NOT NULL DEFAULT 0
-            );
-        """)
-        try:
-            conn.execute("ALTER TABLE sessions ADD COLUMN created_at REAL DEFAULT 0;")
-        except sqlite3.OperationalError:
-            pass
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);")
-
         try:
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
