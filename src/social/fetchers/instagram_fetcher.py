@@ -59,6 +59,7 @@ class InstagramSessionRejected(RuntimeError):
 class InstagramFetcher(SocialFetcher):
     platform_name = "instagram"
     kinds = ("post", "carousel", "reel", "story")
+    _last_blocked_log: float = 0.0
 
     def __init__(self, config: dict, store=None, downloader=None,
                  on_session_lost=None):
@@ -77,6 +78,7 @@ class InstagramFetcher(SocialFetcher):
         })
         self._warmed = False
         self._login_hint_shown = False
+        self._last_blocked_log = 0.0
         # 每个账号单独维护 Story 限频状态；不能让先轮询的账号压住其它账号。
         self._story_checked: dict[str, float] = {}
         self._story_next_gap: dict[str, int] = {}
