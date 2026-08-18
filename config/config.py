@@ -123,6 +123,7 @@ _DEFAULTS: dict = {
     "tg_bot_token":             "",  # legacy single bot token
     "tg_bots":                  [],
     "napcat_routes":            [],
+    "proxy":                    "",
 }
 
 
@@ -538,6 +539,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "social":                       "SOCIAL",
     "napcat_routes":                "NAPCAT_ROUTES",
     "tg_bots":                      "TG_BOTS",
+    "proxy":                        "PROXY",
 }
 
 # 可在热重载时通过 in-place mutation 更新的容器类型 key
@@ -624,6 +626,7 @@ def _load_config() -> dict:
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
     cfg["zhipu_api_key"]  = _env("ZHIPU_API_KEY", "")
     cfg["tg_bot_token"]   = _env("TG_BOT_TOKEN", "")
+    cfg["proxy"]          = (cfg.get("proxy") or "").strip() or _env("HTTP_PROXY") or _env("HTTPS_PROXY") or _env("ALL_PROXY") or _env("PROXY", "")
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
     cfg = _match_account_credentials(cfg)

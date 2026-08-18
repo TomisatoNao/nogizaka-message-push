@@ -216,6 +216,11 @@
     },
     "media": {
       "type": "object"
+    },
+    "proxy": {
+      "type": "string",
+      "default": "",
+      "description": "全局 HTTP / SOCKS5 代理地址（如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080）"
     }
   }
 }

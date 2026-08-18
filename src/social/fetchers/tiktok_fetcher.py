@@ -66,6 +66,9 @@ class TikTokFetcher(SocialFetcher):
     def __init__(self, config: dict, store=None, downloader=None):
         super().__init__(config, store, downloader)
         self._session = requests.Session()
+        proxy = self.cfg.get("proxy") or config.get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY") or ""
+        if proxy:
+            self._session.proxies.update({"http": proxy, "https": proxy})
         self._session.headers.update({
             "User-Agent": _UA,
             "Referer": "https://www.tiktok.com/",

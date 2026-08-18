@@ -66,6 +66,9 @@ class InstagramFetcher(SocialFetcher):
         # 登录态失效时的告警回调（由 SyncManager 注入，用于推送 QQ）
         self._on_session_lost = on_session_lost
         self._session = requests.Session()
+        proxy = self.cfg.get("proxy") or config.get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("ALL_PROXY") or ""
+        if proxy:
+            self._session.proxies.update({"http": proxy, "https": proxy})
         self._session.headers.update({
             "User-Agent": _UA,
             "X-IG-App-ID": _IG_APP_ID,

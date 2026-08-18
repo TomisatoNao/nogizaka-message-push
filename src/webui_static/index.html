@@ -311,7 +311,34 @@
     </div>
   </div>
 
-  <!-- Card 4: 近期运行错误 -->
+  <!-- Card 4: 存储空间与媒体占用 -->
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+      <h2 style="margin:0; flex:1;">💾 存储空间与媒体占用</h2>
+      <button class="btn small" id="btnRefreshStorage" type="button">🔄 刷新用量</button>
+    </div>
+    
+    <!-- 磁盘总体使用率进度条 -->
+    <div style="background:var(--card-soft); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-soft); margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:13px;">
+        <span style="color:var(--text); font-weight:600;">系统总磁盘: <span id="stDiskTotal" style="color:var(--muted); font-weight:normal;">—</span></span>
+        <span style="color:var(--muted);">剩余可用: <b id="stDiskFree" style="color:var(--ok); font-weight:600;">—</b> (已用 <span id="stDiskPercent">0%</span>)</span>
+      </div>
+      <div style="height:8px; background:var(--border-soft); border-radius:4px; overflow:hidden; display:flex;">
+        <div id="stDiskBar" style="height:100%; width:0%; background:linear-gradient(90deg, var(--accent), #ec4899); border-radius:4px; transition:width 0.4s ease;"></div>
+      </div>
+      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">
+        本系统各模块累计落盘数据: <b id="stAppTotal" style="color:var(--text);">—</b>
+      </div>
+    </div>
+
+    <!-- 各分类存储网格 -->
+    <div id="stStorageGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+      <!-- 动态注入 -->
+    </div>
+  </div>
+
+  <!-- Card 5: 近期运行错误 -->
   <div class="card">
     <h2>⚠️ 近期运行错误（最多 20 条）</h2>
     <div class="empty" id="stErrors">（无）</div>
@@ -717,6 +744,25 @@
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 双引擎智能轮番调用与自动容灾说明</summary>
       <div class="hint" style="margin-top: 6px;">
         同时配置 Gemini 与智谱 API Key 时，系统在每次翻译请求时<b>智能交替轮流分发（Round-Robin）</b>，分摊单家配额并大幅提升并发响应速度；当任意一家遭遇限频（429）或网络故障时，<b>自动无缝降级</b>至另一引擎模型。
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+      <h2 style="margin:0; flex:1;">🌐 全局网络代理设置（HTTP / SOCKS5）</h2>
+      <button class="btn small" id="btnTestProxy" type="button">⚡ 测试代理连通性</button>
+    </div>
+    <div class="grid">
+      <label class="field" style="grid-column: 1 / -1;">代理服务器地址 (Proxy URL)
+        <input id="sysProxy" placeholder="例如: http://127.0.0.1:7890 或 socks5://127.0.0.1:1080 (留空为直连)" type="text"/>
+      </label>
+    </div>
+    <div id="proxyTestResult" style="margin-top: 4px;"></div>
+    <details class="help-box" style="margin-top: 10px;">
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 代理配置与作用域说明</summary>
+      <div class="hint" style="margin-top: 6px;">
+        配置后将接管 <b>Google Gemini 翻译、Telegram 推送、Instagram 抓取、X / TikTok 抓取与 Message 消息轮询</b> 等外网请求；若留空则自动读取宿主机 <code>HTTP_PROXY</code> 环境变量或使用直连。
       </div>
     </details>
   </div>
@@ -1499,6 +1545,43 @@ async function fetchStatus() {
   }
 }
 
+async function fetchStorage(forceRefresh = false) {
+  try {
+    const res = await api(`/api/system/storage${forceRefresh ? "?refresh=1" : ""}`);
+    if (!res || !res.ok || !res.storage) return;
+    renderStorage(res.storage);
+  } catch (e) {}
+}
+
+function renderStorage(st) {
+  const disk = st.disk || {};
+  const app = st.app_total || {};
+  const cats = st.categories || {};
+
+  if ($("stDiskTotal")) $("stDiskTotal").textContent = disk.total_human || "—";
+  if ($("stDiskFree")) $("stDiskFree").textContent = disk.free_human || "—";
+  if ($("stDiskPercent")) $("stDiskPercent").textContent = (disk.used_percent || 0) + "%";
+  if ($("stDiskBar")) $("stDiskBar").style.width = Math.min(100, Math.max(0, disk.used_percent || 0)) + "%";
+  if ($("stAppTotal")) $("stAppTotal").textContent = app.human || "—";
+
+  const container = $("stStorageGrid");
+  if (!container) return;
+  container.innerHTML = "";
+
+  for (const [k, item] of Object.entries(cats)) {
+    const card = document.createElement("div");
+    card.style.cssText = "background:var(--card-soft); border:1px solid var(--border-soft); border-radius:var(--radius-sm); padding:10px 14px; display:flex; flex-direction:column; gap:4px;";
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:12.5px; color:var(--muted); font-weight:500;">${esc(item.name)}</span>
+        <span style="font-size:11px; padding:1px 6px; border-radius:10px; background:${item.color}22; color:${item.color}; font-weight:600;">${item.count !== undefined ? item.count + ' 项' : ''}</span>
+      </div>
+      <div style="font-size:16px; font-weight:700; color:var(--text);">${esc(item.human)}</div>
+    `;
+    container.appendChild(card);
+  }
+}
+
 function updateCountdown() {
   if (!stNextCycle) { $("stNext").textContent = ""; return; }
   const remain = stNextCycle.at_epoch - Date.now() / 1000 - stClockDelta;
@@ -1508,7 +1591,8 @@ function updateCountdown() {
 
 function startStatusPolling() {
   fetchStatus();
-  if (statusTimer === null) statusTimer = setInterval(fetchStatus, 3000);
+  fetchStorage();
+  if (statusTimer === null) statusTimer = setInterval(() => { fetchStatus(); }, 3000);
   if (countdownTimer === null) countdownTimer = setInterval(updateCountdown, 1000);
 }
 function stopStatusPolling() {
@@ -1712,6 +1796,7 @@ function renderGeneral() {
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
+  if ($("sysProxy")) $("sysProxy").value = config.proxy || "";
   renderQqBots();
 }
 
@@ -2018,6 +2103,12 @@ function collectGeneral() {
     enabled: $("cmdOn").checked,
     allow_openids: $("cmdAllow").value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
   };
+  const proxyVal = $("sysProxy") ? $("sysProxy").value.trim() : "";
+  if (proxyVal) {
+    config.proxy = proxyVal;
+  } else {
+    delete config.proxy;
+  }
 }
 ["tab-system", "tab-channels", "tab-monitors", "tab-social", "tab-users"].forEach((id) => {
   const el = $(id);
@@ -2038,6 +2129,47 @@ if ($("authArchivePublic")) {
     markDirty();
   });
 }
+
+$("btnRefreshStorage")?.addEventListener("click", () => {
+  fetchStorage(true);
+});
+
+$("btnTestProxy")?.addEventListener("click", async () => {
+  const proxy = $("sysProxy") ? $("sysProxy").value.trim() : "";
+  const resBox = $("proxyTestResult");
+  if (!resBox) return;
+  resBox.innerHTML = '<div style="font-size:13px; color:var(--accent); padding:6px 0;">⏳ 正在探测各节点网络连通性与响应延迟…</div>';
+  try {
+    const res = await api("/api/system/proxy/test", {
+      method: "POST",
+      body: JSON.stringify({ proxy })
+    });
+    if (!res || !res.ok) {
+      resBox.innerHTML = `<div style="font-size:13px; color:var(--err); padding:6px 0;">❌ 测试失败: ${esc(((res && res.errors) || []).join(", "))}</div>`;
+      return;
+    }
+    let html = '<div style="display:flex; flex-direction:column; gap:6px; background:var(--card-soft); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-soft); margin-top:8px;">';
+    html += `<div style="font-size:12.5px; font-weight:600; margin-bottom:4px; color:${res.all_ok ? 'var(--ok)' : (res.any_ok ? 'var(--warn)' : 'var(--err)')};">` +
+      (res.all_ok ? '✅ 全部节点连通正常' : (res.any_ok ? '⚠️ 部分节点连通成功' : '❌ 节点全部连通失败')) +
+      ` <span style="font-weight:normal; color:var(--muted); font-size:12px;">(${proxy ? '代理: ' + esc(proxy) : '当前直连'})</span></div>`;
+    for (const r of (res.results || [])) {
+      html += `<div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:2px 0;">
+        <span>${esc(r.name)}</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="color:var(--muted); font-size:11.5px;">${r.latency_ms}ms</span>
+          <span class="cred ${r.ok ? 'ok' : 'miss'}">${r.ok ? '✓ 连通 (' + r.status_code + ')' : '✗ 失败'}</span>
+        </div>
+      </div>`;
+      if (r.error) {
+        html += `<div style="font-size:11px; color:var(--err); margin-left:8px;">${esc(r.error)}</div>`;
+      }
+    }
+    html += '</div>';
+    resBox.innerHTML = html;
+  } catch (e) {
+    resBox.innerHTML = `<div style="font-size:13px; color:var(--err); padding:6px 0;">❌ 请求异常: ${esc(e.message)}</div>`;
+  }
+});
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;

@@ -894,6 +894,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "history": list_config_history()})
             return
 
+        if path == "/api/system/storage":
+            if not self._check_auth():
+                return
+            from src.utils import get_storage_breakdown
+            from urllib.parse import parse_qs
+            qs = parse_qs(self.path.partition("?")[2])
+            refresh = qs.get("refresh", ["0"])[0] in ("1", "true")
+            self._send_json({"ok": True, "storage": get_storage_breakdown(force_refresh=refresh)})
+            return
+
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
     def _handle_members(self) -> None:
@@ -2225,7 +2235,66 @@ class _Handler(BaseHTTPRequestHandler):
                 log_all(f"🚨 重启回调异常: {e}", is_error=True)
             self._send_json({"ok": True, "restarting": True})
             return
+        if path == "/api/system/proxy/test":
+            if not self._check_auth():
+                return
+            self._handle_proxy_test()
+            return
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+
+    def _handle_proxy_test(self) -> None:
+        """测试指定代理服务器的连通性与关键节点响应延迟。"""
+        body = self._read_body_json()
+        if body is None:
+            return
+        proxy = str(body.get("proxy", "")).strip() or None
+
+        import asyncio
+        import time
+        import httpx
+
+        targets = [
+            {"name": "Google Gemini (AI 翻译)", "url": "https://generativelanguage.googleapis.com"},
+            {"name": "Telegram Bot API", "url": "https://api.telegram.org"},
+            {"name": "Instagram 官方", "url": "https://www.instagram.com"},
+            {"name": "乃木坂46 Message", "url": "https://api.message.nogizaka46.com"},
+        ]
+
+        async def _probe(target):
+            t0 = time.monotonic()
+            try:
+                async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(target["url"])
+                    latency_ms = int((time.monotonic() - t0) * 1000)
+                    return {
+                        "name": target["name"],
+                        "url": target["url"],
+                        "ok": resp.status_code < 500,
+                        "status_code": resp.status_code,
+                        "latency_ms": latency_ms,
+                        "error": None,
+                    }
+            except Exception as e:
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                return {
+                    "name": target["name"],
+                    "url": target["url"],
+                    "ok": False,
+                    "status_code": 0,
+                    "latency_ms": latency_ms,
+                    "error": f"{type(e).__name__}: {str(e)[:80]}",
+                }
+
+        async def _run_all():
+            return await asyncio.gather(*[_probe(t) for t in targets])
+
+        try:
+            results = asyncio.run(_run_all())
+            all_ok = all(r["ok"] for r in results)
+            any_ok = any(r["ok"] for r in results)
+            self._send_json({"ok": True, "proxy": proxy, "all_ok": all_ok, "any_ok": any_ok, "results": results})
+        except Exception as e:
+            self._send_json({"ok": False, "errors": [f"代理测试执行失败: {e}"]}, 500)
 
     async def _smart_parse_credentials_text(self, raw: str, account: str = "") -> dict:
         """智能解析用户粘贴的 cURL / Headers / Signin Payload 文本。"""

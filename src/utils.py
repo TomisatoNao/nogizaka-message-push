@@ -79,3 +79,155 @@ class RateLimiter:
 
     async def __aexit__(self, *args):
         pass
+
+
+def format_bytes(num_bytes: int | float) -> str:
+    """将字节数格式化为人类可读的字符串（B / KB / MB / GB / TB）。"""
+    n = float(num_bytes or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024.0 or unit == "TB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
+        n /= 1024.0
+    return f"{n:.1f} TB"
+
+
+_storage_cache: dict = {}
+_storage_cache_time: float = 0.0
+_storage_lock = threading.Lock()
+
+
+def get_storage_breakdown(force_refresh: bool = False) -> dict:
+    """计算磁盘总空间及 Message、博客、社媒、数据库与日志的分项存储占用（带 30s 内存缓存）。"""
+    global _storage_cache, _storage_cache_time
+    import shutil
+    from pathlib import Path
+
+    now = time.time()
+    with _storage_lock:
+        if not force_refresh and _storage_cache and (now - _storage_cache_time < 30):
+            return dict(_storage_cache)
+
+        base_dir = Path(__file__).resolve().parent.parent
+
+        # 1. 宿主机 / 容器文件系统磁盘用量
+        try:
+            total_b, used_b, free_b = shutil.disk_usage(str(base_dir))
+            used_pct = round((used_b / total_b * 100), 1) if total_b > 0 else 0.0
+        except Exception:
+            total_b, used_b, free_b, used_pct = 0, 0, 0, 0.0
+
+        def _scan_dir(dir_path: Path, ext_filter=None, ext_exclude=None) -> tuple[int, int]:
+            """返回 (总字节数, 文件总数)"""
+            if not dir_path.exists() or not dir_path.is_dir():
+                return 0, 0
+            size = 0
+            count = 0
+            try:
+                for entry in dir_path.rglob("*"):
+                    if entry.is_file():
+                        if ext_filter and entry.suffix.lower() not in ext_filter:
+                            continue
+                        if ext_exclude and entry.suffix.lower() in ext_exclude:
+                            continue
+                        try:
+                            size += entry.stat().st_size
+                            count += 1
+                        except OSError:
+                            pass
+            except Exception:
+                pass
+            return size, count
+
+        # 2. 分项统计
+        # Message 媒体（data/archive 中排除 .db 数据库文件）
+        msg_media_b, msg_media_cnt = _scan_dir(base_dir / "data" / "archive", ext_exclude=(".db", ".db-wal", ".db-shm"))
+        # 博客原图 (data/blog_images)
+        blog_img_b, blog_img_cnt = _scan_dir(base_dir / "data" / "blog_images")
+        # 社媒下载媒体 (data/social_media)
+        social_b, social_cnt = _scan_dir(base_dir / "data" / "social_media")
+        # 直播录制 (recordings / data/recordings)
+        live_b1, live_cnt1 = _scan_dir(base_dir / "recordings")
+        live_b2, live_cnt2 = _scan_dir(base_dir / "data" / "recordings")
+        live_b = live_b1 + live_b2
+        live_cnt = live_cnt1 + live_cnt2
+
+        # 核心数据库文件 (data/*.db, data/archive/*.db, etc.)
+        db_bytes = 0
+        db_count = 0
+        for p in (base_dir / "data").rglob("*.db*"):
+            if p.is_file():
+                try:
+                    db_bytes += p.stat().st_size
+                    db_count += 1
+                except OSError:
+                    pass
+
+        # 系统运行日志 (logs/)
+        logs_b, logs_cnt = _scan_dir(base_dir / "logs")
+
+        app_total_b = msg_media_b + blog_img_b + social_b + live_b + db_bytes + logs_b
+
+        res = {
+            "disk": {
+                "total_bytes": total_b,
+                "total_human": format_bytes(total_b),
+                "used_bytes": used_b,
+                "used_human": format_bytes(used_b),
+                "free_bytes": free_b,
+                "free_human": format_bytes(free_b),
+                "used_percent": used_pct,
+            },
+            "app_total": {
+                "bytes": app_total_b,
+                "human": format_bytes(app_total_b),
+            },
+            "categories": {
+                "message_media": {
+                    "name": "Message 媒体",
+                    "bytes": msg_media_b,
+                    "human": format_bytes(msg_media_b),
+                    "count": msg_media_cnt,
+                    "color": "#ec4899",
+                },
+                "blog_images": {
+                    "name": "博客原图",
+                    "bytes": blog_img_b,
+                    "human": format_bytes(blog_img_b),
+                    "count": blog_img_cnt,
+                    "color": "#8b5cf6",
+                },
+                "social_media": {
+                    "name": "社媒媒体",
+                    "bytes": social_b,
+                    "human": format_bytes(social_b),
+                    "count": social_cnt,
+                    "color": "#3b82f6",
+                },
+                "live_recordings": {
+                    "name": "直播录像",
+                    "bytes": live_b,
+                    "human": format_bytes(live_b),
+                    "count": live_cnt,
+                    "color": "#f59e0b",
+                },
+                "databases": {
+                    "name": "SQLite 数据库",
+                    "bytes": db_bytes,
+                    "human": format_bytes(db_bytes),
+                    "count": db_count,
+                    "color": "#10b981",
+                },
+                "logs": {
+                    "name": "运行日志",
+                    "bytes": logs_b,
+                    "human": format_bytes(logs_b),
+                    "count": logs_cnt,
+                    "color": "#6b7280",
+                },
+            },
+            "updated_at": now,
+        }
+
+        _storage_cache = res
+        _storage_cache_time = now
+        return dict(res)

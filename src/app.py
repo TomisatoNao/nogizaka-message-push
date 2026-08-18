@@ -640,9 +640,14 @@ async def main() -> None:
         print(banner, flush=True)
         log_all("🔑 系统首次运行：已初始化创建 admin 账号（初始密码已输出至控制台）")
 
+    proxy_url = getattr(cfg, "PROXY", "") or None
+    if proxy_url:
+        log_all(f"🌐 已配置网络代理: {proxy_url}")
+
     # 2. 创建共享 HTTP 客户端
     http_client = httpx.AsyncClient(
         timeout=20,
+        proxy=proxy_url,
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
     )
     qq_client = httpx.AsyncClient(
@@ -669,7 +674,7 @@ async def main() -> None:
 
     # 博客 http 客户端
     global _blog_client
-    _blog_client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+    _blog_client = httpx.AsyncClient(timeout=30, proxy=proxy_url, follow_redirects=True)
 
     # 4. 账号初始 Token 刷新与自动握手
     #    必须放在通道注入（步骤 3）之后：刷新失败时 refresh_token 会走
