@@ -242,6 +242,35 @@ header.app-header {
   background: var(--err-soft) !important;
 }
 
+/* ── 顶栏前后台切换专属胶囊按钮 ── */
+.app-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent-2) 85%, var(--accent)) 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, white 25%) !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 32%, transparent) !important;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all var(--tr-fast) cubic-bezier(.2,.8,.2,1);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.app-switch-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent) !important;
+  filter: brightness(1.08);
+  color: #ffffff !important;
+}
+.app-switch-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+
 @media (max-width: 768px) {
   header.app-header { padding: 0 12px; height: auto; min-height: 54px; flex-wrap: wrap; gap: 8px; padding-top: 6px; padding-bottom: 6px; }
   .header-nav { order: 3; width: 100%; justify-content: flex-start; flex-wrap: wrap; padding-bottom: 4px; overflow: visible !important; }
