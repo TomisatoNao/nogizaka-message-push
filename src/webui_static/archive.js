@@ -1521,7 +1521,8 @@ function renderBubble(msg) {
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
       let parts = [];
-      const mName = curMember || "成员";
+      const mObj = members.find(x => x.name === curMember);
+      const mName = (mObj ? mObj.display : curMember) || "成员";
       const timeStr = fmtCopyTime(msg.published_at);
       parts.push(mName + " " + timeStr);
 

@@ -1420,8 +1420,10 @@ class _Handler(BaseHTTPRequestHandler):
                     def _build_pic(row) -> dict:
                         rj = json.loads(row[6])
                         pub = row[4] or row[5] or ""
+                        norm_m = row[1].replace(" ", "").replace("　", "").replace("_", "")
+                        disp = monitor_names.get(norm_m) or row[1].replace("_", " ")
                         return {
-                            "member": row[1], "member_display": row[1].replace("_", " "),
+                            "member": row[1], "member_display": disp,
                             "id": row[0], "text": row[2] or "",
                             "url": f"/api/archive/media/{row[1]}/{row[3]}",
                             "w": rj.get("thumbnail_width"), "h": rj.get("thumbnail_height"),
@@ -1458,8 +1460,10 @@ class _Handler(BaseHTTPRequestHandler):
                     for rid in rand_txt_ids:
                         r = txt_map[rid]
                         pub = r[4] or r[5] or ""
+                        norm_r = r[1].replace(" ", "").replace("　", "").replace("_", "")
+                        disp_r = monitor_names.get(norm_r) or r[1].replace("_", " ")
                         rand_msgs.append({
-                            "member": r[1], "member_display": r[1].replace("_", " "),
+                            "member": r[1], "member_display": disp_r,
                             "id": r[0], "text": r[2] or "", "translation": r[3] or "",
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
