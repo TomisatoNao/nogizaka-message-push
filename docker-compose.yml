@@ -1,0 +1,20 @@
+services:
+  sakamichi-push:
+    image: ghcr.io/tomisatonao/nogizaka-message-push:latest
+    # 如需本地直接构建运行，可取消下一行注释：
+    # build: .
+    container_name: sakamichi-push
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - TZ=Asia/Tokyo
+      # 可直接在此处注入密钥（或写入挂载的 .env 文件）：
+      # - WEB_ADMIN_TOKEN=your_admin_token
+      # - GEMINI_API_KEY=AIzaSy...
+      # - TG_BOT_TOKEN=123456:ABC-DEF...
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env

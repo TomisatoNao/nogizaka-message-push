@@ -20,10 +20,7 @@ __pycache__/
 .claude/
 CLAUDE.md
 
-# Docker 本地实验（不在远端仓库）
-Dockerfile
-docker-compose.yml
-.dockerignore
+# Docker 镜像导出临时文件
 *.tar
 
 # Git worktrees
