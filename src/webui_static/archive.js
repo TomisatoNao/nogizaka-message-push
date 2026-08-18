@@ -2112,40 +2112,44 @@ function renderHome(data) {
     });
   });
 
-  // 4. 最新动态聚合流 (Message + Blog)
+  // 4. 最新动态聚合流 (Message + Blog 双列瀑布流)
   const feedDiv = $("homeFeedList");
   if (recentFeed.length) {
-    let feedHTML = '';
+    let col1HTML = '';
+    let col2HTML = '';
     recentFeed.forEach((item, i) => {
+      let cardHTML = '';
       const dateStr = fmtDate(item.published_at);
       if (item.type === "blog") {
-        feedHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
-        feedHTML += '<div class="hmc-header">';
-        feedHTML += '<div class="hmc-meta-left">';
-        feedHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
-        feedHTML += '<span class="hmc-time">' + dateStr + '</span>';
-        feedHTML += '</div>';
-        feedHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
-        feedHTML += '</div>';
-        feedHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
-        feedHTML += '</div>';
+        cardHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
+        cardHTML += '<div class="hmc-header">';
+        cardHTML += '<div class="hmc-meta-left">';
+        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
+        cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        cardHTML += '</div>';
+        cardHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
+        cardHTML += '</div>';
+        cardHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
+        cardHTML += '</div>';
       } else {
-        feedHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
-        feedHTML += '<div class="hmc-header">';
-        feedHTML += '<div class="hmc-meta-left">';
-        feedHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
-        feedHTML += '<span class="hmc-time">' + dateStr + '</span>';
-        feedHTML += '</div>';
-        feedHTML += '<span class="hmc-jump">查看消息 →</span>';
-        feedHTML += '</div>';
-        feedHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
+        cardHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
+        cardHTML += '<div class="hmc-header">';
+        cardHTML += '<div class="hmc-meta-left">';
+        cardHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
+        cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        cardHTML += '</div>';
+        cardHTML += '<span class="hmc-jump">查看消息 →</span>';
+        cardHTML += '</div>';
+        cardHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
         if (item.translation) {
-          feedHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
+          cardHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
         }
-        feedHTML += '</div>';
+        cardHTML += '</div>';
       }
+      if (i % 2 === 0) col1HTML += cardHTML;
+      else col2HTML += cardHTML;
     });
-    feedDiv.innerHTML = feedHTML;
+    feedDiv.innerHTML = '<div class="portal-feed-col">' + col1HTML + '</div><div class="portal-feed-col">' + col2HTML + '</div>';
     feedDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
         hideHome();
@@ -2164,11 +2168,13 @@ function renderHome(data) {
     feedDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无最新动态</div>';
   }
 
-  // 5. 时光隧道 (Message + Blog)
+  // 5. 时光隧道 (Message + Blog 双列瀑布流)
   const tunnelDiv = $("homeTimeTunnel");
   if (timeTunnel && timeTunnel.length) {
-    let tunnelHTML = '';
+    let col1HTML = '';
+    let col2HTML = '';
     timeTunnel.forEach((item, i) => {
+      let cardHTML = '';
       const dateStr = fmtDateFull(item.published_at);
       const d = parseDateSafe(item.published_at);
       const year = d ? d.getFullYear() : (item.year || '');
@@ -2177,38 +2183,40 @@ function renderHome(data) {
       const agoTag = yearsAgo > 0 ? (yearsAgo + '年前 · ' + year + '年') : (year + '年');
 
       if (item.type === "blog") {
-        tunnelHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
-        tunnelHTML += '<div class="hmc-header">';
-        tunnelHTML += '<div class="hmc-meta-left">';
-        tunnelHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
-        tunnelHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
-        tunnelHTML += '<span class="hmc-time">' + dateStr + '</span>';
-        tunnelHTML += '</div>';
-        tunnelHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
-        tunnelHTML += '</div>';
-        tunnelHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
+        cardHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
+        cardHTML += '<div class="hmc-header">';
+        cardHTML += '<div class="hmc-meta-left">';
+        cardHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
+        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
+        cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        cardHTML += '</div>';
+        cardHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
+        cardHTML += '</div>';
+        cardHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
         if (item.translation) {
-          tunnelHTML += '<div class="hmc-trans" style="color:var(--text);">' + formatCardText(item.translation) + '</div>';
+          cardHTML += '<div class="hmc-trans" style="color:var(--text);">' + formatCardText(item.translation) + '</div>';
         }
-        tunnelHTML += '</div>';
+        cardHTML += '</div>';
       } else {
-        tunnelHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
-        tunnelHTML += '<div class="hmc-header">';
-        tunnelHTML += '<div class="hmc-meta-left">';
-        tunnelHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
-        tunnelHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
-        tunnelHTML += '<span class="hmc-time">' + dateStr + '</span>';
-        tunnelHTML += '</div>';
-        tunnelHTML += '<span class="hmc-jump">跳转当日 →</span>';
-        tunnelHTML += '</div>';
-        tunnelHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
+        cardHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
+        cardHTML += '<div class="hmc-header">';
+        cardHTML += '<div class="hmc-meta-left">';
+        cardHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
+        cardHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
+        cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        cardHTML += '</div>';
+        cardHTML += '<span class="hmc-jump">跳转当日 →</span>';
+        cardHTML += '</div>';
+        cardHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
         if (item.translation) {
-          tunnelHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
+          cardHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
         }
-        tunnelHTML += '</div>';
+        cardHTML += '</div>';
       }
+      if (i % 2 === 0) col1HTML += cardHTML;
+      else col2HTML += cardHTML;
     });
-    tunnelDiv.innerHTML = tunnelHTML;
+    tunnelDiv.innerHTML = '<div class="portal-tunnel-col">' + col1HTML + '</div><div class="portal-tunnel-col">' + col2HTML + '</div>';
     tunnelDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
         curMode = "msg";

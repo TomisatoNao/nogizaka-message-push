@@ -582,18 +582,26 @@
     color: var(--text);
   }
 
-  /* 聚合动态流与时光隧道 */
+  /* 聚合动态流与时光隧道（双列瀑布流无缝排版） */
   .portal-feed-grid,
   .portal-tunnel-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    align-items: start;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .portal-feed-col,
+  .portal-tunnel-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
     gap: 12px;
   }
   @media (max-width: 768px) {
     .portal-feed-grid,
     .portal-tunnel-grid {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+      gap: 12px;
     }
   }
 
