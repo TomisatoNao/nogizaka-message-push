@@ -261,7 +261,10 @@ def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = N
                 next_node = el.next_sibling
                 zh_text = ""
                 while next_node:
-                    if getattr(next_node, "name", None) == "span":
+                    name = getattr(next_node, "name", None)
+                    if name in ("em", "p", "img"):
+                        break
+                    if name == "span":
                         zh_text = next_node.get_text("\n").strip()
                         break
                     next_node = next_node.next_sibling

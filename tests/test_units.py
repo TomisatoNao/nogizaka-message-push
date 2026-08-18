@@ -264,6 +264,43 @@ def test_smart_parse_credentials() -> None:
     print("  ✅ cURL -b 与 Authorization 提取正确")
 
 
+def test_extract_bilingual_pairs() -> None:
+    print("=== _extract_bilingual_pairs ===")
+    from src.notifier import _extract_bilingual_pairs
+
+    # 1) 包含未翻译声音拟声词/AA（无对应 span 译文），不能跨越 em 偷取后文 span
+    html = (
+        "<em>ｸﾞﾙｸﾞﾙ</em><br><br>"
+        "<em>ｼｭｰｰｰｰｰ</em><br><br>"
+        "<em>おひさまが幸せに暮らせますように.。.☆</em><br>"
+        "<span>希望Ohisama（日向坂粉丝名）们都能幸福地生活.。.☆</span><br><br>"
+        "<em>ｷﾗﾝｯｯ</em><br><br>"
+        "<em>流れ星がお願いを聞いてくれる時間</em><br>"
+        "<span>流星能听见愿望的时间</span>"
+    )
+    pairs = _extract_bilingual_pairs(html)
+    assert len(pairs) == 5, pairs
+    assert pairs[0] == ("ｸﾞﾙｸﾞﾙ", ""), pairs[0]
+    assert pairs[1] == ("ｼｭｰｰｰｰｰ", ""), pairs[1]
+    assert pairs[2] == ("おひさまが幸せに暮らせますように.。.☆", "希望Ohisama（日向坂粉丝名）们都能幸福地生活.。.☆"), pairs[2]
+    assert pairs[3] == ("ｷﾗﾝｯｯ", ""), pairs[3]
+    assert pairs[4] == ("流れ星がお願いを聞いてくれる時間", "流星能听见愿望的时间"), pairs[4]
+
+    # 2) 包含图片标签自动压缩
+    html2 = (
+        "<em>段落1</em><br><span>译文1</span><br><br>"
+        "<img src='https://example.com/1.jpg'><br><br>"
+        "<img src='https://example.com/2.jpg'><br><br>"
+        "<em>段落2</em><br><span>译文2</span>"
+    )
+    pairs2 = _extract_bilingual_pairs(html2, media_urls=["https://example.com/1.jpg", "https://example.com/2.jpg"])
+    assert len(pairs2) == 3, pairs2
+    assert pairs2[0] == ("段落1", "译文1")
+    assert pairs2[1] == "[写真1-2]"
+    assert pairs2[2] == ("段落2", "译文2")
+    print("  ✅ _extract_bilingual_pairs 边界隔离与图片压缩测试通过")
+
+
 def main() -> None:
     test_utc_to_jst()
     test_log_truncation()
@@ -271,6 +308,7 @@ def main() -> None:
     test_chain_extract()
     test_cookie_cleaner()
     test_smart_parse_credentials()
+    test_extract_bilingual_pairs()
     test_health_rolling()
     test_time_record_skip()
     test_stop_signal_file()
