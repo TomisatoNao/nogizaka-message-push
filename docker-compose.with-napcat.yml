@@ -1,0 +1,34 @@
+services:
+  sakamichi-push:
+    image: ghcr.io/tomisatonao/nogizaka-message-push:latest
+    container_name: sakamichi-push
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - TZ=Asia/Tokyo
+      # 容器网络直连 NapCat 服务的 HTTP API
+      - NAPCAT_API_URL=http://napcat:3000/send_group_msg
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    depends_on:
+      - napcat
+
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    environment:
+      - ACCOUNT=123456789
+      - HTTP_ENABLE=true
+      - HTTP_PORT=3000
+      - WEBUI_PORT=6099
+    ports:
+      - "6099:6099" # NapCat 网页扫码登录控制台
+      - "3000:3000" # OneBot 11 HTTP 接口
+    volumes:
+      - ./napcat/data:/app/.napcat
+      - ./napcat/config:/app/napcat/config

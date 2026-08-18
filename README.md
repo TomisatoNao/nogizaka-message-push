@@ -74,7 +74,8 @@
 ## 📑 目录
 
 - [✨ 核心特性 / Features](#-核心特性--features)
-- [🚀 极简快速上手 / Quick Start](#-极简快速上手--quick-start)
+- [🐳 Docker / NAS 一键部署 (推荐)](#-docker--nas-一键部署-推荐)
+- [🚀 极简快速上手 / Quick Start (原生 Python)](#-极简快速上手--quick-start-原生-python)
   - [Step 1: 安装依赖与环境准备](#step-1-安装依赖与环境准备)
   - [Step 2: 启动程序（自动生成初始管理员）](#step-2-启动程序自动生成初始管理员)
   - [Step 3: 登录管理后台进行可视化配置](#step-3-登录管理后台进行可视化配置)
@@ -146,7 +147,69 @@
 
 ---
 
-## 🚀 极简快速上手 / Quick Start
+## 🐳 Docker / NAS 一键部署 (推荐)
+
+本项目提供官方多架构 Docker 镜像（支持 `linux/amd64` 和 `linux/arm64`，全面适配群晖 Synology、QNAP、Unraid、1Panel、Portainer、云服务器及树莓派）。镜像内置 `ffmpeg`、`tzdata` 与首次运行自动初始化机制，开箱即用。
+
+### 方式一：Docker CLI 一行运行
+
+```bash
+docker run -d \
+  --name sakamichi-push \
+  --restart unless-stopped \
+  -p 8787:8787 \
+  -e TZ=Asia/Tokyo \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/.env:/app/.env \
+  ghcr.io/tomisatonao/nogizaka-message-push:latest
+```
+
+### 方式二：Docker Compose 编排启动（最推荐）
+
+1. 创建并进入工作目录：
+```bash
+mkdir -p sakamichi-push && cd sakamichi-push
+```
+
+2. 新建 `docker-compose.yml` 编排文件：
+```yaml
+services:
+  sakamichi-push:
+    image: ghcr.io/tomisatonao/nogizaka-message-push:latest
+    container_name: sakamichi-push
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - TZ=Asia/Tokyo
+      # 也可以直接在此处注入密钥（或者通过挂载的 .env 填写）：
+      # - WEB_ADMIN_TOKEN=your_token
+      # - GEMINI_API_KEY=AIzaSy...
+      # - TG_BOT_TOKEN=123456:ABC...
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+```
+
+3. 一键启动容器：
+```bash
+docker compose up -d
+```
+
+4. 查看首次启动终端生成的初始管理员账号与随机密码：
+```bash
+docker logs sakamichi-push
+```
+
+5. 打开浏览器访问 **`http://<服务器或NAS IP>:8787/`** 即可直接登录并进行可视化管理！
+
+---
+
+## 🚀 极简快速上手 / Quick Start (原生 Python)
 
 本项目采用**“零手动改配置文件、全 Web 可视化引导”**的极简设计理念，3 步即可完成部署与运行：
 
