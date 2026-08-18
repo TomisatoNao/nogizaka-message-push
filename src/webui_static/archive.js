@@ -335,17 +335,28 @@ async function jumpToDay(dateKey) {
 // ── 模式切换 ─────────────────────────────────────
 function switchMainTab(mode, keepHash) {
   curMode = mode;
+  const tabHome = $("tabHome");
+  if (tabHome) tabHome.classList.toggle("active", mode === "home");
   $("tabMsg").classList.toggle("active", mode === "msg");
   $("tabBlog").classList.toggle("active", mode === "blog");
+  
+  $("subNav").style.display = mode === "home" ? "none" : "";
   $("memberChips").style.display = mode === "msg" ? "" : "none";
   $("blogGroupChips").style.display = mode === "blog" ? "" : "none";
 
-  if (mode === "msg") {
+  if (mode === "home") {
     if (!keepHash) goHome();
-  } else {
+  } else if (mode === "msg") {
+    hideHome();
+    if (!keepHash) {
+      const wanted = curMember || (members[0] ? members[0].name : "冨里奈央");
+      selectMember(wanted);
+    }
+  } else if (mode === "blog") {
+    hideHome();
     if (!keepHash) {
       if (blogGroups && blogGroups.length > 0) {
-        selectBlogGroup(blogGroups[0].key);
+        selectBlogGroup(curBlogGroup || blogGroups[0].key);
       } else {
         location.hash = "blog="; // 触发 hashchange 或 reload
         showBlogHome();
@@ -354,6 +365,7 @@ function switchMainTab(mode, keepHash) {
   }
 }
 
+if ($("tabHome")) $("tabHome").addEventListener("click", () => goHome());
 $("tabMsg").addEventListener("click", () => switchMainTab("msg"));
 $("tabBlog").addEventListener("click", () => switchMainTab("blog"));
 
@@ -1813,17 +1825,34 @@ function fmtDateShort(utc) {
   return (d.getMonth() + 1) + "月" + d.getDate() + "日";
 }
 
+async function openBlogReaderById(blogId) {
+  try {
+    const res = await api("/api/archive/blogs?id=" + encodeURIComponent(blogId));
+    if (res.ok && res.post) {
+      openBlogReader(res.post);
+    } else {
+      showToast("⚠️ 博客加载失败");
+    }
+  } catch (e) {
+    showToast("⚠️ 加载博客异常: " + e.message);
+  }
+}
+
 async function showHome() {
+  curMode = "home";
+  switchMainTab("home", true);
+  
   document.querySelector('.layout').style.display = 'none';
   $('backTop').classList.remove('show'); $('backTop').classList.add('force-hide');
   $('archiveHome').classList.add('active');
+  
   // 骨架屏
   $('homeSkeleton').classList.add('active');
-  $('archiveHome').querySelector('.home-hero').style.display = 'none';
+  $('portalContent').style.display = 'none';
+  
   try {
     const data = await api("/api/archive/home");
-    if (!data.members.length) {
-      // 空状态
+    if (!data.ok || (!data.members.length && !data.blog_groups.length)) {
       $('homeSkeleton').classList.remove('active');
       $('archiveHome').innerHTML =
         '<div class="home-empty active"><div class="ee-icon">📭</div>' +
@@ -1831,164 +1860,101 @@ async function showHome() {
         '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
       return;
     }
-    renderHome(data.aggregated, data.members);
+    renderHome(data);
     $('homeSkeleton').classList.remove('active');
-    $('archiveHome').querySelector('.home-hero').style.display = '';
+    $('portalContent').style.display = '';
   } catch (e) {
     $('homeSkeleton').classList.remove('active');
     $('archiveHome').innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
   }
 }
 
-function renderHome(agg, members) {
-  // ── Hero 卡片 ──
-  const single = members.length === 1;
-  let heroHTML = '<div class="hc-top">';
-  heroHTML += '<div class="hc-icon">' + (single ? '⛩️' : '🏠') + '</div>';
-  heroHTML += '<div class="hc-title-box">';
-  heroHTML += '<div class="hc-name">' + (single ? esc(members[0].display) : members.length + ' 位成员') + '</div>';
-  if (members.length > 1) {
-    heroHTML += '<div class="hc-sub">' + members.map(m => esc(m.display)).join(' · ') + '</div>';
-  } else {
-    heroHTML += '<div class="hc-sub">乃木坂46 · 官方 Message 归档</div>';
-  }
+function renderHome(data) {
+  const summary = data.summary || {};
+  const members = data.members || [];
+  const blogGroups = data.blog_groups || [];
+  const recentPics = data.recent_pics || [];
+  const recentFeed = data.recent_feed || [];
+  const timeTunnel = data.time_tunnel || [];
+
+  // 1. Portal Hero 看板
+  const heroDiv = $("portalHero");
+  let heroHTML = '';
+  heroHTML += '<div class="portal-hero-top">';
+  heroHTML += '<div class="portal-hero-icon">🌸</div>';
+  heroHTML += '<div class="portal-hero-title-box">';
+  heroHTML += '<div class="portal-hero-title">坂道综合归档总览</div>';
+  heroHTML += '<div class="portal-hero-sub">乃木坂46 · 樱坂46 · 日向坂46 官方 Message 与三团官方博客数字化总库</div>';
   heroHTML += '</div></div>';
 
-  const totalMonths = members.reduce((s, m) => s + m.stats.months, 0);
-  const ws = agg.week_stats || {};
-  heroHTML += '<div class="hc-stats-grid">';
-  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">💌 消息总数</span><span class="hc-metric-val">' + agg.total_msgs.toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">条</small></span></div>';
-  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">🗓️ 归档月数</span><span class="hc-metric-val">' + totalMonths + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">个月</small></span><span class="hc-metric-sub">' + (agg.first_date || '?') + ' — ' + (agg.last_date || '?') + '</span></div>';
+  heroHTML += '<div class="portal-metric-grid">';
+  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">💌 官方 Message</span><span class="portal-metric-val">' + (summary.total_messages || 0).toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">条</small></span><span class="portal-metric-sub">' + (summary.member_count || 0) + ' 位监控成员</span></div>';
+  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">📝 官方博客</span><span class="portal-metric-val">' + (summary.total_blogs || 0).toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">篇</small></span><span class="portal-metric-sub">3 团全量 · ' + (summary.blog_author_count || 0) + ' 位作者</span></div>';
+  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">📊 全站归档总计</span><span class="portal-metric-val">' + (summary.total_all || 0).toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">项</small></span><span class="portal-metric-sub">' + (summary.first_date || '2012/02') + ' — ' + (summary.last_date || '2026/08') + '</span></div>';
   
-  let weekVal = (ws.this_week || 0) + ' 条';
-  let weekDiff = '';
-  if (ws.this_week > 0 && ws.last_week > 0 && ws.this_week !== ws.last_week) {
-    const diff = ws.this_week - ws.last_week;
-    weekDiff = '较上周 ' + (diff > 0 ? '↑' + diff : '↓' + Math.abs(diff));
-  }
-  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">📈 本周发送</span><span class="hc-metric-val">' + weekVal + '</span>' + (weekDiff ? '<span class="hc-metric-sub">' + weekDiff + '</span>' : '') + '</div>';
-  
-  const lu = agg.last_updated ? fmtDate(agg.last_updated) : '—';
-  heroHTML += '<div class="hc-metric"><span class="hc-metric-label">⚡ 最近更新</span><span class="hc-metric-val" style="font-size:14px; margin-top:2px;">' + lu + '</span></div>';
+  const lu = summary.last_updated ? fmtDate(summary.last_updated) : '—';
+  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">⚡ 最近更新动态</span><span class="portal-metric-val" style="font-size:14px; margin-top:3px;">' + lu + '</span><span class="portal-metric-sub">实时监控同步中</span></div>';
   heroHTML += '</div>';
 
-  // 今日动态 + 快捷跳转
-  const today = new Date();
-  const todayKey = today.getFullYear() + "-" + String(today.getMonth()+1).padStart(2,"0") + "-" + String(today.getDate()).padStart(2,"0");
-  const todayCount = members.reduce((s, m) => s + ((m.days || {})[todayKey] || 0), 0);
-  
+  const today = summary.today_stats || {};
   let actionHTML = '';
-  if (todayCount > 0) {
-    actionHTML += '<button class="hc-today-btn" id="hcTodayBtn">🔥 今日有 <b>' + todayCount + '</b> 条新动态 · 点击查看 →</button>';
+  if (today.total > 0) {
+    actionHTML += '<button class="portal-today-btn" id="portalTodayBtn">🔥 今日全站有 <b>' + today.total + '</b> 条新动态（Message ' + (today.messages || 0) + ' 条 · 博客 ' + (today.blogs || 0) + ' 篇）· 点击速览 →</button>';
   } else {
-    actionHTML += '<span style="font-size:12px;color:var(--muted)">✨ 历史消息已同步最新</span>';
+    actionHTML += '<span style="font-size:12.5px;color:var(--muted)">✨ 历史消息与官方博客数据已同步至最新</span>';
   }
-  heroHTML += '<div class="hc-actions">' + actionHTML + '<span style="font-size:11.5px;color:var(--muted)">📅 ' + (agg.first_date || '?') + ' 起</span></div>';
-  $("homeMember").innerHTML = heroHTML;
+  heroHTML += '<div class="portal-hero-banner">' + actionHTML + '<span style="font-size:12px;color:var(--muted)">📅 ' + (summary.first_date || '2012/02') + ' 起</span></div>';
+  heroDiv.innerHTML = heroHTML;
 
-  // 今日按钮点击
-  const todayBtn = $("hcTodayBtn");
+  // 今日动态按钮跳转
+  const todayBtn = $("portalTodayBtn");
   if (todayBtn) {
-    const defaultMember = members[0].name;
-    const latestMonth = members[0].monthly && members[0].monthly[0];
-    const ty = latestMonth ? latestMonth.year : today.getFullYear();
-    const tm = latestMonth ? latestMonth.month : (today.getMonth() + 1);
-
-    const goToday = async (e) => {
-      e.preventDefault();
-      curMode = "msg";
-      switchMainTab("msg", true);
-      hideHome();
-
-      curMember = defaultMember;
-      curType = "";
-      searchQuery = "";
-      syncSearchInput();
-      targetMsgId = "";
-
-      selfHashUpdate = true;
-      location.hash = "member=" + encodeURIComponent(defaultMember) + "&y=" + ty + "&m=" + tm;
-      setTimeout(() => { selfHashUpdate = false; }, 100);
-
-      await selectMember(defaultMember, false);
-
-      const todayDateKey = today.getFullYear() + "-"
-        + String(today.getMonth() + 1).padStart(2, "0") + "-"
-        + String(today.getDate()).padStart(2, "0");
-      const loadVersion = contentVersion;
-      while (loadVersion === contentVersion && page < totalPages) {
-        const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
-        if (sep) break;
-        page++;
-        await loadPage();
+    todayBtn.addEventListener("click", () => {
+      const feedSec = $("homeFeedList");
+      if (feedSec) {
+        const topY = feedSec.getBoundingClientRect().top + window.scrollY - 80;
+        window.scrollTo({ top: topY, behavior: "smooth" });
       }
-
-      const scrollToToday = () => {
-        const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
-        if (!sep) return false;
-        const headerEl = document.querySelector("header, .header, nav.header, #header");
-        const headerH = headerEl ? headerEl.getBoundingClientRect().height : 64;
-        const targetY = sep.getBoundingClientRect().top + window.scrollY - headerH - 16;
-        window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
-        return true;
-      };
-
-      if (!scrollToToday()) return;
-
-      setTimeout(scrollToToday, 400);
-      setTimeout(scrollToToday, 1000);
-
-      setTimeout(() => {
-        const sep = document.querySelector('.day-sep[data-date="' + todayDateKey + '"]');
-        if (!sep) return;
-        sep.classList.add("flash");
-        setTimeout(() => sep.classList.remove("flash"), 2500);
-        let next = sep.nextElementSibling;
-        while (next && !next.classList.contains("bubble")) {
-          next = next.nextElementSibling;
-        }
-        if (next) {
-          next.classList.add("today-flash");
-          setTimeout(() => next.classList.remove("today-flash"), 1600);
-        }
-      }, 600);
-    };
-
-    todayBtn.addEventListener("click", goToday);
-    todayBtn.addEventListener("touchend", goToday);
+    });
   }
 
-  // ── Section: 最新写真 ──
+  // 2. 综合写真画廊
   const strip = $("photoStrip");
-  if (agg.pics.length) {
-    strip.innerHTML = agg.pics.map(p =>
-      '<div class="photo-card" data-member="' + esc(p.member) + '" data-year="' + p.year + '" data-month="' + p.month + '" data-id="' + p.id + '">' +
-        (members.length > 1 ? '<span class="pc-member">' + esc(p.member_display) + '</span>' : '') +
+  if (recentPics.length) {
+    strip.innerHTML = recentPics.map(p =>
+      '<div class="photo-card" data-type="' + p.type + '" data-member="' + esc(p.member || '') + '" data-group="' + esc(p.group_key || '') + '" data-id="' + p.id + '" data-year="' + (p.year || '') + '" data-month="' + (p.month || '') + '">' +
+        '<span class="pc-member">' + esc(p.member_display) + '</span>' +
         '<img src="' + mediaUrl(p.url) + '" data-src="' + esc(p.url) + '" alt="" onerror="handleImgError(this)" onload="this.classList.add(\'loaded\')">' +
         (p.text ? '<div class="pc-overlay"><div class="pc-cap">' + formatMessageText(p.text) + '</div></div>' : '') +
       '</div>'
     ).join('');
+
     strip.querySelectorAll('.photo-card').forEach(el => {
       el.addEventListener('click', () => {
-        curMode = "msg";
-        switchMainTab("msg", true);
-        hideHome();
-        curMember = el.dataset.member;
-        curType = "";
-        searchQuery = "";
-        syncSearchInput();
-        targetMsgId = el.dataset.id;
-        selfHashUpdate = true;
-        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
-        setTimeout(() => { selfHashUpdate = false; }, 100);
-        loadMembers();
+        const pType = el.dataset.type;
+        if (pType === "blog") {
+          openBlogReaderById(el.dataset.id);
+        } else {
+          curMode = "msg";
+          switchMainTab("msg", true);
+          hideHome();
+          curMember = el.dataset.member;
+          curType = "";
+          searchQuery = "";
+          syncSearchInput();
+          targetMsgId = el.dataset.id;
+          selfHashUpdate = true;
+          location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
+          setTimeout(() => { selfHashUpdate = false; }, 100);
+          loadMembers();
+        }
       });
     });
   } else {
     strip.innerHTML = '<div style="color:var(--muted);padding:30px 10px;text-align:center">暂无图片</div>';
   }
 
-  // 图片条自动滚动
+  // 图片条自动滚动与拖拽交互
   let photoTimer = null;
   let photoScrolling = false;
   function photoAdvance() {
@@ -2013,7 +1979,6 @@ function renderHome(agg, members) {
   strip.addEventListener("mouseenter", stopPhotoScroll);
   strip.addEventListener("mouseleave", startPhotoScroll);
 
-  // 桌面端鼠标拖拽滑动（带惯性）
   let dragOn = false, dragStartX = 0, dragStartScroll = 0;
   let dragTrail = [];
   let dragMoved = false;
@@ -2065,29 +2030,114 @@ function renderHome(agg, members) {
     if (dragMoved) { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); }
   }, true);
 
-  // ── Section: 最近动态 ──
-  const msgDiv = $("homeMsgList");
-  if (agg.latest_msgs.length) {
-    let html = '';
-    const multi = members.length > 1;
-    agg.latest_msgs.forEach((msg, i) => {
-      const dateStr = fmtDate(msg.published_at);
-      html += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
-      html += '<div class="hmc-header">';
-      html += '<div class="hmc-meta-left">';
-      if (multi) html += '<span class="hmc-mem-badge">' + esc(msg.member_display) + '</span>';
-      html += '<span class="hmc-time">' + dateStr + '</span>';
-      html += '</div>';
-      html += '<span class="hmc-jump">查看消息 →</span>';
-      html += '</div>';
-      html += '<div class="hmc-text">' + formatMessageText(msg.text) + '</div>';
-      if (msg.translation) {
-        html += '<div class="hmc-trans">' + formatMessageText(msg.translation) + '</div>';
-      }
-      html += '</div>';
+  // 3. 核心归档专区入口 (Message 专区 + Blog 专区)
+  const secDiv = $("portalSections");
+  let secHTML = '';
+
+  // 3.1 Message 专区卡片
+  secHTML += '<div class="portal-sec-card">';
+  secHTML += '<div class="portal-sec-card-head">';
+  secHTML += '<div class="portal-sec-card-title"><span>💬 官方 Message 专区</span><span class="portal-sec-sub" style="font-weight:normal">(' + (summary.total_messages || 0).toLocaleString() + ' 条)</span></div>';
+  secHTML += '<a class="portal-sec-card-jump" id="jumpToMsg">进入消息时间线 →</a>';
+  secHTML += '</div>';
+  secHTML += '<div class="portal-inner-list">';
+  members.forEach(m => {
+    secHTML += '<div class="portal-member-row" data-name="' + esc(m.name) + '">';
+    secHTML += '<div class="pmr-left">';
+    secHTML += '<div class="pmr-avatar">' + (m.display ? m.display.slice(0, 1) : '💬') + '</div>';
+    secHTML += '<div>';
+    secHTML += '<div class="pmr-name">' + esc(m.display) + '</div>';
+    secHTML += '<div class="pmr-meta">' + (m.stats.months || 0) + ' 个月归档 · 本月 ' + (m.stats.this_month || 0) + ' 条</div>';
+    secHTML += '</div></div>';
+    secHTML += '<div class="pmr-right">' + (m.stats.total || 0).toLocaleString() + ' 条 ↗</div>';
+    secHTML += '</div>';
+  });
+  secHTML += '</div></div>';
+
+  // 3.2 Blog 专区卡片
+  secHTML += '<div class="portal-sec-card">';
+  secHTML += '<div class="portal-sec-card-head">';
+  secHTML += '<div class="portal-sec-card-title"><span>📝 坂道官方博客专区</span><span class="portal-sec-sub" style="font-weight:normal">(' + (summary.total_blogs || 0).toLocaleString() + ' 篇)</span></div>';
+  secHTML += '<a class="portal-sec-card-jump" id="jumpToBlog">进入博客中心 →</a>';
+  secHTML += '</div>';
+  secHTML += '<div class="portal-inner-list">';
+  blogGroups.forEach(g => {
+    const lp = g.latest_post || {};
+    secHTML += '<div class="portal-group-row" data-group="' + esc(g.key) + '">';
+    secHTML += '<div class="pmr-left" style="min-width:0;">';
+    secHTML += '<div class="pmr-avatar" style="background:color-mix(in srgb, ' + g.color + ' 15%, transparent); color:' + g.color + ';">' + g.icon + '</div>';
+    secHTML += '<div style="min-width:0;">';
+    secHTML += '<div class="pgr-title">' + esc(g.name) + ' <span style="font-size:11.5px;color:var(--muted);font-weight:normal">(' + g.author_count + ' 位成员)</span></div>';
+    if (lp.title) {
+      secHTML += '<div class="pgr-latest">最新: ' + esc(lp.author) + '《' + esc(lp.title) + '》</div>';
+    }
+    secHTML += '</div></div>';
+    secHTML += '<div class="pgr-right">' + (g.total || 0).toLocaleString() + ' 篇 ↗</div>';
+    secHTML += '</div>';
+  });
+  secHTML += '</div></div>';
+
+  secDiv.innerHTML = secHTML;
+
+  // 专区卡片点击交互
+  $("jumpToMsg")?.addEventListener("click", () => switchMainTab("msg"));
+  $("jumpToBlog")?.addEventListener("click", () => switchMainTab("blog"));
+
+  secDiv.querySelectorAll('.portal-member-row').forEach(row => {
+    row.addEventListener("click", () => {
+      const mName = row.dataset.name;
+      curMode = "msg";
+      switchMainTab("msg", true);
+      hideHome();
+      selectMember(mName);
     });
-    msgDiv.innerHTML = html;
-    msgDiv.querySelectorAll('.home-msg-card').forEach(el => {
+  });
+
+  secDiv.querySelectorAll('.portal-group-row').forEach(row => {
+    row.addEventListener("click", () => {
+      const gKey = row.dataset.group;
+      curMode = "blog";
+      switchMainTab("blog", true);
+      hideHome();
+      selectBlogGroup(gKey);
+    });
+  });
+
+  // 4. 最新动态聚合流 (Message + Blog)
+  const feedDiv = $("homeFeedList");
+  if (recentFeed.length) {
+    let feedHTML = '';
+    recentFeed.forEach((item, i) => {
+      const dateStr = fmtDate(item.published_at);
+      if (item.type === "blog") {
+        feedHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
+        feedHTML += '<div class="hmc-header">';
+        feedHTML += '<div class="hmc-meta-left">';
+        feedHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
+        feedHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        feedHTML += '</div>';
+        feedHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
+        feedHTML += '</div>';
+        feedHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
+        feedHTML += '</div>';
+      } else {
+        feedHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
+        feedHTML += '<div class="hmc-header">';
+        feedHTML += '<div class="hmc-meta-left">';
+        feedHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
+        feedHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        feedHTML += '</div>';
+        feedHTML += '<span class="hmc-jump">查看消息 →</span>';
+        feedHTML += '</div>';
+        feedHTML += '<div class="hmc-text">' + formatMessageText(item.text) + '</div>';
+        if (item.translation) {
+          feedHTML += '<div class="hmc-trans">' + formatMessageText(item.translation) + '</div>';
+        }
+        feedHTML += '</div>';
+      }
+    });
+    feedDiv.innerHTML = feedHTML;
+    feedDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
         hideHome();
         curMember = el.dataset.member;
@@ -2102,38 +2152,55 @@ function renderHome(agg, members) {
       });
     });
   } else {
-    msgDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无文字消息</div>';
+    feedDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无最新动态</div>';
   }
 
-  // ── Section: 时光隧道 ──
+  // 5. 时光隧道 (Message + Blog)
   const tunnelDiv = $("homeTimeTunnel");
-  if (agg.random_msgs && agg.random_msgs.length) {
-    let html = '';
-    const multi = members.length > 1;
-    agg.random_msgs.forEach((msg, i) => {
-      const dateStr = fmtDateFull(msg.published_at);
-      const d = parseDateSafe(msg.published_at);
-      const year = d ? d.getFullYear() : (msg.year || '');
+  if (timeTunnel && timeTunnel.length) {
+    let tunnelHTML = '';
+    timeTunnel.forEach((item, i) => {
+      const dateStr = fmtDateFull(item.published_at);
+      const d = parseDateSafe(item.published_at);
+      const year = d ? d.getFullYear() : (item.year || '');
       const thisYear = new Date().getFullYear();
       const yearsAgo = thisYear - (year || thisYear);
       const agoTag = yearsAgo > 0 ? (yearsAgo + '年前 · ' + year + '年') : (year + '年');
-      html += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(msg.member) + '" data-year="' + msg.year + '" data-month="' + msg.month + '" data-id="' + msg.id + '">';
-      html += '<div class="hmc-header">';
-      html += '<div class="hmc-meta-left">';
-      html += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
-      if (multi) html += '<span class="hmc-mem-badge">' + esc(msg.member_display) + '</span>';
-      html += '<span class="hmc-time">' + dateStr + '</span>';
-      html += '</div>';
-      html += '<span class="hmc-jump">跳转当日 →</span>';
-      html += '</div>';
-      html += '<div class="hmc-text">' + formatMessageText(msg.text) + '</div>';
-      if (msg.translation) {
-        html += '<div class="hmc-trans">' + formatMessageText(msg.translation) + '</div>';
+
+      if (item.type === "blog") {
+        tunnelHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
+        tunnelHTML += '<div class="hmc-header">';
+        tunnelHTML += '<div class="hmc-meta-left">';
+        tunnelHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
+        tunnelHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
+        tunnelHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        tunnelHTML += '</div>';
+        tunnelHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
+        tunnelHTML += '</div>';
+        tunnelHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
+        if (item.translation) {
+          tunnelHTML += '<div class="hmc-trans" style="color:var(--text);">' + esc(item.translation) + '</div>';
+        }
+        tunnelHTML += '</div>';
+      } else {
+        tunnelHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
+        tunnelHTML += '<div class="hmc-header">';
+        tunnelHTML += '<div class="hmc-meta-left">';
+        tunnelHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
+        tunnelHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
+        tunnelHTML += '<span class="hmc-time">' + dateStr + '</span>';
+        tunnelHTML += '</div>';
+        tunnelHTML += '<span class="hmc-jump">跳转当日 →</span>';
+        tunnelHTML += '</div>';
+        tunnelHTML += '<div class="hmc-text">' + formatMessageText(item.text) + '</div>';
+        if (item.translation) {
+          tunnelHTML += '<div class="hmc-trans">' + formatMessageText(item.translation) + '</div>';
+        }
+        tunnelHTML += '</div>';
       }
-      html += '</div>';
     });
-    tunnelDiv.innerHTML = html;
-    tunnelDiv.querySelectorAll('.home-msg-card').forEach(el => {
+    tunnelDiv.innerHTML = tunnelHTML;
+    tunnelDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
         curMode = "msg";
         switchMainTab("msg", true);
@@ -2158,7 +2225,7 @@ function goHome() {
   curMember = ""; curBlogGroup = "";
   curType = ""; searchQuery = "";
   syncSearchInput();
-  switchMainTab("msg", true);
+  switchMainTab("home", true);
   location.hash = "";
   showHome();
 }
@@ -2170,7 +2237,7 @@ function hideHome() {
   _enterMemberMode();
 }
 
-// ── 入口（支持 #member=&y=&m=&t= / #blog=深链）────────────
+// ── 入口（支持 #member=&y=&m=&t= / #blog=深链 / 首页）────────────
 function boot() {
   const p = new URLSearchParams(location.hash.slice(1));
   curType = p.get("t") || "";
@@ -2183,7 +2250,7 @@ function boot() {
     curBlogGroup = p.get("blog") || "";
     curBlogAuthor = p.get("author") || "";
     switchMainTab("blog", true);
-    loadMembers(true); // 后台加载 chips
+    loadMembers(true);
     if (curBlogGroup) {
       selectBlogGroup(curBlogGroup).then(() => {
         if (curBlogAuthor) selectBlogAuthor(curBlogAuthor);
@@ -2191,17 +2258,17 @@ function boot() {
     } else {
       showBlogHome();
     }
-  } else {
+  } else if (p.has("member") || p.has("y") || p.has("m") || location.hash === "#msg") {
     curMode = "msg";
     curMember = p.get("member") || "";
     switchMainTab("msg", true);
-    if (!curMember) {
-      showHome();
-      loadMembers(true); 
-    } else {
-      hideHome();
-      loadMembers();
-    }
+    hideHome();
+    loadMembers();
+  } else {
+    curMode = "home";
+    switchMainTab("home", true);
+    showHome();
+    loadMembers(true);
   }
 }
 boot();
@@ -2212,8 +2279,8 @@ window.addEventListener("pageshow", (e) => { if (e.persisted) boot(); });
 window.addEventListener("hashchange", () => {
   if (selfHashUpdate) return;
   const p = new URLSearchParams(location.hash.slice(1));
-  if (!p.has("blog") && !(p.get("member") || "")) {
-    if (curMember || curBlogGroup) {
+  if (!p.has("blog") && !(p.get("member") || "") && location.hash !== "#msg") {
+    if (curMode !== "home") {
       goHome();
       loadMembers(true);
     }

@@ -297,6 +297,44 @@
     background: var(--accent-soft);
     color: var(--accent);
     display: flex;
+  /* ── 全站总览首页 (Portal Home) ── */
+  .portal-content {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+  .portal-hero {
+    background: linear-gradient(145deg, color-mix(in srgb, var(--card) 92%, var(--accent) 8%), var(--card));
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 24px 26px;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+  }
+  .portal-hero::before {
+    content: "";
+    position: absolute;
+    top: -50px;
+    right: -50px;
+    width: 180px;
+    height: 180px;
+    background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .portal-hero-top {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .portal-hero-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--accent) 15%, var(--card));
+    display: flex;
     align-items: center;
     justify-content: center;
     font-size: 26px;
@@ -304,64 +342,69 @@
     box-shadow: 0 4px 16px var(--accent-ring);
     flex-shrink: 0;
   }
-  .hero-card .hc-title-box {
+  .portal-hero-title-box {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
   }
-  .hero-card .hc-name {
-    font-size: 25px;
+  .portal-hero-title {
+    font-size: 22px;
     font-weight: 750;
     color: var(--text-strong);
-    letter-spacing: .02em;
-    line-height: 1.2;
+    letter-spacing: .01em;
+    line-height: 1.25;
   }
-  .hero-card .hc-sub {
+  .portal-hero-sub {
     font-size: 13px;
     color: var(--muted);
-    margin-top: 3px;
+    margin-top: 4px;
     font-weight: 500;
   }
-  .hero-card .hc-stats-grid {
+  .portal-metric-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 12px;
     width: 100%;
-    margin-top: 20px;
   }
-  .hero-card .hc-metric {
+  @media (max-width: 900px) {
+    .portal-metric-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 480px) {
+    .portal-metric-grid { grid-template-columns: 1fr; }
+  }
+  .portal-metric {
     background: var(--card-soft);
     border: 1px solid var(--border-soft);
     border-radius: 14px;
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
     transition: transform .15s, border-color .15s;
   }
-  .hero-card .hc-metric:hover {
+  .portal-metric:hover {
     transform: translateY(-2px);
     border-color: var(--accent);
   }
-  .hero-card .hc-metric-label {
+  .portal-metric-label {
     font-size: 11.5px;
     color: var(--muted);
     display: flex;
     align-items: center;
     gap: 5px;
+    font-weight: 600;
   }
-  .hero-card .hc-metric-val {
-    font-size: 17px;
-    font-weight: 700;
+  .portal-metric-val {
+    font-size: 18px;
+    font-weight: 750;
     color: var(--text-strong);
     letter-spacing: -0.01em;
   }
-  .hero-card .hc-metric-sub {
+  .portal-metric-sub {
     font-size: 11px;
     color: var(--muted);
-    margin-top: 2px;
   }
-  .hero-card .hc-actions {
+  .portal-hero-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -372,7 +415,7 @@
     flex-wrap: wrap;
     gap: 10px;
   }
-  .hero-card .hc-today-btn {
+  .portal-today-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -387,30 +430,201 @@
     box-shadow: 0 4px 14px var(--accent-ring);
     transition: all .2s;
   }
-  .hero-card .hc-today-btn:hover {
+  .portal-today-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px var(--accent-ring);
   }
-  .hero-card .hc-today-btn:active {
+  .portal-today-btn:active {
     transform: scale(0.96);
   }
 
-  /* Section 标题 */
-  .home-sec {
+  /* Section Headers */
+  .portal-sec {
+    margin-top: 4px;
+  }
+  .portal-sec-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .portal-sec-title span:first-child {
+    font-size: 16px;
+    font-weight: 750;
+    color: var(--text-strong);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .portal-sec-sub {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* 核心专区板块网格 */
+  .portal-sections-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 820px) {
+    .portal-sections-grid { grid-template-columns: 1fr; }
+  }
+  .portal-sec-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--tr), border-color var(--tr), box-shadow var(--tr);
+  }
+  .portal-sec-card:hover {
+    border-color: var(--border-hover);
+    box-shadow: var(--shadow-md);
+  }
+  .portal-sec-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .portal-sec-card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-strong);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .portal-sec-card-jump {
+    font-size: 12.5px;
+    color: var(--accent);
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: opacity var(--tr);
+  }
+  .portal-sec-card-jump:hover { opacity: 0.8; }
+  
+  /* 专区内部卡片列表 */
+  .portal-inner-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .portal-member-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--card-soft);
+    border: 1px solid var(--border-soft);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .portal-member-row:hover {
+    background: var(--hover);
+    border-color: var(--accent);
+    transform: translateX(3px);
+  }
+  .pmr-left {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 30px 0 14px;
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text-strong);
-    letter-spacing: .02em;
   }
-  .home-sec::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: var(--border-soft);
+  .pmr-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pmr-name {
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--text-strong);
+  }
+  .pmr-meta {
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .pmr-right {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .portal-group-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--card-soft);
+    border: 1px solid var(--border-soft);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .portal-group-row:hover {
+    background: var(--hover);
+    border-color: var(--accent);
+    transform: translateX(3px);
+  }
+  .pgr-title {
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--text-strong);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pgr-latest {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+  }
+  .pgr-right {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* 聚合动态流与时光隧道 */
+  .portal-feed-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 768px) {
+    .portal-feed-grid { grid-template-columns: 1fr; }
+  }
+
+  .portal-tunnel-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 768px) {
+    .portal-tunnel-grid { grid-template-columns: 1fr; }
   }
 
   /* 写真画廊 */
@@ -422,7 +636,7 @@
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     scroll-behavior: smooth;
-    padding: 4px 2px 16px;
+    padding: 4px 2px 14px;
     cursor: grab;
     user-select: none;
   }

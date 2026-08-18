@@ -23,7 +23,8 @@
   <!-- 2. 中间 Navigation 导航区 -->
   <nav class="header-nav">
     <div class="nav-tabs">
-      <button class="nav-tab active" id="tabMsg"><span class="tab-icon">💬</span> 消息</button>
+      <button class="nav-tab active" id="tabHome"><span class="tab-icon">🏠</span> 首页</button>
+      <button class="nav-tab" id="tabMsg"><span class="tab-icon">💬</span> 消息</button>
       <button class="nav-tab" id="tabBlog"><span class="tab-icon">📄</span> 博客</button>
     </div>
 
@@ -54,26 +55,57 @@
 </header>
   
   <!-- 独立悬浮过滤条 -->
-  <div class="sub-nav" id="subNav">
+  <div class="sub-nav" id="subNav" style="display:none;">
   <div class="chips" id="memberChips"></div>
   <div class="chips" id="blogGroupChips" style="display:none;"></div>
 </div>
 
-<div id="archiveHome" class="home">
+<div id="archiveHome" class="home active">
   <!-- 骨架屏 -->
   <div class="home-skeleton" id="homeSkeleton">
     <div class="sk-hero"></div>
     <div class="sk-strip"><div></div><div></div><div></div><div></div></div>
     <div class="sk-msg"><div></div><div></div><div></div></div>
   </div>
-  <div class="home-hero">
-    <div class="hero-card" id="homeMember"></div>
-    <div class="home-sec">&#x1F4F8; 写真画廊</div>
-    <div class="photo-strip" id="photoStrip"></div>
-    <div class="home-sec">&#x1F4AC; 最近动态</div>
-    <div class="msg-list" id="homeMsgList"></div>
-    <div class="home-sec">&#x23F3; 时光隧道</div>
-    <div class="msg-list" id="homeTimeTunnel"></div>
+  <div class="portal-content" id="portalContent" style="display:none;">
+    <!-- 1. 全站总览 Hero 看板 -->
+    <div class="portal-hero" id="portalHero"></div>
+
+    <!-- 2. 全站精选写真画廊 -->
+    <div class="portal-sec">
+      <div class="portal-sec-title">
+        <span>📸 综合写真画廊</span>
+        <span class="portal-sec-sub">精选 Message 写真与官方博客插图</span>
+      </div>
+    </div>
+    <div class="photo-strip portal-strip" id="photoStrip"></div>
+
+    <!-- 3. 核心归档专区入口 -->
+    <div class="portal-sec">
+      <div class="portal-sec-title">
+        <span>🏛️ 归档板块专区</span>
+        <span class="portal-sec-sub">点击卡片直达对应频道</span>
+      </div>
+    </div>
+    <div class="portal-sections-grid" id="portalSections"></div>
+
+    <!-- 4. 最新动态聚合流 -->
+    <div class="portal-sec">
+      <div class="portal-sec-title">
+        <span>⚡ 最新鲜动态</span>
+        <span class="portal-sec-sub">全站实时抓取与归档内容流</span>
+      </div>
+    </div>
+    <div class="portal-feed-grid" id="homeFeedList"></div>
+
+    <!-- 5. 时光隧道 -->
+    <div class="portal-sec">
+      <div class="portal-sec-title">
+        <span>⏳ 往昔时光 · 历史回顾</span>
+        <span class="portal-sec-sub">随机回溯过往精彩瞬间</span>
+      </div>
+    </div>
+    <div class="portal-tunnel-grid" id="homeTimeTunnel"></div>
   </div>
 </div>
 

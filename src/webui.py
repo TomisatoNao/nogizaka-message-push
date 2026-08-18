@@ -1296,19 +1296,22 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "home":
-            # ── 缓存：基于 archive.db 的 mtime + 日期，跨天自动失效（随机种子每天不同）──
+            # ── 缓存：基于 archive.db 与 blogs.db 的 mtime + 日期，跨天自动失效 ──
             global _home_cache, _home_cache_key
             try:
                 db_mtime = _archive.get_db_path().stat().st_mtime
             except OSError:
                 db_mtime = 0
+            try:
+                blog_mtime = Path("data/archive/blogs.db").stat().st_mtime
+            except OSError:
+                blog_mtime = 0
             today_str = datetime.now().strftime("%Y-%m-%d")
-            cache_key = (db_mtime, today_str)
+            cache_key = (db_mtime, blog_mtime, today_str)
             if _home_cache is not None and _home_cache_key == cache_key:
                 self._send_json(_home_cache)
                 return
 
-            # 以日期为随机种子，保证同一天内"随机 6 张"结果稳定
             random.seed(today_str)
 
             monitor_names = {}
@@ -1316,14 +1319,15 @@ class _Handler(BaseHTTPRequestHandler):
                 norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
                 monitor_names[norm] = m.get("m_name", "")
 
+            # ── 1. Message 归档成员统计 ──
             members = []
+            today_msg_cnt = 0
             for name in _archive.list_members():
                 months = _archive.list_months(name)
                 total = sum(m["count"] for m in months)
                 latest_msgs: list[dict] = []
                 type_counts: dict[str, int] = {}
-                # 从最近月份往前找，收集图片和文字消息
-                for mo in months:
+                for mo in months[:3]:
                     msgs = _archive.load_month(name, mo["year"], mo["month"])
                     for m in reversed(msgs):
                         rid = m.get("id")
@@ -1336,33 +1340,11 @@ class _Handler(BaseHTTPRequestHandler):
                                 "translation": m.get("_translation", ""),
                                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                             })
-                    if len(latest_msgs) >= 8:
-                        break
 
-                # 月度分布
                 monthly = [{"year": mo["year"], "month": mo["month"], "count": mo["count"]} for mo in months[:24]]
+                days = _archive.day_counts(name)
+                today_msg_cnt += days.get(today_str, 0)
 
-                # 近 6 个月每日计数（热力图用）
-                days: dict[str, int] = {}
-                if months:
-                    cutoff_y, cutoff_m = months[0]["year"], months[0]["month"]
-                    # 回溯 6 个月
-                    for _ in range(6):
-                        dm = _archive.day_counts(name)
-                        for d, c in dm.items():
-                            parts = d.split("-")
-                            if len(parts) == 3:
-                                dy, dm_num = int(parts[0]), int(parts[1])
-                                if dy > cutoff_y or (dy == cutoff_y and dm_num >= cutoff_m):
-                                    days[d] = days.get(d, 0) + c
-                        cutoff_m -= 1
-                        if cutoff_m < 1:
-                            cutoff_m = 12
-                            cutoff_y -= 1
-                    # 简化：直接返回最近 6 个月所有 day_counts（去重按天）
-                    days = _archive.day_counts(name)
-
-                # 统计概要
                 first_date, last_date = "", ""
                 if months:
                     last = months[0]
@@ -1380,7 +1362,6 @@ class _Handler(BaseHTTPRequestHandler):
                     "first_date": first_date,
                     "last_date": last_date,
                 }
-                # 本月消息数
                 if months:
                     stats["this_month"] = months[0]["count"]
 
@@ -1394,15 +1375,144 @@ class _Handler(BaseHTTPRequestHandler):
                     "days": days,
                     "latest_msgs": latest_msgs,
                 })
-            # ── 聚合：SQL 直查全量图片 → 最近 6 + 随机 6（不重复，种子=日期）──
+
+            # ── 2. Blog 博客全量统计 ──
+            GROUP_INFO = {
+                "nogizaka": {"name": "乃木坂46", "icon": "💜", "color": "#8b5cf6"},
+                "sakurazaka": {"name": "樱坂46", "icon": "🌸", "color": "#ec4899"},
+                "hinatazaka": {"name": "日向坂46", "icon": "🩵", "color": "#06b6d4"},
+            }
+            blog_groups = []
+            total_blogs = 0
+            total_blog_authors = 0
+            recent_blogs = []
+            blog_pics = []
+            rand_blog_msgs = []
+            today_blog_cnt = 0
+            blog_this_week = 0
+
+            blog_db = _get_blog_db()
+            if blog_db:
+                try:
+                    total_blogs = blog_db.execute("SELECT COUNT(*) FROM blog_posts").fetchone()[0]
+                    total_blog_authors = blog_db.execute("SELECT COUNT(DISTINCT author) FROM blog_posts").fetchone()[0]
+
+                    for gkey, gmeta in GROUP_INFO.items():
+                        row = blog_db.execute("""
+                            SELECT COUNT(*), COUNT(DISTINCT author), MIN(date), MAX(date)
+                            FROM blog_posts WHERE group_key=?
+                        """, (gkey,)).fetchone()
+                        count = row[0] if row else 0
+                        if count > 0:
+                            lp_row = blog_db.execute("""
+                                SELECT id, author, title, date, body_text, images_json, image_paths_json
+                                FROM blog_posts WHERE group_key=?
+                                ORDER BY date DESC LIMIT 1
+                            """, (gkey,)).fetchone()
+                            latest_post = None
+                            if lp_row:
+                                lp = dict(lp_row)
+                                imgs = json.loads(lp.get("image_paths_json") or "[]")
+                                cover = f"/api/archive/blog_media/{imgs[0]}" if imgs and imgs[0] else ""
+                                latest_post = {
+                                    "id": lp["id"],
+                                    "author": lp["author"],
+                                    "title": lp["title"],
+                                    "date": lp["date"],
+                                    "cover": cover,
+                                }
+                            blog_groups.append({
+                                "key": gkey,
+                                "name": gmeta["name"],
+                                "icon": gmeta["icon"],
+                                "color": gmeta["color"],
+                                "total": count,
+                                "author_count": row[1],
+                                "first_date": (row[2] or "")[:7].replace("-", "/"),
+                                "last_date": (row[3] or "")[:7].replace("-", "/"),
+                                "latest_post": latest_post,
+                            })
+
+                    # 最近博客列表
+                    for r in blog_db.execute("""
+                        SELECT id, group_key, author, title, date, body_text, images_json, image_paths_json
+                        FROM blog_posts
+                        ORDER BY date DESC LIMIT 6
+                    """).fetchall():
+                        bp = dict(r)
+                        imgs = json.loads(bp.get("image_paths_json") or "[]")
+                        cover = f"/api/archive/blog_media/{imgs[0]}" if imgs and imgs[0] else ""
+                        gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
+                        gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
+                        recent_blogs.append({
+                            "type": "blog",
+                            "id": bp["id"],
+                            "group_key": bp["group_key"],
+                            "group_name": gname,
+                            "group_icon": gicon,
+                            "author": bp["author"],
+                            "title": bp["title"],
+                            "date": bp["date"],
+                            "cover": cover,
+                            "has_images": len(imgs) > 0,
+                        })
+                        if cover:
+                            blog_pics.append({
+                                "type": "blog",
+                                "id": bp["id"],
+                                "group_key": bp["group_key"],
+                                "member": bp["author"],
+                                "member_display": f"{gicon} {gname} · {bp['author']}",
+                                "text": bp["title"],
+                                "url": cover,
+                                "published_at": bp["date"],
+                                "year": int(bp["date"][:4]) if len(bp["date"]) >= 4 and bp["date"][:4].isdigit() else 2026,
+                                "month": int(bp["date"][5:7]) if len(bp["date"]) >= 7 and bp["date"][5:7].isdigit() else 8,
+                            })
+
+                    # 今日与本周博客统计
+                    for r in blog_db.execute("SELECT substr(date, 1, 10), COUNT(*) FROM blog_posts GROUP BY substr(date, 1, 10)").fetchall():
+                        d_str, cnt = r[0], r[1]
+                        if d_str == today_str:
+                            today_blog_cnt += cnt
+                        try:
+                            dd = datetime.strptime(d_str, "%Y-%m-%d")
+                            if 0 <= (datetime.now() - dd).days < 7:
+                                blog_this_week += cnt
+                        except Exception:
+                            pass
+
+                    # 博客时光隧道：随机抽取 3 篇经典博文
+                    rand_blog_rows = blog_db.execute("""
+                        SELECT id, group_key, author, title, date, body_text
+                        FROM blog_posts
+                        ORDER BY RANDOM() LIMIT 3
+                    """).fetchall()
+                    for r in rand_blog_rows:
+                        bp = dict(r)
+                        gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
+                        gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
+                        rand_blog_msgs.append({
+                            "type": "blog",
+                            "id": bp["id"],
+                            "group_key": bp["group_key"],
+                            "member_display": f"{gicon} {gname} · {bp['author']}",
+                            "text": bp["title"],
+                            "translation": (bp.get("body_text") or "")[:120].strip() + ("..." if len(bp.get("body_text") or "") > 120 else ""),
+                            "published_at": bp["date"],
+                        })
+                except Exception:
+                    pass
+
+            # ── 3. 聚合写真画廊（Message 写真 + 博客精选图）──
             def _ym(utc_str: str) -> tuple[int, int]:
                 try:
                     return (int(utc_str[:4]), int(utc_str[5:7]))
                 except (ValueError, IndexError):
                     return (2026, 1)
+
             db = _archive.init_db()
-            recent_pics = []
-            rand_pics = []
+            msg_pics = []
             if db:
                 pic_rows = db.execute("""
                     SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
@@ -1416,13 +1526,14 @@ class _Handler(BaseHTTPRequestHandler):
                     recent_ids = all_ids[:6]
                     rest_ids = [i for i in all_ids if i not in set(recent_ids)]
                     random.seed(today_str)
-                    rand_ids = random.sample(rest_ids, min(6, len(rest_ids)))
+                    rand_ids = random.sample(rest_ids, min(4, len(rest_ids)))
                     def _build_pic(row) -> dict:
-                        rj = json.loads(row[6])
+                        rj = json.loads(row[6]) if row[6] else {}
                         pub = row[4] or row[5] or ""
                         norm_m = row[1].replace(" ", "").replace("　", "").replace("_", "")
                         disp = monitor_names.get(norm_m) or row[1].replace("_", " ")
                         return {
+                            "type": "msg",
                             "member": row[1], "member_display": disp,
                             "id": row[0], "text": row[2] or "",
                             "url": f"/api/archive/media/{row[1]}/{row[3]}",
@@ -1430,19 +1541,48 @@ class _Handler(BaseHTTPRequestHandler):
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
                         }
-                    recent_pics = [_build_pic(pic_map[i]) for i in recent_ids]
-                    rand_pics = [_build_pic(pic_map[i]) for i in rand_ids]
-            agg_pics = recent_pics + rand_pics
-            agg_msgs = sorted(
-                ({"member": m["name"], "member_display": m["display"],
-                  "id": msg["id"], "text": msg["text"], "translation": msg["translation"],
-                  "published_at": msg.get("published_at", ""),
-                  "year": _ym(msg.get("published_at", ""))[0],
-                  "month": _ym(msg.get("published_at", ""))[1]}
-                 for m in members for msg in m["latest_msgs"]),
-                key=lambda x: x["published_at"], reverse=True)[:6]
-            # ── 时光隧道：从全量历史中随机抽取 4 条文字消息（排除最近 6 条）──
-            recent_msg_ids = {m["id"] for m in agg_msgs}
+                    msg_pics = [_build_pic(pic_map[i]) for i in (recent_ids + rand_ids)]
+
+            # 综合写真画廊：Message 精选图 + Blog 插图混合
+            agg_pics = sorted(msg_pics + blog_pics[:6], key=lambda x: x.get("published_at", ""), reverse=True)
+
+            # ── 4. 全站最新动态流（Message 消息 + Blog 博文混合）──
+            agg_msgs = []
+            for m in members:
+                for msg in m["latest_msgs"][:4]:
+                    agg_msgs.append({
+                        "type": "msg",
+                        "member": m["name"],
+                        "member_display": m["display"],
+                        "id": msg["id"],
+                        "text": msg["text"],
+                        "translation": msg.get("translation", ""),
+                        "published_at": msg.get("published_at", ""),
+                        "year": _ym(msg.get("published_at", ""))[0],
+                        "month": _ym(msg.get("published_at", ""))[1],
+                    })
+
+            for b in recent_blogs[:4]:
+                agg_msgs.append({
+                    "type": "blog",
+                    "group_key": b["group_key"],
+                    "group_name": b["group_name"],
+                    "group_icon": b["group_icon"],
+                    "author": b["author"],
+                    "member_display": f"{b['group_icon']} {b['group_name']} · {b['author']}",
+                    "id": b["id"],
+                    "text": b["title"],
+                    "translation": "",
+                    "cover": b.get("cover", ""),
+                    "published_at": b["date"],
+                    "year": int(b["date"][:4]) if len(b["date"]) >= 4 and b["date"][:4].isdigit() else 2026,
+                    "month": int(b["date"][5:7]) if len(b["date"]) >= 7 and b["date"][5:7].isdigit() else 8,
+                })
+
+            recent_feed = sorted(agg_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:8]
+
+            # ── 5. 全站时光隧道（随机 Message 经典记录 + 随机 Blog 经典）──
+            recent_msg_ids = {m["id"] for m in agg_msgs if m.get("type") == "msg"}
             rand_msgs = []
             if db:
                 txt_rows = db.execute("""
@@ -1455,7 +1595,7 @@ class _Handler(BaseHTTPRequestHandler):
                     txt_map = {r[0]: r for r in txt_rows}
                     rest_txt_ids = [r[0] for r in txt_rows if r[0] not in recent_msg_ids]
                     random.seed(today_str)
-                    n_rand = min(4, len(rest_txt_ids))
+                    n_rand = min(3, len(rest_txt_ids))
                     rand_txt_ids = random.sample(rest_txt_ids, n_rand) if n_rand > 0 else []
                     for rid in rand_txt_ids:
                         r = txt_map[rid]
@@ -1463,20 +1603,24 @@ class _Handler(BaseHTTPRequestHandler):
                         norm_r = r[1].replace(" ", "").replace("　", "").replace("_", "")
                         disp_r = monitor_names.get(norm_r) or r[1].replace("_", " ")
                         rand_msgs.append({
+                            "type": "msg",
                             "member": r[1], "member_display": disp_r,
                             "id": r[0], "text": r[2] or "", "translation": r[3] or "",
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
                         })
-            agg_total = sum(m["stats"]["total"] for m in members)
-            agg_first = min((m["stats"]["first_date"] for m in members if m["stats"]["first_date"]), default="")
-            agg_last = max((m["stats"]["last_date"] for m in members if m["stats"]["last_date"]), default="")
-            # 最后更新时间
-            last_pub = max((p.get("published_at", "") for p in agg_pics), default="")
-            last_msg = max((msg.get("published_at", "") for msg in agg_msgs), default="")
-            last_updated = max(last_pub, last_msg)
 
-            # 本周 / 上周统计
+            time_tunnel = sorted(rand_msgs + rand_blog_msgs, key=lambda x: x.get("published_at", ""), reverse=True)
+
+            # ── 6. 综合统计概览 ──
+            total_messages = sum(m["stats"]["total"] for m in members)
+            first_dates = [m["stats"]["first_date"] for m in members if m["stats"]["first_date"]] + [g["first_date"] for g in blog_groups if g["first_date"]]
+            last_dates = [m["stats"]["last_date"] for m in members if m["stats"]["last_date"]] + [g["last_date"] for g in blog_groups if g["last_date"]]
+
+            agg_first = min(first_dates) if first_dates else ""
+            agg_last = max(last_dates) if last_dates else ""
+
+            # 本周统计
             from datetime import datetime as _dt
             now = _dt.now()
             this_week = 0
@@ -1494,18 +1638,42 @@ class _Handler(BaseHTTPRequestHandler):
                     except ValueError:
                         pass
 
-            aggregated = {
-                "total_msgs": agg_total,
+            last_pub = max((p.get("published_at", "") for p in agg_pics), default="")
+            last_feed = max((f.get("published_at", "") for f in recent_feed), default="")
+            last_updated = max(last_pub, last_feed)
+
+            summary = {
+                "total_messages": total_messages,
+                "total_blogs": total_blogs,
+                "total_all": total_messages + total_blogs,
+                "member_count": len(members),
+                "blog_group_count": len(blog_groups),
+                "blog_author_count": total_blog_authors,
                 "first_date": agg_first,
                 "last_date": agg_last,
                 "last_updated": last_updated,
-                "week_stats": {"this_week": this_week, "last_week": last_week},
-                "pics": agg_pics,
-                "latest_msgs": agg_msgs,
-                "random_msgs": rand_msgs,
+                "today_stats": {
+                    "messages": today_msg_cnt,
+                    "blogs": today_blog_cnt,
+                    "total": today_msg_cnt + today_blog_cnt,
+                },
+                "week_stats": {
+                    "this_week": this_week + blog_this_week,
+                    "last_week": last_week,
+                    "messages_week": this_week,
+                    "blogs_week": blog_this_week,
+                },
             }
-            result = {"ok": True, "members": members, "count": len(members),
-                       "aggregated": aggregated}
+
+            result = {
+                "ok": True,
+                "summary": summary,
+                "members": members,
+                "blog_groups": blog_groups,
+                "recent_pics": agg_pics,
+                "recent_feed": recent_feed,
+                "time_tunnel": time_tunnel,
+            }
             _home_cache = result
             _home_cache_key = cache_key
             self._send_json(result)
@@ -1571,6 +1739,24 @@ class _Handler(BaseHTTPRequestHandler):
 
         if sub == "blogs":
             qs = self._query_params()
+            blog_id = qs.get("id")
+            if blog_id:
+                try:
+                    db = _get_blog_db()
+                    r = db.execute("SELECT * FROM blog_posts WHERE id=?", (blog_id,)).fetchone()
+                    if r:
+                        d = dict(r)
+                        d["images_json"] = d.get("images_json") or "[]"
+                        d["image_paths_json"] = d.get("image_paths_json") or "[]"
+                        self._send_json({"ok": True, "post": d})
+                        return
+                    else:
+                        self._send_json({"ok": False, "errors": ["博客不存在"]}, 404)
+                        return
+                except Exception as e:
+                    self._send_json({"ok": False, "errors": [str(e)]}, 500)
+                    return
+
             group = qs.get("group", "hinatazaka")
             author = qs.get("author", "")
             date_filter = qs.get("date", "")
