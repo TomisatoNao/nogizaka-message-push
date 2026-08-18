@@ -90,6 +90,31 @@
   .cred { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
   .cred.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
   .cred.miss { color: var(--err); background: var(--danger-soft); }
+
+  /* ── 订阅与过滤规则 & Client Secret 按钮高级美化 ── */
+  .sub-summary-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 175px; align-items: flex-start; }
+  .sub-badge-row { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; }
+  .sub-badge-pill { font-size: 10.5px; font-weight: 600; padding: 1.5px 5.5px; border-radius: 4px; letter-spacing: .02em; line-height: 1.35; user-select: none; transition: all var(--tr-fast); }
+  .sub-badge-pill.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 28%, transparent); }
+  .sub-badge-pill.off { color: var(--muted); background: color-mix(in srgb, var(--border) 40%, transparent); opacity: .45; border: 1px solid transparent; }
+  .btn-sub-config { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; font-weight: 500; border-radius: 6px; background: color-mix(in srgb, var(--card) 90%, transparent); border: 1px solid var(--border); color: var(--text); cursor: pointer; white-space: nowrap; transition: all var(--tr); box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+  .btn-sub-config:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); color: var(--accent); box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 15%, transparent); transform: translateY(-1px); }
+  .btn-sub-config .gear-icon { font-size: 12px; line-height: 1; color: var(--muted); transition: transform .3s ease; }
+  .btn-sub-config:hover .gear-icon { transform: rotate(45deg); color: var(--accent); }
+  .sub-filter-tag { display: inline-flex; align-items: center; padding: 1.5px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+  .sub-filter-tag.all { background: color-mix(in srgb, var(--border) 60%, transparent); color: var(--muted); border: 1px solid transparent; font-weight: 500; }
+  
+  .btn-secret-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; font-family: inherit; transition: all var(--tr); border: 1px solid var(--border); background: var(--card-solid); box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+  .btn-secret-status.configured { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+  .btn-secret-status.configured:hover { background: color-mix(in srgb, var(--ok) 18%, transparent); border-color: var(--ok); box-shadow: 0 2px 8px color-mix(in srgb, var(--ok) 20%, transparent); transform: translateY(-1px); }
+  .btn-secret-status.configured .secret-action { font-size: 11px; color: var(--muted); padding-left: 5px; border-left: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); transition: color var(--tr); }
+  .btn-secret-status.configured:hover .secret-action { color: var(--ok); font-weight: 600; }
+  .btn-secret-status.unconfigured { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+  .btn-secret-status.unconfigured:hover { background: color-mix(in srgb, var(--err) 18%, transparent); border-color: var(--err); box-shadow: 0 2px 8px color-mix(in srgb, var(--err) 20%, transparent); transform: translateY(-1px); }
+  .btn-secret-status.unconfigured .secret-action { font-size: 11px; color: var(--err); padding-left: 5px; border-left: 1px solid color-mix(in srgb, var(--err) 30%, transparent); font-weight: 600; }
+  .btn-secret-status .secret-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .btn-secret-status.configured .secret-dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .btn-secret-status.unconfigured .secret-dot { background: var(--err); box-shadow: 0 0 6px var(--err); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
   .hint code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
   footer.savebar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px);
@@ -1883,21 +1908,27 @@ function renderQqBots() {
 
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
-      // 本次会话刚写入的密钥服务端状态里还查不到，一并算作已配置
+      tdSecret.style.whiteSpace = "nowrap";
       const secretSet = (st && st.secret_env === secretVar && st.client_secret)
         || secretsWritten.has(bot.name);
-      tdSecret.innerHTML = secretSet
-        ? '<span class="cred ok">✓ 已配置</span>'
-        : '<span class="cred miss">✗ 未配置</span>';
       tdSecret.title = secretVar;
-      // 「修改/填写」按钮无条件提供 —— 新建但未保存的 Bot 也要能改密钥
-      tdSecret.appendChild(document.createTextNode(" "));
-      tdSecret.appendChild(mkBtn(secretSet ? "修改" : "填写", () => openSecretDialog(
-        (secretSet ? "修改" : "填写") + "官方 Bot 密钥：" + (bot.name || ""),
-        "写入 <code>" + esc(secretVar) + "</code>，保存并热重载后生效。",
-        [{ env: secretVar, label: "Client Secret", required: true,
-           help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }],
-        null, { onDone: () => { secretsWritten.add(bot.name); renderQqBots(); } })));
+
+      const secBtn = document.createElement("button");
+      secBtn.className = "btn-secret-status " + (secretSet ? "configured" : "unconfigured");
+      secBtn.type = "button";
+      secBtn.innerHTML = secretSet
+        ? '<span class="secret-dot"></span><span>✓ 已配置</span><span class="secret-action">修改</span>'
+        : '<span class="secret-dot"></span><span>✗ 未配置</span><span class="secret-action">填写</span>';
+      secBtn.onclick = (e) => {
+        e.preventDefault();
+        openSecretDialog(
+          (secretSet ? "修改" : "填写") + "官方 Bot 密钥：" + (bot.name || ""),
+          "写入 <code>" + esc(secretVar) + "</code>，保存并热重载后生效。",
+          [{ env: secretVar, label: "Client Secret", required: true,
+             help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }],
+          null, { onDone: () => { secretsWritten.add(bot.name); renderQqBots(); } });
+      };
+      tdSecret.appendChild(secBtn);
 
       const tdState = document.createElement("td");
       if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
@@ -2903,15 +2934,10 @@ $("subSave").addEventListener("click", () => {
 
 function renderSubSummary(item, onOpenDialog) {
   const wrap = document.createElement("div");
-  wrap.style.display = "flex";
-  wrap.style.alignItems = "center";
-  wrap.style.gap = "8px";
-  wrap.style.flexWrap = "wrap";
+  wrap.className = "sub-summary-wrap";
   
   const badges = document.createElement("div");
-  badges.style.display = "flex";
-  badges.style.gap = "3px";
-  badges.style.flexWrap = "wrap";
+  badges.className = "sub-badge-row";
   
   const platforms = [
     { key: "push_message", label: "Msg", def: true },
@@ -2926,10 +2952,7 @@ function renderSubSummary(item, onOpenDialog) {
   platforms.forEach(p => {
     const active = item[p.key] !== undefined ? item[p.key] : p.def;
     const badge = document.createElement("span");
-    badge.className = "cred " + (active ? "ok" : "miss");
-    badge.style.fontSize = "10.5px";
-    badge.style.padding = "1px 4px";
-    badge.style.opacity = active ? "1" : "0.35";
+    badge.className = "sub-badge-pill " + (active ? "on" : "off");
     badge.textContent = p.label;
     badges.appendChild(badge);
   });
@@ -2939,16 +2962,22 @@ function renderSubSummary(item, onOpenDialog) {
   const socs = item.social_filter || [];
   const blogs = item.blog_filter || [];
   
-  if (mems.length) filterDesc.push(`成员(${mems.length})`);
-  if (socs.length) filterDesc.push(`社媒(${socs.length})`);
-  if (blogs.length) filterDesc.push(`博客(${blogs.length})`);
+  if (mems.length) filterDesc.push(`成员 ${mems.length}`);
+  if (socs.length) filterDesc.push(`社媒 ${socs.length}`);
+  if (blogs.length) filterDesc.push(`博客 ${blogs.length}`);
   
   const btn = document.createElement("button");
-  btn.className = "btn small";
+  btn.className = "btn-sub-config";
   btn.type = "button";
-  btn.style.padding = "2px 8px";
-  btn.style.fontSize = "11px";
-  btn.innerHTML = "⚙️ 订阅设置 " + (filterDesc.length ? `<span style="color:var(--accent);font-weight:bold;">[${filterDesc.join('/')}]</span>` : "<span style='color:var(--muted);'>[全量]</span>");
+  
+  let tagHtml = "";
+  if (filterDesc.length) {
+    tagHtml = filterDesc.map(t => `<span class="sub-filter-tag">${esc(t)}</span>`).join(" ");
+  } else {
+    tagHtml = '<span class="sub-filter-tag all">全量订阅</span>';
+  }
+  
+  btn.innerHTML = `<span class="gear-icon">⚙️</span><span>订阅规则</span> ${tagHtml}`;
   btn.onclick = (e) => {
     e.preventDefault();
     onOpenDialog();
