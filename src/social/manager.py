@@ -1,8 +1,4 @@
-"""
-social/manager.py — 社交媒体监控服务管理器
-负责协调 Fetchers、SocialScheduler、SocialForwarder 的生命周期。
-"""
-
+import logging
 import threading
 
 from src.logger import log_all
@@ -24,6 +20,32 @@ _lock = threading.Lock()
 _forward_lock = threading.Lock()
 
 
+class _SocialLogBridge(logging.Handler):
+    """将社媒监控模块的 logging 日志桥接至系统的统一 log_all 流。"""
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            if record.levelno >= logging.ERROR:
+                log_all(f"{msg}", is_error=True)
+            elif record.levelno >= logging.WARNING:
+                log_all(f"⚠️ {msg}")
+            elif record.levelno >= logging.INFO:
+                log_all(f"{msg}")
+            else:
+                log_all(f"{msg}", is_debug=True)
+        except Exception:
+            pass
+
+
+def _setup_social_logger() -> None:
+    for name in ("collink", "social.forwarder"):
+        logger = logging.getLogger(name)
+        logger.handlers.clear()
+        logger.addHandler(_SocialLogBridge())
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+
+
 def start_social_service(config: dict) -> SocialScheduler | None:
     """初始化并启动社交媒体监控守护调度器。"""
     global _store, _downloader, _forwarder, _scheduler, _shared_config
@@ -32,6 +54,7 @@ def start_social_service(config: dict) -> SocialScheduler | None:
         if _scheduler is not None:
             return _scheduler
 
+        _setup_social_logger()
         _shared_config = config
         _store = SocialStore()
         _downloader = MediaDownloader(config)

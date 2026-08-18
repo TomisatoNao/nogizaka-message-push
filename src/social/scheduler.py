@@ -70,8 +70,14 @@ class SocialScheduler:
 
     def stop(self) -> None:
         self._stop_evt.set()
+        for f in self._fetchers:
+            if hasattr(f, "stop_all"):
+                try:
+                    f.stop_all()
+                except Exception:
+                    pass
 
-    def join(self, timeout: float = 10) -> None:
+    def join(self, timeout: float = 5) -> None:
         for t in self._threads:
             t.join(timeout=timeout)
 

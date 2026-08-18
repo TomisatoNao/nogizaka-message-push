@@ -23,3 +23,4 @@ if __name__ == "__main__":
     except RuntimeError as e:
         if "Event loop is closed" not in str(e):
             raise
+    sys.exit(0)

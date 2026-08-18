@@ -829,7 +829,7 @@ async def main() -> None:
             webui_server.server_close()
         if observer is not None:
             observer.stop()
-            observer.join()
+            observer.join(timeout=2.0)
         stop_social_service()
         try:
             await tagger.wait_pending(timeout=30)
