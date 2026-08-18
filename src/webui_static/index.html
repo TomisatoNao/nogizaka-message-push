@@ -1219,7 +1219,16 @@ function setDirty(v) {
 function deepEqual(a, b) {
   if (a === b) return true;
   if (a == null || typeof a !== "object" || b == null || typeof b !== "object") return false;
-  let keysA = Object.keys(a), keysB = Object.keys(b);
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  let keysA = Object.keys(a).filter(k => a[k] !== undefined);
+  let keysB = Object.keys(b).filter(k => b[k] !== undefined);
   if (keysA.length !== keysB.length) return false;
   for (let key of keysA) {
     if (!keysB.includes(key) || !deepEqual(a[key], b[key])) return false;
@@ -1306,7 +1315,6 @@ async function loadConfig() {
   try {
     const data = await api("/api/config");
     config = data.config;
-    baseline = JSON.stringify(config);
     credStatus = data.cred_status || {};
     qqBotStatus = data.qq_bot_status || [];
     envStatus = data.env_status || {};
@@ -1314,8 +1322,12 @@ async function loadConfig() {
     $("btnPollNow").hidden = !data.can_poll;
     $("btnTestPush").hidden = !data.can_test_push;
     canCaptureOpenid = !!data.can_test_push;   // 与测试推送同为"内嵌模式"能力
-    setDirty(false);
     renderAll();
+    collectGeneral();
+    collectChannels();
+    collectSocial();
+    baseline = JSON.stringify(config);
+    setDirty(false);
     loadPushTargets();
     msg("已载入 " + data.config_path, "ok");
   } catch (e) {
@@ -2804,7 +2816,11 @@ function renderNapcat() {
     const tr = document.createElement("tr");
     
     const tdId = document.createElement("td");
-    tdId.appendChild(mkInput(r.group_id || "", (v) => { r.group_id = parseInt(v); }, "12345678", "width:120px"));
+    tdId.appendChild(mkInput(r.group_id || "", (v) => {
+      const n = parseInt(v.trim(), 10);
+      if (Number.isFinite(n)) r.group_id = n;
+      else r.group_id = null;
+    }, "12345678", "width:120px"));
     
     const tdSub = document.createElement("td");
     tdSub.appendChild(renderSubSummary(r, () => {
@@ -3293,17 +3309,19 @@ function startOpenidPolling() {
       stopOpenidPolling();
       const isGroup = (openidCtx.mode || "user") === "group";
       if (isGroup) {
-        openidCtx.groupInput.value = st.openid;
-        if (openidCtx.groupInput.oninput) openidCtx.groupInput.dispatchEvent(new Event("input", { bubbles: true }));
+        openidCtx.bot.group_openid = st.openid;
+        if (openidCtx.groupInput) openidCtx.groupInput.value = st.openid;
         markDirty();
+        renderQqBots();
         $("openidStart").hidden = false; $("openidStop").hidden = true;
         setOpenidStatus("✅ 已捕获群 OpenID" + (st.sender ? "（来自 " + esc(st.sender) + "）" : "") +
           "<br><code>" + esc(st.openid) + "</code><br>已填入 <b>群 OpenID</b>，别忘了点底部「保存并热重载」。", "var(--ok)");
         msg("✅ 已获取群 OpenID 并填入群 OpenID 列，记得保存", "ok");
       } else {
         openidCtx.bot.target_openid = st.openid;
-        openidCtx.personalInput.value = st.openid;
+        if (openidCtx.personalInput) openidCtx.personalInput.value = st.openid;
         markDirty();
+        renderQqBots();
         $("openidStart").hidden = false; $("openidStop").hidden = true;
         setOpenidStatus("✅ 已捕获" + (st.sender ? "（来自 " + esc(st.sender) + "）" : "") +
           "<br><code>" + esc(st.openid) + "</code><br>已填入 <b>个人 OpenID</b>，别忘了点底部「保存并热重载」。", "var(--ok)");
