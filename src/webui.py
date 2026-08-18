@@ -1413,7 +1413,8 @@ class _Handler(BaseHTTPRequestHandler):
                             if lp_row:
                                 lp = dict(lp_row)
                                 imgs = json.loads(lp.get("image_paths_json") or "[]")
-                                cover = f"/api/archive/blog_media/{imgs[0]}" if imgs and imgs[0] else ""
+                                first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
+                                cover = f"/api/archive/blog_media/{first_img}" if first_img else ""
                                 latest_post = {
                                     "id": lp["id"],
                                     "author": lp["author"],
@@ -1441,7 +1442,8 @@ class _Handler(BaseHTTPRequestHandler):
                     """).fetchall():
                         bp = dict(r)
                         imgs = json.loads(bp.get("image_paths_json") or "[]")
-                        cover = f"/api/archive/blog_media/{imgs[0]}" if imgs and imgs[0] else ""
+                        first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
+                        cover = f"/api/archive/blog_media/{first_img}" if first_img else ""
                         gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
                         gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
                         recent_blogs.append({
@@ -2019,9 +2021,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub.startswith("blog_media/"):
-            rel = Path(unquote(sub[len("blog_media/"):]))
+            rel_str = unquote(sub[len("blog_media/"):].replace("\\", "/"))
+            rel = Path(rel_str)
             full = (BLOG_IMAGE_DIR / rel).resolve()
-            if BLOG_IMAGE_DIR.resolve() not in full.parents:
+            if BLOG_IMAGE_DIR.resolve() not in full.parents and full != BLOG_IMAGE_DIR.resolve():
                 self._send_json({"ok": False, "errors": ["非法路径"]}, 403)
                 return
             if not full.is_file():

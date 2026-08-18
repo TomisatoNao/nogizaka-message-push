@@ -262,42 +262,16 @@
     #lbCounter { top: max(12px, env(safe-area-inset-top)); font-size: 12px; }
   }
 
-  /* ── 首页 ── */
-  .home { display: none; }
-  .home.active { display: block; }
-  .home-hero { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
-
-  /* Hero 卡片 */
-  .hero-card {
-    position: relative;
-    padding: 28px 24px 22px;
-    margin-bottom: 30px;
-    background: color-mix(in srgb, var(--card) 88%, transparent);
-    border: 1px solid var(--border);
-    border-radius: 22px;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    box-shadow: var(--shadow-md);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  .hero-card .hc-top {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 6px;
-    width: 100%;
-    justify-content: center;
-  }
-  .hero-card .hc-icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent);
-    display: flex;
   /* ── 全站总览首页 (Portal Home) ── */
+  .home {
+    display: none;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 24px 20px 80px;
+  }
+  .home.active {
+    display: block;
+  }
   .portal-content {
     display: flex;
     flex-direction: column;
