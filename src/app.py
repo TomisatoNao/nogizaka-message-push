@@ -826,9 +826,20 @@ async def main() -> None:
             observer.stop()
             observer.join()
         stop_social_service()
-        await tagger.wait_pending(timeout=30)
-        await archive.wait_pending(timeout=30)   # 归档后台任务收尾（媒体下载中途别掐）
-        await asyncio.gather(http_client.aclose(), qq_client.aclose())
+        try:
+            await tagger.wait_pending(timeout=30)
+            await archive.wait_pending(timeout=30)   # 归档后台任务收尾（媒体下载中途别掐）
+        except Exception:
+            pass
+        try:
+            await asyncio.gather(http_client.aclose(), qq_client.aclose(), return_exceptions=True)
+        except Exception:
+            pass
+        if _blog_client is not None:
+            try:
+                await _blog_client.aclose()
+            except Exception:
+                pass
         print("✅ 资源清理完毕")
 
     if restart_requested:

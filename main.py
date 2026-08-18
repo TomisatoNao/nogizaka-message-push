@@ -18,5 +18,8 @@ from src.app import main
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
+    except RuntimeError as e:
+        if "Event loop is closed" not in str(e):
+            raise
