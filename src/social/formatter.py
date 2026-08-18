@@ -24,7 +24,14 @@ from src.social.models import Post
 _JST = timezone(timedelta(hours=9))
 _CST = timezone(timedelta(hours=8))
 
-# 平台展示名
+# 平台展示名与 Emoji 图标
+PLATFORM_ICONS = {
+    "x": "𝕏 X",
+    "instagram": "📷 Instagram",
+    "tiktok": "🎵 TikTok",
+    "tiktok_live": "🔴 TikTok Live",
+}
+
 PLATFORM_LABELS = {
     "x": "X",
     "instagram": "Instagram",
@@ -32,12 +39,12 @@ PLATFORM_LABELS = {
     "tiktok_live": "TikTok Live",
 }
 
-# 内容形态展示名（附在平台后，如「平台：Instagram（Story）」）
+# 内容形态展示名（附在平台后，如「📷 Instagram (Story)」）
 KIND_LABELS = {
     "post": "",
     "feed": "",
-    "photo": "图文",
-    "carousel": "多图",
+    "photo": "",
+    "carousel": "",
     "reel": "Reel",
     "story": "Story",
     "retweet": "转推",
@@ -77,15 +84,15 @@ SOCIAL_TRANSLATE_PROMPT = """\
 
 
 def platform_label(post_or_platform, kind: str = "") -> str:
-    """生成「平台」字段的值，如 "Instagram（Story）"。"""
+    """生成平台名称（含形态标识）。"""
     if isinstance(post_or_platform, Post):
         platform = post_or_platform.platform
         kind = kind or post_or_platform.extra.get("kind", "")
     else:
         platform = str(post_or_platform)
-    label = PLATFORM_LABELS.get(platform, platform.upper())
+    label = PLATFORM_ICONS.get(platform, platform.upper())
     suffix = KIND_LABELS.get(kind, "")
-    return f"{label}（{suffix}）" if suffix else label
+    return f"{label} ({suffix})" if suffix else label
 
 
 def fmt_ts(ts: float | int | None, tz=_JST, suffix: str = "JST") -> str:
@@ -153,63 +160,78 @@ def build_post_message(post: Post, translated: str | None = None,
                        alt_translations: dict | None = None) -> str:
     """按统一格式渲染一条社交动态。
 
-    :param post: 通用 Post
-    :param translated: Gemini 译文（None / 空 → 不输出「内容（中文）」段）
-    :param alt_translations: {图片序号: 译文}，用于渲染图片描述的中文
+    与 Message 推送和 Blog 推送风格保持一致：
+    1. 顶部 Header：平台图标 + 平台名 + 账号/成员名 + 时间戳
+    2. 正文原文直接输出（无冗余字段标签）
+    3. 译文段以统一分割线分隔（与 Message 保持一致）
+    4. 底部输出精简链接
     """
     kind = post.extra.get("kind", "")
-    lines = [
-        f"平台：{platform_label(post, kind)}",
-        f"作者：{post.author}",
-    ]
+    plat_str = platform_label(post, kind)
+
+    author_name = post.author or ""
+    member_name = post.extra.get("member_name", "")
+    if member_name and member_name != author_name:
+        clean_acc = author_name.lstrip("@")
+        display_author = f"{member_name} (@{clean_acc})"
+    else:
+        display_author = author_name
+
+    header_parts = [plat_str]
+    if display_author:
+        header_parts.append(display_author)
+    header = " · ".join(header_parts)
     if post.timestamp:
-        lines.append(f"发布时间：{post.timestamp}")
+        header += f" {post.timestamp}"
 
-    if post.text and post.text.strip():
-        lines.append("内容（原文）：")
-        lines.append(post.text.strip())
-        if translated and translated.strip():
-            lines.append("内容（中文）：")
-            lines.append(translated.strip())
+    sections = [header]
 
-    # 图片描述（alt）—— 紧跟正文之后，原文与译文分段列出
+    # 正文原文
+    orig_text = (post.text or "").strip()
+    if orig_text:
+        sections.append(orig_text)
+
+        # 译文段（仅在译文存在且与原文不完全相同时展示）
+        trans_text = (translated or "").strip()
+        if trans_text and trans_text != orig_text:
+            sections.append(f"─── 🌐 译文 ───\n\n{trans_text}")
+
+    # 图片无障碍描述 (alt)
     alts = collect_alts(post)
     if alts:
-        lines.append("图片描述 alt（原文）：")
+        zh_map = alt_translations or {}
+        alt_lines = []
         for i, text in alts:
-            lines.append(f"[图{i}] {text}")
-        zh = alt_translations or {}
-        if any(zh.get(i) for i, _ in alts):
-            lines.append("图片描述 alt（中文）：")
-            for i, _ in alts:
-                if zh.get(i):
-                    lines.append(f"[图{i}] {zh[i].strip()}")
+            zh = zh_map.get(i)
+            if zh and zh.strip() and zh.strip() != text:
+                alt_lines.append(f"[图{i}] {zh.strip()} ({text})")
+            else:
+                alt_lines.append(f"[图{i}] {text}")
+        if alt_lines:
+            sections.append("🖼️ 图片描述：\n" + "\n".join(alt_lines))
 
-    # 引用推文 / 转推的原文附在后面（若 fetcher 提取到）
+    # 引用推文 / 转推
     quoted = post.extra.get("quoted_text", "")
     if quoted:
         qa = post.extra.get("quoted_author", "")
-        lines.append(f"引用（{qa}）：" if qa else "引用：")
-        lines.append(str(quoted).strip())
+        q_header = f"🔁 引用推文 (@{qa.lstrip('@')}):" if qa else "🔁 引用推文:"
+        sections.append(f"{q_header}\n{str(quoted).strip()}")
 
-    lines.append(f"媒体数量：{len(post.media)}")
-
+    # 链接
     url = post.extra.get("url", "")
     if url:
-        lines.append(f"链接：{url}")
-    return "\n".join(lines)
+        sections.append(f"🔗 {url}")
+
+    return "\n\n".join(sections)
 
 
 def build_live_start_message(*, author: str, start_time: str, live_url: str,
                              platform: str = "TikTok Live") -> str:
-    """开播提醒（格式与需求文档逐行对齐）。"""
-    return "\n".join([
-        "【TikTok 开播提醒】",
-        f"平台：{platform}",
-        f"主播：{author}",
-        f"开播时间：{start_time}",
-        f"直播链接：{live_url}",
-        "状态：已开始自动录制",
+    """开播提醒。"""
+    return "\n\n".join([
+        f"🔴 {platform} 开播提醒 · {author}\n开播时间：{start_time}",
+        "⏺️ 状态：已开启自动录制",
+        f"🔗 直播链接：{live_url}",
     ])
 
 
@@ -218,19 +240,16 @@ def build_live_end_message(*, author: str, start_time: str, end_time: str,
                            part_count: int = 0, note: str = "") -> str:
     """直播录制完成通知。"""
     lines = [
-        "【TikTok 直播录制完成】",
-        f"主播：{author}",
-        f"直播开始：{start_time}",
-        f"直播结束：{end_time}",
-        f"直播时长：{duration}",
-        f"文件大小：{size}",
-        f"保存路径：{save_path}",
+        f"🔴 TikTok 直播录制完成 · {author}",
+        f"⏱️ 直播时间：{start_time} ~ {end_time}（{duration}）",
+        f"📁 录像大小：{size}",
     ]
     if part_count:
-        lines.append(f"分段数量：{part_count}")
+        lines.append(f"📦 分段数量：{part_count}")
     if note:
-        lines.append(f"备注：{note}")
-    return "\n".join(lines)
+        lines.append(f"📝 备注：{note}")
+    lines.append(f"💾 保存路径：{save_path}")
+    return "\n\n".join(lines)
 
 
 def chunk_text(text: str, max_chars: int = 1500) -> list[str]:
