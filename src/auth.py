@@ -198,9 +198,7 @@ def set_password(username: str, password: str) -> tuple[bool, str]:
     users[username]["password"] = hash_password(password)
     save_users(users)
     # 该用户的现有会话全部失效，强制重新登录
-    with _lock:
-        for token in [t for t, s in _sessions.items() if s["username"] == username]:
-            _sessions.pop(token, None)
+    destroy_user_sessions(username)
     return True, f"已重置密码: {username}"
 
 
@@ -213,9 +211,7 @@ def delete_user(username: str) -> tuple[bool, str]:
         return False, "不能删除最后一个 admin 用户（否则无人能进管理端）"
     del users[username]
     save_users(users)
-    with _lock:
-        for token in [t for t, s in _sessions.items() if s["username"] == username]:
-            _sessions.pop(token, None)
+    destroy_user_sessions(username)
     return True, f"已删除用户: {username}"
 
 
@@ -230,6 +226,19 @@ def set_role(username: str, role: str) -> tuple[bool, str]:
         return False, "不能降级最后一个 admin 用户"
     users[username]["role"] = role
     save_users(users)
+    # 角色变更时，同步更新现有活跃会话的角色
+    with _lock:
+        _load_sessions_from_db()
+        for s in _sessions.values():
+            if s.get("username") == username:
+                s["role"] = role
+        conn = _get_db()
+        if conn:
+            try:
+                with conn:
+                    conn.execute("UPDATE sessions SET role = ? WHERE username = ?;", (role, username))
+            except Exception:
+                pass
     return True, f"{username} 角色已改为 {role}"
 
 
@@ -263,8 +272,42 @@ def clear_failures(ip: str) -> None:
 
 
 # ================================================================
-# 会话
+# 会话（内存高速缓存 + SQLite 持久化）
 # ================================================================
+_sessions_loaded_from_db: bool = False
+
+
+def _get_db():
+    try:
+        from src.archive import init_db
+        return init_db()
+    except Exception:
+        return None
+
+
+def _load_sessions_from_db() -> None:
+    """系统启动或首次使用时从 SQLite 加载未过期的活跃会话到内存中。"""
+    global _sessions_loaded_from_db
+    if _sessions_loaded_from_db:
+        return
+    conn = _get_db()
+    if conn:
+        now = time.time()
+        try:
+            with conn:
+                # 顺带清理数据库中已过期的垃圾会话
+                conn.execute("DELETE FROM sessions WHERE expires_at <= ?;", (now,))
+                cur = conn.execute("SELECT token, username, role, expires_at FROM sessions WHERE expires_at > ?;", (now,))
+                for row in cur.fetchall():
+                    _sessions[row[0]] = {
+                        "username": row[1],
+                        "role": row[2],
+                        "expires_at": float(row[3]),
+                    }
+        except Exception:
+            pass
+    _sessions_loaded_from_db = True
+
 
 def authenticate(username: str, password: str) -> dict | None:
     """校验用户名密码，成功返回 {username, role}。"""
@@ -280,12 +323,27 @@ def authenticate(username: str, password: str) -> dict | None:
 
 
 def create_session(username: str, role: str, ttl_seconds: int) -> str:
+    """创建并持久化会话。"""
     token = secrets.token_urlsafe(32)
+    now = time.time()
+    expires_at = now + ttl_seconds
     with _lock:
+        _load_sessions_from_db()
         _sessions[token] = {
-            "username": username, "role": role,
-            "expires_at": time.time() + ttl_seconds,
+            "username": username,
+            "role": role,
+            "expires_at": expires_at,
         }
+        conn = _get_db()
+        if conn:
+            try:
+                with conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO sessions (token, username, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?);",
+                        (token, username, role, expires_at, now),
+                    )
+            except Exception:
+                pass
     return token
 
 
@@ -295,20 +353,79 @@ def get_session(token: str, ttl_seconds: int = 0) -> dict | None:
         return None
     now = time.time()
     with _lock:
+        _load_sessions_from_db()
         for t in [t for t, s in _sessions.items() if s["expires_at"] <= now]:
             _sessions.pop(t, None)
         sess = _sessions.get(token)
         if sess is None:
+            # 内存未命中，尝试从 SQLite 读取（兼容外部写入或跨进程场景）
+            conn = _get_db()
+            if conn:
+                try:
+                    cur = conn.execute(
+                        "SELECT username, role, expires_at FROM sessions WHERE token = ? AND expires_at > ?;",
+                        (token, now),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        sess = {
+                            "username": row[0],
+                            "role": row[1],
+                            "expires_at": float(row[2]),
+                        }
+                        _sessions[token] = sess
+                except Exception:
+                    pass
+        if sess is None:
             return None
         if ttl_seconds > 0:
-            sess["expires_at"] = now + ttl_seconds
+            new_exp = now + ttl_seconds
+            sess["expires_at"] = new_exp
+            conn = _get_db()
+            if conn:
+                try:
+                    with conn:
+                        conn.execute("UPDATE sessions SET expires_at = ? WHERE token = ?;", (new_exp, token))
+                except Exception:
+                    pass
         return dict(sess)
 
 
 def destroy_session(token: str) -> None:
+    """注销并持久化删除单条会话。"""
+    if not token:
+        return
     with _lock:
+        _load_sessions_from_db()
         _sessions.pop(token, None)
+        conn = _get_db()
+        if conn:
+            try:
+                with conn:
+                    conn.execute("DELETE FROM sessions WHERE token = ?;", (token,))
+            except Exception:
+                pass
+
+
+def destroy_user_sessions(username: str) -> None:
+    """销毁指定用户的所有活跃会话（改密/删号/强制下线时触发）。"""
+    with _lock:
+        _load_sessions_from_db()
+        for token in [t for t, s in _sessions.items() if s.get("username") == username]:
+            _sessions.pop(token, None)
+        conn = _get_db()
+        if conn:
+            try:
+                with conn:
+                    conn.execute("DELETE FROM sessions WHERE username = ?;", (username,))
+            except Exception:
+                pass
 
 
 def session_count() -> int:
-    return len(_sessions)
+    with _lock:
+        _load_sessions_from_db()
+        now = time.time()
+        for t in [t for t, s in _sessions.items() if s["expires_at"] <= now]:
+            _sessions.pop(t, None)
+        return len(_sessions)

@@ -112,13 +112,28 @@ def main() -> None:
         assert auth.get_session("") is None
         expired = auth.create_session("admin1", "admin", -1)   # 立即过期
         assert auth.get_session(expired) is None, "过期会话不应可用"
-        auth.destroy_session(tok)
-        assert auth.get_session(tok) is None, "登出后会话应失效"
+        # 会话持久化与跨重启恢复测试
+        tok_pers = auth.create_session("admin1", "admin", 7200)
+        # 模拟内存清空（主程序/容器重启）
+        with auth._lock:
+            auth._sessions.clear()
+            auth._sessions_loaded_from_db = False
+        sess_recovered = auth.get_session(tok_pers)
+        assert sess_recovered and sess_recovered["username"] == "admin1", "重启后应能从 SQLite 恢复未过期会话"
+        assert sess_recovered["role"] == "admin"
+        auth.destroy_session(tok_pers)
+        with auth._lock:
+            auth._sessions.clear()
+            auth._sessions_loaded_from_db = False
+        assert auth.get_session(tok_pers) is None, "销毁后 SQLite 中也应被删除"
 
-        # 改密使该用户所有会话失效
+        # 改密使该用户所有会话失效（同时清理内存与 SQLite）
         t1, t2 = auth.create_session("v1", "viewer", 3600), auth.create_session("v1", "viewer", 3600)
         assert auth.set_password("v1", "newviewerpass")[0]
-        assert auth.get_session(t1) is None and auth.get_session(t2) is None, "改密应踢掉旧会话"
+        with auth._lock:
+            auth._sessions.clear()
+            auth._sessions_loaded_from_db = False
+        assert auth.get_session(t1) is None and auth.get_session(t2) is None, "改密应踢掉旧会话（含 SQLite）"
         assert auth.authenticate("v1", "newviewerpass") is not None
         assert auth.authenticate("v1", "viewerpass123") is None, "旧密码应失效"
         print("✅ Test 3 通过\n")

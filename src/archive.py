@@ -116,6 +116,22 @@ def init_db() -> sqlite3.Connection | None:
             );
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                role TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                created_at REAL NOT NULL DEFAULT 0
+            );
+        """)
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN created_at REAL DEFAULT 0;")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);")
+
         try:
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
