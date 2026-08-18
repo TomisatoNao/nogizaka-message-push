@@ -2604,17 +2604,6 @@ function collectSocial() {
 }
 
 // ── 账号池 ───────────────────────────────────────
-function credBadge(accId) {
-  const st = credStatus[accId];
-  if (!st) return '<span class="cred miss">未知</span>';
-  if (st.ok) return '<span class="cred ok">✓ 已配置</span>';
-  const missing = st.expected.filter((name, i) => {
-    if ("refresh_token" in st) return !st.refresh_token;
-    return i === 0 ? !st.token : !st.cookie;
-  });
-  return '<span class="cred miss" title="缺少: ' + missing.join(", ") + '">✗ 缺 ' + missing.join(" / ") + "</span>";
-}
-
 function renderAccounts() {
   const tbody = $("accountRows");
   tbody.innerHTML = "";
@@ -2624,18 +2613,70 @@ function renderAccounts() {
   for (const id of ids) {
     const acc = accounts[id];
     const tr = document.createElement("tr");
-    tr.innerHTML =
-      "<td><b>" + esc(id) + "</b></td>" +
-      "<td>" + esc(acc.group || "") + "</td>" +
-      "<td>" + esc(acc.auth || "web") + "</td>" +
-      "<td>" + esc(acc.app_tag || "—") + "</td>" +
-      "<td>" + credBadge(id) + "</td>";
+
+    // 账号 ID
+    const tdId = document.createElement("td");
+    tdId.innerHTML = '<span style="font-family:var(--mono);font-weight:600;color:var(--text-strong);">' + esc(id) + '</span>';
+
+    // 团体
+    const tdGroup = document.createElement("td");
+    tdGroup.innerHTML = '<span class="sub-filter-tag all">' + esc(acc.group || "nogizaka46") + '</span>';
+
+    // 登录方式
+    const tdAuth = document.createElement("td");
+    tdAuth.innerHTML = '<span style="font-family:var(--mono);font-size:12px;color:var(--muted);">' + esc(acc.auth || "web") + '</span>';
+
+    // App 标签
+    const tdTag = document.createElement("td");
+    tdTag.innerHTML = '<span style="font-size:12px;color:var(--muted);">' + esc(acc.app_tag || "—") + '</span>';
+
+    // 凭证 (.env) 专属状态操作胶囊按钮
+    const st = credStatus[id];
+    const tdCred = document.createElement("td");
+    tdCred.style.whiteSpace = "nowrap";
+    const credBtn = document.createElement("button");
+    credBtn.type = "button";
+
+    if (!st) {
+      credBtn.className = "btn-secret-status unconfigured";
+      credBtn.innerHTML = '<span class="secret-dot"></span><span>未保存</span><span class="secret-action">先保存</span>';
+      credBtn.onclick = () => uiAlert("请先「保存并热重载」把该账号写进 config.json，再填凭证。");
+    } else {
+      const isOk = !!st.ok;
+      const missing = (st.expected || []).filter((name, i) => {
+        if ("refresh_token" in st) return !st.refresh_token;
+        return i === 0 ? !st.token : !st.cookie;
+      });
+      credBtn.className = "btn-secret-status " + (isOk ? "configured" : "unconfigured");
+      credBtn.title = isOk ? "凭证正常，点击修改" : ("缺失: " + missing.join(", "));
+      credBtn.innerHTML = isOk
+        ? '<span class="secret-dot"></span><span>✓ 凭证已配置</span><span class="secret-action">修改</span>'
+        : '<span class="secret-dot"></span><span>✗ 缺失凭证</span><span class="secret-action">去填写</span>';
+      credBtn.onclick = (e) => {
+        e.preventDefault();
+        openAccountCredDialog(id);
+      };
+    }
+    tdCred.appendChild(credBtn);
+
+    // 操作列：横向整齐排列
     const tdOps = document.createElement("td");
-    const btnCred = mkBtn("填凭证", () => openAccountCredDialog(id));
-    const btnVerify = mkBtn("⚡握手测试", async () => {
+    tdOps.style.whiteSpace = "nowrap";
+
+    const opsWrap = document.createElement("div");
+    opsWrap.style.display = "inline-flex";
+    opsWrap.style.alignItems = "center";
+    opsWrap.style.gap = "6px";
+
+    // 1. 握手测试
+    const btnVerify = document.createElement("button");
+    btnVerify.className = "btn small";
+    btnVerify.type = "button";
+    btnVerify.innerHTML = '<span style="font-size:12px;">⚡</span><span>握手测试</span>';
+    btnVerify.onclick = async () => {
       btnVerify.disabled = true;
-      const oldTxt = btnVerify.textContent;
-      btnVerify.textContent = "测试中…";
+      const oldHtml = btnVerify.innerHTML;
+      btnVerify.innerHTML = '<span>⏳</span><span>测试中…</span>';
       try {
         msg("正在与 " + id + " 鉴权服务握手测试…", "");
         const res = await api("/api/accounts/verify", {
@@ -2654,11 +2695,23 @@ function renderAccounts() {
         uiAlert("测试请求失败：" + e.message, { title: "网络错误", danger: true });
       } finally {
         btnVerify.disabled = false;
-        btnVerify.textContent = oldTxt;
+        btnVerify.innerHTML = oldHtml;
       }
-    });
-    const btnEdit = mkBtn("编辑", () => openAccountDialog(id));
-    const btnDel = mkBtn("删除", async () => {
+    };
+
+    // 2. 编辑
+    const btnEdit = document.createElement("button");
+    btnEdit.className = "btn small";
+    btnEdit.type = "button";
+    btnEdit.innerHTML = '<span style="font-size:11px;">✏️</span><span>编辑</span>';
+    btnEdit.onclick = () => openAccountDialog(id);
+
+    // 3. 删除
+    const btnDel = document.createElement("button");
+    btnDel.className = "btn small danger";
+    btnDel.type = "button";
+    btnDel.innerHTML = '<span style="font-size:11px;">🗑️</span><span>删除</span>';
+    btnDel.onclick = async () => {
       const used = (config.monitor || []).filter((m) => m.account === id);
       if (used.length > 0) {
         const names = used.map((m) => m.name || m.id).join("、");
@@ -2673,9 +2726,12 @@ function renderAccounts() {
       }
       delete config.accounts[id];
       markDirty(); renderAccounts(); renderMembers();
-    }, "danger");
-    tdOps.append(btnCred, document.createTextNode(" "), btnVerify, document.createTextNode(" "), btnEdit, document.createTextNode(" "), btnDel);
-    tr.appendChild(tdOps);
+    };
+
+    opsWrap.append(btnVerify, btnEdit, btnDel);
+    tdOps.appendChild(opsWrap);
+
+    tr.append(tdId, tdGroup, tdAuth, tdTag, tdCred, tdOps);
     tbody.appendChild(tr);
   }
 }
