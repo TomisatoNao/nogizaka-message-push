@@ -31,6 +31,28 @@ let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
 
+window.handleImgError = function(img) {
+  const retryCount = parseInt(img.dataset.retry || "0", 10);
+  if (retryCount < 2) {
+    img.dataset.retry = String(retryCount + 1);
+    const rawUrl = img.dataset.src || img.src;
+    setTimeout(() => {
+      const base = rawUrl.split("?")[0];
+      const sep = base.includes("?") ? "&" : "?";
+      const tokenParam = authToken ? "token=" + encodeURIComponent(authToken) + "&" : "";
+      img.src = base + sep + tokenParam + "_retry=" + Date.now();
+    }, 350 * (retryCount + 1));
+  } else {
+    img.classList.add("img-broken");
+    if (!img.nextElementSibling || !img.nextElementSibling.classList.contains("pc-broken-fallback")) {
+      const fb = document.createElement("div");
+      fb.className = "pc-broken-fallback";
+      fb.innerHTML = '<span style="font-size:26px;opacity:0.5;">🖼️</span>';
+      img.parentNode.insertBefore(fb, img.nextSibling);
+    }
+  }
+};
+
 async function api(path, options = {}) {
   const resp = await fetch(path, {
     headers: authToken ? { "X-Auth-Token": authToken } : {},
@@ -1941,7 +1963,7 @@ function renderHome(agg, members) {
     strip.innerHTML = agg.pics.map(p =>
       '<div class="photo-card" data-member="' + esc(p.member) + '" data-year="' + p.year + '" data-month="' + p.month + '" data-id="' + p.id + '">' +
         (members.length > 1 ? '<span class="pc-member">' + esc(p.member_display) + '</span>' : '') +
-        '<img src="' + mediaUrl(p.url) + '" alt="" loading="lazy">' +
+        '<img src="' + mediaUrl(p.url) + '" data-src="' + esc(p.url) + '" alt="" onerror="handleImgError(this)" onload="this.classList.add(\'loaded\')">' +
         (p.text ? '<div class="pc-overlay"><div class="pc-cap">' + formatMessageText(p.text) + '</div></div>' : '') +
       '</div>'
     ).join('');

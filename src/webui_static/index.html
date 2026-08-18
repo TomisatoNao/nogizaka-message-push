@@ -797,7 +797,6 @@
     <div class="grid">
       <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
       <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
-      <label class="switch"><input id="archivePublicOn" type="checkbox"/><span class="track"></span>游客免登录访问归档</label>
       <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
       <label class="field">摘要时间（JST 整点）
         <input id="summaryHour" max="23" min="0" type="number"/>
@@ -806,7 +805,7 @@
     <details class="help-box" style="margin-top: 10px;">
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 归档与反向心跳摘要说明</summary>
       <div class="hint" style="margin-top: 6px;">
-        归档内容可在 <a href="/archive">📚 消息归档</a> 页浏览；开启「游客免登录」后访客可直接阅读归档而无需账号，管理后台依然受密码保护。
+        归档内容可在 <a href="/archive">📖 消息归档</a> 页浏览；归档的访问权限（是否允许游客免登录浏览）可在「🔑 用户」选项卡中统一管理。
       </div>
     </details>
   </div>
@@ -1413,10 +1412,30 @@ async function saveConfig() {
   
   // 增加前端校验
   const errors = [];
-  if (config.day_interval[0] > config.day_interval[1]) errors.push("日间间隔的最小值不能大于最大值");
-  if (config.night_interval[0] > config.night_interval[1]) errors.push("深夜间隔的最小值不能大于最大值");
-  if (config.blog_monitor.day_interval[0] > config.blog_monitor.day_interval[1]) errors.push("博客日间间隔的最小值不能大于最大值");
-  if (config.blog_monitor.night_interval[0] > config.blog_monitor.night_interval[1]) errors.push("博客深夜间隔的最小值不能大于最大值");
+  if (config.day_interval && config.day_interval[0] > config.day_interval[1]) {
+    errors.push("日间巡查间隔的最小值不能大于最大值");
+  }
+  if (config.night_interval && config.night_interval[0] > config.night_interval[1]) {
+    errors.push("夜间巡查间隔的最小值不能大于最大值");
+  }
+  if (config.blog_monitor && config.blog_monitor.day_interval && config.blog_monitor.day_interval[0] > config.blog_monitor.day_interval[1]) {
+    errors.push("博客日间巡查间隔的最小值不能大于最大值");
+  }
+  if (config.blog_monitor && config.blog_monitor.night_interval && config.blog_monitor.night_interval[0] > config.blog_monitor.night_interval[1]) {
+    errors.push("博客夜间巡查间隔的最小值不能大于最大值");
+  }
+  if (config.daily_summary && config.daily_summary.hour !== undefined && config.daily_summary.hour !== null) {
+    const h = config.daily_summary.hour;
+    if (typeof h !== "number" || isNaN(h) || h < 0 || h > 23) {
+      errors.push("每日摘要时间必须为 0 ~ 23 之间的整点数字");
+    }
+  }
+  if (config.web_admin && config.web_admin.port !== undefined && config.web_admin.port !== null) {
+    const p = config.web_admin.port;
+    if (typeof p !== "number" || isNaN(p) || p < 1 || p > 65535) {
+      errors.push("Web 管理端口必须在 1 ~ 65535 之间");
+    }
+  }
   
   if (errors.length > 0) {
     msg("保存失败，请检查配置：\n" + errors.join("\n"), "err");
@@ -1840,7 +1859,6 @@ function renderGeneral() {
   const au = config.auth || {};
   const isPublic = au.archive_public === true;
   if ($("authArchivePublic")) $("authArchivePublic").checked = isPublic;
-  if ($("archivePublicOn")) $("archivePublicOn").checked = isPublic;
   const ds = config.daily_summary || {};
   $("summaryOn").checked = !!ds.enabled;
   $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
@@ -2111,18 +2129,27 @@ $("qqBotSave").addEventListener("click", async () => {
   }
 });
 
-// 把表单值收回 config（数字字段做 parse，空值回退默认）
+function parseNum(val, float = false) {
+  if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  if (s === "") return null;
+  const n = float ? parseFloat(s) : parseInt(s, 10);
+  return Number.isFinite(n) ? n : s;
+}
+
+// 把表单值收回 config（数字字段做 parse）
 function collectGeneral() {
   if (!config) return;
-  const num = (id, fallback, float) => {
-    const v = float ? parseFloat($(id).value) : parseInt($(id).value, 10);
-    return Number.isFinite(v) ? v : fallback;
+  const num = (id, float) => {
+    const el = $(id);
+    if (!el) return null;
+    return parseNum(el.value, float);
   };
   config.napcat_api = $("napcatApi").value.trim() || undefined;
   if (config.napcat_api === undefined) delete config.napcat_api;
-  config.day_interval = [num("dayMin", 120), num("dayMax", 180)];
-  config.night_interval = [num("nightMin", 1500), num("nightMax", 1800)];
-  config.sleep_hours = [num("sleepStart", 2), num("sleepEnd", 7)];
+  config.day_interval = [num("dayMin") ?? 120, num("dayMax") ?? 180];
+  config.night_interval = [num("nightMin") ?? 1500, num("nightMax") ?? 1800];
+  config.sleep_hours = [num("sleepStart") ?? 2, num("sleepEnd") ?? 7];
   config.message_monitor = {
     enabled: $("msgMonitorOn") ? $("msgMonitorOn").checked : true
   };
@@ -2131,26 +2158,25 @@ function collectGeneral() {
     hinatazaka: $("blogHinatazaka").checked,
     nogizaka: $("blogNogizaka").checked,
     sakurazaka: $("blogSakurazaka").checked,
-    day_interval: [num("blogDayMin", 60), num("blogDayMax", 120)],
-    night_interval: [num("blogNightMin", 1650), num("blogNightMax", 1950)]
+    day_interval: [num("blogDayMin") ?? 60, num("blogDayMax") ?? 120],
+    night_interval: [num("blogNightMin") ?? 1650, num("blogNightMax") ?? 1950]
   };
-  config.alert_cooldown = num("alertCooldown", 3600);
-  config.qq_send_interval = num("qqSendInterval", 1.5, true);
+  config.alert_cooldown = num("alertCooldown") ?? 3600;
+  config.qq_send_interval = num("qqSendInterval", true) ?? 1.5;
   config.translate = $("translateOn").checked;
-  config.gemini_min_interval = num("geminiMinInterval", 7.0, true);
-  config.translate_timeout = num("translateTimeout", 30);
+  config.gemini_min_interval = num("geminiMinInterval", true) ?? 7.0;
+  config.translate_timeout = num("translateTimeout") ?? 30;
   config.web_admin = {
     enabled: $("webAdminOn").checked,
     host: $("webAdminHost").value.trim() || "127.0.0.1",
-    port: num("webAdminPort", 8787),
+    port: num("webAdminPort") ?? 8787,
   };
   config.archive = {
     enabled: $("archiveOn").checked,
     dir: (config.archive || {}).dir || "data/archive",
     media: $("archiveMedia").checked,
   };
-  const isPublic = Boolean(($("authArchivePublic") && $("authArchivePublic").checked) ||
-                           ($("archivePublicOn") && $("archivePublicOn").checked));
+  const isPublic = Boolean($("authArchivePublic") && $("authArchivePublic").checked);
   config.auth = config.auth || {};
   config.auth.enabled = config.auth.enabled !== false;
   config.auth.archive_public = isPublic;
@@ -2158,7 +2184,7 @@ function collectGeneral() {
 
   config.daily_summary = {
     enabled: $("summaryOn").checked,
-    hour: Math.min(23, Math.max(0, num("summaryHour", 23))),
+    hour: num("summaryHour") ?? 23,
   };
   config.qq_commands = {
     enabled: $("cmdOn").checked,
@@ -2171,25 +2197,13 @@ function collectGeneral() {
     delete config.proxy;
   }
 }
-["tab-system", "tab-channels", "tab-monitors", "tab-social", "tab-users"].forEach((id) => {
-  const el = $(id);
-  if (el) {
-    el.addEventListener("input", () => markDirty());
-    el.addEventListener("change", (e) => {
-      if (e.target.id === "archivePublicOn" && $("authArchivePublic")) {
-        $("authArchivePublic").checked = e.target.checked;
-      }
-      markDirty();
-    });
-  }
+
+document.addEventListener("input", (e) => {
+  if (e.target && e.target.closest && e.target.closest("main")) markDirty();
 });
-if ($("authArchivePublic")) {
-  $("authArchivePublic").addEventListener("change", (e) => {
-    if ($("archivePublicOn")) $("archivePublicOn").checked = e.target.checked;
-    collectGeneral();
-    markDirty();
-  });
-}
+document.addEventListener("change", (e) => {
+  if (e.target && e.target.closest && e.target.closest("main")) markDirty();
+});
 
 $("btnRefreshStorage")?.addEventListener("click", () => {
   fetchStorage(true);
