@@ -101,6 +101,15 @@ function formatMessageText(str, query) {
   return highlightQuery(cleaned, query);
 }
 
+function formatCardText(str, maxLen = 160) {
+  if (!str) return "";
+  let s = str.replace(/%%%/g, "");
+  // 压缩连续换行与多余空行
+  s = s.replace(/\n\s*\n+/g, "\n").trim();
+  if (s.length > maxLen) s = s.slice(0, maxLen).trim() + "...";
+  return esc(s);
+}
+
 function escRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -2129,9 +2138,9 @@ function renderHome(data) {
         feedHTML += '</div>';
         feedHTML += '<span class="hmc-jump">查看消息 →</span>';
         feedHTML += '</div>';
-        feedHTML += '<div class="hmc-text">' + formatMessageText(item.text) + '</div>';
+        feedHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
         if (item.translation) {
-          feedHTML += '<div class="hmc-trans">' + formatMessageText(item.translation) + '</div>';
+          feedHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
         }
         feedHTML += '</div>';
       }
@@ -2179,7 +2188,7 @@ function renderHome(data) {
         tunnelHTML += '</div>';
         tunnelHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
         if (item.translation) {
-          tunnelHTML += '<div class="hmc-trans" style="color:var(--text);">' + esc(item.translation) + '</div>';
+          tunnelHTML += '<div class="hmc-trans" style="color:var(--text);">' + formatCardText(item.translation) + '</div>';
         }
         tunnelHTML += '</div>';
       } else {
@@ -2192,9 +2201,9 @@ function renderHome(data) {
         tunnelHTML += '</div>';
         tunnelHTML += '<span class="hmc-jump">跳转当日 →</span>';
         tunnelHTML += '</div>';
-        tunnelHTML += '<div class="hmc-text">' + formatMessageText(item.text) + '</div>';
+        tunnelHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
         if (item.translation) {
-          tunnelHTML += '<div class="hmc-trans">' + formatMessageText(item.translation) + '</div>';
+          tunnelHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
         }
         tunnelHTML += '</div>';
       }

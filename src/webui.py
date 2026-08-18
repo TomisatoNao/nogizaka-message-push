@@ -1494,13 +1494,16 @@ class _Handler(BaseHTTPRequestHandler):
                         bp = dict(r)
                         gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
                         gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
+                        raw_body = bp.get("body_text") or ""
+                        clean_body = re.sub(r'[\r\n\s]+', ' ', raw_body).strip()
+                        preview = clean_body[:120] + ("..." if len(clean_body) > 120 else "")
                         rand_blog_msgs.append({
                             "type": "blog",
                             "id": bp["id"],
                             "group_key": bp["group_key"],
                             "member_display": f"{gicon} {gname} · {bp['author']}",
                             "text": bp["title"],
-                            "translation": (bp.get("body_text") or "")[:120].strip() + ("..." if len(bp.get("body_text") or "") > 120 else ""),
+                            "translation": preview,
                             "published_at": bp["date"],
                         })
                 except Exception:

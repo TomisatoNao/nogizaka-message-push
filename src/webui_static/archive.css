@@ -583,22 +583,18 @@
   }
 
   /* 聚合动态流与时光隧道 */
-  .portal-feed-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-  @media (max-width: 768px) {
-    .portal-feed-grid { grid-template-columns: 1fr; }
-  }
-
+  .portal-feed-grid,
   .portal-tunnel-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
+    align-items: start;
     gap: 12px;
   }
   @media (max-width: 768px) {
-    .portal-tunnel-grid { grid-template-columns: 1fr; }
+    .portal-feed-grid,
+    .portal-tunnel-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* 写真画廊 */
@@ -702,12 +698,15 @@
     background: var(--card);
     border: 1px solid var(--border-soft);
     border-radius: 14px;
-    padding: 15px 18px;
+    padding: 13px 16px;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
     transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
     opacity: 0;
     animation: homeFadeUp .25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
   }
   .home-msg-card:hover {
     transform: translateY(-2px);
@@ -737,7 +736,7 @@
     flex-wrap: wrap;
   }
   .hmc-time {
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--muted);
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -768,21 +767,29 @@
     color: var(--text-strong);
   }
   .hmc-text {
-    font-size: 14.5px;
+    font-size: 14px;
     color: var(--text-strong);
-    line-height: 1.65;
+    line-height: 1.5;
     word-break: break-word;
-    white-space: pre-wrap;
+    white-space: pre-line;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .hmc-trans {
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--ok);
-    line-height: 1.55;
+    line-height: 1.45;
     word-break: break-word;
-    white-space: pre-wrap;
-    margin-top: 8px;
-    padding-top: 8px;
+    white-space: pre-line;
+    margin-top: 6px;
+    padding-top: 6px;
     border-top: 1px dashed var(--border-soft);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   /* 确保动画的 to 帧存在 */
