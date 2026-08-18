@@ -127,15 +127,11 @@ class InstagramFetcher(SocialFetcher):
             if cookies.get("csrftoken"):
                 self._session.headers["X-CSRFToken"] = cookies["csrftoken"]
             return      # 已有登录态，无需再做匿名预热
-
-        # 2) 没有登录态时才做匿名 warm-up（提高匿名接口的成功率）
         try:
-            self._session.get("https://www.instagram.com/", timeout=20)
-            token = self._session.cookies.get("csrftoken")
-            if token:
-                self._session.headers["X-CSRFToken"] = token
+            self._session.get("https://www.instagram.com/", timeout=self._dl.timeout)
+            self._warmed = True
         except Exception as e:
-            log.debug("[instagram] 会话预热失败（不影响后续尝试）: %s", e)
+            log.debug("[instagram] 预热 session 失败（不影响主流程）: %s", e)
 
     def _session_failed(self, reason: str) -> None:
         """标记登录态失效并（首次）告警。
@@ -168,15 +164,17 @@ class InstagramFetcher(SocialFetcher):
         except Exception:
             pass
 
+    # ── 登录态引导（仅触发一次）─────────────────────────────
+
     def _hint_login_once(self) -> None:
-        """匿名被拦时给出一次可操作的提示（避免每轮重复刷屏）。"""
         if self._login_hint_shown:
             return
         self._login_hint_shown = True
         log.warning(
-            "[instagram] Instagram 已在服务端限制匿名访问（429 / 需要登录态），"
-            "这不是本程序可绕过的问题。若要监控 Instagram，二选一：\n"
-            '  ① 推荐：用浏览器扩展（如 "Get cookies.txt LOCALLY"）导出 '
+            "[instagram] ⚠️ 当前未配置有效登录态，只能抓取公开账号的基本 Feed，"
+            "且无法抓取 Story。\n"
+            "建议在具有 Instagram 正常访问权限的环境中配置登录态（任选其一）：\n"
+            "  ① 安装浏览器扩展（如 Get cookies.txt LOCALLY），导出 "
             "instagram.com 的 cookies.txt，填到 config.json → "
             'platforms.instagram.cookies_file；\n'
             '  ② 或设置 "cookies_from_browser": "chrome"（需完全关闭该浏览器；'
@@ -196,7 +194,12 @@ class InstagramFetcher(SocialFetcher):
         try:
             guard.check(self._config, what="轮询")
         except Blocked as e:
-            log.info("[instagram] ⏸ %s", e)
+            now = time.time()
+            if now - self._last_blocked_log > 60:
+                self._last_blocked_log = now
+                log.info("[instagram] ⏸ %s", e)
+            else:
+                log.debug("[instagram] ⏸ %s", e)
             return posts
 
         self._warm_session()
@@ -616,8 +619,8 @@ class InstagramFetcher(SocialFetcher):
             log.warning("[instagram] @%s Story 未检查：未配置登录态。", account)
             return []
         if not entries:
-            log.info("[instagram] @%s 当前没有 Story（登录态有效，Story API 返回空列表）",
-                     account)
+            log.debug("[instagram] @%s 当前没有 Story（登录态有效，Story API 返回空列表）",
+                      account)
             return []
 
         log.info("[instagram] 📖 @%s 发现 %s 条 Story", account, len(entries))

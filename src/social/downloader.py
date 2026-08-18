@@ -336,9 +336,9 @@ class MediaDownloader:
                 if os.path.getsize(tmp) == 0:
                     raise OSError("下载内容为空")
                 os.replace(tmp, dest_path)
-                log.info("[download] ✅ 下载成功: %s (%.1f KB)",
-                         os.path.basename(dest_path),
-                         os.path.getsize(dest_path) / 1024)
+                log.debug("[download] ✅ 下载成功: %s (%.1f KB)",
+                          os.path.basename(dest_path),
+                          os.path.getsize(dest_path) / 1024)
                 return True
             except Exception as e:
                 log.warning("[download] ❌ 下载失败 (%s/%s) %s: %s",

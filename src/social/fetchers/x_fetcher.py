@@ -352,7 +352,7 @@ class XFetcher(SocialFetcher):
                 self._fill_missing_alts(got)
                 return got
             log.debug("[x] 后端 %s 无结果，尝试下一个", name)
-        log.warning("[x] @%s 所有后端均无结果（可能被限流或账号无公开推文）", account)
+        log.debug("[x] @%s 所有后端均无结果（可能被限流或账号无公开推文）", account)
         return []
 
     # ── 图片 alt（无障碍描述）补齐 ────────────────────────
@@ -486,7 +486,10 @@ class XFetcher(SocialFetcher):
 
     # 后端 2：Nitter RSS（免 token）
     def _backend_nitter(self, account: str) -> list[_RawTweet]:
-        instances = self.cfg.get("nitter_instances") or []
+        instances = self.cfg.get("nitter_instances") or [
+            "https://nitter.perennialte.ch",
+            "https://xcancel.com",
+        ]
         last_err = None
         for inst in instances:
             base = str(inst).rstrip("/")

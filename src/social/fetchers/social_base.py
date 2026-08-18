@@ -254,7 +254,7 @@ class SocialFetcher(BaseFetcher):
             return posts
 
         for account in accounts:
-            log.info("[%s] 🔎 开始检查账号 @%s", self.platform_name, account)
+            log.debug("[%s] 🔎 开始检查账号 @%s", self.platform_name, account)
             try:
                 got = self._fetch_account(account)
             except Exception as e:
@@ -271,7 +271,7 @@ class SocialFetcher(BaseFetcher):
                          self.platform_name, account, len(got))
                 posts.extend(got)
             else:
-                log.info("[%s] ✅ @%s 无新内容", self.platform_name, account)
+                log.debug("[%s] ✅ @%s 无新内容", self.platform_name, account)
         return posts
 
     def _fetch_account(self, account: str) -> list[Post]:
