@@ -1,6 +1,3 @@
-# ============================================================
-# qq_official.py — QQ 开放平台官方 Bot 单聊推送（支持多 Bot）
-# ============================================================
 import asyncio
 import base64
 import time
@@ -10,6 +7,7 @@ import httpx
 # 统一通过 cfg.X 访问，热重载后标量值（超时、限速间隔等）才能生效
 import config.config as cfg
 from src.logger import log_all
+from src.utils import RateLimiter
 
 _MEDIA_FILE_TYPES = {
     "image": 1,
@@ -118,22 +116,15 @@ class QQOfficialBot:
         self.push_alert: bool = push_alert
 
         # 实例级状态
-        self._client: httpx.AsyncClient = None
-        self._lock: asyncio.Lock = None
+        self._client: httpx.AsyncClient | None = None
+        self._send_limiter = RateLimiter(lambda: getattr(cfg, "QQ_SEND_INTERVAL", 1.5))
         self._access_token: str = ""
         self._token_expire_at: float = 0.0
         self._last_send_ts: float = 0.0
 
-    def _get_lock(self) -> asyncio.Lock:
-        """获取或惰性创建与当前事件循环绑定的协程锁。"""
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
-
     def initialize(self, client: httpx.AsyncClient) -> None:
-        """注入共享的 AsyncClient 实例，并创建串行化锁。"""
+        """注入共享的 AsyncClient 实例。"""
         self._client = client
-        self._lock = asyncio.Lock()
 
     def is_configured(self) -> bool:
         """凭证完整即可（target_openid 允许为空——群推送专用 Bot 不需要单聊目标）。"""
@@ -276,7 +267,7 @@ class QQOfficialBot:
         if not text.strip():
             return False
 
-        async with self._get_lock():
+        async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
 
@@ -488,7 +479,7 @@ class QQOfficialBot:
                           message_chain: list[dict],
                           media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
         """共享的链式发送核心：文字 + 媒体。scope='users'|'groups'。"""
-        async with self._get_lock():
+        async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
 
@@ -526,7 +517,7 @@ class QQOfficialBot:
         """向指定群聊发送纯文本消息。"""
         if not text.strip():
             return False
-        async with self._get_lock():
+        async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
             url = f"{self._target_base('groups', group_openid)}/messages"
@@ -536,7 +527,7 @@ class QQOfficialBot:
         """向指定用户发送纯文本消息。"""
         if not text.strip():
             return False
-        async with self._get_lock():
+        async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
             url = f"{self._target_base('users', target_openid)}/messages"
@@ -550,7 +541,7 @@ class QQOfficialBot:
         """向指定用户/群聊发送单张图片或视频媒体文件。scope: 'users' | 'groups'。"""
         if not content or not target_openid:
             return False
-        async with self._get_lock():
+        async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
             file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid, filename=filename)
@@ -611,7 +602,7 @@ class QQOfficialBot:
             parts.append(buf)
             
         all_ok = True
-        async with self._get_lock():
+        async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
             url = f"{self._target_base(scope, target_openid)}/messages"

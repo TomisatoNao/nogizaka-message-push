@@ -280,11 +280,6 @@ def clean_storage_category(category: str) -> tuple[bool, str, int]:
         get_storage_breakdown(force_refresh=True)
         return True, f"已清理社交媒体下载缓存（共删除 {deleted_files} 个文件，释放 {format_bytes(freed_bytes)}）", freed_bytes
 
-    elif category == "blog_images":
-        _remove_files_in_dir(base_dir / "data" / "blog_images")
-        get_storage_breakdown(force_refresh=True)
-        return True, f"已清理博客原图缓存（共删除 {deleted_files} 个文件，释放 {format_bytes(freed_bytes)}）", freed_bytes
-
     elif category == "logs":
         log_dir = base_dir / "logs"
         if log_dir.exists() and log_dir.is_dir():

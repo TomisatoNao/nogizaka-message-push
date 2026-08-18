@@ -1035,14 +1035,14 @@ if (brTranslateBtn) {
           brTranslateBtn.disabled = true;
         }
       } else {
-        alert(data.msg || "翻译失败，请检查 API Key 配置与网络连接");
+        showToast(data.msg || "翻译失败，请检查 API Key 配置与网络连接", "error");
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
           brTranslateBtn.textContent = "🌐 重试翻译";
           brTranslateBtn.disabled = false;
         }
       }
     } catch(err) {
-      alert("网络异常: " + err);
+      showToast("网络异常: " + err, "error");
       if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
         brTranslateBtn.textContent = "🌐 重试翻译";
         brTranslateBtn.disabled = false;
@@ -1473,9 +1473,9 @@ function renderBubble(msg) {
           editBtn.textContent = val ? "✎ 编辑" : "+ 加标签";
           editBtn.hidden = false; input.hidden = true;
         } else {
-          alert("保存失败：" + (data.errors || []).join("；"));
+          showToast("保存失败：" + (data.errors || []).join("；"), "error");
         }
-      } catch (e) { alert("保存失败：" + e.message); }
+      } catch (e) { showToast("保存失败：" + e.message, "error"); }
     }
 
     tagsDiv.appendChild(editBtn);

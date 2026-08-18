@@ -1556,20 +1556,21 @@ async function fetchStorage(forceRefresh = false) {
 }
 
 async function cleanStorage(category, name) {
-  if (!confirm(`确定要清空【${name}】的全部落盘文件/缓存吗？\n\n此操作将释放磁盘空间，清理后不可恢复。`)) return;
+  const ok = await uiConfirm(`确定要清空【${name}】的全部落盘文件/缓存吗？\n\n此操作将释放磁盘空间，清理后不可恢复。`, { title: `清理【${name}】确认`, danger: true, yesText: "确认清空" });
+  if (!ok) return;
   try {
     const res = await api("/api/system/storage/clean", {
       method: "POST",
       body: JSON.stringify({ category })
     });
     if (!res || !res.ok) {
-      alert("❌ 清理失败: " + (((res && res.errors) || []).join(", ")));
+      uiAlert("清理失败: " + (((res && res.errors) || []).join(", ")), "操作失败");
       return;
     }
-    alert("✅ " + (res.msg || "清理成功"));
+    uiAlert(res.msg || "清理成功", "清理完成");
     fetchStorage(true);
   } catch (e) {
-    alert("❌ 清理请求异常: " + e.message);
+    uiAlert("清理请求异常: " + e.message, "请求异常");
   }
 }
 
@@ -1588,7 +1589,8 @@ function renderStorage(st) {
   if (!container) return;
   container.innerHTML = "";
 
-  const cleanableCats = new Set(["live_recordings", "social_media", "blog_images", "logs"]);
+  // 博客原图与 Message 媒体作为核心归档受保护，不提供清理入口；仅临时/可再生媒体支持清理
+  const cleanableCats = new Set(["live_recordings", "social_media", "logs"]);
 
   for (const [k, item] of Object.entries(cats)) {
     const card = document.createElement("div");
