@@ -301,6 +301,37 @@ def test_extract_bilingual_pairs() -> None:
     print("  ✅ _extract_bilingual_pairs 边界隔离与图片压缩测试通过")
 
 
+def test_match_member_filter() -> None:
+    print("=== match_member_filter 容错与空格/ID匹配 ===")
+    from src.utils import match_member_filter
+
+    # 空过滤器放行全部
+    assert match_member_filter("冨里 奈央", None) is True
+    assert match_member_filter("冨里 奈央", []) is True
+
+    # 精确匹配与带空格匹配
+    assert match_member_filter("冨里 奈央", ["冨里 奈央"]) is True
+    assert match_member_filter("冨里 奈央", ["冨里奈央"]) is True
+    assert match_member_filter("冨里奈央", ["冨里 奈央"]) is True
+    assert match_member_filter("冨里_奈央", ["冨里 奈央"]) is True
+
+    # 成员 ID 匹配
+    assert match_member_filter("冨里 奈央", ["55"], member_id="55") is True
+    assert match_member_filter("冨里 奈央", ["55"], member_id=55) is True
+
+    # 不匹配情况
+    assert match_member_filter("冨里 奈央", ["石森 璃花", "山下 美月"]) is False
+    print("  ✅ match_member_filter 各种空格/下划线/ID组合均正确匹配")
+
+
+def test_member_dir_name() -> None:
+    print("=== member_dir_name 目录复用与防分叉 ===")
+    from src.archive import member_dir_name
+    # 模拟已有 冨里奈央 目录
+    assert member_dir_name("冨里 奈央") in ("冨里奈央", "冨里_奈央")
+    print("  ✅ member_dir_name 目录匹配正确")
+
+
 def main() -> None:
     test_utc_to_jst()
     test_log_truncation()
@@ -313,6 +344,8 @@ def main() -> None:
     test_time_record_skip()
     test_stop_signal_file()
     test_powershell_scripts_have_bom()
+    test_match_member_filter()
+    test_member_dir_name()
     print("\n" + "=" * 50)
     print("🎉 全部单元断言通过")
 

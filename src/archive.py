@@ -268,7 +268,21 @@ def initialize(client: httpx.AsyncClient) -> None:
 # 路径工具
 # ──────────────────────────────────────────────
 def member_dir_name(m_name: str) -> str:
-    return _FILENAME_ILLEGAL.sub("_", m_name.replace(" ", "_"))
+    """返回成员在归档根目录下的子文件夹名。
+
+    1. 智能复用：优先匹配磁盘上已存在的归档目录（忽略全半角空格与下划线差异），
+       防止修改成员显示名（如 '冨里奈央' 变为 '冨里 奈央'）时导致归档数据分叉。
+    2. 新建目录：默认去除空格生成紧凑规范的目录名。
+    """
+    root = archive_root()
+    norm = _FILENAME_ILLEGAL.sub("", m_name.replace(" ", "").replace("　", "").replace("_", ""))
+    if root.is_dir():
+        for d in root.iterdir():
+            if d.is_dir():
+                d_norm = _FILENAME_ILLEGAL.sub("", d.name.replace(" ", "").replace("　", "").replace("_", ""))
+                if d_norm == norm:
+                    return d.name
+    return _FILENAME_ILLEGAL.sub("_", m_name.replace(" ", "").replace("　", ""))
 
 
 def archive_root() -> Path:

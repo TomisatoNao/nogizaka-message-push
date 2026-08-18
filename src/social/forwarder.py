@@ -17,6 +17,7 @@ import subprocess
 import config.config as cfg
 from src.logger import log_all
 from src.platforms import napcat, qq_official, tgbot
+from src.utils import match_member_filter
 from src.social.formatter import (
     build_live_end_message,
     build_post_message,
@@ -150,7 +151,7 @@ class SocialForwarder:
                             if not getattr(b, f"push_{plat}", True):
                                 continue
                             # 2) 成员过滤（若本动态归属于某个成员且该通道配置了成员过滤）
-                            if m_name and b.member_filter and m_name not in b.member_filter:
+                            if m_name and b.member_filter and not match_member_filter(m_name, b.member_filter):
                                 continue
                             # 3) 社媒账号过滤（若该通道配置了社媒账号白名单）
                             if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
@@ -209,7 +210,7 @@ class SocialForwarder:
                                 continue
                             # 2) 成员过滤
                             m_filters = r.get("member_filter") or []
-                            if m_name and m_filters and m_name not in m_filters:
+                            if m_name and m_filters and not match_member_filter(m_name, m_filters):
                                 continue
                             # 3) 社媒账号过滤
                             s_filters = r.get("social_filter") or []
@@ -256,7 +257,7 @@ class SocialForwarder:
                             if not getattr(bot, f"push_{plat}", True):
                                 continue
                             # 2) 成员过滤
-                            if m_name and bot.member_filter and m_name not in bot.member_filter:
+                            if m_name and bot.member_filter and not match_member_filter(m_name, bot.member_filter):
                                 continue
                             # 3) 社媒账号过滤
                             if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):

@@ -47,6 +47,34 @@ def in_hour_range(hour: int, start: int, end: int) -> bool:
     return hour >= start or hour < end
 
 
+def match_member_filter(
+    member_name: str,
+    filters: list[str] | None,
+    member_id: str | int | None = None,
+) -> bool:
+    """检查成员名或 ID 是否命中过滤列表。
+
+    支持：
+    1. 空列表或 None 表示不过滤（放行全部）
+    2. 精确匹配（如 '冨里 奈央' in filters）
+    3. 忽略全角/半角空格和下划线的模糊匹配（如 '冨里奈央' 匹配 '冨里 奈央'）
+    4. 成员 ID 匹配（如 '55' in filters）
+    """
+    if not filters:
+        return True
+    if not member_name and member_id is None:
+        return False
+    if member_name in filters:
+        return True
+    if member_id is not None and str(member_id) in [str(f).strip() for f in filters]:
+        return True
+
+    # 归一化（去除所有空格、全角空格、下划线并转小写）
+    norm_name = str(member_name or "").replace(" ", "").replace("　", "").replace("_", "").lower()
+    norm_filters = {str(f).replace(" ", "").replace("　", "").replace("_", "").lower() for f in filters}
+    return norm_name in norm_filters
+
+
 class RateLimiter:
     """基于时间戳与线程安全锁的异步速率限制器（支持多线程与不同 event loop）。
 

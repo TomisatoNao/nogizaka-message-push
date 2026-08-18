@@ -9,6 +9,7 @@ from src.platforms.qq_official import get_configured_bots, has_bots
 from src.platforms import tgbot
 from src import health
 from src.health import ErrorTier
+from src.utils import match_member_filter
 
 
 def enabled_channels() -> list[str]:
@@ -23,20 +24,17 @@ def enabled_channels() -> list[str]:
 
 
 async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
-    """
-    向所有启用的通道推送成员消息。
-    NapCat 保持原有可靠性语义：失败会阻断时间戳记录。
-    官方 Bot 和 TG Bot 作为旁路，失败只记日志。
-    """
-    channels = enabled_channels()
-    if not channels:
-        log_all("⏸️ 推送通道均未启用，本条消息仅记录状态", is_error=True)
-        return True
+    """向已启用的通道广播成员消息。
 
-    m_name = member.get("m_name", "")
+    解耦模式下：各通道按自己的 target/group 和 member_filter 进行独立路由。
+    返回 True 表示至少一个通道发送成功，或没有启用任何通道（不应重试）；
+    返回 False 表示启用的通道全部失败（需要按重试逻辑处理）。
+    """
+    m_name = member.get("name", "未知成员")
+    m_id = member.get("id")
     napcat_ok = True
 
-    # 1. NapCat 路由
+    # 1. NapCat QQ 路由
     if cfg.ENABLE_NAPCAT_QQ:
         routes = getattr(cfg, "NAPCAT_ROUTES", [])
         matched_any = False
@@ -44,7 +42,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
             if not route.get("push_message", True):
                 continue
             filters = route.get("member_filter") or []
-            if not filters or m_name in filters:
+            if match_member_filter(m_name, filters, m_id):
                 gid = route.get("group_id")
                 if gid:
                     matched_any = True
@@ -69,7 +67,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         for bot in bots:
             if not bot.target_openid or not bot.push_message:
                 continue
-            if bot.member_filter and m_name not in bot.member_filter:
+            if not match_member_filter(m_name, bot.member_filter, m_id):
                 continue
             ok = await bot.send_message_chain(member, message_chain, media_payloads=media_payloads)
             health.get_tracker().record_channel(f"official:{bot.name}", ok)
@@ -82,7 +80,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         for bot in bots:
             if not bot.group_openid or not bot.push_message:
                 continue
-            if bot.member_filter and m_name not in bot.member_filter:
+            if not match_member_filter(m_name, bot.member_filter, m_id):
                 continue
             ok = await bot.send_message_chain_to_group(
                 bot.group_openid, member, message_chain, media_payloads=media_payloads)
@@ -98,7 +96,7 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         for bot in tg_bots:
             if not bot.target_chat or not bot.push_message:
                 continue
-            if bot.member_filter and m_name not in bot.member_filter:
+            if not match_member_filter(m_name, bot.member_filter, m_id):
                 continue
             tg_ok = await bot.send_member_message(message_chain)
             health.get_tracker().record_channel(f"tg:{bot.name}", tg_ok)
