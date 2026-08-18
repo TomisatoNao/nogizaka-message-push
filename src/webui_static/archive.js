@@ -33,7 +33,7 @@ function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(au
 
 window.handleImgError = function(img) {
   const retryCount = parseInt(img.dataset.retry || "0", 10);
-  if (retryCount < 2) {
+  if (retryCount < 3) {
     img.dataset.retry = String(retryCount + 1);
     const rawUrl = img.dataset.src || img.src;
     setTimeout(() => {
@@ -41,8 +41,15 @@ window.handleImgError = function(img) {
       const sep = base.includes("?") ? "&" : "?";
       const tokenParam = authToken ? "token=" + encodeURIComponent(authToken) + "&" : "";
       img.src = base + sep + tokenParam + "_retry=" + Date.now();
-    }, 350 * (retryCount + 1));
+    }, 250 * (retryCount + 1));
   } else {
+    // 若本地媒体重试失败，尝试回退到官方 CDN 原始链接
+    const origUrl = img.dataset.origSrc;
+    if (origUrl && img.src !== origUrl) {
+      img.dataset.retry = "99";
+      img.src = origUrl;
+      return;
+    }
     img.classList.add("img-broken");
     if (!img.nextElementSibling || !img.nextElementSibling.classList.contains("pc-broken-fallback")) {
       const fb = document.createElement("div");
@@ -859,11 +866,15 @@ function renderCurrentBlogContent() {
     '<h1 style="margin-top:0; font-size:24px;">' + esc(currentBlogReaderPost.title || "无题") + '</h1>' +
     bodyHtml;
 
-  // 博客正文图片支持点击灯箱放大预览与兜底
+  // 博客正文图片支持点击灯箱放大预览、加载失败自动重试与兜底
   const brImgs = $("brContent").querySelectorAll("img");
   const blogImages = Array.from(brImgs).map(img => ({ url: img.src, caption: currentBlogReaderPost.title || "" }));
   brImgs.forEach((img, idx) => {
     img.style.cursor = "zoom-in";
+    img.onerror = () => handleImgError(img);
+    if (img.complete && img.naturalWidth === 0) {
+      handleImgError(img);
+    }
     img.onclick = () => {
       images = blogImages;
       openLightbox(idx, img);
@@ -1137,13 +1148,14 @@ function _replaceImgUrls(html, images, paths) {
       const relPath = u.pathname + u.search;
       if (relPath && relPath !== orig && relPath !== '/') {
         const target = (local !== orig) ? local : orig;
+        const origAttr = ' data-orig-src="' + esc(orig) + '"';
         // 使用正则限定在 src="..." 或 src='...' 中精准替换相对路径，避免匹配到已带有域名的完整 URL
         const safeRel = relPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const relRe = new RegExp('((?:src|href)=["\'])' + safeRel + '(["\'])', 'gi');
-        result = result.replace(relRe, '$1' + target + '$2');
+        result = result.replace(relRe, '$1' + target + '$2' + origAttr);
         const safeEscRel = esc(relPath).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const relEscRe = new RegExp('((?:src|href)=["\'])' + safeEscRel + '(["\'])', 'gi');
-        result = result.replace(relEscRe, '$1' + target + '$2');
+        result = result.replace(relEscRe, '$1' + target + '$2' + origAttr);
       }
     } catch(e) {}
   }

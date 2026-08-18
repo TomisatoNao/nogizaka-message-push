@@ -282,7 +282,7 @@ def member_dir_name(m_name: str) -> str:
                 d_norm = _FILENAME_ILLEGAL.sub("", d.name.replace(" ", "").replace("　", "").replace("_", ""))
                 if d_norm == norm:
                     return d.name
-    return _FILENAME_ILLEGAL.sub("_", m_name.replace(" ", "").replace("　", ""))
+    return _FILENAME_ILLEGAL.sub("_", m_name.replace(" ", "_").replace("　", "_"))
 
 
 def archive_root() -> Path:

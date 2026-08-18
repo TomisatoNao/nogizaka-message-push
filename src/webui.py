@@ -482,6 +482,7 @@ _blog_db_conn: sqlite3.Connection | None = None
 
 
 class _Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
 
     def _query_params(self) -> dict[str, str]:
         """解析 URL 查询参数。"""
@@ -2781,7 +2782,9 @@ def start_webui(host: str | None = None, port: int | None = None,
     _enforce_host_check = host in _LOOPBACK_HOSTS
 
     try:
+        ThreadingHTTPServer.request_queue_size = 128
         server = ThreadingHTTPServer((host, port), _Handler)
+        server.daemon_threads = True
     except OSError as e:
         print(f"🚨 网页管理端启动失败（{host}:{port}）: {e}")
         return None
