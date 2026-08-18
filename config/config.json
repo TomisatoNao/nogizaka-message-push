@@ -7,9 +7,9 @@
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
   "qq_official_bots": [
-    {"name": "official_bot1", "app_id": "1905290933", "target_openid": "5CADF347E2C67F2CF0B207F84D239EF6", "member_filter": ["冨里奈央"], "group_openid": "41AF50041FB8E04AB04E119733E2873C", "blog_filter": [], "push_alert": true, "push_message": true, "push_blog": false, "push_x": true, "push_instagram": true, "push_tiktok": true, "push_live": true, "social_filter": []},
-    {"name": "official_bot2", "app_id": "1905396097", "member_filter": ["冨里奈央"], "group_openid": "164BFBF703F42544C624D36BCCF0986E", "blog_filter": ["hinatazaka", "nogizaka", "sakurazaka"], "push_message": true, "push_blog": true, "push_x": false, "push_instagram": false, "push_tiktok": false, "push_live": false, "push_alert": false, "social_filter": []},
-    {"name": "official_bot3", "app_id": "1905290933", "push_message": true, "push_blog": true, "push_x": true, "push_instagram": true, "push_tiktok": true, "push_live": true, "push_alert": false, "member_filter": ["冨里奈央"], "social_filter": ["mao.ioki.official"], "blog_filter": ["hinatazaka", "nogizaka", "sakurazaka"], "group_openid": "86CF34BCA035FF3A2E39FEF610A31567"}
+    {"name": "official_bot1", "app_id": "1905290933", "target_openid": "5CADF347E2C67F2CF0B207F84D239EF6", "member_filter": ["冨里 奈央", "石森 璃花"], "group_openid": "41AF50041FB8E04AB04E119733E2873C", "blog_filter": [], "push_alert": true, "push_message": true, "push_blog": false, "push_x": true, "push_instagram": true, "push_tiktok": true, "push_live": true, "social_filter": []},
+    {"name": "official_bot2", "app_id": "1905396097", "member_filter": ["冨里 奈央"], "group_openid": "164BFBF703F42544C624D36BCCF0986E", "blog_filter": ["hinatazaka", "nogizaka", "sakurazaka"], "push_message": true, "push_blog": true, "push_x": false, "push_instagram": false, "push_tiktok": false, "push_live": false, "push_alert": false, "social_filter": []},
+    {"name": "official_bot3", "app_id": "1905290933", "push_message": true, "push_blog": true, "push_x": true, "push_instagram": true, "push_tiktok": true, "push_live": true, "push_alert": false, "member_filter": ["冨里 奈央"], "social_filter": ["mao.ioki.official"], "blog_filter": ["hinatazaka", "nogizaka", "sakurazaka"], "group_openid": "86CF34BCA035FF3A2E39FEF610A31567"}
   ],
 
   // ── 网页管理 ──
@@ -47,12 +47,14 @@
 
   // ── 账号池 ──
   "accounts": {
-    "nogizaka_main": {"group": "nogizaka46"}
+    "nogizaka_main": {"group": "nogizaka46"},
+    "sakurazaka_main": {"group": "sakurazaka46"}
   },
 
   // ── 监控成员 ──
   "monitor": [
-    {"id": "55", "name": "冨里奈央", "account": "nogizaka_main", "groups": [533072575], "tg": "-1004219007326"}
+    {"id": "55", "name": "冨里 奈央", "account": "nogizaka_main", "groups": [533072575], "tg": "-1004219007326"},
+    {"id": "62", "name": "石森 璃花", "account": "sakurazaka_main", "groups": [], "social": {"instagram": ["rika.ishimori.official"]}}
   ],
 
   // ── 推送节奏 ──
@@ -81,6 +83,6 @@
   "image_tagging": true,
   "message_monitor": {"enabled": true},
   "napcat_routes": [],
-  "platforms": {"x": {"enabled": true, "interval_seconds": 60, "night_interval_seconds": 300, "accounts": ["Yuki_Nakashim", "Lets_chikochiko", "oshida_mitsuki"], "display_names": {}}, "instagram": {"enabled": true, "include_feed": true, "include_stories": true, "interval_seconds": 1799, "night_interval_seconds": 5400, "accounts": ["amano_konoa__", "aida_jurii__", "yokono_sumire", "miku_osushi", "mifu_kawashima.official", "kisaki_ebata.official", "murayama_yuuka_", "miku.ichinose_official", "teresaikedaofficial", "ichihara_ayumi_", "zukky_48", "reichi01_akb48teamtp", "momoka_ito1206", "hinatazaka46", "rei_inoue.official", "chiharu_okr"], "display_names": {}}, "tiktok": {"enabled": false, "interval_seconds": 120, "accounts": [], "display_names": {}}, "tiktok_live": {"enabled": false, "interval_seconds": 8, "accounts": [], "display_names": {}}},
+  "platforms": {"x": {"enabled": true, "interval_seconds": 60, "night_interval_seconds": 300, "accounts": ["Yuki_Nakashim", "Lets_chikochiko", "oshida_mitsuki"], "display_names": {}}, "instagram": {"enabled": true, "include_feed": true, "include_stories": true, "interval_seconds": 1799, "night_interval_seconds": 5400, "accounts": ["amano_konoa__", "aida_jurii__", "yokono_sumire", "miku_osushi", "mifu_kawashima.official", "kisaki_ebata.official", "murayama_yuuka_", "miku.ichinose_official", "teresaikedaofficial", "ichihara_ayumi_", "zukky_48", "reichi01_akb48teamtp", "momoka_ito1206", "hinatazaka46", "rei_inoue.official", "chiharu_okr", "kaho.fujishima_official"], "display_names": {}}, "tiktok": {"enabled": false, "interval_seconds": 120, "accounts": [], "display_names": {}}, "tiktok_live": {"enabled": false, "interval_seconds": 8, "accounts": [], "display_names": {}}},
   "tg_bots": []
 }
