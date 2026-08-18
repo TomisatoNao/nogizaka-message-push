@@ -683,7 +683,6 @@ async def main() -> None:
 
     # 5. 启动健康检查（改进 3）
     await _health_check(qq_client)
-    print()
 
     # 6. 可选启动 config.json 文件监控（watchdog 未安装时返回 None）
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"

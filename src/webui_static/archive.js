@@ -816,6 +816,17 @@ function renderCurrentBlogContent() {
     '<h1 style="margin-top:0; font-size:24px;">' + esc(currentBlogReaderPost.title || "无题") + '</h1>' +
     bodyHtml;
 
+  // 博客正文图片支持点击灯箱放大预览与兜底
+  const brImgs = $("brContent").querySelectorAll("img");
+  const blogImages = Array.from(brImgs).map(img => ({ url: img.src, caption: currentBlogReaderPost.title || "" }));
+  brImgs.forEach((img, idx) => {
+    img.style.cursor = "zoom-in";
+    img.onclick = () => {
+      images = blogImages;
+      openLightbox(idx, img);
+    };
+  });
+
   updateModeSelectorUI();
 }
 
