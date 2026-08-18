@@ -78,7 +78,8 @@ async def tag_image(member_dir: str, local_file: str) -> str:
         return ""
 
     # 读取本地图片
-    img_path = Path(cfg.ARCHIVE_DIR) / member_dir / local_file
+    from src.archive import member_dir_name
+    img_path = Path(cfg.ARCHIVE_DIR) / member_dir_name(member_dir) / local_file
     if not img_path.is_file():
         log_all(f"⚠️ 图片打标签：文件不存在 {img_path}", is_debug=True)
         return ""

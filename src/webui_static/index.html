@@ -1216,7 +1216,7 @@
           <input id="tgbChat" placeholder="-10012345678" type="text"/>
 </label>
 <label class="field" style="grid-column: 1 / -1;">成员订阅 (逗号分隔，留空则全收)
-          <input id="tgbMembers" placeholder="冨里奈央,小川彩" type="text"/>
+          <input id="tgbMembers" placeholder="冨里 奈央, 小川 彩" type="text"/>
 </label>
 <div style="display:flex; gap:16px; margin-top:8px; grid-column: 1 / -1;">
 <label class="switch"><input id="tgbBlog" type="checkbox"/><span class="track"></span>推送博客</label>
@@ -1237,7 +1237,7 @@
           <input id="ncGroup" placeholder="12345678" type="number"/>
 </label>
 <label class="field">成员订阅 (留空则全收)
-          <input id="ncMembers" placeholder="冨里奈央,小川彩" type="text"/>
+          <input id="ncMembers" placeholder="冨里 奈央, 小川 彩" type="text"/>
 </label>
 </div>
 <div class="dialog-actions">
@@ -3227,7 +3227,7 @@ function renderMembers() {
     const tdId = document.createElement("td");
     tdId.appendChild(mkInput(m.id || "", (v) => { m.id = v.trim(); }, "55 (可空)", "width:85px"));
     const tdName = document.createElement("td");
-    tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里奈央", "max-width:140px"));
+    tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里 奈央", "max-width:140px"));
     const tdAcc = document.createElement("td");
     const sel = document.createElement("select");
     const optNone = document.createElement("option");

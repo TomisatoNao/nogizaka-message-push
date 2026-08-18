@@ -7,11 +7,11 @@
 # 幂等：已拥有 _tags 的图片跳过，随时可重跑。
 #
 # 用法：
-#   python tools/tag_images.py --dry-run                    # 预览所有需处理的图片
-#   python tools/tag_images.py --member 冨里奈央 --dry-run  # 预览指定成员
-#   python tools/tag_images.py --member 冨里奈央 --year 2026 --month 07  # 指定月份
-#   python tools/tag_images.py --member 冨里奈央            # 回填指定成员全部
-#   python tools/tag_images.py                              # 回填所有成员全部
+#   python tools/tag_images.py --dry-run                      # 预览所有需处理的图片
+#   python tools/tag_images.py --member "冨里 奈央" --dry-run  # 预览指定成员
+#   python tools/tag_images.py --member "冨里 奈央" --year 2026 --month 07  # 指定月份
+#   python tools/tag_images.py --member "冨里 奈央"            # 回填指定成员全部
+#   python tools/tag_images.py                                # 回填所有成员全部
 # ============================================================
 import argparse
 import asyncio
@@ -20,12 +20,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # 添加项目根到 sys.path
 _HERE = Path(__file__).resolve().parent
 _PROJECT_ROOT = _HERE.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.archive import archive_root, list_members, load_month, _merge_write  # noqa: E402
+from src.archive import archive_root, list_members, load_month, member_dir_name, _merge_write  # noqa: E402
 from src.tagger import tag_image, initialize as init_tagger  # noqa: E402
 
 
@@ -48,7 +53,8 @@ async def main():
     # 收集待处理图片
     pending = []  # [(member, year, month, msg)]
     for m_name in members:
-        root = archive_root() / m_name
+        dir_name = member_dir_name(m_name)
+        root = archive_root() / dir_name
         if not root.is_dir():
             print(f"⚠ 成员归档不存在: {m_name}")
             continue

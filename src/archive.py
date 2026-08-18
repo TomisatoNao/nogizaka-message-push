@@ -472,7 +472,7 @@ async def archive_message(member: dict, msg: dict, translated: str = "") -> None
         # ── 图片后台打标签 ──
         if msg.get("type") in ("picture", "image") and msg.get("file") and _local_file:
             from src.tagger import schedule_tag as _schedule_tag
-            _schedule_tag(m_name, dict(msg, _local_file=_local_file))
+            _schedule_tag(member_dir_name(m_name), dict(msg, _local_file=_local_file))
     except Exception:
         import traceback
         log_all(f"⚠️ 归档失败 [{m_name}] id={msg.get('id')}:\n{traceback.format_exc()}", is_error=True)

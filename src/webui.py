@@ -1119,11 +1119,18 @@ class _Handler(BaseHTTPRequestHandler):
 
         if sub == "members":
             members = []
+            monitor_names = {}
+            for m in getattr(cfg, "MONITOR_LIST", []):
+                norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
+                monitor_names[norm] = m.get("m_name", "")
+
             for name in _archive.list_members():
                 months = _archive.list_months(name)
+                norm = name.replace(" ", "").replace("　", "").replace("_", "")
+                display = monitor_names.get(norm) or name.replace("_", " ")
                 members.append({
                     "name": name,
-                    "display": name.replace("_", " "),
+                    "display": display,
                     "months": len(months),
                     "total": sum(m["count"] for m in months),
                 })
@@ -1131,17 +1138,19 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "months":
-            member = qp("member")
-            if member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+            raw_m = qp("member")
+            member = _archive.member_dir_name(raw_m) if raw_m else ""
+            if not member or member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
                 return
             self._send_json({"ok": True, "member": member, "months": _archive.list_months(member)})
             return
 
         if sub == "messages":
-            member = qp("member")
-            if member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+            raw_m = qp("member")
+            member = _archive.member_dir_name(raw_m) if raw_m else ""
+            if not member or member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
                 return
             try:
                 year, month = int(qp("year")), int(qp("month"))
@@ -1182,9 +1191,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "calendar":
-            member = qp("member")
-            if member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+            raw_m = qp("member")
+            member = _archive.member_dir_name(raw_m) if raw_m else ""
+            if not member or member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
                 return
             type_filter = qp("type")
             wanted = None
@@ -1198,9 +1208,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "search":
-            member = qp("member")
-            if member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+            raw_m = qp("member")
+            member = _archive.member_dir_name(raw_m) if raw_m else ""
+            if not member or member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
                 return
             query = qp("q").strip()
             if not query:
@@ -1249,9 +1260,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if sub == "tags":
-            member = qp("member")
-            if member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {member!r}"]}, 404)
+            raw_m = qp("member")
+            member = _archive.member_dir_name(raw_m) if raw_m else ""
+            if not member or member not in _archive.list_members():
+                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
                 return
             body = self._read_body_json()
             if body is None:
@@ -1298,6 +1310,11 @@ class _Handler(BaseHTTPRequestHandler):
 
             # 以日期为随机种子，保证同一天内"随机 6 张"结果稳定
             random.seed(today_str)
+
+            monitor_names = {}
+            for m in getattr(cfg, "MONITOR_LIST", []):
+                norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
+                monitor_names[norm] = m.get("m_name", "")
 
             members = []
             for name in _archive.list_members():
@@ -1367,9 +1384,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if months:
                     stats["this_month"] = months[0]["count"]
 
+                norm = name.replace(" ", "").replace("　", "").replace("_", "")
+                display = monitor_names.get(norm) or name.replace("_", " ")
                 members.append({
                     "name": name,
-                    "display": name.replace("_", " "),
+                    "display": display,
                     "stats": stats,
                     "monthly": monthly,
                     "days": days,
@@ -1823,8 +1842,9 @@ class _Handler(BaseHTTPRequestHandler):
 
         if sub.startswith("media/"):
             rest = unquote(sub[len("media/"):])
-            member, _, rel = rest.partition("/")
-            if member not in _archive.list_members() or not rel:
+            raw_member, _, rel = rest.partition("/")
+            member = _archive.member_dir_name(raw_member) if raw_member else ""
+            if not member or member not in _archive.list_members() or not rel:
                 self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
                 return
             member_root = (_archive.archive_root() / member).resolve()

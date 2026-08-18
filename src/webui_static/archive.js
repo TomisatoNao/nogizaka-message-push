@@ -2303,7 +2303,7 @@ async function promptArchiveMessage() {
   const result = await customPrompt({
     title: "💬 归档成员消息",
     message: "请输入要补全历史消息的成员姓名（留空代表处理全部监控成员）：",
-    placeholder: "例：冨里奈央（支持多姓名或留空）",
+    placeholder: "例：冨里 奈央（支持多姓名或留空）",
     icon: "💬",
     confirmText: "开始回填消息"
   });

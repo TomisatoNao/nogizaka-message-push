@@ -138,8 +138,10 @@ async def _fetch_member_messages(member: dict):
     time_file = os.path.join(cfg.TIME_RECORD_DIR, f"time_{group_type}_{m_id}.txt")
     file_lock = get_file_lock(time_file)
 
+    is_first_fetch = False
     async with file_lock:
         if not os.path.exists(time_file):
+            is_first_fetch = True
             l_time = (
                 datetime.now(timezone.utc) - timedelta(hours=cfg.BACKTRACK_HOURS)
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -162,16 +164,19 @@ async def _fetch_member_messages(member: dict):
                     f"{base}/v2/groups/{m_id}/timeline"
                     f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
                 )
+                past_url = f"{base}/v2/groups/{m_id}/past_messages"
             elif acc_cfg.get("api_base"):
                 url = (
                     f"{acc_cfg['api_base']}/v2/groups/{m_id}/timeline"
                     f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
                 )
+                past_url = f"{acc_cfg['api_base']}/v2/groups/{m_id}/past_messages"
             else:
                 url = (
                     f"https://api.message.{group_type}.com/v2/groups/{m_id}/timeline"
                     f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
                 )
+                past_url = f"https://api.message.{group_type}.com/v2/groups/{m_id}/past_messages"
 
             # ── Header 构建 ──
             if is_mobile:
@@ -197,6 +202,22 @@ async def _fetch_member_messages(member: dict):
                     log_all(f"🚨 [成员ID: {m_id} | 名字: {m_name}] API 响应 HTTP 200 但不是合法 JSON", is_error=True)
                     _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "API 响应非 JSON")
                     return None
+
+                # 首次加入监控时，额外尝试拉取过去 24 小时历史消息 (/past_messages)
+                if is_first_fetch:
+                    try:
+                        async with _semaphore:
+                            past_resp = await _http_client.get(past_url, headers=headers)
+                        if past_resp.status_code == 200:
+                            past_msgs = past_resp.json().get("messages", [])
+                            if past_msgs:
+                                log_all(f"📥 [成员ID: {m_id} | 名字: {m_name}] 首次巡查：成功拉取 {len(past_msgs)} 条订阅前历史消息 (past_messages)", is_debug=True)
+                                existing_ids = {str(m.get("id") or m.get("updated_at", "")) for m in msgs}
+                                for pm in past_msgs:
+                                    if str(pm.get("id") or pm.get("updated_at", "")) not in existing_ids:
+                                        msgs.append(pm)
+                    except Exception as e:
+                        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 拉取 past_messages 失败: {e}", is_debug=True)
 
                 new_msgs = sorted(
                     [

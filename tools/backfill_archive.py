@@ -5,7 +5,7 @@
 
 用法:
     python tools/backfill_archive.py                          # 回填所有监控成员
-    python tools/backfill_archive.py 冨里奈央                  # 只回填指定成员（名字或 id 均可，可多个）
+    python tools/backfill_archive.py "冨里 奈央"               # 只回填指定成员（名字或 id 均可，可多个）
     python tools/backfill_archive.py --from 2023-01-01        # 指定起始日期（默认 2013-01-01）
     python tools/backfill_archive.py --force                  # 跳过"主程序正在运行"检查（不建议）
 
@@ -27,6 +27,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import httpx
 
@@ -120,6 +125,30 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
     total_new = 0
     pacer = AdaptivePacer()
 
+    # ── 1. 优先拉取新订阅成员过去 24 小时历史消息 (/past_messages) ──
+    past_url = f"{base.rstrip('/')}/v2/groups/{member['m_id']}/past_messages"
+    try:
+        past_resp = await client.get(past_url, headers=build_headers(account_id, acc_cfg))
+        if past_resp.status_code == 200:
+            past_msgs = past_resp.json().get("messages", [])
+            past_new = 0
+            for msg in sorted(past_msgs, key=lambda m: m.get("updated_at", "")):
+                if msg.get("publish_type") in cfg.SKIP_PUBLISH_TYPES:
+                    continue
+                mid = str(msg.get("id", ""))
+                if mid in archived_ids and mid not in failed_ids:
+                    continue
+                await archive.archive_message(member, msg)
+                archived_ids.add(mid)
+                failed_ids.discard(mid)
+                past_new += 1
+            if past_new:
+                print(f"  📥 [past_messages] 成功归档 {past_new} 条过去 24h 消息")
+                total_new += past_new
+    except Exception as e:
+        print(f"  ⚠️ 抓取 past_messages 失败: {e}")
+
+    # ── 2. 分页回填时间线 (timeline) ──
     while True:
         await proactive_refresh_if_expiring(account_id, 0)   # target_group=0：告警只打日志
         url = (f"{base.rstrip('/')}/v2/groups/{member['m_id']}/timeline"
@@ -211,10 +240,14 @@ async def main() -> None:
 
     targets = list(cfg.MONITOR_LIST)
     if args:
-        wanted = set(args)
-        targets = [m for m in targets
-                   if m["m_name"] in wanted or m["m_name"].replace(" ", "") in wanted
-                   or m["m_id"] in wanted]
+        wanted_norm = {a.replace(" ", "").replace("　", "").replace("_", "") for a in args}
+        wanted_raw = set(args)
+        targets = [
+            m for m in targets
+            if m["m_name"] in wanted_raw
+            or m["m_id"] in wanted_raw
+            or m["m_name"].replace(" ", "").replace("　", "").replace("_", "") in wanted_norm
+        ]
         if not targets:
             print(f"未在 monitor 里找到：{'、'.join(args)}")
             print(f"可选成员：{'、'.join(m['m_name'] for m in cfg.MONITOR_LIST)}")
