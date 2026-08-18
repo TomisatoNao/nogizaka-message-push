@@ -231,3 +231,75 @@ def get_storage_breakdown(force_refresh: bool = False) -> dict:
         _storage_cache = res
         _storage_cache_time = now
         return dict(res)
+
+
+def clean_storage_category(category: str) -> tuple[bool, str, int]:
+    """清理指定分类的存储媒体/缓存，返回 (成功, 描述信息, 清理释放的字节数)。"""
+    import shutil
+    from pathlib import Path
+
+    base_dir = Path(__file__).resolve().parent.parent
+    freed_bytes = 0
+    deleted_files = 0
+
+    def _remove_files_in_dir(d: Path) -> tuple[int, int]:
+        nonlocal freed_bytes, deleted_files
+        b_count, f_count = 0, 0
+        if not d.exists() or not d.is_dir():
+            return 0, 0
+        for item in list(d.iterdir()):
+            try:
+                if item.is_file():
+                    sz = item.stat().st_size
+                    item.unlink()
+                    b_count += sz
+                    f_count += 1
+                elif item.is_dir():
+                    for sub in item.rglob("*"):
+                        if sub.is_file():
+                            try:
+                                b_count += sub.stat().st_size
+                                f_count += 1
+                            except OSError:
+                                pass
+                    shutil.rmtree(item, ignore_errors=True)
+            except Exception:
+                pass
+        freed_bytes += b_count
+        deleted_files += f_count
+        return b_count, f_count
+
+    if category == "live_recordings":
+        _remove_files_in_dir(base_dir / "recordings")
+        _remove_files_in_dir(base_dir / "data" / "recordings")
+        get_storage_breakdown(force_refresh=True)
+        return True, f"已清理直播录像（共删除 {deleted_files} 个文件，释放 {format_bytes(freed_bytes)}）", freed_bytes
+
+    elif category == "social_media":
+        _remove_files_in_dir(base_dir / "data" / "social_media")
+        get_storage_breakdown(force_refresh=True)
+        return True, f"已清理社交媒体下载缓存（共删除 {deleted_files} 个文件，释放 {format_bytes(freed_bytes)}）", freed_bytes
+
+    elif category == "blog_images":
+        _remove_files_in_dir(base_dir / "data" / "blog_images")
+        get_storage_breakdown(force_refresh=True)
+        return True, f"已清理博客原图缓存（共删除 {deleted_files} 个文件，释放 {format_bytes(freed_bytes)}）", freed_bytes
+
+    elif category == "logs":
+        log_dir = base_dir / "logs"
+        if log_dir.exists() and log_dir.is_dir():
+            for f in log_dir.glob("*.log*"):
+                if f.is_file():
+                    try:
+                        sz = f.stat().st_size
+                        with open(f, "w", encoding="utf-8"):
+                            pass
+                        freed_bytes += sz
+                        deleted_files += 1
+                    except Exception:
+                        pass
+        get_storage_breakdown(force_refresh=True)
+        return True, f"已截断清空运行日志（释放 {format_bytes(freed_bytes)}）", freed_bytes
+
+    else:
+        return False, f"不支持清理该分类: {category}", 0

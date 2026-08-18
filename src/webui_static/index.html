@@ -751,7 +751,7 @@
   <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
       <h2 style="margin:0; flex:1;">🌐 全局网络代理设置（HTTP / SOCKS5）</h2>
-      <button class="btn small" id="btnTestProxy" type="button">⚡ 测试代理连通性</button>
+      <button class="btn small" id="btnTestProxy" type="button">⚡ 测试连通性</button>
     </div>
     <div class="grid">
       <label class="field" style="grid-column: 1 / -1;">代理服务器地址 (Proxy URL)
@@ -1545,12 +1545,32 @@ async function fetchStatus() {
   }
 }
 
+let storageTimer = null;
+
 async function fetchStorage(forceRefresh = false) {
   try {
     const res = await api(`/api/system/storage${forceRefresh ? "?refresh=1" : ""}`);
     if (!res || !res.ok || !res.storage) return;
     renderStorage(res.storage);
   } catch (e) {}
+}
+
+async function cleanStorage(category, name) {
+  if (!confirm(`确定要清空【${name}】的全部落盘文件/缓存吗？\n\n此操作将释放磁盘空间，清理后不可恢复。`)) return;
+  try {
+    const res = await api("/api/system/storage/clean", {
+      method: "POST",
+      body: JSON.stringify({ category })
+    });
+    if (!res || !res.ok) {
+      alert("❌ 清理失败: " + (((res && res.errors) || []).join(", ")));
+      return;
+    }
+    alert("✅ " + (res.msg || "清理成功"));
+    fetchStorage(true);
+  } catch (e) {
+    alert("❌ 清理请求异常: " + e.message);
+  }
 }
 
 function renderStorage(st) {
@@ -1568,15 +1588,21 @@ function renderStorage(st) {
   if (!container) return;
   container.innerHTML = "";
 
+  const cleanableCats = new Set(["live_recordings", "social_media", "blog_images", "logs"]);
+
   for (const [k, item] of Object.entries(cats)) {
     const card = document.createElement("div");
+    const canClean = cleanableCats.has(k) && (item.bytes > 0 || (item.count && item.count > 0));
     card.style.cssText = "background:var(--card-soft); border:1px solid var(--border-soft); border-radius:var(--radius-sm); padding:10px 14px; display:flex; flex-direction:column; gap:4px;";
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <span style="font-size:12.5px; color:var(--muted); font-weight:500;">${esc(item.name)}</span>
         <span style="font-size:11px; padding:1px 6px; border-radius:10px; background:${item.color}22; color:${item.color}; font-weight:600;">${item.count !== undefined ? item.count + ' 项' : ''}</span>
       </div>
-      <div style="font-size:16px; font-weight:700; color:var(--text);">${esc(item.human)}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+        <div style="font-size:16px; font-weight:700; color:var(--text);">${esc(item.human)}</div>
+        ${canClean ? `<button class="btn small" style="padding:2px 8px; font-size:11px; color:var(--err); border-color:rgba(239,68,68,0.3); background:transparent;" onclick="cleanStorage('${k}', '${esc(item.name)}')">🗑️ 清理</button>` : ''}
+      </div>
     `;
     container.appendChild(card);
   }
@@ -1593,10 +1619,12 @@ function startStatusPolling() {
   fetchStatus();
   fetchStorage();
   if (statusTimer === null) statusTimer = setInterval(() => { fetchStatus(); }, 3000);
+  if (storageTimer === null) storageTimer = setInterval(() => { fetchStorage(); }, 15000);
   if (countdownTimer === null) countdownTimer = setInterval(updateCountdown, 1000);
 }
 function stopStatusPolling() {
   if (statusTimer !== null) { clearInterval(statusTimer); statusTimer = null; }
+  if (storageTimer !== null) { clearInterval(storageTimer); storageTimer = null; }
   if (countdownTimer !== null) { clearInterval(countdownTimer); countdownTimer = null; }
 }
 

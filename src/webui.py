@@ -2240,6 +2240,24 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._handle_proxy_test()
             return
+        if path == "/api/system/storage/clean":
+            if not self._check_auth():
+                return
+            if not self._guard(need_admin=True):
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            category = str(body.get("category", "")).strip()
+            from src.utils import clean_storage_category
+            ok, msg, freed = clean_storage_category(category)
+            if ok:
+                from src.logger import log_all
+                log_all(f"🧹 网页端清理存储分类 [{category}]: {msg}")
+                self._send_json({"ok": True, "msg": msg, "freed_bytes": freed})
+            else:
+                self._send_json({"ok": False, "errors": [msg]}, 400)
+            return
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
     def _handle_proxy_test(self) -> None:

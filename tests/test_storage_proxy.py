@@ -90,6 +90,16 @@ class TestStorageProxy(unittest.TestCase):
                 self.assertIn("results", data)
                 self.assertEqual(len(data["results"]), 4)
 
+            # 3. 测试 POST /api/system/storage/clean
+            url_clean = f"http://127.0.0.1:{port}/api/system/storage/clean"
+            payload_clean = json.dumps({"category": "live_recordings"}).encode("utf-8")
+            req = urllib.request.Request(url_clean, data=payload_clean, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode("utf-8"))
+                self.assertTrue(data.get("ok"))
+                self.assertIn("msg", data)
+
         finally:
             cfg.AUTH_ENABLED = orig_auth
             server.shutdown()
