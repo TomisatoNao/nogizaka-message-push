@@ -46,7 +46,7 @@ MAX_FAILURES = 5
 LOCK_WINDOW = 600
 LOCK_SECONDS = 900
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _auth_conn: sqlite3.Connection | None = None
 _sessions: dict[str, dict] = {}          # token -> {username, role, expires_at}
 _sessions_loaded_from_db: bool = False   # 是否已从 DB 加载过活跃会话
@@ -61,55 +61,56 @@ _locked_until: dict[str, float] = {}     # ip -> 解锁时间
 def get_auth_db() -> sqlite3.Connection:
     """获取或初始化 data/auth.db 数据库连接。"""
     global _auth_conn
-    if _auth_conn is not None:
+    with _lock:
+        if _auth_conn is not None:
+            return _auth_conn
+
+        AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(AUTH_DB_PATH), timeout=10.0, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                role TEXT NOT NULL,
+                password_json TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                role TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                created_at REAL NOT NULL DEFAULT 0
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);")
+        conn.commit()
+
+        # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
+        if AUTH_DB_PATH == _BASE_DIR / "data" / "auth.db" and LEGACY_USERS_JSON.exists():
+            try:
+                cur = conn.execute("SELECT COUNT(*) FROM users;")
+                if cur.fetchone()[0] == 0:
+                    with open(LEGACY_USERS_JSON, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        with conn:
+                            for uname, info in data.items():
+                                conn.execute(
+                                    "INSERT OR REPLACE INTO users (username, role, password_json, created_at) VALUES (?, ?, ?, ?);",
+                                    (uname, info.get("role", "viewer"), json.dumps(info.get("password", {})), float(info.get("created_at", 0)))
+                                )
+            except Exception:
+                pass
+
+        _auth_conn = conn
         return _auth_conn
-
-    AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(AUTH_DB_PATH), timeout=10.0, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            role TEXT NOT NULL,
-            password_json TEXT NOT NULL,
-            created_at REAL NOT NULL
-        );
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            token TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            role TEXT NOT NULL,
-            expires_at REAL NOT NULL,
-            created_at REAL NOT NULL DEFAULT 0
-        );
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);")
-    conn.commit()
-
-    # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
-    if AUTH_DB_PATH == _BASE_DIR / "data" / "auth.db" and LEGACY_USERS_JSON.exists():
-        try:
-            cur = conn.execute("SELECT COUNT(*) FROM users;")
-            if cur.fetchone()[0] == 0:
-                with open(LEGACY_USERS_JSON, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, dict):
-                    with conn:
-                        for uname, info in data.items():
-                            conn.execute(
-                                "INSERT OR REPLACE INTO users (username, role, password_json, created_at) VALUES (?, ?, ?, ?);",
-                                (uname, info.get("role", "viewer"), json.dumps(info.get("password", {})), float(info.get("created_at", 0)))
-                            )
-        except Exception:
-            pass
-
-    _auth_conn = conn
-    return _auth_conn
 
 
 # ================================================================
@@ -153,20 +154,21 @@ def load_users() -> dict:
     """读取用户库 {username: {role, password: {...}, created_at}}。"""
     conn = get_auth_db()
     users = {}
-    try:
-        cur = conn.execute("SELECT username, role, password_json, created_at FROM users;")
-        for row in cur.fetchall():
-            try:
-                pw = json.loads(row[2])
-            except Exception:
-                pw = {}
-            users[row[0]] = {
-                "role": row[1],
-                "password": pw,
-                "created_at": float(row[3]),
-            }
-    except Exception:
-        pass
+    with _lock:
+        try:
+            cur = conn.execute("SELECT username, role, password_json, created_at FROM users;")
+            for row in cur.fetchall():
+                try:
+                    pw = json.loads(row[2])
+                except Exception:
+                    pw = {}
+                users[row[0]] = {
+                    "role": row[1],
+                    "password": pw,
+                    "created_at": float(row[3]),
+                }
+        except Exception:
+            pass
     return users
 
 
@@ -186,11 +188,16 @@ def save_users(users: dict) -> None:
 def has_users() -> bool:
     """检查是否存在任何用户。"""
     conn = get_auth_db()
-    try:
-        cur = conn.execute("SELECT COUNT(*) FROM users;")
-        return cur.fetchone()[0] > 0
-    except Exception:
-        return bool(load_users())
+    with _lock:
+        try:
+            cur = conn.execute("SELECT COUNT(*) FROM users;")
+            row = cur.fetchone()
+            if row is not None:
+                return row[0] > 0
+        except Exception:
+            pass
+    users = load_users()
+    return bool(users)
 
 
 def ensure_initial_admin() -> tuple[bool, str, str]:

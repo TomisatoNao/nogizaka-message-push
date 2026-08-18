@@ -467,18 +467,26 @@ def _tail_file(path: Path, max_lines: int) -> list[str]:
 
 
 BLOG_IMAGE_DIR = Path("data/blog_images")
+_blog_db_local = threading.local()
 
 
 def _get_blog_db() -> sqlite3.Connection:
-    """获取博客 DB 连接（惰性初始化）。"""
+    """获取线程本地的博客 DB 连接（WAL 模式 + 并发隔离）。"""
     from src.blog_fetcher import init_blog_db
-    global _blog_db_conn
-    if "_blog_db_conn" not in globals() or _blog_db_conn is None:
-        _blog_db_conn = init_blog_db()
-    return _blog_db_conn
-
-
-_blog_db_conn: sqlite3.Connection | None = None
+    conn = getattr(_blog_db_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1;")
+            return conn
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            _blog_db_local.conn = None
+    conn = init_blog_db()
+    _blog_db_local.conn = conn
+    return conn
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -523,15 +531,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── 认证与授权 ─────────────────────────────────
     def _api_token_ok(self) -> bool:
-        """WEB_ADMIN_TOKEN 校验（脚本 / 无会话访问用，等价 admin 身份）。"""
-        token = os.getenv("WEB_ADMIN_TOKEN", "")
+        token = os.getenv("WEB_ADMIN_TOKEN", "").strip()
         if not token:
             return False
-        supplied = self.headers.get("X-Auth-Token", "")
-        if not supplied:
-            authz = self.headers.get("Authorization", "")
-            if authz.startswith("Bearer "):
-                supplied = authz[7:]
+        supplied = self.headers.get("X-Auth-Token", "").strip()
         if not supplied:
             # <img>/<video> 标签无法带自定义头，归档媒体通过 query 传 token
             from urllib.parse import parse_qs
@@ -589,6 +592,21 @@ class _Handler(BaseHTTPRequestHandler):
         if not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
             return True
 
+        # 1. 优先校验已登录身份（已登录则直接根据角色放行，避免并发冲突与额外开销）
+        user = self._current_user()
+        if user is not None:
+            if need_admin and user["role"] != "admin":
+                if is_page:
+                    self._send_html_text(
+                        "权限不足",
+                        f"当前账号 {user['username']}（{user['role']}）只能访问归档。",
+                        403, link=("/archive", "前往消息归档"))
+                else:
+                    self._send_json({"ok": False, "errors": ["需要管理员权限"]}, 403)
+                return False
+            return True
+
+        # 2. 未登录情况下：若用户库为空，提示初始化创建；否则重定向登录
         if not _auth.has_users():
             msg = ("账号系统已启用但还没有任何用户。请在服务器上执行："
                    "python tools/manage_users.py add <用户名>")
@@ -598,23 +616,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": [msg]}, 503)
             return False
 
-        user = self._current_user()
-        if user is None:
-            if is_page:
-                self._redirect("/login?next=" + quote(self.path, safe=""))
-            else:
-                self._send_json({"ok": False, "errors": ["未登录"]}, 401)
-            return False
-        if need_admin and user["role"] != "admin":
-            if is_page:
-                self._send_html_text(
-                    "权限不足",
-                    f"当前账号 {user['username']}（{user['role']}）只能访问归档。",
-                    403, link=("/archive", "前往消息归档"))
-            else:
-                self._send_json({"ok": False, "errors": ["需要管理员权限"]}, 403)
-            return False
-        return True
+        if is_page:
+            self._redirect("/login?next=" + quote(self.path, safe=""))
+        else:
+            self._send_json({"ok": False, "errors": ["未登录"]}, 401)
+        return False
 
     def _redirect(self, location: str) -> None:
         self.send_response(302)
