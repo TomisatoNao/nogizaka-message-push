@@ -322,7 +322,7 @@ async def send_blog_post(post: dict) -> bool:
     any_ok = False
 
     # ----------------------------------------------------
-    # Channel 1: QQ 官方 Bot (受 blog_filter 控制)
+    # Channel 1: QQ 官方 Bot (受 push_blog + blog_filter 控制)
     # ----------------------------------------------------
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
         from src.platforms.qq_official import get_configured_bots
@@ -330,7 +330,9 @@ async def send_blog_post(post: dict) -> bool:
         for bot in bots:
             if not bot.group_openid and not bot.target_openid:
                 continue
-            if not bot.blog_filter or group_key not in bot.blog_filter:
+            if not getattr(bot, "push_blog", False):
+                continue
+            if bot.blog_filter and group_key not in bot.blog_filter:
                 continue
 
             try:
@@ -387,13 +389,15 @@ async def send_blog_post(post: dict) -> bool:
                 log_all(f"⚠️ 博客推送失败 [{bot.name}]: {e}", is_error=True)
 
     # ----------------------------------------------------
-    # Channel 2: NapCat (受 blog_filter 控制)
+    # Channel 2: NapCat (受 push_blog + blog_filter 控制)
     # ----------------------------------------------------
     if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
         routes = getattr(cfg, "NAPCAT_ROUTES", [])
         for route in routes:
+            if not route.get("push_blog", False):
+                continue
             filters = route.get("blog_filter") or []
-            if not filters or group_key not in filters:
+            if filters and group_key not in filters:
                 continue
             gid = route.get("group_id")
             if not gid:
@@ -419,7 +423,7 @@ async def send_blog_post(post: dict) -> bool:
                 log_all(f"⚠️ NapCat 博客推送失败 (群 {gid}): {e}", is_error=True)
 
     # ----------------------------------------------------
-    # Channel 3: Telegram (受 blog_filter 控制)
+    # Channel 3: Telegram (受 push_blog + blog_filter 控制)
     # ----------------------------------------------------
     if getattr(cfg, "ENABLE_TG_BOT", False):
         from src.platforms.tgbot import get_configured_bots
@@ -427,7 +431,9 @@ async def send_blog_post(post: dict) -> bool:
         for bot in bots:
             if not bot.target_chat:
                 continue
-            if not bot.blog_filter or group_key not in bot.blog_filter:
+            if not getattr(bot, "push_blog", False):
+                continue
+            if bot.blog_filter and group_key not in bot.blog_filter:
                 continue
 
             try:
