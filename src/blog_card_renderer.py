@@ -75,7 +75,7 @@ def _file_to_base64(filepath: Path) -> str:
 
 
 def _generate_html(post: dict, image_b64_list: list[str]) -> str:
-    """根据博客数据与三团配置生成自适应 HTML 模板字符串。"""
+    """根据博客数据与三团配置生成自适应 HTML 模板字符串（针对手机与大屏精读调大字号与行距）。"""
     group_key = post.get("group_key", "").lower()
     theme = GROUP_THEMES.get(group_key, DEFAULT_THEME)
 
@@ -133,7 +133,7 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
   /* Header Section */
   .card-header {{
     background: {theme["gradient"]};
-    padding: 34px 40px 30px;
+    padding: 38px 44px 34px;
     position: relative;
     color: #ffffff;
   }}
@@ -143,16 +143,16 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     bottom: 0;
     left: 0;
     right: 0;
-    height: 18px;
+    height: 20px;
     background: #121422;
-    border-radius: 20px 20px 0 0;
+    border-radius: 24px 24px 0 0;
   }}
 
   .header-top {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 22px;
   }}
   .brand-badge {{
     display: inline-flex;
@@ -161,15 +161,15 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     background: rgba(255, 255, 255, 0.25);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.4);
-    padding: 6px 16px;
+    padding: 7px 18px;
     border-radius: 30px;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 700;
     letter-spacing: 0.05em;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   }}
   .time-badge {{
-    font-size: 14px;
+    font-size: 15px;
     color: rgba(255, 255, 255, 0.95);
     font-weight: 600;
     letter-spacing: 0.03em;
@@ -178,28 +178,28 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
   .author-row {{
     display: flex;
     align-items: center;
-    gap: 18px;
-    margin-bottom: 16px;
+    gap: 20px;
+    margin-bottom: 18px;
   }}
   .author-avatar {{
-    width: 64px;
-    height: 64px;
+    width: 72px;
+    height: 72px;
     border-radius: 50%;
-    border: 2.5px solid #ffffff;
+    border: 3px solid #ffffff;
     object-fit: cover;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
     flex-shrink: 0;
   }}
   .author-avatar-fallback {{
-    width: 64px;
-    height: 64px;
+    width: 72px;
+    height: 72px;
     border-radius: 50%;
-    border: 2.5px solid #ffffff;
+    border: 3px solid #ffffff;
     background: rgba(255, 255, 255, 0.2);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 28px;
+    font-size: 32px;
     font-weight: bold;
     color: #ffffff;
     flex-shrink: 0;
@@ -210,67 +210,69 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     gap: 4px;
   }}
   .author-name {{
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 800;
     letter-spacing: 0.03em;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }}
   .author-tag {{
-    font-size: 13px;
+    font-size: 14.5px;
     color: rgba(255, 255, 255, 0.9);
     font-weight: 500;
   }}
 
   .blog-title {{
-    font-size: 26px;
+    font-size: 32px;
     font-weight: 800;
     line-height: 1.45;
     letter-spacing: 0.02em;
     color: #ffffff;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-    margin-top: 4px;
+    margin-top: 6px;
   }}
 
   .ai-badge {{
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 14px;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    padding: 5px 14px;
-    border-radius: 8px;
-    font-size: 13px;
+    gap: 7px;
+    margin-top: 16px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    padding: 6px 16px;
+    border-radius: 10px;
+    font-size: 14.5px;
     color: rgba(255, 255, 255, 0.95);
     font-weight: 500;
   }}
 
-  /* Content Body */
+  /* Content Body with Crisp Large Typography */
   .card-body {{
-    padding: 16px 40px 32px;
-    font-size: 17px;
+    padding: 20px 44px 40px;
+    font-size: 24px;
     line-height: 1.8;
   }}
 
   .card-body p {{
-    margin-bottom: 24px;
+    margin-bottom: 30px;
   }}
   .card-body em {{
     display: block;
     color: #94a3b8;
     font-style: normal;
-    font-size: 16px;
+    font-size: 21px;
     line-height: 1.7;
-    margin-bottom: 6px;
-    opacity: 0.9;
+    margin-bottom: 8px;
+    opacity: 0.92;
+    letter-spacing: 0.01em;
   }}
   .card-body span {{
     display: block;
     color: #f8fafc;
     font-weight: 600;
-    font-size: 18px;
+    font-size: 24px;
     line-height: 1.75;
-    margin-bottom: 18px;
+    margin-bottom: 22px;
+    letter-spacing: 0.015em;
   }}
   .card-body a {{
     color: {theme["accent"]};
@@ -281,13 +283,13 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
 
   /* Image styling */
   .blog-img-wrap {{
-    margin: 24px 0 26px;
+    margin: 28px 0 32px;
     text-align: center;
   }}
   .blog-img {{
     width: 100%;
-    border-radius: 18px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    border-radius: 20px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
     display: block;
   }}
 
@@ -295,22 +297,22 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
   .card-footer {{
     background: #0b0c16;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 22px 40px;
+    padding: 26px 44px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 13.5px;
+    font-size: 15px;
     color: #64748b;
   }}
   .footer-brand {{
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     font-weight: 600;
     color: #94a3b8;
   }}
   .footer-right {{
-    font-size: 13px;
+    font-size: 14.5px;
     color: #475569;
     font-weight: 500;
   }}

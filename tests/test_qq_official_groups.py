@@ -6,6 +6,7 @@ import asyncio
 import sys
 import time
 from pathlib import Path
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -76,9 +77,6 @@ def test_member_filter():
 
 
 # ── Test 4: 异步 — 群发方法调用验证 ──
-import pytest
-
-
 @pytest.mark.asyncio
 async def test_send_to_group():
     print("\n── Test 4: send_group_text / send_message_chain_to_group ──")

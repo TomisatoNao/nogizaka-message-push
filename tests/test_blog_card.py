@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from src.blog_card_renderer import render_blog_card, is_playwright_available, _generate_html
 
 @pytest.mark.asyncio
