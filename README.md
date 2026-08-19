@@ -419,11 +419,13 @@ python tools/manage_users.py reset --force     # 免确认静默重置
 
    - **Step 1（准备抓包）**：按 `F12` 打开浏览器开发者工具 ➔ 切换到 **Network（网络）** 面板 ➔ **务必勾选顶部的「Preserve log」（保留日志）**；
    - **Step 2（完成登录）**：访问对应团体的 Web 官网（如 `https://message.nogizaka46.com/` / `https://message.sakurazaka46.com/` / `https://message.hinatazaka46.com/`）正常完成 Google / Apple / Line 账号登录；
-   - **Step 3（复制 signin 登录接口）**：登录成功后，在 Network 面板筛选框中输入 `signin` ➔ 找到 **`POST signin`** 请求 ➔ 在该请求上右键 ➔ **「Copy」➔「Copy as cURL (cmd)」**（或直接 Copy all as cURL / Copy as fetch / 复制请求标头均可，系统内置通用智能解析器）；
+   - **Step 3（一键复制 cURL 凭证）**：登录成功后，在 Network（网络）面板中通过以下任一方式复制：
+     - **方式 A（全量复制，最省心推荐）**：在 Network 请求列表任意空白处或请求上右键 ➔ **「Copy」➔「Copy all as cURL (bash)」** 或 **「Copy all as cURL (cmd)」**；
+     - **方式 B（精准复制单请求）**：在 Network 顶部筛选框输入 `signin` ➔ 找到 **`POST signin`** 请求 ➔ 右键 **「Copy」➔「Copy as cURL (bash / cmd)」**；
    - **Step 4（智能解析与保存）**：
      - 打开本系统 Web 管理端（`http://127.0.0.1:8787/`）➔ 进入「👥 账号与成员」卡片 ➔ 点击目标账号的 **「填凭证」**；
      - 展开顶部的 **「📋 智能一键解析」** ➔ 将复制的内容直接粘贴进文本框 ➔ 点击 **「🚀 解析并填充」**；
-     - 系统将自动提炼 `access_token` 与长达 30 天可循环顺延的持久 `session` Cookie；
+     - 系统内置的深度解析器将自动清洗命令行转义字符，智能提炼最新的 `access_token` 与长达 30 天可循环顺延的持久 `session` Cookie；
      - 点击 **「🔐 保存并自动握手」**，系统立刻完成安全握手与长期托管，从此以后每小时全自动无感续期，永不过期！
 
 3. **主动式寿命探测与自动续期**：
