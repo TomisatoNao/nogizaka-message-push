@@ -497,9 +497,11 @@
       <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
         ℹ️ QQ 官方 Bot 填写与 OpenID 自动获取说明
       </summary>
-      <div class="hint" id="qqBotHint" style="margin-top: 8px;">
-        App ID 直接在表格里填；Client Secret 点该行「填写」存入 <code>.env</code>。<br/>
-        <b>目标 OpenID 获取</b>：已知可直接填；不知则点「🎯 自动获取」，向 Bot 发送一条私聊消息即可自动捕获回填。
+      <div class="hint" id="qqBotHint" style="margin-top: 8px; line-height: 1.65;">
+        • <b>App ID 与 Secret</b>：App ID 直接在表格里填；Client Secret 点对应行「填写」存入 <code>.env</code>。<br/>
+        • <b>多目标路由推送（同一 Bot 推多群）</b>：同一个 QQ 官方 Bot（相同 App ID & Secret）可添加多行，分别填写不同的【群 OPENID】或【个人 OPENID】，并配置独立的【⚙️ 订阅规则】（如群 A 订阅日向坂、群 B 订阅乃木坂），相互独立、互不干扰。<br/>
+        • <b>指令监听去重</b>：若启用「私聊 Bot 查询信息」，系统会自动对相同 App ID 聚合复用单个 WebSocket 连接，绝不重复连接或冲突。<br/>
+        • <b>目标 OpenID 获取</b>：已知可直接填；不知则点「🎯 自动获取」，向 Bot 发送一条私聊消息即可自动捕获回填。
       </div>
     </details>
 
@@ -594,13 +596,7 @@
       <label class="field">博客深夜间隔（min / max 秒）
         <span class="pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
       </label>
-      <label class="field" style="grid-column: 1 / -1;">博客推送表现形式
-        <select id="blogCardMode">
-          <option value="card_and_images">🌟 长图卡片 + 高清原图（推荐，杂志级双语长图替代枯燥文本，并随附全部原图供存图）</option>
-          <option value="card_only">🖼️ 仅长图卡片（极简防刷屏）</option>
-          <option value="text_and_images">📝 传统经典模式（纯文本 + 高清原图）</option>
-        </select>
-      </label>
+
     </div>
     <details class="help-box" style="margin-top: 10px;">
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 博客推送目标配置提示</summary>
@@ -1189,6 +1185,17 @@
           <input id="subSocialFilter" placeholder="留空 = 接收全部监控的社媒账号；例: nogizaka46, tomisato.nao_official" type="text" style="margin-top:3px;"/>
         </label>
       </div>
+    </div>
+
+    <div>
+      <div style="font-weight: bold; font-size: 13px; color: var(--accent); margin-bottom: 6px;">3. 官方博客推送表现形式</div>
+      <label class="field">
+        <select id="subBlogCardMode" style="width: 100%;">
+          <option value="card_and_images">🌟 长图卡片 + 高清原图（推荐，杂志级长图替代枯燥文本，并随附全量原图写真供存图）</option>
+          <option value="card_only">🖼️ 仅长图卡片（极简防刷屏）</option>
+          <option value="text_and_images">📝 传统经典模式（纯文本 + 高清原图）</option>
+        </select>
+      </label>
     </div>
   </div>
 
@@ -1881,7 +1888,6 @@ function renderGeneral() {
   const bni = bm.night_interval || [1650, 1950];
   $("blogDayMin").value = bdi[0]; $("blogDayMax").value = bdi[1];
   $("blogNightMin").value = bni[0]; $("blogNightMax").value = bni[1];
-  if ($("blogCardMode")) $("blogCardMode").value = bm.card_mode || "card_and_images";
   $("alertCooldown").value = config.alert_cooldown ?? 3600;
   $("qqSendInterval").value = config.qq_send_interval ?? 1.5;
   $("translateOn").checked = config.translate !== false;
@@ -2193,7 +2199,6 @@ function collectGeneral() {
   };
   config.blog_monitor = {
     enabled: $("blogMonitorOn").checked,
-    card_mode: $("blogCardMode") ? $("blogCardMode").value : "card_and_images",
     hinatazaka: $("blogHinatazaka").checked,
     nogizaka: $("blogNogizaka").checked,
     sakurazaka: $("blogSakurazaka").checked,
@@ -2978,6 +2983,7 @@ function openChannelSubDialog(item, title, onSave) {
 
   $("subMemberFilter").value = (item.member_filter || []).join(", ");
   $("subSocialFilter").value = (item.social_filter || []).join(", ");
+  $("subBlogCardMode").value = item.blog_card_mode || "card_and_images";
 
   const wrap = $("subBlogFilterWrap");
   wrap.innerHTML = "";
@@ -3035,6 +3041,7 @@ $("subSave").addEventListener("click", () => {
     if (el && el.checked) bFilters.push(k);
   });
   currentSubTarget.blog_filter = bFilters;
+  currentSubTarget.blog_card_mode = $("subBlogCardMode").value;
 
   markDirty();
   if (typeof currentSubCallback === "function") currentSubCallback();

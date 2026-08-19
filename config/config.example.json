@@ -73,7 +73,6 @@
   // ── 官方博客监控（默认关闭，按需开启指定团）──
   "blog_monitor": {
     "enabled": false,
-    "card_mode": "card_and_images",
     "hinatazaka": false,
     "nogizaka": false,
     "sakurazaka": false,

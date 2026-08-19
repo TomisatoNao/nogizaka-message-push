@@ -31,7 +31,8 @@ class TGBot:
                  push_instagram: bool = True,
                  push_tiktok: bool = True,
                  push_live: bool = True,
-                 push_alert: bool = False):
+                 push_alert: bool = False,
+                 blog_card_mode: str = "card_and_images"):
         self.name = name
         self.token = token
         self.target_chat = target_chat
@@ -45,6 +46,7 @@ class TGBot:
         self.push_tiktok = push_tiktok
         self.push_live = push_live
         self.push_alert = push_alert
+        self.blog_card_mode = blog_card_mode
         
         self._bot = None
         self._request = None
@@ -293,7 +295,8 @@ def initialize() -> None:
                 push_instagram=bool(bot_cfg.get("push_instagram", True)),
                 push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
                 push_live=bool(bot_cfg.get("push_live", True)),
-                push_alert=bool(bot_cfg.get("push_alert", False))
+                push_alert=bool(bot_cfg.get("push_alert", False)),
+                blog_card_mode=bot_cfg.get("blog_card_mode", "card_and_images")
             )
             bot.initialize()
             if bot._bot:

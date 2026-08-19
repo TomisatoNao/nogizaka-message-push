@@ -98,7 +98,8 @@ class QQOfficialBot:
                  push_instagram: bool = True,
                  push_tiktok: bool = True,
                  push_live: bool = True,
-                 push_alert: bool = False):
+                 push_alert: bool = False,
+                 blog_card_mode: str = "card_and_images"):
         self.name = name
         self.app_id = app_id
         self.client_secret = client_secret
@@ -114,6 +115,7 @@ class QQOfficialBot:
         self.push_tiktok: bool = push_tiktok
         self.push_live: bool = push_live
         self.push_alert: bool = push_alert
+        self.blog_card_mode: str = blog_card_mode
 
         # 实例级状态
         self._client: httpx.AsyncClient | None = None
@@ -688,7 +690,8 @@ def initialize(client: httpx.AsyncClient) -> None:
             push_instagram=bool(bot_cfg.get("push_instagram", True)),
             push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
             push_live=bool(bot_cfg.get("push_live", True)),
-            push_alert=bool(bot_cfg.get("push_alert", False))
+            push_alert=bool(bot_cfg.get("push_alert", False)),
+            blog_card_mode=bot_cfg.get("blog_card_mode", "card_and_images")
         )
         bot.initialize(client)
         _bots.append(bot)
@@ -718,7 +721,8 @@ def reload() -> None:
             push_instagram=bool(bot_cfg.get("push_instagram", True)),
             push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
             push_live=bool(bot_cfg.get("push_live", True)),
-            push_alert=bool(bot_cfg.get("push_alert", False))
+            push_alert=bool(bot_cfg.get("push_alert", False)),
+            blog_card_mode=bot_cfg.get("blog_card_mode", "card_and_images")
         )
         bot.initialize(_client)
         if bot.app_id in old_bots:
