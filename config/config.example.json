@@ -1,39 +1,22 @@
 {
-  // ── 推送通道总开关 ──
+  // ── 推送通道总开关（默认全关，按需在网页后台开启）──
   "channels": {
     "napcat": false,
     "tg": false,
-    "qq_official": true
+    "qq_official": false
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
 
-  // ── QQ 官方机器人配置（可在网页后台添加/管理）──
-  "qq_official_bots": [
-    // 示例 Bot：
-    // {
-    //   "name": "bot_1",
-    //   "app_id": "你的Bot_AppID",
-    //   "group_openid": "目标QQ群OpenID",
-    //   "member_filter": ["冨里 奈央"],
-    //   "blog_filter": ["nogizaka"],
-    //   "push_message": true,
-    //   "push_blog": true,
-    //   "push_x": true,
-    //   "push_instagram": true,
-    //   "push_tiktok": false,
-    //   "push_live": false,
-    //   "push_alert": false,
-    //   "social_filter": []
-    // }
-  ],
+  // ── QQ 官方机器人列表（初始为空，在网页端添加）──
+  "qq_official_bots": [],
 
-  // ── NapCat (OneBot / LLOneBot) 路由配置 ──
+  // ── NapCat (OneBot 11) 路由配置 ──
   "napcat_routes": [],
 
   // ── Telegram Bot 路由配置 ──
   "tg_bots": [],
 
-  // ── 网页管理端 ──
+  // ── 网页管理端（开箱即用，访问 http://localhost:8787）──
   "web_admin": {
     "enabled": true,
     "host": "0.0.0.0",
@@ -49,61 +32,50 @@
 
   // ── 每日摘要 ──
   "daily_summary": {
-    "enabled": true,
+    "enabled": false,
     "hour": 23
   },
 
-  // ── Bot 指令 ──
+  // ── 官方 Bot 指令（/status, /search 等）──
   "qq_commands": {
-    "enabled": true,
+    "enabled": false,
     "allow_openids": []
   },
 
-  // ── 账号系统 ──
+  // ── 账号系统（登录鉴权）──
   "auth": {
     "enabled": true,
     "archive_public": false,
     "session_hours": 12
   },
 
-  // ── 账号池 ──
+  // ── 账号池预设 ──
   "accounts": {
     "nogizaka_main": {"group": "nogizaka46"},
     "sakurazaka_main": {"group": "sakurazaka46"},
     "hinatazaka_main": {"group": "hinatazaka46"}
   },
 
-  // ── 监控成员 ──
-  "monitor": [
-    {"id": "55", "name": "冨里 奈央", "account": "nogizaka_main"}
-  ],
+  // ── Message 监控成员列表（初始为空，由用户在管理端添加）──
+  "monitor": [],
 
-  // ── 推送节奏 ──
+  // ── Message 轮询开关（默认关闭）──
+  "message_monitor": {
+    "enabled": false
+  },
+
+  // ── 推送节奏（秒）──
   "day_interval": [120, 180],
   "night_interval": [1500, 1800],
   "sleep_hours": [2, 7],
   "alert_cooldown": 3600,
 
-  // ── 可选覆盖 ──
-  "qq_send_interval": 1.5,
-  "translate": true,
-  "gemini_models": [
-    {"name": "gemini-3.7-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
-    {"name": "glm-4-flash", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
-    {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
-    {"name": "gemini-3.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
-    {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
-    {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
-    {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
-    {"name": "gemini-2.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"}
-  ],
-  "gemini_min_interval": 7,
-  "translate_timeout": 90,
+  // ── 官方博客监控（默认关闭，按需开启指定团）──
   "blog_monitor": {
-    "enabled": true,
-    "hinatazaka": true,
-    "nogizaka": true,
-    "sakurazaka": true,
+    "enabled": false,
+    "hinatazaka": false,
+    "nogizaka": false,
+    "sakurazaka": false,
     "day_interval": [60, 120],
     "night_interval": [1650, 1950]
   },
@@ -112,25 +84,23 @@
     "nogizaka": "",
     "sakurazaka": ""
   },
-  "image_tagging": true,
-  "message_monitor": {
-    "enabled": true
-  },
+
+  // ── 社交媒体监控（X / Instagram / TikTok，默认全关）──
   "platforms": {
     "x": {
-      "enabled": true,
+      "enabled": false,
       "interval_seconds": 60,
       "night_interval_seconds": 300,
-      "accounts": ["nogizaka46", "sakurazaka46", "hinatazaka46"],
+      "accounts": [],
       "display_names": {}
     },
     "instagram": {
-      "enabled": true,
+      "enabled": false,
       "include_feed": true,
       "include_stories": true,
       "interval_seconds": 1800,
       "night_interval_seconds": 5400,
-      "accounts": ["hinatazaka46"],
+      "accounts": [],
       "display_names": {}
     },
     "tiktok": {
@@ -145,5 +115,24 @@
       "accounts": [],
       "display_names": {}
     }
-  }
+  },
+
+  // ── AI 翻译配置（默认关闭，需在 .env 配置 GEMINI_API_KEY）──
+  "translate": false,
+  "gemini_models": [
+    {"name": "gemini-3.7-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
+    {"name": "glm-4-flash", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
+    {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
+    {"name": "gemini-3.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
+    {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
+    {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
+    {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
+    {"name": "gemini-2.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"}
+  ],
+  "gemini_min_interval": 7,
+  "translate_timeout": 90,
+
+  // ── AI 图片打标签（默认关闭）──
+  "image_tagging": false,
+  "qq_send_interval": 1.5
 }
