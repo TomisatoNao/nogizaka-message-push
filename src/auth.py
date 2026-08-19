@@ -101,6 +101,13 @@ def get_auth_db() -> sqlite3.Connection:
                 updated_at REAL NOT NULL
             );
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS env_fingerprints (
+                account_id TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL
+            );
+        """)
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
@@ -219,6 +226,34 @@ def list_account_credentials() -> dict[str, dict]:
             return res
         except Exception:
             return {}
+
+
+def load_env_seen() -> dict[str, str]:
+    """从数据库加载已记录的 .env 凭证指纹。"""
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT account_id, fingerprint FROM env_fingerprints")
+            return dict(cur.fetchall())
+        except Exception:
+            return {}
+
+
+def save_env_seen(seen: dict[str, str]) -> None:
+    """持久化 .env 凭证指纹到数据库。"""
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                for k, v in seen.items():
+                    conn.execute(
+                        "INSERT INTO env_fingerprints (account_id, fingerprint) VALUES (?, ?) "
+                        "ON CONFLICT(account_id) DO UPDATE SET fingerprint = excluded.fingerprint;",
+                        (k, v)
+                    )
+        except Exception:
+            pass
 
 
 # ================================================================

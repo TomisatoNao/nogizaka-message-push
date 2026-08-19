@@ -153,26 +153,19 @@ def _env_fingerprint(acc_cfg: dict) -> str:
 
 
 def _load_env_seen() -> dict[str, str]:
-    path = os.path.join(cfg.CRED_DIR, _ENV_SEEN_FILE)
-    if not os.path.exists(path):
-        return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
+        from src import auth
+        return auth.load_env_seen()
     except Exception:
         return {}
 
 
 def _save_env_seen(seen: dict[str, str]) -> None:
-    path = os.path.join(cfg.CRED_DIR, _ENV_SEEN_FILE)
-    tmp = path + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(seen, f)
-        os.replace(tmp, path)
-    except Exception as e:
-        log_all(f"⚠️ 写入 {_ENV_SEEN_FILE} 失败: {e}", is_debug=True)
+        from src import auth
+        auth.save_env_seen(seen)
+    except Exception:
+        pass
 
 
 def _save_cred(account_id: str, token: str, cookies: dict) -> None:
@@ -404,12 +397,29 @@ def get_source_headers_for_account(account_id: str, group_type: str) -> dict[str
     return headers
 
 
-async def write_time_record(time_file: str, file_lock: asyncio.Lock, updated: str) -> None:
-    # 值没变就不落盘：无新消息的轮次会以完全相同的内容反复重写同一文件
-    if _last_time_written.get(time_file) == updated:
+async def write_time_record(time_file: str, file_lock: asyncio.Lock | None, updated: str) -> None:
+    # 状态与水位线已统一由 archive.db 持久化；仅当外部目录存在时同步写文件（保持测试与向后兼容）
+    if not time_file or _last_time_written.get(time_file) == updated:
+        return
+    parent = os.path.dirname(time_file)
+    if not parent or not os.path.isdir(parent):
+        _last_time_written[time_file] = updated
         return
     tmp = time_file + ".tmp"
-    async with file_lock:
+    if file_lock is not None:
+        async with file_lock:
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(updated)
+                os.replace(tmp, time_file)
+                _last_time_written[time_file] = updated
+            except Exception as e:
+                log_all(f"🚨 时间戳写入失败 ({time_file}): {e}", is_error=True)
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+    else:
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(updated)

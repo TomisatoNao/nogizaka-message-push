@@ -493,6 +493,13 @@ def _get_blog_db() -> sqlite3.Connection:
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def handle(self) -> None:
+        """处理 HTTP 请求，静默忽略客户端主动断连或刷新等无害网络异常。"""
+        try:
+            super().handle()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+
     def _query_params(self) -> dict[str, str]:
         """解析 URL 查询参数。"""
         from urllib.parse import urlparse, parse_qs
@@ -2768,6 +2775,15 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _ThreadingHTTPServer(ThreadingHTTPServer):
+    """静默处理客户端主动断开连接等无害网络异常。"""
+    def handle_error(self, request, client_address):
+        ex_type, _, _ = sys.exc_info()
+        if ex_type in (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            return
+        super().handle_error(request, client_address)
+
+
 def start_webui(host: str | None = None, port: int | None = None,
                 on_reload=None, on_restart=None, on_poll=None, on_test_push=None,
                 on_openid=None):
@@ -2796,8 +2812,8 @@ def start_webui(host: str | None = None, port: int | None = None,
     _enforce_host_check = host in _LOOPBACK_HOSTS
 
     try:
-        ThreadingHTTPServer.request_queue_size = 128
-        server = ThreadingHTTPServer((host, port), _Handler)
+        _ThreadingHTTPServer.request_queue_size = 128
+        server = _ThreadingHTTPServer((host, port), _Handler)
         server.daemon_threads = True
     except OSError as e:
         print(f"🚨 网页管理端启动失败（{host}:{port}）: {e}")
