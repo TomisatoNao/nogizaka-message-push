@@ -134,20 +134,27 @@ async def _fetch_member_messages(member: dict):
         _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, f"账号 {account_id} 无可用凭据")
         return None
 
-    os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
-    time_file = os.path.join(cfg.TIME_RECORD_DIR, f"time_{group_type}_{m_id}.txt")
-    file_lock = get_file_lock(time_file)
+    # 优先从 SQLite 数据库获取时间戳水位线，旧磁盘文本文件作为平滑过渡
+    l_time = archive.get_timeline_watermark(group_type, m_id)
+    time_dir = getattr(cfg, "TIME_RECORD_DIR", "")
+    time_file = os.path.join(time_dir, f"time_{group_type}_{m_id}.txt") if time_dir else ""
+    file_lock = get_file_lock(time_file or f"{group_type}_{m_id}")
 
-    is_first_fetch = False
-    async with file_lock:
-        if not os.path.exists(time_file):
-            is_first_fetch = True
-            l_time = (
-                datetime.now(timezone.utc) - timedelta(hours=cfg.BACKTRACK_HOURS)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
-        else:
+    if not l_time and time_file and os.path.exists(time_file):
+        try:
             with open(time_file, "r", encoding="utf-8") as f:
                 l_time = f.read().strip()
+            if l_time:
+                archive.set_timeline_watermark(group_type, m_id, l_time)
+        except Exception:
+            pass
+
+    is_first_fetch = False
+    if not l_time:
+        is_first_fetch = True
+        l_time = (
+            datetime.now(timezone.utc) - timedelta(hours=cfg.BACKTRACK_HOURS)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     id_list, id_set = load_sent_ids(group_type, m_id)
     l_time_ref = [l_time]
@@ -321,11 +328,15 @@ async def _push_member_messages(member: dict, new_msgs: list,
     for msg in new_msgs:
         ok = await _handle_message(member, msg, id_list, id_set, l_time_ref)
         if not ok:
-            await write_time_record(time_file, file_lock, l_time_ref[0])
+            archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
+            if time_file:
+                await write_time_record(time_file, file_lock, l_time_ref[0])
             _health_tracker().record_member_push(m_name, False)
             return False
 
-    await write_time_record(time_file, file_lock, l_time_ref[0])
+    archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
+    if time_file:
+        await write_time_record(time_file, file_lock, l_time_ref[0])
 
     new_count = len(truly_new)
     if new_count > 0:

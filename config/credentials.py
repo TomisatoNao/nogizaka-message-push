@@ -176,15 +176,11 @@ def _save_env_seen(seen: dict[str, str]) -> None:
 
 
 def _save_cred(account_id: str, token: str, cookies: dict) -> None:
-    os.makedirs(cfg.CRED_DIR, exist_ok=True)
-    path = os.path.join(cfg.CRED_DIR, f"{account_id}.json")
-    tmp  = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"token": token, "cookies": cookies}, f)
-    os.replace(tmp, path)
+    # 1. 持久化到 SQLite 数据库
     try:
-        os.chmod(path, 0o600)
-    except OSError:
+        from src import auth
+        auth.set_account_credential(account_id, "web", {"token": token, "cookies": cookies})
+    except Exception:
         pass
 
 
@@ -206,16 +202,11 @@ def _resolve_mobile_group(acc_cfg: dict) -> str:
 
 
 def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) -> None:
-    """保存移动端凭证：{access_token, refresh_token}。"""
-    os.makedirs(cfg.CRED_DIR, exist_ok=True)
-    path = os.path.join(cfg.CRED_DIR, f"{account_id}.json")
-    tmp  = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"access_token": access_token, "refresh_token": refresh_token}, f)
-    os.replace(tmp, path)
+    """保存移动端凭证：{access_token, refresh_token} 到 SQLite 数据库。"""
     try:
-        os.chmod(path, 0o600)
-    except OSError:
+        from src import auth
+        auth.set_account_credential(account_id, "mobile", {"access_token": access_token, "refresh_token": refresh_token})
+    except Exception:
         pass
 
 
@@ -433,26 +424,49 @@ async def write_time_record(time_file: str, file_lock: asyncio.Lock, updated: st
 
 
 def load_all_accounts() -> None:
-    """从磁盘加载所有账号凭证，不存在时用初始凭证创建。
-    自动识别凭证格式：磁盘文件含 refresh_token → 移动端，否则 → Web 端。
+    """从数据库加载所有账号凭证，不存在时用初始凭证创建并持久化至数据库。
+    自动识别凭证格式：包含 refresh_token → 移动端，否则 → Web 端。
 
     幂等：已加载的账号会跳过，因此热重载后可安全重复调用以加载新增账号。
-    优先级：磁盘凭证 > `.env`。若 `.env` 相比上次启动发生变化，会打告警提示
-    正确的轮换方式（删除磁盘凭证文件），而不会自动采用 `.env` 的值。"""
-    os.makedirs(cfg.CRED_DIR, exist_ok=True)
+    优先级：数据库持久化凭证 > `.env`。若 `.env` 相比上次启动发生变化，会打告警提示
+    正确的轮换方式（在管理端重置凭证），而不会自动采用 `.env` 的值。"""
+    try:
+        from src import auth
+    except ImportError:
+        auth = None
+
     env_seen = _load_env_seen()
     seen_dirty = False
 
     for acc_id, acc_cfg in cfg.ACCOUNTS.items():
         is_mobile = acc_cfg.get("auth_method") == "mobile"
         fingerprint = _env_fingerprint(acc_cfg)
-        path = os.path.join(cfg.CRED_DIR, f"{acc_id}.json")
+        data = None
+
+        # 1. 优先从 SQLite 数据库获取
+        if auth is not None:
+            try:
+                data = auth.get_account_credential(acc_id)
+            except Exception:
+                data = None
+
+        # 2. 兼容检查旧磁盘 json 文件
+        path = os.path.join(cfg.CRED_DIR, f"{acc_id}.json") if getattr(cfg, "CRED_DIR", None) else ""
+        if data is None and path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data and auth is not None:
+                    c_type = "mobile" if "refresh_token" in data else "web"
+                    auth.set_account_credential(acc_id, c_type, data)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            except Exception:
+                data = None
 
         # ── 认证方式切换检测 ──────────────────────────
-        # 账号在 config.json 里从 mobile 改成 web（或反之）后，内存/磁盘里
-        # 旧格式的凭证结构不再匹配（web 需要 cookies，mobile 需要 refresh_token），
-        # 继续沿用会在抓取时 KeyError。这里检测到不匹配就丢弃旧凭证，
-        # 走下方初始化分支用 .env 的新凭证重建。
         if acc_id in ACCOUNT_CREDS:
             cred_is_mobile = "refresh_token" in ACCOUNT_CREDS[acc_id]
             if cred_is_mobile == is_mobile:
@@ -462,31 +476,21 @@ def load_all_accounts() -> None:
                 f"丢弃旧凭证并用 .env 重建",
             )
             del ACCOUNT_CREDS[acc_id]
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            disk_is_mobile = "refresh_token" in data
-            if disk_is_mobile != is_mobile:
-                # 磁盘凭证也是切换前的旧格式（如切换后首次重启）：作废重建
-                log_all(
-                    f"🔁 {acc_id} 磁盘凭证为旧认证方式（{'mobile' if disk_is_mobile else 'web'}）"
-                    f"，作废并用 .env 重建",
-                )
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-                data = None
-        else:
-            data = None
+            if auth is not None:
+                auth.delete_account_credential(acc_id)
 
         if data is not None:
-            # 自动识别格式：含 refresh_token → 移动端
+            disk_is_mobile = "refresh_token" in data
+            if disk_is_mobile != is_mobile:
+                log_all(
+                    f"🔁 {acc_id} 凭证为旧认证方式（{'mobile' if disk_is_mobile else 'web'}）"
+                    f"，作废并用 .env 重建",
+                )
+                if auth is not None:
+                    auth.delete_account_credential(acc_id)
+                data = None
+
+        if data is not None:
             if "refresh_token" in data:
                 ACCOUNT_CREDS[acc_id] = {
                     "token": data.get("access_token", ""),
@@ -498,13 +502,12 @@ def load_all_accounts() -> None:
                 log_all(f"📂 读取账号凭证: {acc_id}")
 
             if fingerprint and acc_id not in env_seen:
-                # 首次记录（老用户升级）：无从判断 .env 是否变过，静默记下即可
                 env_seen[acc_id] = fingerprint
                 seen_dirty = True
             elif fingerprint and env_seen[acc_id] != fingerprint:
                 log_all(
-                    f"⚠️ {acc_id} 的 .env 凭证已修改，但磁盘凭证优先，本次修改不会生效；"
-                    f"如需强制轮换请删除 {path} 后重启",
+                    f"⚠️ {acc_id} 的 .env 凭证已修改，但数据库凭证优先，本次修改不会生效；"
+                    f"如需强制轮换请在管理端重置该账号凭证后重启",
                     is_error=True,
                 )
         elif is_mobile:

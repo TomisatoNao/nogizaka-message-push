@@ -337,18 +337,19 @@ def update_env_file(values: dict[str, str], path: Path | None = None,
 
 
 def _rotate_account_creds(account_id: str) -> None:
-    """轮换账号凭证：删除磁盘持久化凭证 + 清除内存态。
-
-    磁盘凭证优先级高于 .env（Token 续期后磁盘才是最新值），所以换新凭证时必须
-    删掉旧文件，热重载后 load_all_accounts 才会用 .env 的新值重新初始化。
-    （测试中可 monkeypatch 掉。）
-    """
-    import config.config as cfg
-    cred_file = Path(cfg.CRED_DIR) / f"{account_id}.json"
+    """轮换账号凭证：删除数据库与磁盘持久化凭证 + 清除内存态。"""
     try:
-        cred_file.unlink(missing_ok=True)
-    except OSError as e:
-        print(f"⚠️ 删除旧凭证文件失败 {cred_file}: {e}")
+        from src import auth
+        auth.delete_account_credential(account_id)
+    except Exception:
+        pass
+    import config.config as cfg
+    if getattr(cfg, "CRED_DIR", None):
+        cred_file = Path(cfg.CRED_DIR) / f"{account_id}.json"
+        try:
+            cred_file.unlink(missing_ok=True)
+        except OSError:
+            pass
     creds_mod = sys.modules.get("config.credentials")
     if creds_mod is not None:
         creds_mod.ACCOUNT_CREDS.pop(account_id, None)

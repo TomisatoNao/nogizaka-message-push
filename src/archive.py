@@ -105,6 +105,15 @@ def init_db() -> sqlite3.Connection | None:
                 PRIMARY KEY (group_type, m_id, msg_id)
             );
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS timeline_watermarks (
+                group_type TEXT NOT NULL,
+                m_id TEXT NOT NULL,
+                last_time TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (group_type, m_id)
+            );
+        """)
         try:
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -128,6 +137,40 @@ def init_db() -> sqlite3.Connection | None:
     except Exception as e:
         log_all(f"⚠️ SQLite 数据库初始化失败: {e}", is_error=True)
         return None
+
+
+def get_timeline_watermark(group_type: str, m_id: str) -> str | None:
+    """从数据库读取成员上次成功抓取的最后时间戳水位线。"""
+    conn = init_db()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT last_time FROM timeline_watermarks WHERE group_type = ? AND m_id = ?",
+            (group_type, m_id)
+        )
+        row = cur.fetchone()
+        return str(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+def set_timeline_watermark(group_type: str, m_id: str, last_time: str) -> None:
+    """持久化成员最新抓取时间戳水位线到 SQLite 数据库。"""
+    conn = init_db()
+    if not conn or not last_time:
+        return
+    import time
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO timeline_watermarks (group_type, m_id, last_time, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(group_type, m_id) DO UPDATE SET last_time = excluded.last_time, updated_at = excluded.updated_at;",
+                (group_type, m_id, str(last_time), time.time())
+            )
+    except Exception as e:
+        log_all(f"⚠️ 保存时间戳水位线失败 ({group_type}_{m_id}): {e}", is_debug=True)
 
 
 def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dict]) -> None:

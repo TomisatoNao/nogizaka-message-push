@@ -25,6 +25,8 @@ import threading
 import time
 from pathlib import Path
 
+from src.logger import log_all
+
 _BASE_DIR = Path(__file__).resolve().parent.parent
 AUTH_DB_PATH = _BASE_DIR / "data" / "auth.db"
 LEGACY_USERS_JSON = _BASE_DIR / "data" / "users.json"
@@ -90,6 +92,15 @@ def get_auth_db() -> sqlite3.Connection:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS account_credentials (
+                account_id TEXT PRIMARY KEY,
+                cred_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+        """)
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
@@ -109,8 +120,105 @@ def get_auth_db() -> sqlite3.Connection:
             except Exception:
                 pass
 
+        # 自动无缝平滑迁移旧版 data/web_credentials/*.json（若存在）
+        cred_dir = _BASE_DIR / "data" / "web_credentials"
+        if cred_dir.exists() and cred_dir.is_dir():
+            try:
+                for p in list(cred_dir.glob("*.json")):
+                    if p.name.startswith("_"):
+                        continue
+                    acc_id = p.stem
+                    with open(p, "r", encoding="utf-8") as f:
+                        c_data = json.load(f)
+                    if isinstance(c_data, dict):
+                        c_type = "mobile" if "refresh_token" in c_data else "web"
+                        now = time.time()
+                        with conn:
+                            conn.execute(
+                                "INSERT INTO account_credentials (account_id, cred_type, payload_json, updated_at) VALUES (?, ?, ?, ?) "
+                                "ON CONFLICT(account_id) DO UPDATE SET cred_type = excluded.cred_type, payload_json = excluded.payload_json, updated_at = excluded.updated_at;",
+                                (acc_id, c_type, json.dumps(c_data, ensure_ascii=False), now)
+                            )
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                try:
+                    if not any(cred_dir.iterdir()):
+                        cred_dir.rmdir()
+                except OSError:
+                    pass
+            except Exception:
+                pass
+
         _auth_conn = conn
         return _auth_conn
+
+
+# ================================================================
+# 账号凭证 (Account Credentials) 数据库存储接口
+# ================================================================
+
+def get_account_credential(account_id: str) -> dict | None:
+    """从数据库加载指定 Message 账号的凭证字典。"""
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT payload_json FROM account_credentials WHERE account_id = ?", (account_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return json.loads(row[0])
+        except Exception:
+            pass
+    return None
+
+
+def set_account_credential(account_id: str, cred_type: str, payload: dict) -> None:
+    """持久化指定 Message 账号的凭证字典到数据库。"""
+    conn = get_auth_db()
+    now = time.time()
+    p_str = json.dumps(payload, ensure_ascii=False)
+    with _lock:
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO account_credentials (account_id, cred_type, payload_json, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(account_id) DO UPDATE SET cred_type = excluded.cred_type, payload_json = excluded.payload_json, updated_at = excluded.updated_at;",
+                    (account_id, cred_type, p_str, now)
+                )
+        except Exception as e:
+            log_all(f"⚠️ 保存账号凭证到数据库失败 ({account_id}): {e}", is_error=True)
+
+
+def delete_account_credential(account_id: str) -> bool:
+    """从数据库删除指定账号凭证。"""
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                cur = conn.execute("DELETE FROM account_credentials WHERE account_id = ?", (account_id,))
+                return cur.rowcount > 0
+        except Exception:
+            return False
+
+
+def list_account_credentials() -> dict[str, dict]:
+    """列出数据库中所有账号凭证。"""
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT account_id, payload_json FROM account_credentials")
+            res = {}
+            for acc_id, p_str in cur.fetchall():
+                try:
+                    res[acc_id] = json.loads(p_str)
+                except Exception:
+                    pass
+            return res
+        except Exception:
+            return {}
 
 
 # ================================================================
