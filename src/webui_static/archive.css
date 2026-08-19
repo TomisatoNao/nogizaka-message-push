@@ -146,19 +146,28 @@
   #backTop.show { display: block; }
   #backTop.force-hide { display: none !important; }
   /* 灯箱 */
-  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none;
-              align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none;
+              align-items: center; justify-content: center; z-index: 20000; cursor: zoom-out;
+              backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
   #lightbox.open { display: flex; }
-  #lightbox img { max-width: 94vw; max-height: 92vh; border-radius: 6px; }
+  #lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
   #lightbox .nav-btn { position: absolute; top: 50%; transform: translateY(-50%);
-    background: rgba(255,255,255,.12); color: #fff; border: none; font-size: 26px;
-    padding: 14px 16px; cursor: pointer; border-radius: 10px; }
-  #lightbox .nav-btn:hover { background: rgba(255,255,255,.25); }
-  #lbPrev { left: 14px; } #lbNext { right: 14px; }
-  #lbClose { position: absolute; right: 14px; top: 12px; background: transparent; color: #fff;
-             border: 1px solid rgba(255,255,255,.45); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
-  #lbCounter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-               color: #ddd; font-size: 13px; z-index: 101; pointer-events: none; }
+    background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.2); font-size: 26px;
+    width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; border-radius: 50%; z-index: 20002;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); transition: all .2s ease; }
+  #lightbox .nav-btn:hover { background: rgba(255,255,255,.3); transform: translateY(-50%) scale(1.08); }
+  #lbPrev { left: 24px; } #lbNext { right: 24px; }
+  #lbClose { position: absolute; right: 24px; top: 20px; background: rgba(0,0,0,.55); color: #fff;
+             border: 1px solid rgba(255,255,255,.35); border-radius: 20px; padding: 6px 14px;
+             font-size: 13px; font-weight: 500; cursor: pointer; z-index: 20002;
+             backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: all .2s ease; }
+  #lbClose:hover { background: rgba(255,255,255,.25); border-color: rgba(255,255,255,.6); }
+  #lbCounter { position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+               color: #fff; font-size: 13px; font-weight: 500; letter-spacing: 0.5px;
+               padding: 5px 16px; background: rgba(0,0,0,.65); border: 1px solid rgba(255,255,255,.25);
+               border-radius: 20px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+               z-index: 20002; pointer-events: none; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
 
   /* 一键复制与 Toast 浮窗 */
   .copy-btn {
@@ -259,7 +268,7 @@
       top: max(10px, env(safe-area-inset-top));
       padding: 8px 12px; min-height: 40px;
     }
-    #lbCounter { top: max(12px, env(safe-area-inset-top)); font-size: 12px; }
+    #lbCounter { top: max(14px, env(safe-area-inset-top)); font-size: 12px; padding: 4px 12px; }
   }
 
   /* ── 全站总览首页 (Portal Home) ── */
