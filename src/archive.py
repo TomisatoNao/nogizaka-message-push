@@ -132,6 +132,37 @@ def init_db() -> sqlite3.Connection | None:
 
         conn.commit()
 
+        # 自动无缝平滑迁移旧版 data/time_records/*.txt 到 timeline_watermarks
+        time_dir = _BASE_DIR / "data" / "time_records"
+        if time_dir.exists() and time_dir.is_dir():
+            try:
+                import time as _t
+                for f in list(time_dir.glob("time_*.txt")):
+                    parts = f.stem.split("_")
+                    if len(parts) >= 3:
+                        g_type = parts[1]
+                        m_id = "_".join(parts[2:])
+                        with open(f, "r", encoding="utf-8") as tf:
+                            val = tf.read().strip()
+                        if val:
+                            conn.execute(
+                                "INSERT INTO timeline_watermarks (group_type, m_id, last_time, updated_at) VALUES (?, ?, ?, ?) "
+                                "ON CONFLICT(group_type, m_id) DO UPDATE SET last_time = excluded.last_time, updated_at = excluded.updated_at;",
+                                (g_type, m_id, val, _t.time())
+                            )
+                        try:
+                            f.unlink()
+                        except OSError:
+                            pass
+                conn.commit()
+                try:
+                    if not any(time_dir.iterdir()):
+                        time_dir.rmdir()
+                except OSError:
+                    pass
+            except Exception:
+                pass
+
         _sqlite_conn = conn
         return _sqlite_conn
     except Exception as e:

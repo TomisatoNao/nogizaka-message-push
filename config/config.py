@@ -568,33 +568,50 @@ _TYPE_CONVERTERS = {
 #   3. .env 补充（密钥、凭证自动匹配）
 # ================================================================
 
+def _recursive_merge_dir(src: _Path, dst: _Path) -> None:
+    """递归合并两个目录，移动所有文件并清理源目录。"""
+    if not src.exists() or not src.is_dir():
+        return
+    import os
+    import shutil
+    dst.mkdir(parents=True, exist_ok=True)
+    for root, dirs, files in os.walk(str(src), topdown=False):
+        r_path = _Path(root)
+        rel = r_path.relative_to(src)
+        target_root = dst / rel
+        target_root.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            s_file = r_path / f
+            d_file = target_root / f
+            if not d_file.exists():
+                try:
+                    shutil.move(str(s_file), str(d_file))
+                except Exception:
+                    pass
+            else:
+                try:
+                    s_file.unlink()
+                except Exception:
+                    pass
+        try:
+            r_path.rmdir()
+        except Exception:
+            pass
+
+
 def _migrate_legacy_data_dirs() -> None:
     """自动将根目录遗留的 state/ 和 messages/ 迁移合并至 data/ 统一管理。"""
     try:
-        import shutil
         base = _BASE_DIR
         data_dir = base / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. 迁移 state/ 下的子目录和文件到 data/
+        # 1. 递归迁移 state/ 下的全部内容到 data/
         state_dir = base / "state"
         if state_dir.exists() and state_dir.is_dir():
-            for item in list(state_dir.iterdir()):
-                target = data_dir / item.name
-                if not target.exists():
-                    shutil.move(str(item), str(target))
-                elif item.is_dir():
-                    for sub in list(item.iterdir()):
-                        sub_target = target / sub.name
-                        if not sub_target.exists():
-                            shutil.move(str(sub), str(sub_target))
-            try:
-                if not any(state_dir.iterdir()):
-                    state_dir.rmdir()
-            except Exception:
-                pass
+            _recursive_merge_dir(state_dir, data_dir)
 
-        # 2. 迁移 messages/ 下的社媒媒体文件到 data/social_media/
+        # 2. 递归迁移 messages/ 下的社媒媒体文件到 data/social_media/
         msg_dir = base / "messages"
         if msg_dir.exists() and msg_dir.is_dir():
             social_dir = data_dir / "social_media"
@@ -602,12 +619,16 @@ def _migrate_legacy_data_dirs() -> None:
             for item in list(msg_dir.iterdir()):
                 norm_name = item.name.replace("_media", "")
                 target = social_dir / norm_name
-                target.mkdir(parents=True, exist_ok=True)
                 if item.is_dir():
-                    for sub in list(item.iterdir()):
-                        sub_target = target / sub.name
-                        if not sub_target.exists():
-                            shutil.move(str(sub), str(sub_target))
+                    _recursive_merge_dir(item, target)
+                else:
+                    target_file = target / item.name
+                    if not target_file.exists():
+                        try:
+                            import shutil
+                            shutil.move(str(item), str(target_file))
+                        except Exception:
+                            pass
             try:
                 if not any(msg_dir.iterdir()):
                     msg_dir.rmdir()
