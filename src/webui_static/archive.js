@@ -1622,7 +1622,16 @@ function openLightbox(i, opener) {
   lbIndex = i;
   $("lbImg").src = images[i].url;
   $("lbImg").alt = images[i].caption || "归档图片";
-  $("lbCounter").textContent = (i + 1) + " / " + images.length;
+  if (images.length > 1) {
+    $("lbCounter").style.display = "";
+    $("lbCounter").textContent = (i + 1) + " / " + images.length;
+    $("lbPrev").style.display = "";
+    $("lbNext").style.display = "";
+  } else {
+    $("lbCounter").style.display = "none";
+    $("lbPrev").style.display = "none";
+    $("lbNext").style.display = "none";
+  }
   $("lightbox").classList.add("open");
   $("lightbox").setAttribute("aria-hidden", "false");
   $("lbClose").focus();
