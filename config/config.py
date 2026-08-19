@@ -20,6 +20,7 @@ except ImportError:
 # ── 路径常量（运行时推导，不放入 JSON）─────────────────────────
 _BASE_DIR = _Path(__file__).resolve().parent.parent
 _CONFIG_PATH = _Path(__file__).resolve().parent / "config.json"
+_EXAMPLE_PATH = _Path(__file__).resolve().parent / "config.example.json"
 _SCHEMA_PATH = _Path(__file__).resolve().parent / "config.schema.json"
 
 
@@ -573,7 +574,17 @@ def _load_config() -> dict:
     # 1. 从内置默认值开始（深拷贝，避免污染 _DEFAULTS）
     cfg = _copy.deepcopy(_DEFAULTS)
 
-    # 2. 读 JSONC
+    # 2. 确保 config.json 存在（若缺失则从 config.example.json 自动初始化）
+    if not _CONFIG_PATH.exists() and _EXAMPLE_PATH.exists():
+        try:
+            import shutil as _shutil
+            _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copyfile(_EXAMPLE_PATH, _CONFIG_PATH)
+            print(f"[INFO ] ⚙️ 首次运行：已从 config.example.json 自动创建本地 {_CONFIG_PATH.name}")
+        except Exception:
+            pass
+
+    # 3. 读 JSONC
     try:
         import json5 as _json5
     except ImportError:

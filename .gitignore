@@ -1,6 +1,7 @@
-# 凭证和敏感数据
+# 凭证和敏感数据 / 本地私有配置
 .env
 data/web_credentials/
+config/config.json
 
 # 运行时产生的数据目录
 data/
