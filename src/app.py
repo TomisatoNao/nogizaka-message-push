@@ -768,8 +768,6 @@ def _on_config_reload(success: bool) -> None:
 
 async def main() -> None:
     print("=== 坂道联合监控系统 ===")
-    os.makedirs(cfg.TIME_RECORD_DIR, exist_ok=True)
-    os.makedirs(cfg.SENT_IDS_DIR, exist_ok=True)
     # 上次的停止信号不该影响本次启动
     try:
         STOP_FILE.unlink(missing_ok=True)
