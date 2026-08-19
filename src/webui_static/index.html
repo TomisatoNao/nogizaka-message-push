@@ -47,29 +47,36 @@
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
   input[type=text], input[type=number], input[type=search], select, textarea {
     padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
-    background: var(--field); color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
-    transition: border-color var(--tr), box-shadow var(--tr), background var(--tr);
+    background-color: var(--field); color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
+    transition: border-color var(--tr), box-shadow var(--tr), background-color var(--tr);
     box-shadow: inset 0 1px 3px rgba(0,0,0,.02); }
   select {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
+    background-color: var(--field);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 11px center;
-    background-size: 14px 14px;
-    padding-right: 32px;
+    background-repeat: no-repeat !important;
+    background-position: right 11px center !important;
+    background-size: 14px 14px !important;
+    padding-right: 32px !important;
     cursor: pointer;
   }
   select:hover {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a5b4fc' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 11px center !important;
+    background-size: 14px 14px !important;
   }
   input:focus, select:focus, textarea:focus {
-    outline: none; border-color: var(--accent); background: var(--card-solid);
+    outline: none; border-color: var(--accent); background-color: var(--card-solid);
     box-shadow: 0 0 0 3px var(--accent-ring), inset 0 1px 3px rgba(0,0,0,.01); }
   select:focus {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 11px center !important;
+    background-size: 14px 14px !important;
   }
   select option {
     background-color: var(--card-solid, #1e202e);

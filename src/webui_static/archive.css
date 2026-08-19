@@ -93,26 +93,32 @@
     padding: 6px 30px 6px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--card);
+    background-color: var(--card);
     color: var(--text);
     font-size: 13.5px;
     font-family: inherit;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 9px center;
-    background-size: 13px 13px;
+    background-repeat: no-repeat !important;
+    background-position: right 9px center !important;
+    background-size: 13px 13px !important;
     cursor: pointer;
-    transition: border-color var(--tr), box-shadow var(--tr), background var(--tr);
+    transition: border-color var(--tr), box-shadow var(--tr), background-color var(--tr);
   }
   select:hover {
     border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a5b4fc' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 9px center !important;
+    background-size: 13px 13px !important;
   }
   select:focus {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-ring);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 9px center !important;
+    background-size: 13px 13px !important;
   }
   select option {
     background-color: var(--card-solid, #1e202e);
