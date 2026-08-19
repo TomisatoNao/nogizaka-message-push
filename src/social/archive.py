@@ -320,7 +320,9 @@ class PostArchive:
         scanned = 0
         for platform in ("x", "instagram", "tiktok"):
             pcfg = (config.get("platforms") or {}).get(platform) or {}
-            root = pcfg.get("download_dir") or f"messages/{platform}_media"
+            root = pcfg.get("download_dir") or f"data/social_media/{platform}"
+            if not os.path.isdir(root) and os.path.isdir(f"messages/{platform}_media"):
+                root = f"messages/{platform}_media"
             if not os.path.isdir(root):
                 continue
             names = pcfg.get("display_names") or {}

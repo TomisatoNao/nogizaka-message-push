@@ -58,10 +58,10 @@ _DEFAULTS: dict = {
         {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
     ],
     "gemini_tag_min_interval":  5.0,
-    # 文件路径
-    "cred_dir":                 "state/web_credentials",
-    "time_record_dir":          "state/time_records",
-    "sent_ids_dir":             "state/sent_ids",
+    # 文件路径（统一收拢至 data/ 目录）
+    "cred_dir":                 "data/web_credentials",
+    "time_record_dir":          "data/time_records",
+    "sent_ids_dir":             "data/sent_ids",
     "error_log_file":           "logs/error_debug.log",
     "system_log_file":          "logs/system_info.log",
     "response_log_file":        "logs/response_debug.log",
@@ -568,9 +568,61 @@ _TYPE_CONVERTERS = {
 #   3. .env 补充（密钥、凭证自动匹配）
 # ================================================================
 
+def _migrate_legacy_data_dirs() -> None:
+    """自动将根目录遗留的 state/ 和 messages/ 迁移合并至 data/ 统一管理。"""
+    try:
+        import shutil
+        base = _BASE_DIR
+        data_dir = base / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. 迁移 state/ 下的子目录和文件到 data/
+        state_dir = base / "state"
+        if state_dir.exists() and state_dir.is_dir():
+            for item in list(state_dir.iterdir()):
+                target = data_dir / item.name
+                if not target.exists():
+                    shutil.move(str(item), str(target))
+                elif item.is_dir():
+                    for sub in list(item.iterdir()):
+                        sub_target = target / sub.name
+                        if not sub_target.exists():
+                            shutil.move(str(sub), str(sub_target))
+            try:
+                if not any(state_dir.iterdir()):
+                    state_dir.rmdir()
+            except Exception:
+                pass
+
+        # 2. 迁移 messages/ 下的社媒媒体文件到 data/social_media/
+        msg_dir = base / "messages"
+        if msg_dir.exists() and msg_dir.is_dir():
+            social_dir = data_dir / "social_media"
+            social_dir.mkdir(parents=True, exist_ok=True)
+            for item in list(msg_dir.iterdir()):
+                norm_name = item.name.replace("_media", "")
+                target = social_dir / norm_name
+                target.mkdir(parents=True, exist_ok=True)
+                if item.is_dir():
+                    for sub in list(item.iterdir()):
+                        sub_target = target / sub.name
+                        if not sub_target.exists():
+                            shutil.move(str(sub), str(sub_target))
+            try:
+                if not any(msg_dir.iterdir()):
+                    msg_dir.rmdir()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _load_config() -> dict:
     """三层加载配置：默认 → config.json → .env。
        任何失败都抛异常，由调用方决定是否 exit。"""
+    # 0. 自动迁移旧版分散的数据目录
+    _migrate_legacy_data_dirs()
+
     # 1. 从内置默认值开始（深拷贝，避免污染 _DEFAULTS）
     cfg = _copy.deepcopy(_DEFAULTS)
 

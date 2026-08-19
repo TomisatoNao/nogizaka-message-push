@@ -38,7 +38,7 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
         ],
         "bearer_token": "",               # 可选：官方 API v2 Bearer Token
         "fetch_alt_text": True,           # 抓取图片 alt 描述并一并翻译
-        "download_dir": "messages/x_media",
+        "download_dir": "data/social_media/x",
         "max_items_per_poll": 5,          # 单次轮询最多处理几条（防止首次刷屏）
         "first_run_skip": True,           # 首次运行只记录不推送（避免历史刷屏）
     },
@@ -65,7 +65,7 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
         "cookies_file": "",               # 后台粘贴 cookies 后自动填入
         "cookies_from_browser": "",       # 或直接读浏览器，如 "chrome" / "edge"
         "user_agent": "",                 # 建议与导出 cookies 的浏览器一致
-        "download_dir": "messages/instagram_media",
+        "download_dir": "data/social_media/instagram",
         "max_items_per_poll": 3,          # 单轮少取一些，减少请求
         "first_run_skip": True,
         # 风控防护（详见 social/ig_safety.py）
@@ -91,7 +91,7 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
         "include_photos": True,           # 图文 Post（轮播图）
         "cookies_file": "",
         "cookies_from_browser": "",
-        "download_dir": "messages/tiktok_media",
+        "download_dir": "data/social_media/tiktok",
         "max_items_per_poll": 5,
         "first_run_skip": True,
     },

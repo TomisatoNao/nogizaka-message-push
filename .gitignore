@@ -6,6 +6,7 @@ config/config.json
 # 运行时产生的数据目录
 data/
 state/
+messages/
 config/history/
 
 # 日志

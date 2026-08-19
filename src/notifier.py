@@ -345,18 +345,37 @@ async def send_blog_post(post: dict) -> bool:
                 await asyncio.sleep(0.5)
 
                 # Step 2: 发送全量图片
-                for img_url in media_urls:
+                # 尝试获取本地已下载的图片路径映射
+                local_paths = post.get("image_paths") or []
+                for idx, img_url in enumerate(media_urls):
                     try:
-                        async with httpx.AsyncClient(timeout=30) as c:
-                            r = await c.get(img_url)
-                            img_bytes = r.content
-                        async with bot._lock:
-                            if await bot.ensure_access_token():
-                                fi = await bot._upload_media("image", img_bytes, scope=scope, target_openid=target)
-                                if fi:
-                                    await bot._send_uploaded_media(fi, scope=scope, target_openid=target)
-                    except Exception:
-                        pass
+                        img_bytes = None
+                        if idx < len(local_paths) and local_paths[idx]:
+                            import os
+                            lp = local_paths[idx]
+                            if os.path.exists(lp):
+                                try:
+                                    with open(lp, "rb") as f:
+                                        img_bytes = f.read()
+                                except OSError:
+                                    pass
+
+                        if not img_bytes:
+                            headers = {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                                "Referer": blog_url or img_url,
+                            }
+                            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+                                r = await c.get(img_url, headers=headers)
+                                if r.status_code == 200:
+                                    img_bytes = r.content
+
+                        if img_bytes:
+                            sent = await bot.send_media_file(scope, target, "image", img_bytes)
+                            if not sent:
+                                log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送未成功 (第 {idx+1}/{len(media_urls)} 张)", is_debug=True)
+                    except Exception as ex:
+                        log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片下载或发送异常: {ex}", is_debug=True)
                     await asyncio.sleep(0.4)
 
                 # Step 3: 发送中日对照正文 (*日文斜体* / 中文常规体，段落间 \n​\n 分隔)
