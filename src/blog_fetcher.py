@@ -123,12 +123,25 @@ def init_blog_db() -> sqlite3.Connection:
     conn.commit()
     return conn
 
-_RECORDS_PATH = Path(__file__).resolve().parent.parent / "state" / "blog_records.json"
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_RECORDS_PATH = _BASE_DIR / "data" / "blog_records.json"
+_LEGACY_RECORDS_PATH = _BASE_DIR / "state" / "blog_records.json"
 
 def _load_records() -> dict[str, str]:
     if _RECORDS_PATH.exists():
         try:
             return json.loads(_RECORDS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if _LEGACY_RECORDS_PATH.exists():
+        try:
+            data = json.loads(_LEGACY_RECORDS_PATH.read_text(encoding="utf-8"))
+            _save_records(data)
+            try:
+                _LEGACY_RECORDS_PATH.unlink()
+            except OSError:
+                pass
+            return data
         except Exception:
             pass
     return {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""}
