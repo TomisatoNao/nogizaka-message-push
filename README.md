@@ -27,7 +27,7 @@
  ┌──────────────────────────────┐           ┌──────────────────────────────┐          ┌──────────────────────────────┐
  │  1.1 Token 预检与自动续期    │           │  2.1 官网爬虫与水印 Diff 对比 │          │  3.1 多平台免登录抗封控爬取  │
  │  · decode JWT 检查 exp 寿命  │           │  · 日向坂/乃木坂/樱坂增量抓取 │          │  · X Syndication / Nitter    │
- │  · 磁盘凭证优先于环境变量    │           │  · state/blog_records.json   │          │  · IG 安全限频 / TikTok WAF  │
+ │  · 数据库持久化凭证与会话    │           │  · SQLite blog_watermarks 水印│          │  · IG 安全限频 / TikTok WAF  │
  └──────────────┬───────────────┘           └──────────────┬───────────────┘          └──────────────┬───────────────┘
                 │                                          │                                         │
                 ▼                                          ▼                                         ▼
@@ -280,8 +280,8 @@ python tools/manage_users.py passwd admin
 # 清空现有用户并重新生成初始 admin 随机密码
 python tools/manage_users.py reset
 
-# 或者直接删除用户库文件后重启主程序（自动重新生成）：
-rm data/users.json          # Windows: del data\users.json
+# 或者直接删除鉴权数据库后重启主程序（自动重新生成）：
+rm data/auth.db             # Windows: del data\auth.db
 python main.py
 ```
 
@@ -313,7 +313,7 @@ python main.py
 ### 2.2 银行级安全架构与防锁死机制
 
 1. **scrypt 加盐哈希加密**：
-   - 用户密码采用标准库 `hashlib.scrypt` 进行加盐哈希（$N=16384, r=8, p=1$），数据库和 `data/users.json` 中**绝不存储任何明文密码**，即使归档数据泄露也无法逆向还原。
+   - 用户密码采用标准库 `hashlib.scrypt` 进行加盐哈希（$N=16384, r=8, p=1$），数据库 `data/auth.db` 中**绝不存储任何明文密码**，即使归档数据泄露也无法逆向还原。
    - 校验逻辑采用 `hmac.compare_digest` 常时比较，彻底免疫针对密码比对的时序侧信道攻击（Timing Attack）。
 2. **安全会话生命周期**：
    - 登录成功后签发由 `secrets` 模块生成的强随机 Session Token；
@@ -415,16 +415,16 @@ python tools/manage_users.py reset --force     # 免确认静默重置
    - `mobile` 模式：模拟 iOS 客户端，使用 `refresh_token` 自动向鉴权中心换取短期 JWT，免去 Cookie 过期困扰。
 
 2. **📖 Web 端 0 等待登录凭证抓取与自动续期操作手册**：
-   > 💡 **原理提示**：乃木坂官方将核心 `session` Cookie 限定于 `Path=/v2/update_token` 路径下，普通消息列表（`timeline`）不会携带此 Cookie。该 Cookie 的唯一下发源头是登录瞬间的 `POST /v2/signin` 请求。利用本系统内置的智能解析器，您可以在登录完成的**第 0 秒**直接完成全套凭证捕获与永久自动续期！
+   > 💡 **原理提示**：乃木坂 / 樱坂 / 日向坂官方将核心 `session` Cookie 限定于 `Path=/v2/update_token` 路径下，普通消息列表（`timeline`）不会携带此 Cookie。该 Cookie 的唯一下发源头是登录瞬间的 `POST /v2/signin` 接口。利用本系统内置的智能解析器，您可以在登录完成的**第 0 秒**直接完成全套凭证捕获与永久自动续期！
 
    - **Step 1（准备抓包）**：按 `F12` 打开浏览器开发者工具 ➔ 切换到 **Network（网络）** 面板 ➔ **务必勾选顶部的「Preserve log」（保留日志）**；
-   - **Step 2（完成登录）**：访问 `https://message.nogizaka46.com/` 正常完成 Google / Apple / Line 账号登录；
-   - **Step 3（一键复制）**：在 Network 面板任意空白处或请求上右键 ➔ **「Copy」➔「Copy all as cURL (cmd)」**；
+   - **Step 2（完成登录）**：访问对应团体的 Web 官网（如 `https://message.nogizaka46.com/` / `https://message.sakurazaka46.com/` / `https://message.hinatazaka46.com/`）正常完成 Google / Apple / Line 账号登录；
+   - **Step 3（复制 signin 登录接口）**：登录成功后，在 Network 面板筛选框中输入 `signin` ➔ 找到 **`POST signin`** 请求 ➔ 在该请求上右键 ➔ **「Copy」➔「Copy as cURL (cmd)」**（或直接 Copy all as cURL / Copy as fetch / 复制请求标头均可，系统内置通用智能解析器）；
    - **Step 4（智能解析与保存）**：
      - 打开本系统 Web 管理端（`http://127.0.0.1:8787/`）➔ 进入「👥 账号与成员」卡片 ➔ 点击目标账号的 **「填凭证」**；
      - 展开顶部的 **「📋 智能一键解析」** ➔ 将复制的内容直接粘贴进文本框 ➔ 点击 **「🚀 解析并填充」**；
-     - 系统将自动向官方接口完成安全登录握手，并同步回填最新的 `access_token` 与长达 30 天可循环顺延的持久 `session` Cookie；
-     - 点击 **「🔐 保存并自动握手」**，系统立刻完成长期托管，从此以后每小时全自动无感续期，永不过期！
+     - 系统将自动提炼 `access_token` 与长达 30 天可循环顺延的持久 `session` Cookie；
+     - 点击 **「🔐 保存并自动握手」**，系统立刻完成安全握手与长期托管，从此以后每小时全自动无感续期，永不过期！
 
 3. **主动式寿命探测与自动续期**：
    - 每次巡查前解码 JWT 并检查 `exp` 寿命，若剩余不足 300 秒则自动发起静默续期；
@@ -433,9 +433,9 @@ python tools/manage_users.py reset --force     # 免确认静默重置
 
 4. **凭证加载优先级**：
    ```
-   磁盘动态凭证 (data/web_credentials/*.json)  >  环境变量 (.env)  >  默认配置
+   SQLite 加密凭证库 (data/auth.db)  >  环境变量 (.env)  >  默认配置
    ```
-   > 💡 **操作建议**：更换凭证时推荐直接在**网页端「账号与成员」卡片中点击「填凭证」**修改，系统会自动清理旧磁盘凭证、同步更新 `.env` 并执行即时在线握手。
+   > 💡 **操作建议**：更换凭证时推荐直接在**网页端「账号与成员」卡片中点击「填凭证」**修改，系统会自动更新 SQLite 数据库、同步更新 `.env` 并执行即时在线握手。
 
 ### 3.3 配置文件三层加载体系与热重载机制
 
@@ -667,7 +667,7 @@ bash tools/install_systemd.sh --stop       # 停止服务
   - `data/archive/`：历史 Message 归档与 `blogs.db` 数据库（**最重要数据，建议定期冷备份**）；
   - `data/blog_images/`：本地下载的博客原图；
   - `data/social_state.db`：社交媒体去重与直播录制会话状态库；
-  - `data/users.json`：用户与密码哈希库；
+  - `data/auth.db`：用户鉴权、Web 会话与账号加密凭证数据库；
   - `config/config.json` 与 `.env`：系统配置与密钥凭证。
 
 ---
@@ -677,13 +677,13 @@ bash tools/install_systemd.sh --stop       # 停止服务
 | 故障现象 | 潜在排查原因 | 解决方案 |
 |---|---|---|
 | **启动时没看清初始管理员密码** | 终端输出被刷过或未留意。 | 执行 `python tools/manage_users.py passwd admin <新密码>` 直接重设，或执行 `reset` 重置。 |
-| **启动提示「没有任何可用推送目标」** | 监控成员未配置 `groups` 或 `tg`，且未启用官方 Bot。 | 在「👥 账号与成员」中为监控成员勾选或填入推送目标。 |
+| **启动提示「没有任何可用推送目标」** | 未在「📢 推送通道」中配置任何有效的推送渠道（NapCat / Telegram / QQ 官方 Bot）。 | 进入「📢 推送通道」开启对应 Bot/通道，并在「订阅与过滤规则」中配置接收规则。 |
 | **Telegram 报错 `Chat not found`** | Bot 未加入目标频道，或未被赋予「发布消息」管理员权限。 | 将 Bot 添加至频道 Admin；使用 [@getidsbot](https://t.me/getidsbot) 获取准确的频道 Chat ID。 |
 | **NapCat 提示连接失败** | OneBot 框架未启动，或 `napcat_api` 地址配置有误。 | 确认 NapCat 运行中，且 HTTP API 地址（如 `http://127.0.0.1:3000`）可正常访问。 |
 | **Token 频繁报错过期或 401** | Web 凭证 Cookie 失效或账号在多处登录发生冲突。 | 重新抓包获取最新凭证，在 WebUI「账号与成员」中点击「填凭证」更新。 |
 | **消息/博客/社媒有原文但无译文** | API Key 未配置，或单家 API 触发了频控限额。 | 在「⚙️ 系统设置」中检查并补充 Google Gemini API Key 或 智谱 API Key（支持两家混合轮流调用）。 |
 | **Instagram Story 快拍无法抓取** | 未配置 Instagram Session ID 导致被限登录阻拦。 | 登录网页版 Instagram 复制 Cookie 中的 `sessionid`，在 WebUI「社交监控」填报。 |
-| **改了 `.env` 但未生效** | 磁盘动态凭证 `data/web_credentials/` 优先级高于 `.env`。 | 推荐在 WebUI 页面直接粘贴凭证，或删除对应磁盘 JSON 文件后重启。 |
+| **改了 `.env` 但未生效** | 数据库已持久化有效会话凭证（`data/auth.db`）。 | 推荐直接在 WebUI「账号与成员」卡片中点击「填凭证」在线握手并自动同步更新。 |
 | **博客列表封面出现破图** | 官方 CDN 开启了防盗链或原图链接失效。 | 新版已集成自动过滤与占位降级机制，更新代码后自动恢复整洁样式。 |
 
 ---
