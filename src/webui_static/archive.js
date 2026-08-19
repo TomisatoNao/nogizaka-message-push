@@ -143,7 +143,18 @@ function setPageLoading(loading) {
 
 
 // ── JST 时间 ─────────────────────────────────────
-function toJst(utc) { return new Date(new Date(utc).getTime() + 9 * 3600 * 1000); }
+function toJst(utc) {
+  if (!utc) return new Date();
+  if (utc instanceof Date) return new Date(utc.getTime() + 9 * 3600 * 1000);
+  const s = String(utc).trim();
+  let iso = s.replace(" ", "T");
+  if (!iso.endsWith("Z") && !iso.includes("+") && !iso.includes("-", 10)) {
+    iso += "Z";
+  }
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return new Date();
+  return new Date(d.getTime() + 9 * 3600 * 1000);
+}
 function fmtDay(utc) {
   const d = toJst(utc);
   const w = "日一二三四五六"[d.getUTCDay()];

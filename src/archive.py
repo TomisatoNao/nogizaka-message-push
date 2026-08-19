@@ -21,7 +21,7 @@ import json
 import os
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
@@ -29,6 +29,7 @@ import httpx
 import config.config as cfg
 from src.logger import log_all
 
+_BASE_DIR = Path(__file__).resolve().parent.parent
 _FILENAME_ILLEGAL = re.compile(r'[<>:"/\\|?*]')
 
 _EXT_MAP = {
@@ -371,8 +372,32 @@ def _month_dir(m_name: str, dt: datetime) -> Path:
     return _member_root(m_name) / f"{dt.year:04d}" / f"{dt.month:02d}"
 
 
+JST_TZ = timezone(timedelta(hours=9))
+
+
+def parse_jst_datetime(ts_str: str) -> datetime:
+    """将时间戳统一解析为日本标准时间 (JST, UTC+9) 的 datetime 对象。"""
+    if not ts_str:
+        raise ValueError("Empty timestamp string")
+    s = str(ts_str).strip()
+    if s.endswith("Z"):
+        dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return dt.astimezone(JST_TZ)
+    if "+" in s or (s.count("-") >= 3 and "T" in s):
+        dt = datetime.fromisoformat(s)
+        return dt.astimezone(JST_TZ)
+    s_iso = s.replace(" ", "T")
+    try:
+        dt = datetime.fromisoformat(s_iso).replace(tzinfo=timezone.utc)
+        return dt.astimezone(JST_TZ)
+    except Exception:
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return dt.astimezone(JST_TZ)
+
+
 def _parse_utc(utc_str: str) -> datetime:
-    return datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
+    """兼容旧接口：返回 JST 归档时间的 datetime。"""
+    return parse_jst_datetime(utc_str)
 
 
 def _media_subdir(msg_type: str) -> str:
@@ -522,15 +547,15 @@ async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
 # 公开接口
 # ──────────────────────────────────────────────
 async def archive_message(member: dict, msg: dict, translated: str = "") -> None:
-    """归档单条消息：先落 JSON，再下载媒体回填。幂等，可安全重复调用。"""
+    """归档单条消息：按 JST 日本标准时间划分年月，先落 JSON，再下载媒体回填。幂等，可安全重复调用。"""
     m_name = member.get("m_name", "")
-    utc_str = msg.get("updated_at", "")
-    if not m_name or not utc_str:
+    ts_str = msg.get("published_at") or msg.get("updated_at", "")
+    if not m_name or not ts_str:
         return
     try:
-        dt = _parse_utc(utc_str)
-    except ValueError:
-        log_all(f"⚠️ 归档跳过（无法解析时间戳 {utc_str!r}）", is_debug=True)
+        dt = parse_jst_datetime(ts_str)
+    except (ValueError, TypeError):
+        log_all(f"⚠️ 归档跳过（无法解析时间戳 {ts_str!r}）", is_debug=True)
         return
 
     record = dict(msg)
@@ -759,3 +784,120 @@ def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
             )
             (fail_ids if incomplete else ok_ids).add(mid)
     return ok_ids, fail_ids
+
+
+def realign_archive_timezones() -> int:
+    """全自动历史数据对齐：扫描全部已归档消息，按 JST (UTC+9) 真实年月纠正跨月错位数据。
+    返回修正的消息条数。
+    """
+    root = archive_root()
+    if not root.is_dir():
+        return 0
+
+    realigned_count = 0
+    # 扫描所有 member_dir
+    for member_path in sorted(root.iterdir()):
+        if not member_path.is_dir():
+            continue
+        m_dir = member_path.name
+        # 遍历所有 messages.json
+        for json_file in list(member_path.glob("[0-9]*/[0-9]*/messages.json")):
+            try:
+                cur_month_str = json_file.parent.name
+                cur_year_str = json_file.parent.parent.name
+                cur_year = int(cur_year_str)
+                cur_month = int(cur_month_str)
+            except ValueError:
+                continue
+
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    msgs = json.load(f)
+            except Exception:
+                continue
+
+            if not isinstance(msgs, list):
+                continue
+
+            stay_msgs = []
+            moved_records = []  # [(target_year, target_month, msg), ...]
+
+            for m in msgs:
+                pub_str = m.get("published_at") or m.get("updated_at") or ""
+                try:
+                    dt = parse_jst_datetime(pub_str)
+                except Exception:
+                    stay_msgs.append(m)
+                    continue
+
+                if dt.year == cur_year and dt.month == cur_month:
+                    stay_msgs.append(m)
+                else:
+                    moved_records.append((dt.year, dt.month, m))
+
+            if not moved_records:
+                continue
+
+            # 1. 更新当前月的 messages.json
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(stay_msgs, f, ensure_ascii=False, indent=2)
+
+            # 2. 移动错位消息及其关联的媒体文件到正确的目标月份
+            for t_year, t_month, m in moved_records:
+                target_month_dir = member_path / f"{t_year:04d}" / f"{t_month:02d}"
+                target_month_dir.mkdir(parents=True, exist_ok=True)
+                target_json = target_month_dir / "messages.json"
+
+                # 处理本地媒体文件移动
+                old_local = m.get("_local_file")
+                if old_local:
+                    old_path = member_path / old_local
+                    if old_path.exists():
+                        media_sub = _media_subdir(m.get("type", ""))
+                        new_media_dir = target_month_dir / media_sub
+                        new_media_dir.mkdir(parents=True, exist_ok=True)
+                        new_file_path = new_media_dir / old_path.name
+                        if not new_file_path.exists():
+                            try:
+                                import shutil
+                                shutil.move(str(old_path), str(new_file_path))
+                            except Exception:
+                                pass
+                        new_rel = new_file_path.relative_to(member_path).as_posix()
+                        m["_local_file"] = new_rel
+
+                # 追加/合并进目标月份的 messages.json
+                target_msgs = []
+                if target_json.exists():
+                    try:
+                        with open(target_json, "r", encoding="utf-8") as f:
+                            target_msgs = json.load(f)
+                    except Exception:
+                        target_msgs = []
+                by_id = {str(item.get("id", "")): item for item in target_msgs}
+                by_id[str(m.get("id", ""))] = m
+                final_target_msgs = sorted(by_id.values(), key=lambda x: x.get("updated_at", ""))
+                with open(target_json, "w", encoding="utf-8") as f:
+                    json.dump(final_target_msgs, f, ensure_ascii=False, indent=2)
+
+                # 更新 SQLite 数据库中的 year 和 month
+                _save_msgs_to_sqlite(m_dir, t_year, t_month, [m])
+                realigned_count += 1
+
+            # 3. 如果当前月已变为空，删除旧空目录
+            if not stay_msgs:
+                try:
+                    json_file.unlink(missing_ok=True)
+                    json_file.parent.rmdir()
+                    # 如果年目录也空了，清理年目录
+                    year_dir = member_path / cur_year_str
+                    if year_dir.exists() and not any(year_dir.iterdir()):
+                        year_dir.rmdir()
+                except Exception:
+                    pass
+
+    # 清空 day_cache 缓存以保证最新
+    _day_cache.clear()
+    if realigned_count > 0:
+        log_all(f"🕒 历史归档时区自动自愈完成：已纠正 {realigned_count} 条跨月时区错位消息至 JST 年月")
+    return realigned_count

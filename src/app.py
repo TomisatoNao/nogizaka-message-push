@@ -822,6 +822,11 @@ async def main() -> None:
     init_credentials(http_client)
     translator.initialize(http_client)
     archive.initialize(http_client)
+    # 自动检查并纠正历史归档中因旧版 UTC 导致的跨月错位数据（全自动无损自愈）
+    try:
+        archive.realign_archive_timezones()
+    except Exception as e:
+        log_all(f"⚠️ 历史归档时区自动自愈异常: {e}", is_debug=True)
     tagger.initialize(http_client)
     tgbot.initialize()
     napcat.initialize(qq_client)
