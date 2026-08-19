@@ -112,6 +112,13 @@ def init_blog_db() -> sqlite3.Connection:
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS blog_watermarks (
+            group_key TEXT PRIMARY KEY,
+            last_url TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_group_date ON blog_posts(group_key, date DESC);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_url ON blog_posts(url);")
     # 增量升级：旧表可能没有这些列
@@ -127,31 +134,51 @@ _BASE_DIR = Path(__file__).resolve().parent.parent
 _RECORDS_PATH = _BASE_DIR / "data" / "blog_records.json"
 _LEGACY_RECORDS_PATH = _BASE_DIR / "state" / "blog_records.json"
 
-def _load_records() -> dict[str, str]:
-    if _RECORDS_PATH.exists():
-        try:
-            return json.loads(_RECORDS_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    if _LEGACY_RECORDS_PATH.exists():
-        try:
-            data = json.loads(_LEGACY_RECORDS_PATH.read_text(encoding="utf-8"))
-            _save_records(data)
-            try:
-                _LEGACY_RECORDS_PATH.unlink()
-            except OSError:
-                pass
-            return data
-        except Exception:
-            pass
-    return {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""}
-
-def _save_records(records: dict[str, str]) -> None:
+def _load_records(db: sqlite3.Connection | None = None) -> dict[str, str]:
+    """从 SQLite 数据库加载博客水印，若有历史 JSON 文件则自动无缝导入并清理。"""
+    conn = db or init_blog_db()
+    records = {"hinatazaka": "", "nogizaka": "", "sakurazaka": ""}
     try:
-        _RECORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _RECORDS_PATH.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        cur = conn.execute("SELECT group_key, last_url FROM blog_watermarks;")
+        for row in cur.fetchall():
+            records[row[0]] = row[1]
+    except Exception:
+        pass
+
+    # 若数据库中暂无记录，尝试从旧版 JSON 文件自动无缝迁移
+    if not any(records.values()):
+        for p in [_RECORDS_PATH, _LEGACY_RECORDS_PATH]:
+            if p.exists():
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        records.update(data)
+                        _save_records(records, conn)
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                        break
+                except Exception:
+                    pass
+    return records
+
+
+def _save_records(records: dict[str, str], db: sqlite3.Connection | None = None) -> None:
+    """持久化博客水印至 SQLite 数据库。"""
+    conn = db or init_blog_db()
+    import time
+    try:
+        with conn:
+            for k, url in records.items():
+                if url:
+                    conn.execute(
+                        "INSERT INTO blog_watermarks (group_key, last_url, updated_at) VALUES (?, ?, ?) "
+                        "ON CONFLICT(group_key) DO UPDATE SET last_url = excluded.last_url, updated_at = excluded.updated_at;",
+                        (k, url, time.time())
+                    )
     except Exception as e:
-        log_all(f"⚠️ 保存博客水印失败: {e}", is_error=True)
+        log_all(f"⚠️ 保存博客水印至 SQLite 失败: {e}", is_error=True)
 
 # ── 主循环 ──
 
@@ -167,7 +194,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
     if not blog_cfg.get("enabled", True):
         return []
 
-    records = _load_records()
+    records = _load_records(db)
     records_dirty = False
     new_posts = []
 
@@ -292,9 +319,9 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             records[key] = post["url"]
             new_posts.append(post)
 
-    # 写回水印到单独文件
+    # 写回水印到 SQLite 数据库
     if records_dirty:
-        _save_records(records)
+        _save_records(records, db)
 
     return new_posts
 
