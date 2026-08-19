@@ -18,9 +18,10 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Claude Code 本地配置
+# AI 本地配置与规则文件
 .claude/
 CLAUDE.md
+GEMINI.md
 
 # Docker 镜像导出临时文件
 *.tar
