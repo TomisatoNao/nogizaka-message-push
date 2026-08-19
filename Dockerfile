@@ -28,7 +28,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用源码、配置模板与启动脚本
 COPY main.py .
-COPY config.example.json .
 COPY entrypoint.sh .
 COPY config/ ./config/
 COPY src/ ./src/
