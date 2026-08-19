@@ -304,6 +304,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                 except Exception as e:
                     log_all(f"⚠️ 自动翻译博客失败: {e}", is_debug=True)
 
+            post["image_paths"] = image_paths
             post["translation"] = translated_html
             post["content_json"] = content_json
             post["translation_model"] = translation_model

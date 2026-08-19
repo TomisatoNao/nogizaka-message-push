@@ -5,6 +5,7 @@
 """
 
 import re
+import json
 import base64
 from pathlib import Path
 from typing import Optional
@@ -62,7 +63,7 @@ def is_playwright_available() -> bool:
 
 
 def _file_to_base64(filepath: Path) -> str:
-    if filepath.exists():
+    if filepath.exists() and filepath.stat().st_size > 0:
         try:
             with open(filepath, "rb") as f:
                 data = base64.b64encode(f.read()).decode("utf-8")
@@ -74,8 +75,16 @@ def _file_to_base64(filepath: Path) -> str:
     return ""
 
 
+def _bytes_to_base64(data: bytes, ext: str = "jpg") -> str:
+    if data:
+        b64 = base64.b64encode(data).decode("utf-8")
+        mime = "image/png" if ext == "png" else "image/jpeg"
+        return f"data:{mime};base64,{b64}"
+    return ""
+
+
 def _generate_html(post: dict, image_b64_list: list[str]) -> str:
-    """根据博客数据与三团配置生成自适应 HTML 模板字符串（针对手机与大屏精读调大字号与行距）。"""
+    """根据博客数据与三团配置生成自适应 HTML 模板字符串（大字号排版 + 100% 原图原位及文末完整呈现）。"""
     group_key = post.get("group_key", "").lower()
     theme = GROUP_THEMES.get(group_key, DEFAULT_THEME)
 
@@ -101,7 +110,21 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
 
     processed_body = re.sub(r'<img\s+src="[^"]+"\s*/?>', _replace_img, raw_html)
 
-    hero_b64 = image_b64_list[0] if image_b64_list else ""
+    # 兜底：如果正文中未匹配完所有图片（或译文未包含 <img> 占位），将剩余的图片自动附在正文后
+    if img_counter[0] < len(image_b64_list):
+        trailing_imgs = []
+        for idx in range(img_counter[0], len(image_b64_list)):
+            if image_b64_list[idx]:
+                trailing_imgs.append(
+                    f'<div class="blog-img-wrap">'
+                    f'<img src="{image_b64_list[idx]}" class="blog-img" alt="写真 {idx + 1}"/>'
+                    f'</div>'
+                )
+        if trailing_imgs:
+            processed_body += "\n" + "\n".join(trailing_imgs)
+
+    valid_images_count = sum(1 for b in image_b64_list if b)
+    hero_b64 = next((b for b in image_b64_list if b), "")
     if hero_b64:
         avatar_html = f'<img src="{hero_b64}" class="author-avatar" alt="{author}"/>'
     else:
@@ -343,7 +366,7 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
 
   <div class="card-footer">
     <div class="footer-brand">🌸 坂道联合监控系统 · 自动推送归档</div>
-    <div class="footer-right">写真共 {len(image_b64_list)} 张 · 官方原图无损呈现</div>
+    <div class="footer-right">写真共 {valid_images_count} 张 · 官方原图无损呈现</div>
   </div>
 </div>
 
@@ -357,6 +380,7 @@ async def render_blog_card(post: dict) -> Optional[Path]:
     """渲染指定博客的长图卡片，返回生成的高清 JPG 图片绝对路径。
 
     若 Playwright 不可用或渲染异常，返回 None 实现优雅降级。
+    支持自动从本地磁盘或远程 URL 加载全量写真，确保卡片 100% 包含图片。
     """
     if not is_playwright_available():
         log_all("💡 Playwright 未安装或不可用，跳过长图卡片渲染并自动降级为标准推送", is_debug=True)
@@ -368,13 +392,38 @@ async def render_blog_card(post: dict) -> Optional[Path]:
         return None
 
     image_paths = post.get("image_paths") or []
+    image_urls = post.get("images") or []
+    if isinstance(image_urls, str):
+        try:
+            image_urls = json.loads(image_urls)
+        except Exception:
+            image_urls = []
+
     image_b64_list = []
     for p_str in image_paths:
-        if isinstance(p_str, str):
+        b64 = ""
+        if isinstance(p_str, str) and p_str:
             p = Path(p_str)
             if not p.is_absolute():
                 p = Path("data/blog_images") / p
-            image_b64_list.append(_file_to_base64(p))
+            b64 = _file_to_base64(p)
+        image_b64_list.append(b64)
+
+    # 兜底：如果本地文件读取为空，但有 HTTP URL，并发获取 bytes 转换为 base64
+    if (not image_b64_list or any(not b for b in image_b64_list)) and image_urls:
+        import httpx
+        while len(image_b64_list) < len(image_urls):
+            image_b64_list.append("")
+        for idx, url in enumerate(image_urls):
+            if idx < len(image_b64_list) and not image_b64_list[idx] and isinstance(url, str) and url.startswith("http"):
+                try:
+                    headers = {"User-Agent": "Mozilla/5.0"}
+                    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+                        r = await c.get(url, headers=headers)
+                        if r.status_code == 200:
+                            image_b64_list[idx] = _bytes_to_base64(r.content)
+                except Exception:
+                    pass
 
     cache_dir = Path("data/cache/blog_cards")
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -382,7 +431,7 @@ async def render_blog_card(post: dict) -> Optional[Path]:
     group_key = post.get("group_key", "blog")
     safe_author = re.sub(r'[\\/:*?"<>|]', '', post.get("author", "author"))[:20].strip()
     safe_title = re.sub(r'[\\/:*?"<>|]', '', post.get("title", "title"))[:30].strip()
-    safe_ts = re.sub(r'[\\/:*?"<>|\s-]', '', post.get("date", ""))[:12]
+    safe_ts = re.sub(r'[\\/:*?"<>|\\s-]', '', post.get("date", ""))[:12]
 
     base_name = f"{group_key}_{safe_author}_{safe_title}_{safe_ts}"
     tmp_html = cache_dir / f"{base_name}.html"
