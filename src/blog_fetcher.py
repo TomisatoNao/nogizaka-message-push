@@ -231,14 +231,28 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             log_all(f"📝 [{group_name}] 水印已脱节，重置水印到最新，忽略中间积压的推送...")
             continue
 
-        if not unseen:
+        # 双重防御：过滤掉数据库中已经存在（已归档过）的博客，彻底避免重复翻译与推送
+        real_unseen = []
+        for p in unseen:
+            try:
+                cur = db.execute("SELECT 1 FROM blog_posts WHERE url = ? LIMIT 1;", (p["url"],))
+                if not cur.fetchone():
+                    real_unseen.append(p)
+            except Exception:
+                real_unseen.append(p)
+
+        # 推进最新水印
+        if posts[0]["url"] != records.get(key):
+            records[key] = posts[0]["url"]
+            records_dirty = True
+
+        if not real_unseen:
             continue
 
-        log_all(f"📝 [{group_name}] 发现 {len(unseen)} 篇新博客")
+        log_all(f"📝 [{group_name}] 发现 {len(real_unseen)} 篇新博客")
 
         # 按 oldest→newest 顺序处理
-        records_dirty = True
-        for post in reversed(unseen):
+        for post in reversed(real_unseen):
             post["group_key"] = key
             post["group_name"] = group_name
 
