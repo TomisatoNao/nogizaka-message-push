@@ -83,6 +83,7 @@ _DEFAULTS: dict = {
     "night_interval":           [1500, 1800],
     "enable_translation":       True,
     "message_monitor_enabled":  True,
+    "blog_card_mode":           "card_and_images",
     # 消息过滤
     "skip_publish_types":       ["birthday"],
     "media_type_map":           {"video": "video", "voice": "record", "image": "image", "picture": "image"},
@@ -230,6 +231,11 @@ def _normalize_config(raw: dict) -> dict:
         # 图片打标签（image_tagging → enable_image_tagging）
         if "image_tagging" in cfg:
             cfg["enable_image_tagging"] = cfg.pop("image_tagging")
+
+        # 博客长图推送模式（blog_monitor.card_mode → blog_card_mode）
+        if "blog_monitor" in cfg and isinstance(cfg["blog_monitor"], dict):
+            if "card_mode" in cfg["blog_monitor"]:
+                cfg["blog_card_mode"] = cfg["blog_monitor"]["card_mode"]
 
         if "monitor" in cfg:
             accounts = cfg.get("accounts", {})
@@ -536,6 +542,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "platforms":                    "PLATFORMS",
     "blog_monitor":                 "BLOG_MONITOR",
     "blog_records":                 "BLOG_RECORDS",
+    "blog_card_mode":               "BLOG_CARD_MODE",
     "media":                        "MEDIA",
     "social":                       "SOCIAL",
     "napcat_routes":                "NAPCAT_ROUTES",

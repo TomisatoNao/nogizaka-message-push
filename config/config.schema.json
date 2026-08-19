@@ -186,6 +186,7 @@
       "type": "object",
       "properties": {
         "enabled":     { "type": "boolean" },
+        "card_mode":   { "type": "string", "enum": ["card_and_images", "card_only", "text_and_images"] },
         "hinatazaka":  { "type": "boolean" },
         "nogizaka":    { "type": "boolean" },
         "sakurazaka":  { "type": "boolean" },

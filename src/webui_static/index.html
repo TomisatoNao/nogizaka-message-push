@@ -594,6 +594,13 @@
       <label class="field">博客深夜间隔（min / max 秒）
         <span class="pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
       </label>
+      <label class="field" style="grid-column: 1 / -1;">博客推送表现形式
+        <select id="blogCardMode">
+          <option value="card_and_images">🌟 长图卡片 + 高清原图（推荐，杂志级双语长图替代枯燥文本，并随附全部原图供存图）</option>
+          <option value="card_only">🖼️ 仅长图卡片（极简防刷屏）</option>
+          <option value="text_and_images">📝 传统经典模式（纯文本 + 高清原图）</option>
+        </select>
+      </label>
     </div>
     <details class="help-box" style="margin-top: 10px;">
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 博客推送目标配置提示</summary>
@@ -1874,6 +1881,7 @@ function renderGeneral() {
   const bni = bm.night_interval || [1650, 1950];
   $("blogDayMin").value = bdi[0]; $("blogDayMax").value = bdi[1];
   $("blogNightMin").value = bni[0]; $("blogNightMax").value = bni[1];
+  if ($("blogCardMode")) $("blogCardMode").value = bm.card_mode || "card_and_images";
   $("alertCooldown").value = config.alert_cooldown ?? 3600;
   $("qqSendInterval").value = config.qq_send_interval ?? 1.5;
   $("translateOn").checked = config.translate !== false;
@@ -2185,6 +2193,7 @@ function collectGeneral() {
   };
   config.blog_monitor = {
     enabled: $("blogMonitorOn").checked,
+    card_mode: $("blogCardMode") ? $("blogCardMode").value : "card_and_images",
     hinatazaka: $("blogHinatazaka").checked,
     nogizaka: $("blogNogizaka").checked,
     sakurazaka: $("blogSakurazaka").checked,

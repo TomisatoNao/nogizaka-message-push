@@ -138,6 +138,30 @@ class TGBot:
 
         return await self._send_with_retry("媒体发送", action)
 
+    async def send_photo_file(self, file_path_or_bytes: str | bytes, caption: str = "") -> bool:
+        """发送本地图片文件或二进制数据。"""
+        if not self._bot or not self.target_chat or not file_path_or_bytes:
+            return False
+        from telegram.constants import ParseMode
+        safe_caption = _to_html(caption, _TELEGRAM_CAPTION_MAX) if caption else ""
+        kwargs = {
+            "chat_id": self.target_chat,
+            "caption": safe_caption or None,
+            "parse_mode": ParseMode.HTML if safe_caption else None,
+        }
+        try:
+            if isinstance(file_path_or_bytes, str):
+                with open(file_path_or_bytes, "rb") as f:
+                    data = f.read()
+            else:
+                data = file_path_or_bytes
+            def action():
+                return self._bot.send_photo(photo=data, **kwargs)
+            return await self._send_with_retry("本地图片发送", action)
+        except Exception as e:
+            log_all(f"⚠️ TG Bot [{self.name}] 本地图片读取或发送失败: {e}", is_error=True)
+            return False
+
     async def send_media_group_photos(self, photos: list[str], caption: str = "") -> bool:
         """发送 Telegram 图片专辑组（支持全量图片分批，第一张附带 Caption）。"""
         if not self._bot or not self.target_chat or not photos:
