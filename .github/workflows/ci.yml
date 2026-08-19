@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install ruff
+          pip install ruff pytest pytest-asyncio
 
       - name: Lint (ruff)
         run: ruff check .
@@ -56,3 +56,9 @@ jobs:
 
       - name: Social media monitor test
         run: python tests/test_social.py
+
+      - name: Blog card test
+        run: python tests/test_blog_card.py
+
+      - name: Pytest full suite
+        run: pytest

@@ -1,7 +1,27 @@
-import pytest
+"""验证博客长图卡片生成与优雅降级机制
+
+运行: python tests/test_blog_card.py
+"""
+import asyncio
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+try:
+    import pytest
+    _async_test = pytest.mark.asyncio
+except ImportError:
+    def _async_test(fn):
+        return fn
+
 from src.blog_card_renderer import render_blog_card, is_playwright_available, _generate_html
 
-@pytest.mark.asyncio
+
+@_async_test
 async def test_blog_card_html_generation():
     mock_post = {
         "group_key": "nogizaka",
@@ -18,10 +38,12 @@ async def test_blog_card_html_generation():
     assert "テストブログ" in html
     assert "GLM-4-Flash" in html
 
-@pytest.mark.asyncio
+
+@_async_test
 async def test_blog_card_render_execution():
     if not is_playwright_available():
-        pytest.skip("Playwright not installed in environment")
+        print("  ℹ️ Playwright 未安装，跳过真实无头浏览器渲染测试")
+        return
 
     mock_post = {
         "group_key": "hinatazaka",
@@ -37,3 +59,13 @@ async def test_blog_card_render_execution():
     assert img_path.exists()
     assert img_path.suffix == ".jpg"
     assert img_path.stat().st_size > 1000
+
+
+def main():
+    asyncio.run(test_blog_card_html_generation())
+    asyncio.run(test_blog_card_render_execution())
+    print("  ✓ test_blog_card 全部通过")
+
+
+if __name__ == "__main__":
+    main()
