@@ -285,13 +285,14 @@ def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = N
 
 
 
+
 async def send_blog_post(post: dict) -> bool:
     """向配置的渠道推送一篇博客。
 
     无论何种模式，第一条均统一发送博客提醒头（作者/标题/时间/链接）；
-    后续内容根据通道配置的 blog_card_mode 推送：
-    1. card_and_images: 提醒头 -> 精美长图卡片 -> 紧随推送全量高清原始写真（方便存图）；
-    2. card_only: 提醒头 -> 精美长图卡片（极简防刷屏，不发单张原图，不发正文纯文本）；
+    后续内容严格根据通道配置的 blog_card_mode 分发：
+    1. card_only: 提醒头 -> 精美长图卡片（极简防刷屏，坚决不发单张原图，不发正文纯文本）；
+    2. card_and_images: 提醒头 -> 精美长图卡片 -> 紧随推送全量高清原始写真（方便存图）；
     3. text_and_images: 提醒头 -> 全量高清原图 -> 中日对照正文。
     """
     import asyncio
@@ -339,6 +340,39 @@ async def send_blog_post(post: dict) -> bool:
 
     any_ok = False
 
+    # 辅助函数：向 QQ 官方 Bot 发送全量原始写真
+    async def _send_qq_official_raw_images(bot, scope, target):
+        local_paths = post.get("image_paths") or []
+        for idx, img_url in enumerate(media_urls):
+            try:
+                img_bytes = None
+                if idx < len(local_paths) and local_paths[idx]:
+                    lp = local_paths[idx]
+                    if not os.path.isabs(lp):
+                        lp = os.path.join("data/blog_images", lp)
+                    if os.path.exists(lp):
+                        try:
+                            with open(lp, "rb") as f:
+                                img_bytes = f.read()
+                        except OSError:
+                            pass
+
+                if not img_bytes:
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Referer": blog_url or img_url,
+                    }
+                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+                        r = await c.get(img_url, headers=headers)
+                        if r.status_code == 200:
+                            img_bytes = r.content
+
+                if img_bytes:
+                    await bot.send_media_file(scope, target, "image", img_bytes)
+            except Exception as ex:
+                log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送异常: {ex}", is_debug=True)
+            await asyncio.sleep(0.4)
+
     # ----------------------------------------------------
     # Channel 1: QQ 官方 Bot (受 push_blog + blog_filter 控制)
     # ----------------------------------------------------
@@ -365,81 +399,44 @@ async def send_blog_post(post: dict) -> bool:
                     await bot.send_private_text(target, header_text)
                 await asyncio.sleep(0.5)
 
-                # Step 2: 内容推送
-                if card_path and card_path.exists() and mode in ("card_and_images", "card_only"):
-                    # 发送精美长图卡片
-                    with open(card_path, "rb") as f:
-                        card_bytes = f.read()
-                    await bot.send_media_file(scope, target, "image", card_bytes)
-                    await asyncio.sleep(0.5)
+                # Step 2: 严格根据 mode 分发内容
+                if mode == "card_only":
+                    # ── 模式 A: 仅长图卡片（极简防刷屏）──
+                    sent_card = False
+                    if card_path and card_path.exists():
+                        with open(card_path, "rb") as f:
+                            card_bytes = f.read()
+                        sent_card = await bot.send_media_file(scope, target, "image", card_bytes)
+                        await asyncio.sleep(0.5)
 
-                    # 若为 card_and_images 模式，后续推送全量高清原始写真供存图
-                    if mode == "card_and_images" and media_urls:
-                        local_paths = post.get("image_paths") or []
-                        for idx, img_url in enumerate(media_urls):
-                            try:
-                                img_bytes = None
-                                if idx < len(local_paths) and local_paths[idx]:
-                                    lp = local_paths[idx]
-                                    if not os.path.isabs(lp):
-                                        lp = os.path.join("data/blog_images", lp)
-                                    if os.path.exists(lp):
-                                        try:
-                                            with open(lp, "rb") as f:
-                                                img_bytes = f.read()
-                                        except OSError:
-                                            pass
+                    if not sent_card:
+                        log_all(f"⚠️ 官方 Bot [{bot.name}] 长图发送未成功或未渲染，仅长图模式降级发送双语正文", is_debug=True)
+                        if pairs:
+                            await bot.send_translation_qq(scope, target, pairs)
 
-                                if not img_bytes:
-                                    headers = {
-                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                        "Referer": blog_url or img_url,
-                                    }
-                                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
-                                        r = await c.get(img_url, headers=headers)
-                                        if r.status_code == 200:
-                                            img_bytes = r.content
+                elif mode == "card_and_images":
+                    # ── 模式 B: 长图卡片 + 高清原图写真 ──
+                    sent_card = False
+                    if card_path and card_path.exists():
+                        with open(card_path, "rb") as f:
+                            card_bytes = f.read()
+                        sent_card = await bot.send_media_file(scope, target, "image", card_bytes)
+                        await asyncio.sleep(0.5)
 
-                                if img_bytes:
-                                    await bot.send_media_file(scope, target, "image", img_bytes)
-                            except Exception as ex:
-                                log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送异常: {ex}", is_debug=True)
-                            await asyncio.sleep(0.4)
+                    if sent_card:
+                        if media_urls:
+                            await _send_qq_official_raw_images(bot, scope, target)
+                    else:
+                        # 卡片未生成，降级为传统图文（原图 + 正文）
+                        if media_urls:
+                            await _send_qq_official_raw_images(bot, scope, target)
+                        if pairs:
+                            await bot.send_translation_qq(scope, target, pairs)
+
                 else:
-                    # 传统图文模式 (text_and_images 或长图失败 fallback)
-                    local_paths = post.get("image_paths") or []
-                    for idx, img_url in enumerate(media_urls):
-                        try:
-                            img_bytes = None
-                            if idx < len(local_paths) and local_paths[idx]:
-                                lp = local_paths[idx]
-                                if not os.path.isabs(lp):
-                                    lp = os.path.join("data/blog_images", lp)
-                                if os.path.exists(lp):
-                                    try:
-                                        with open(lp, "rb") as f:
-                                            img_bytes = f.read()
-                                    except OSError:
-                                        pass
-
-                            if not img_bytes:
-                                headers = {
-                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                    "Referer": blog_url or img_url,
-                                }
-                                async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
-                                    r = await c.get(img_url, headers=headers)
-                                    if r.status_code == 200:
-                                        img_bytes = r.content
-
-                            if img_bytes:
-                                sent = await bot.send_media_file(scope, target, "image", img_bytes)
-                                if not sent:
-                                    log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送未成功 (第 {idx+1}/{len(media_urls)} 张)", is_debug=True)
-                        except Exception as ex:
-                            log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片下载或发送异常: {ex}", is_debug=True)
-                        await asyncio.sleep(0.4)
-
+                    # ── 模式 C: 传统经典模式 (text_and_images) ──
+                    if media_urls:
+                        await _send_qq_official_raw_images(bot, scope, target)
                     if pairs:
                         await bot.send_translation_qq(scope, target, pairs)
 
@@ -470,26 +467,48 @@ async def send_blog_post(post: dict) -> bool:
                 await send_qq_message(int(gid), [{"type": "text", "data": {"text": header_text}}])
                 await asyncio.sleep(0.5)
 
-                # Step 2: 内容推送
-                if card_path and card_path.exists() and mode in ("card_and_images", "card_only"):
-                    # 发送精美长图卡片
-                    card_file_uri = f"file:///{card_path.resolve().as_posix()}"
-                    ok = await send_qq_message(int(gid), [{"type": "image", "data": {"file": card_file_uri}}])
-                    if ok:
-                        any_ok = True
-                    await asyncio.sleep(0.5)
+                # Step 2: 严格根据 mode 分发内容
+                if mode == "card_only":
+                    sent_card = False
+                    if card_path and card_path.exists():
+                        card_file_uri = f"file:///{card_path.resolve().as_posix()}"
+                        sent_card = await send_qq_message(int(gid), [{"type": "image", "data": {"file": card_file_uri}}])
+                        await asyncio.sleep(0.5)
 
-                    # 若为 card_and_images 模式，后续推送全量高清原始写真供存图
-                    if mode == "card_and_images" and media_urls:
-                        raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                        await send_qq_message(int(gid), raw_chain)
+                    if not sent_card:
+                        if pairs:
+                            from src.platforms.qq_official import _escape_qq_md
+                            blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
+                            body_txt = "\n\n".join(blocks)
+                            await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
+
+                elif mode == "card_and_images":
+                    sent_card = False
+                    if card_path and card_path.exists():
+                        card_file_uri = f"file:///{card_path.resolve().as_posix()}"
+                        sent_card = await send_qq_message(int(gid), [{"type": "image", "data": {"file": card_file_uri}}])
+                        await asyncio.sleep(0.5)
+
+                    if sent_card:
+                        if media_urls:
+                            raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
+                            await send_qq_message(int(gid), raw_chain)
+                    else:
+                        if media_urls:
+                            raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
+                            await send_qq_message(int(gid), raw_chain)
+                            await asyncio.sleep(0.5)
+                        if pairs:
+                            from src.platforms.qq_official import _escape_qq_md
+                            blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
+                            body_txt = "\n\n".join(blocks)
+                            await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
+
                 else:
-                    # 传统图文模式 (text_and_images 或长图失败 fallback)
                     if media_urls:
                         raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
                         await send_qq_message(int(gid), raw_chain)
                         await asyncio.sleep(0.5)
-
                     if pairs:
                         from src.platforms.qq_official import _escape_qq_md
                         blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
@@ -521,21 +540,37 @@ async def send_blog_post(post: dict) -> bool:
                 await bot._send_html(bot.target_chat, header_text)
                 await asyncio.sleep(0.8)
 
-                # Step 2: 内容推送
-                if card_path and card_path.exists() and mode in ("card_and_images", "card_only"):
-                    # 发送精美长图卡片
-                    await bot.send_photo_file(str(card_path))
-                    await asyncio.sleep(0.8)
+                # Step 2: 严格根据 mode 分发内容
+                if mode == "card_only":
+                    sent_card = False
+                    if card_path and card_path.exists():
+                        sent_card = await bot.send_photo_file(str(card_path))
+                        await asyncio.sleep(0.8)
 
-                    # 若为 card_and_images 模式，后续推送全量高清原始写真相册供存图
-                    if mode == "card_and_images" and media_urls:
-                        await bot.send_media_group_photos(media_urls)
+                    if not sent_card:
+                        if pairs:
+                            await bot.send_translation_tg(pairs)
+
+                elif mode == "card_and_images":
+                    sent_card = False
+                    if card_path and card_path.exists():
+                        sent_card = await bot.send_photo_file(str(card_path))
+                        await asyncio.sleep(0.8)
+
+                    if sent_card:
+                        if media_urls:
+                            await bot.send_media_group_photos(media_urls)
+                    else:
+                        if media_urls:
+                            await bot.send_media_group_photos(media_urls)
+                            await asyncio.sleep(0.8)
+                        if pairs:
+                            await bot.send_translation_tg(pairs)
+
                 else:
-                    # 传统图文模式 (text_and_images 或长图失败 fallback)
                     if media_urls:
                         await bot.send_media_group_photos(media_urls)
                         await asyncio.sleep(0.8)
-
                     if pairs:
                         await bot.send_translation_tg(pairs)
 

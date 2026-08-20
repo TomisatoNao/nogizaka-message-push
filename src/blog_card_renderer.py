@@ -464,7 +464,7 @@ async def render_blog_card(post: dict) -> Optional[Path]:
             img = Image.open(tmp_png)
             if img.mode != "RGB":
                 img = img.convert("RGB")
-            img.save(final_jpg, "JPEG", quality=92, optimize=True)
+            img.save(final_jpg, "JPEG", quality=88, optimize=True)
 
             try:
                 tmp_png.unlink(missing_ok=True)

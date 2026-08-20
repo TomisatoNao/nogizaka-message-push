@@ -397,6 +397,7 @@ def _build_qq_official_bots(cfg: dict) -> dict:
                 "member_filter":  b.get("member_filter") or [],
                 "blog_filter":    b.get("blog_filter") or [],
                 "social_filter":  b.get("social_filter") or [],
+                "blog_card_mode": b.get("blog_card_mode", "card_and_images"),
             })
     else:
         for i in range(1, 21):
@@ -418,6 +419,7 @@ def _build_qq_official_bots(cfg: dict) -> dict:
                 "member_filter":  [],
                 "blog_filter":    [],
                 "social_filter":  [],
+                "blog_card_mode": "card_and_images",
             })
 
     cfg["qq_official_bots"] = bots
@@ -455,6 +457,7 @@ def _build_tg_bots(cfg: dict) -> dict:
             "member_filter":  b.get("member_filter") or [],
             "blog_filter":    b.get("blog_filter") or [],
             "social_filter":  b.get("social_filter") or [],
+            "blog_card_mode": b.get("blog_card_mode", "card_and_images"),
         })
         
     cfg["tg_bots"] = bots

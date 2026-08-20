@@ -1,10 +1,11 @@
-"""验证博客长图卡片生成与优雅降级机制
+"""验证博客长图卡片生成、优雅降级与通道路由推送机制
 
 运行: python tests/test_blog_card.py
 """
 import asyncio
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -19,6 +20,7 @@ except ImportError:
         return fn
 
 from src.blog_card_renderer import render_blog_card, is_playwright_available, _generate_html
+from src.notifier import send_blog_post
 
 
 @_async_test
@@ -61,9 +63,52 @@ async def test_blog_card_render_execution():
     assert img_path.stat().st_size > 1000
 
 
+@_async_test
+async def test_notifier_card_only_routing():
+    mock_post = {
+        "group_key": "hinatazaka",
+        "group_name": "日向坂46",
+        "author": "鶴崎 仁香",
+        "title": "繋いだ手、離さないでいて？",
+        "date": "2026.8.19 21:38",
+        "url": "https://www.hinatazaka46.com/s/official/diary/detail/70653",
+        "images": ["https://example.com/1.jpg", "https://example.com/2.jpg"],
+        "image_paths": [],
+        "translation": "<p><em>こんにちは</em><br/><span>你好</span></p>",
+        "translation_model": "gemini-2.5-flash-lite"
+    }
+
+    dummy_dir = Path("data/cache")
+    dummy_dir.mkdir(parents=True, exist_ok=True)
+    dummy_card = dummy_dir / "test_routing_card.jpg"
+    dummy_card.write_bytes(b"FAKE_DATA")
+
+    with patch("config.config.ENABLE_QQ_OFFICIAL_BOT", True),          patch("src.blog_card_renderer.render_blog_card", new_callable=AsyncMock) as mock_render,          patch("src.platforms.qq_official.get_configured_bots") as mock_get_bots:
+
+        mock_render.return_value = dummy_card
+        mock_bot = MagicMock()
+        mock_bot.name = "bot_only"
+        mock_bot.group_openid = "GRP1"
+        mock_bot.target_openid = ""
+        mock_bot.push_blog = True
+        mock_bot.blog_filter = []
+        mock_bot.blog_card_mode = "card_only"
+        mock_bot.send_group_text = AsyncMock(return_value=True)
+        mock_bot.send_media_file = AsyncMock(return_value=True)
+        mock_bot.send_translation_qq = AsyncMock(return_value=True)
+        mock_get_bots.return_value = [mock_bot]
+
+        ok = await send_blog_post(mock_post)
+        assert ok is True
+        assert mock_bot.send_group_text.call_count == 1
+        assert mock_bot.send_media_file.call_count == 1
+        assert mock_bot.send_translation_qq.call_count == 0
+
+
 def main():
     asyncio.run(test_blog_card_html_generation())
     asyncio.run(test_blog_card_render_execution())
+    asyncio.run(test_notifier_card_only_routing())
     print("  ✓ test_blog_card 全部通过")
 
 
