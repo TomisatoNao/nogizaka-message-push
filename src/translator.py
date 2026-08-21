@@ -49,12 +49,13 @@ _BLOG_JSON_PROMPT_TEMPLATE = (
     "你是一名精通坂道系列偶像文化（乃木坂46/櫻坂46/日向坂46）的官方博客资深翻译官。\n"
     "以下是{group_name}成员{member_name}最新博客的正文段落列表（以 JSON 列表格式提供）。\n\n"
     "【核心任务】：\n"
-    "请全局通读整篇博客，在充分理解上下文语境、叙事逻辑和偶像感情色彩的前提下，将列表中每一项的 text 翻译为自然流畅、亲切诚挚的简体中文。\n\n"
+    "请全局通读整篇博客，在充分理解上下文语境、叙事逻辑和偶像感情色彩的前提下，将列表中每一项的 text 翻译为自然流畅、亲切诚挚的简体中文（Strict Simplified Chinese）。\n\n"
     "【翻译与润色规范（极其重要）】：\n"
     "1. 严防错位与漏项（绝对硬性要求）：\n"
     "   - 待翻译列表中每一项包含 id, prefix, text。输出必须为一个合法的 JSON 列表（List of Objects），每个对象必须包含与输入【1:1 完全一致】的 id 与 prefix，以及翻译好的 zh。\n"
     "   - 绝对禁止将两个或多个段落合并为一个！每一项的 zh 必须精准对应翻译该项的 text！\n"
     "2. 语言与用词规范：\n"
+    "   - 必须严格且统一使用标准简体中文（Simplified Chinese），严禁混入繁体字（如「總是」「憂鬱」「電話」等），严禁直接复制日文原文！\n"
     "   - 严禁将发语词「まず」机械直译为「率先」，必须根据语境翻译为「首先 / 这一次 / 首先我想」等符合中文表达习惯的词汇。\n"
     "   - 假名爱称硬性规则：平假名/片假名昵称（如「あやめちゃん」「なぎちゃん」）必须保留日文假名+酱（如「あやめ酱」「なぎ酱」）或使用罗马字（如「ayame酱」），【严禁】擅自查字典硬译为汉字（如严禁将あやめ译为菖蒲）！\n"
     "   - 汉字全名规则：仅在原文出现完整汉字姓名（如「筒井あやめ」「冨里奈央」）时才使用标准汉字。\n"
@@ -582,14 +583,27 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
     if not items_to_translate:
         return [], ""  # 无需翻译
 
-    # 3. 批量发送给翻译引擎（保证整篇文脉全局连贯），25 段一批避免单次超时
-    batch_size = 25
+    # 3. 动态自适应批次（按字符数与项数动态切分，单批限制在 1200 字符内，最多 12 项，彻底避免 MAX_TOKENS 截断）
+    batches = []
+    curr_batch = []
+    curr_len = 0
     all_keys = list(items_to_translate.keys())
+    for k in all_keys:
+        t_len = len(items_to_translate[k])
+        if curr_batch and (curr_len + t_len > 1200 or len(curr_batch) >= 12):
+            batches.append(curr_batch)
+            curr_batch = [k]
+            curr_len = t_len
+        else:
+            curr_batch.append(k)
+            curr_len += t_len
+    if curr_batch:
+        batches.append(curr_batch)
+
     translated_map: dict[str, str] = {}
     model_name = ""
 
-    for i in range(0, len(all_keys), batch_size):
-        batch_keys = all_keys[i : i + batch_size]
+    for batch_keys in batches:
         batch_items = {k: items_to_translate[k] for k in batch_keys}
         res_map, mname = await _do_translate_gemini_json(batch_items, member_name, group_type, custom_client=custom_client)
         translated_map.update(res_map)
