@@ -46,23 +46,25 @@ _PROMPT_TEMPLATE = (
 )
 
 _BLOG_JSON_PROMPT_TEMPLATE = (
-    "你是一名精通坂道系列偶像文化（乃木坂46/櫻坂46/日向坂46）的资深翻译专家。\n"
-    "以下是{group_name}成员{member_name}最新博客的正文段落集合（以 JSON 字典格式提供）。\n\n"
+    "你是一名精通坂道系列偶像文化（乃木坂46/櫻坂46/日向坂46）的官方博客资深翻译官。\n"
+    "以下是{group_name}成员{member_name}最新博客的正文段落列表（以 JSON 列表格式提供）。\n\n"
     "【核心任务】：\n"
-    "请全局通读整篇博客，在充分理解上下文语境、叙事逻辑和偶像感情色彩的前提下，将所有段落翻译为自然流畅、亲切诚挚的简体中文。\n\n"
-    "【翻译与润色规范】：\n"
-    "1. 全局文脉与人名爱称规范（极其重要）：\n"
-    "   - 统一全篇的人称代词、敬语/口语基调与代称。\n"
+    "请全局通读整篇博客，在充分理解上下文语境、叙事逻辑和偶像感情色彩的前提下，将列表中每一项的 text 翻译为自然流畅、亲切诚挚的简体中文。\n\n"
+    "【翻译与润色规范（极其重要）】：\n"
+    "1. 严防错位与漏项（绝对硬性要求）：\n"
+    "   - 待翻译列表中每一项包含 id, prefix, text。输出必须为一个合法的 JSON 列表（List of Objects），每个对象必须包含与输入【1:1 完全一致】的 id 与 prefix，以及翻译好的 zh。\n"
+    "   - 绝对禁止将两个或多个段落合并为一个！每一项的 zh 必须精准对应翻译该项的 text！\n"
+    "2. 语言与用词规范：\n"
+    "   - 严禁将发语词「まず」机械直译为「率先」，必须根据语境翻译为「首先 / 这一次 / 首先我想」等符合中文表达习惯的词汇。\n"
     "   - 假名爱称硬性规则：平假名/片假名昵称（如「あやめちゃん」「なぎちゃん」）必须保留日文假名+酱（如「あやめ酱」「なぎ酱」）或使用罗马字（如「ayame酱」），【严禁】擅自查字典硬译为汉字（如严禁将あやめ译为菖蒲）！\n"
     "   - 汉字全名规则：仅在原文出现完整汉字姓名（如「筒井あやめ」「冨里奈央」）时才使用标准汉字。\n"
     "   - 结合前后文准确翻译活动（如「ミーグリ」➔「线上见面会」）、节目与曲名。\n"
-    "2. 边缘字符与特殊格式：\n"
+    "3. 边缘字符与格式：\n"
     "   - 纯颜文字/Emoji/符号段落保留原样，切勿自行添加解释。\n"
     "   - 遇到段落内的换行符 \\n，译文中请务必在对应位置保留换行符 \\n。\n\n"
-    "【JSON 输出严格约束（必须 100% 遵守）】：\n"
-    "1. 键名完全一致：输出必须为合法的 JSON 字典，键名（如 \"0\", \"1\", \"2\"...）必须与输入 1:1 完全一致，严禁漏项、删键或改动键名。\n"
-    "2. 纯 JSON 格式：直接输出合法 JSON 文本（允许 ```json ... ``` 包裹），绝对禁止输出任何前言、总结、注释或额外对话。\n\n"
-    "待翻译博客段落 JSON：\n{json_payload}"
+    "【JSON 输出严格约束】：\n"
+    "直接输出合法 JSON 列表（允许 ```json ... ``` 包裹），绝对禁止输出任何前言、总结、注释或额外对话。\n\n"
+    "待翻译博客段落列表：\n{json_payload}"
 )
 
 def _get_text_hash(text: str) -> str:
@@ -176,7 +178,7 @@ def _extract_text_gemini(data: dict, model_name: str) -> str:
     return ""
 
 def _parse_json_response(res_text: str) -> dict[str, str]:
-    """安全解析模型返回的 JSON 字典（支持 ```json 标记剥离）。"""
+    """安全解析模型返回的 JSON 响应（支持 List[Object] 锚点列表 与 Dict[str, str] 字典）。"""
     res_text = res_text.strip()
     if res_text.startswith("```json"):
         res_text = res_text[7:]
@@ -189,6 +191,14 @@ def _parse_json_response(res_text: str) -> dict[str, str]:
         data = json.loads(res_text)
         if isinstance(data, dict):
             return {str(k): str(v) for k, v in data.items()}
+        if isinstance(data, list):
+            res_dict = {}
+            for item in data:
+                if isinstance(item, dict):
+                    k = str(item.get("id", item.get("key", len(res_dict))))
+                    v = item.get("zh", item.get("text", ""))
+                    res_dict[k] = str(v)
+            return res_dict
     except Exception as e:
         log_all(f"⚠️ 解析翻译模型 JSON 响应失败: {e}", is_debug=True)
     return {}
@@ -233,7 +243,7 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
     return ""
 
 async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncClient = None) -> dict[str, str]:
-    """按 provider 规范请求结构化 JSON 字典翻译。"""
+    """按 provider 规范请求结构化 JSON 字典/列表翻译。"""
     provider = model.get("provider", "gemini")
     if provider == "zhipu":
         url = model.get("url") or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
@@ -278,9 +288,9 @@ async def _do_translate_gemini_json(
     group_type: str,
     custom_client: httpx.AsyncClient = None
 ) -> tuple[dict[str, str], str]:
-    """纯文本段落组批量整体翻译（双引擎智能轮流 Round-Robin + 自动 Failover 降级）。
+    """纯文本段落组批量整体翻译（日文前缀语义锚点绑定 + 双引擎智能轮流 Round-Robin + 自动 Failover 降级）。
 
-    返回 (译文映射, 成功使用的模型名)；无可用结果时返回 ({}, "")。
+    返回 (译文映射 {str(id): zh}, 成功使用的模型名)；无可用结果时返回 ({}, "")。
     """
     if not items:
         return {}, ""
@@ -289,8 +299,19 @@ async def _do_translate_gemini_json(
     if not try_models:
         return {}, ""
 
+    # 构建带 prefix 原文前缀字符锚点的结构化列表
+    items_list = []
+    for k, text in items.items():
+        clean_text = text.replace("\n", " ").strip()
+        prefix = clean_text[:8] if clean_text else "空"
+        items_list.append({
+            "id": k,
+            "prefix": prefix,
+            "text": text
+        })
+
     group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
-    payload_text = json.dumps(items, ensure_ascii=False, indent=2)
+    payload_text = json.dumps(items_list, ensure_ascii=False, indent=2)
     prompt = _BLOG_JSON_PROMPT_TEMPLATE.format(
         group_name=group_name,
         member_name=member_name or "未知成员",
@@ -575,8 +596,20 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
         if not model_name and mname:
             model_name = mname
 
-    # 3.5 模型偶发漏项/空值（长博客部分键被略过）：对缺失或空值键做一次补译
-    missing = [k for k in items_to_translate if not (translated_map.get(k) or "").strip()]
+    # 3.5 模型偶发漏项/空值/串行重复校验自愈
+    missing = []
+    keys_sorted = sorted(items_to_translate.keys(), key=lambda x: int(x) if x.isdigit() else 999)
+    for i, k in enumerate(keys_sorted):
+        zh = (translated_map.get(k) or "").strip()
+        if not zh or "[翻译失败]" in zh:
+            missing.append(k)
+        elif i > 0:
+            prev_k = keys_sorted[i - 1]
+            prev_zh = (translated_map.get(prev_k) or "").strip()
+            # 若两段非简短符号译文完全一致，而日文原文明显不同，判定为串行复制，加入补译队列
+            if zh == prev_zh and len(zh) > 8 and items_to_translate[k].strip() != items_to_translate[prev_k].strip():
+                missing.append(k)
+
     if missing:
         retry_items = {k: items_to_translate[k] for k in missing}
         res_map, mname = await _do_translate_gemini_json(retry_items, member_name, group_type, custom_client=custom_client)

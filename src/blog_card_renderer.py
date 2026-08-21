@@ -106,7 +106,7 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     img_idx = 0
 
     if structured_blocks:
-        for b in structured_blocks:
+        for b_idx, b in enumerate(structured_blocks):
             if b.get("type") == "img":
                 if img_idx < len(image_b64_list) and image_b64_list[img_idx]:
                     body_elements.append(
@@ -123,10 +123,17 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
                 jp_escaped = html_lib.escape(jp).replace("\n", "<br>")
                 zh_escaped = html_lib.escape(zh).replace("\n", "<br>")
 
-                elem_html = '<div class="para-block">'
+                is_last = (b_idx == len(structured_blocks) - 1)
+                is_sig = is_last and len(jp) < 30 and (
+                    any(g in jp for g in ("乃木坂", "櫻坂", "日向坂"))
+                    or author in jp
+                    or bool(re.search(r"[0-9]{1,2}[./月][0-9]{1,2}", jp))
+                )
+                block_cls = "para-block signature-block" if is_sig else "para-block"
+                elem_html = f'<div class="{block_cls}">'
                 if jp_escaped:
                     elem_html += f'<div class="jp-text">{jp_escaped}</div>'
-                if zh_escaped and "[翻译失败]" not in zh_escaped:
+                if zh_escaped and "[翻译失败]" not in zh_escaped and (not is_sig or zh_escaped != jp_escaped):
                     elem_html += f'<div class="zh-text">{zh_escaped}</div>'
                 elem_html += '</div>'
                 body_elements.append(elem_html)
@@ -329,6 +336,18 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
 
   .para-block {{
     margin-bottom: 28px;
+  }}
+
+  .signature-block {{
+    margin-top: 36px;
+    margin-bottom: 8px;
+    text-align: right;
+  }}
+  .signature-block .jp-text, .signature-block .zh-text {{
+    font-size: 21px;
+    color: #94a3b8;
+    font-weight: 500;
+    line-height: 1.6;
   }}
 
   .jp-text, .card-body em {{
