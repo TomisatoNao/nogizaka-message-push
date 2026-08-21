@@ -7,6 +7,7 @@
 import re
 import json
 import base64
+import html as html_lib
 from pathlib import Path
 from typing import Optional
 from PIL import Image
@@ -84,7 +85,7 @@ def _bytes_to_base64(data: bytes, ext: str = "jpg") -> str:
 
 
 def _generate_html(post: dict, image_b64_list: list[str]) -> str:
-    """根据博客数据与三团配置生成自适应 HTML 模板字符串（大字号排版 + 100% 原图原位及文末完整呈现）。"""
+    """根据博客数据与三团配置生成自适应 HTML 模板字符串（大字号排版 + 原文译文紧凑跟随 + 段落间距舒适）。"""
     group_key = post.get("group_key", "").lower()
     theme = GROUP_THEMES.get(group_key, DEFAULT_THEME)
 
@@ -93,35 +94,86 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     date_str = post.get("date", "")
     trans_model = post.get("translation_model") or "AI 双语翻译引擎"
 
-    raw_html = post.get("translation") or post.get("body_text") or ""
+    content_json_raw = post.get("content_json") or ""
+    structured_blocks = []
+    if content_json_raw:
+        try:
+            structured_blocks = json.loads(content_json_raw) if isinstance(content_json_raw, str) else content_json_raw
+        except Exception:
+            structured_blocks = []
 
-    img_counter = [0]
+    body_elements = []
+    img_idx = 0
 
-    def _replace_img(match):
-        idx = img_counter[0]
-        img_counter[0] += 1
-        if idx < len(image_b64_list) and image_b64_list[idx]:
-            return (
-                f'<div class="blog-img-wrap">'
-                f'<img src="{image_b64_list[idx]}" class="blog-img" alt="写真 {idx + 1}"/>'
-                f'</div>'
-            )
-        return ""
+    if structured_blocks:
+        for b in structured_blocks:
+            if b.get("type") == "img":
+                if img_idx < len(image_b64_list) and image_b64_list[img_idx]:
+                    body_elements.append(
+                        f'<div class="blog-img-wrap">'
+                        f'<img src="{image_b64_list[img_idx]}" class="blog-img" alt="写真 {img_idx + 1}"/>'
+                        f'</div>'
+                    )
+                img_idx += 1
+            else:
+                jp = (b.get("jp") or "").strip()
+                zh = (b.get("zh") or "").strip()
+                if not jp and not zh:
+                    continue
+                jp_escaped = html_lib.escape(jp).replace("\n", "<br>")
+                zh_escaped = html_lib.escape(zh).replace("\n", "<br>")
 
-    processed_body = re.sub(r'<img\s+src="[^"]+"\s*/?>', _replace_img, raw_html)
+                elem_html = '<div class="para-block">'
+                if jp_escaped:
+                    elem_html += f'<div class="jp-text">{jp_escaped}</div>'
+                if zh_escaped and "[翻译失败]" not in zh_escaped:
+                    elem_html += f'<div class="zh-text">{zh_escaped}</div>'
+                elem_html += '</div>'
+                body_elements.append(elem_html)
 
-    # 兜底：如果正文中未匹配完所有图片（或译文未包含 <img> 占位），将剩余的图片自动附在正文后
-    if img_counter[0] < len(image_b64_list):
-        trailing_imgs = []
-        for idx in range(img_counter[0], len(image_b64_list)):
-            if image_b64_list[idx]:
-                trailing_imgs.append(
+        # 兜底：如果还有剩余未渲染的图片，附在正文后
+        while img_idx < len(image_b64_list):
+            if image_b64_list[img_idx]:
+                body_elements.append(
+                    f'<div class="blog-img-wrap">'
+                    f'<img src="{image_b64_list[img_idx]}" class="blog-img" alt="写真 {img_idx + 1}"/>'
+                    f'</div>'
+                )
+            img_idx += 1
+
+        processed_body = "\n".join(body_elements)
+    else:
+        # 兼容传统 HTML 结构，去除 em 与 span 间冗余的空行 <br>
+        raw_html = post.get("translation") or post.get("body_text") or ""
+        raw_html = re.sub(r'</em>\s*(?:<br\s*/?>\s*)+<span>', '</em><span>', raw_html)
+
+        img_counter = [0]
+
+        def _replace_img(match):
+            idx = img_counter[0]
+            img_counter[0] += 1
+            if idx < len(image_b64_list) and image_b64_list[idx]:
+                return (
                     f'<div class="blog-img-wrap">'
                     f'<img src="{image_b64_list[idx]}" class="blog-img" alt="写真 {idx + 1}"/>'
                     f'</div>'
                 )
-        if trailing_imgs:
-            processed_body += "\n" + "\n".join(trailing_imgs)
+            return ""
+
+        processed_body = re.sub(r'<img\s+src="[^"]+"\s*/?>', _replace_img, raw_html)
+
+        # 兜底：若正文中未匹配完所有图片，将剩余图片附在文末
+        if img_counter[0] < len(image_b64_list):
+            trailing_imgs = []
+            for idx in range(img_counter[0], len(image_b64_list)):
+                if image_b64_list[idx]:
+                    trailing_imgs.append(
+                        f'<div class="blog-img-wrap">'
+                        f'<img src="{image_b64_list[idx]}" class="blog-img" alt="写真 {idx + 1}"/>'
+                        f'</div>'
+                    )
+            if trailing_imgs:
+                processed_body += "\n" + "\n".join(trailing_imgs)
 
     valid_images_count = sum(1 for b in image_b64_list if b)
     hero_b64 = next((b for b in image_b64_list if b), "")
@@ -268,35 +320,42 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     font-weight: 500;
   }}
 
-  /* Content Body with Crisp Large Typography */
+  /* Content Body with Crisp Large Typography & Tight Bilingual Pairing */
   .card-body {{
-    padding: 20px 44px 40px;
+    padding: 24px 44px 40px;
     font-size: 24px;
     line-height: 1.8;
   }}
 
-  .card-body p {{
-    margin-bottom: 30px;
+  .para-block {{
+    margin-bottom: 28px;
   }}
-  .card-body em {{
+
+  .jp-text, .card-body em {{
     display: block;
     color: #94a3b8;
     font-style: normal;
-    font-size: 21px;
-    line-height: 1.7;
-    margin-bottom: 8px;
+    font-size: 20px;
+    line-height: 1.65;
+    margin-bottom: 4px;
     opacity: 0.92;
     letter-spacing: 0.01em;
   }}
-  .card-body span {{
+
+  .zh-text, .card-body span {{
     display: block;
     color: #f8fafc;
     font-weight: 600;
     font-size: 24px;
     line-height: 1.75;
-    margin-bottom: 22px;
+    margin-bottom: 0;
     letter-spacing: 0.015em;
   }}
+
+  .card-body p {{
+    margin-bottom: 28px;
+  }}
+
   .card-body a {{
     color: {theme["accent"]};
     text-decoration: none;
@@ -306,7 +365,7 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
 
   /* Image styling */
   .blog-img-wrap {{
-    margin: 28px 0 32px;
+    margin: 28px 0;
     text-align: center;
   }}
   .blog-img {{
