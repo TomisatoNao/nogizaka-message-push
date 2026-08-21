@@ -175,6 +175,9 @@ async def backfill_hinatazaka(client: httpx.AsyncClient, db: sqlite3.Connection,
                 
                 body_el = a.find("div", class_="c-blog-article__text")
                 raw_html = str(body_el) if body_el else ""
+                m_bound = re.search(r'<(div|a|footer|section)[^>]*(p-button__blog_detail|c-button-blog-detail|p-blog-article|c-blog-member|p-footer|l-footer)[^>]*>', raw_html, flags=re.IGNORECASE)
+                if m_bound:
+                    raw_html = raw_html[:m_bound.start()].strip()
 
                 _c = [0]
                 def _ph(m):
