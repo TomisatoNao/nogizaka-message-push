@@ -733,6 +733,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_static(path.rsplit("/", 1)[1])
             return
         if path == "/login":
+            user = self._current_user()
+            if user is not None:
+                from urllib.parse import parse_qs, unquote
+                qs = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+                next_raw = qs.get("next", [""])[0]
+                target = unquote(next_raw) if (next_raw.startswith("/") and not next_raw.startswith("//")) else ("/" if user.get("role") == "admin" else "/archive")
+                if user.get("role") != "admin" and target != "/archive":
+                    target = "/archive"
+                self._redirect(target)
+                return
             self._send_html(_LOGIN_HTML_PATH)
             return
         if path == "/api/auth/me":

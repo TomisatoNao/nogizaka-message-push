@@ -161,9 +161,8 @@ function showNotice(html) {
       return;
     }
     if (me.user) {
-      $("msg").className = "msg ok";
-      $("msg").textContent = "已登录为 " + me.user.username + "，正在跳转…";
-      setTimeout(() => location.href = me.user.role === "admin" ? nextUrl() : "/archive", 500);
+      location.replace(me.user.role === "admin" ? nextUrl() : "/archive");
+      return;
     }
   } catch (e) { /* 离线时正常显示表单 */ }
 })();
