@@ -39,8 +39,8 @@ async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str]
                            timestamp: str = "") -> list[str]:
     """并发下载博客图片到本地，目录结构：{group}/{author}/{title}-{ts}/01.jpg"""
     import asyncio
-    safe_title = _re.sub(r'[\\/:*?"<>|]', '', title)[:50].strip()
-    safe_author = _re.sub(r'[\\/:*?"<>|]', '', author)[:20].strip()
+    safe_title = _re.sub(r'[\\/:*?"<>|#%&]', '', title)[:50].strip()
+    safe_author = _re.sub(r'[\\/:*?"<>|#%&]', '', author)[:20].strip()
     ts = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_ts = _re.sub(r'[^0-9_]', '', ts)[:15]
     dest_dir = BLOG_IMAGE_DIR / group_key / safe_author / f"{safe_title}-{safe_ts}"

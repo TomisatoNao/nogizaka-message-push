@@ -1410,6 +1410,14 @@ class _Handler(BaseHTTPRequestHandler):
             today_blog_cnt = 0
             blog_this_week = 0
 
+            def _encode_blog_media_url(rel_path: str) -> str:
+                if not rel_path:
+                    return ""
+                from urllib.parse import quote
+                parts = rel_path.replace("\\", "/").strip("/").split("/")
+                encoded_parts = [quote(p) for p in parts]
+                return "/api/archive/blog_media/" + "/".join(encoded_parts)
+
             blog_db = _get_blog_db()
             if blog_db:
                 try:
@@ -1433,7 +1441,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 lp = dict(lp_row)
                                 imgs = json.loads(lp.get("image_paths_json") or "[]")
                                 first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
-                                cover = f"/api/archive/blog_media/{first_img}" if first_img else ""
+                                cover = _encode_blog_media_url(first_img) if first_img else ""
                                 latest_post = {
                                     "id": lp["id"],
                                     "author": lp["author"],
@@ -1462,7 +1470,7 @@ class _Handler(BaseHTTPRequestHandler):
                         bp = dict(r)
                         imgs = json.loads(bp.get("image_paths_json") or "[]")
                         first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
-                        cover = f"/api/archive/blog_media/{first_img}" if first_img else ""
+                        cover = _encode_blog_media_url(first_img) if first_img else ""
                         gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
                         gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
                         recent_blogs.append({

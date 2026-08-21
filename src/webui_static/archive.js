@@ -29,7 +29,19 @@ let curMode = "msg";     // "msg" 或 "blog"
 let curBlogAuthor = "";  // 当前选中的博客作者
 let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
-function mediaUrl(u) { return u + (authToken ? "?token=" + encodeURIComponent(authToken) : ""); }
+function mediaUrl(u) {
+  if (!u) return "";
+  if (!authToken) return u;
+  const hashIdx = u.indexOf('#');
+  if (hashIdx !== -1) {
+    const base = u.substring(0, hashIdx);
+    const frag = u.substring(hashIdx);
+    const sep = base.includes('?') ? '&' : '?';
+    return base + sep + 'token=' + encodeURIComponent(authToken) + frag;
+  }
+  const sep = u.includes('?') ? '&' : '?';
+  return u + sep + 'token=' + encodeURIComponent(authToken);
+}
 
 window.handleImgError = function(img) {
   const retryCount = parseInt(img.dataset.retry || "0", 10);

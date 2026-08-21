@@ -429,8 +429,8 @@ async def render_blog_card(post: dict) -> Optional[Path]:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     group_key = post.get("group_key", "blog")
-    safe_author = re.sub(r'[\\/:*?"<>|]', '', post.get("author", "author"))[:20].strip()
-    safe_title = re.sub(r'[\\/:*?"<>|]', '', post.get("title", "title"))[:30].strip()
+    safe_author = re.sub(r'[\\/:*?"<>|#%&]', '', post.get("author", "author"))[:20].strip()
+    safe_title = re.sub(r'[\\/:*?"<>|#%&]', '', post.get("title", "title"))[:30].strip()
     safe_ts = re.sub(r'[\\/:*?"<>|\\s-]', '', post.get("date", ""))[:12]
 
     base_name = f"{group_key}_{safe_author}_{safe_title}_{safe_ts}"
