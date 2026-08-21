@@ -583,14 +583,14 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
     if not items_to_translate:
         return [], ""  # 无需翻译
 
-    # 3. 动态自适应批次（按字符数与项数动态切分，单批限制在 1200 字符内，最多 12 项，彻底避免 MAX_TOKENS 截断）
+    # 3. 动态自适应大批次（支持全篇单次吞吐，最大 5000 字符 / 60 段，兼顾全篇全局文脉与大模型高吞吐量）
     batches = []
     curr_batch = []
     curr_len = 0
     all_keys = list(items_to_translate.keys())
     for k in all_keys:
         t_len = len(items_to_translate[k])
-        if curr_batch and (curr_len + t_len > 1200 or len(curr_batch) >= 12):
+        if curr_batch and (curr_len + t_len > 5000 or len(curr_batch) >= 60):
             batches.append(curr_batch)
             curr_batch = [k]
             curr_len = t_len
