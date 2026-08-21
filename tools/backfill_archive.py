@@ -41,7 +41,7 @@ from config.credentials import (
     proactive_refresh_if_expiring,
     validate_account_cred,
 )
-from src import archive
+from src import archive, tagger
 from src.logger import init_loggers, log_all
 from src.member_directory import api_base, build_headers
 
@@ -260,10 +260,12 @@ async def main() -> None:
     print(f"═══ 历史回填（{len(targets)} 个成员，起始 {start_from}）═══")
     client = httpx.AsyncClient(timeout=30)
     archive.initialize(client)
+    tagger.initialize(client)
     progress = _load_progress()
     try:
         for member in targets:      # 串行：避免同账号并发
             await backfill_member(client, member, start_from, progress)
+        await tagger.wait_pending(timeout=10)
     finally:
         await client.aclose()
     log_all("历史回填完成", is_debug=True)

@@ -43,8 +43,16 @@ _TAG_PROMPT = (
 )
 
 # ── 模块级状态 ──
-_limiter: RateLimiter = None
+_limiter: RateLimiter | None = None
 _http_client: httpx.AsyncClient | None = None
+
+
+def _get_limiter() -> RateLimiter:
+    """获取或自愈创建限流器（确保即使未显式调用 initialize 也能正常工作）。"""
+    global _limiter
+    if _limiter is None:
+        _limiter = RateLimiter(lambda: cfg.GEMINI_TAG_MIN_INTERVAL)
+    return _limiter
 
 
 def initialize(client: httpx.AsyncClient | None = None) -> None:
@@ -105,7 +113,8 @@ async def tag_image(member_dir: str, local_file: str) -> str:
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 64},
     }
 
-    async with _limiter:
+    limiter = _get_limiter()
+    async with limiter:
         for model in cfg.GEMINI_TAG_MODELS:
             url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
             for attempt in range(2):
@@ -164,29 +173,32 @@ def schedule_tag(member_dir: str, msg: dict) -> None:
 
 
 async def _do_tag(member_dir: str, msg: dict, local_file: str) -> None:
-    """内部：打标签并合并写回归档。"""
-    tags = await tag_image(member_dir, local_file)
-    if not tags:
-        return
-
-    # 写回归档（复用 archive.py 的 _merge_write）
-    from src.archive import _merge_write
-    from datetime import datetime as _dt
-
-    utc_str = msg.get("updated_at") or msg.get("published_at", "")
+    """内部：打标签并合并写回归档（全异常捕获保障）。"""
     try:
-        dt = _dt.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
-    except (ValueError, TypeError):
-        log_all(f"⚠️ 打标签：无法解析时间戳 {utc_str!r}", is_debug=True)
-        return
+        tags = await tag_image(member_dir, local_file)
+        if not tags:
+            return
 
-    delta = {
-        "id": msg.get("id"),
-        "updated_at": msg.get("updated_at"),
-        "_tags": tags,
-    }
-    await _merge_write(member_dir, dt, delta)
-    log_all(f"🏷️ [{member_dir}] 图片打标签完成: {tags}")
+        # 写回归档（复用 archive.py 的 _merge_write）
+        from src.archive import _merge_write
+        from datetime import datetime as _dt
+
+        utc_str = msg.get("updated_at") or msg.get("published_at", "")
+        try:
+            dt = _dt.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, TypeError):
+            log_all(f"⚠️ 打标签：无法解析时间戳 {utc_str!r}", is_debug=True)
+            return
+
+        delta = {
+            "id": msg.get("id"),
+            "updated_at": msg.get("updated_at"),
+            "_tags": tags,
+        }
+        await _merge_write(member_dir, dt, delta)
+        log_all(f"🏷️ [{member_dir}] 图片打标签完成: {tags}")
+    except Exception as e:
+        log_all(f"⚠️ 后台打标签异常 [{member_dir}/{local_file}]: {e}", is_debug=True)
 
 
 async def wait_pending(timeout: float = 60) -> None:
