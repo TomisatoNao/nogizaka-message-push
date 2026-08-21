@@ -540,6 +540,7 @@ async function loadBlogAuthors(key) {
       bar.appendChild(allBtn);
       
       data.authors.forEach(a => {
+        if (!a || !a.name || !a.name.trim()) return;
         const btn = document.createElement("button");
         const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
         btn.className = "blog-author-chip" + (isMatch ? " active" : "");

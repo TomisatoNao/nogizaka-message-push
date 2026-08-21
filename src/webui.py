@@ -1772,10 +1772,11 @@ class _Handler(BaseHTTPRequestHandler):
                 db = _get_blog_db()
                 for r in db.execute("""
                     SELECT author, COUNT(*)
-                    FROM blog_posts WHERE group_key=?
+                    FROM blog_posts WHERE group_key=? AND author != '' AND author IS NOT NULL
                     GROUP BY author ORDER BY COUNT(*) DESC
                 """, (group,)).fetchall():
-                    authors.append({"name": r[0], "total": r[1]})
+                    if r[0] and str(r[0]).strip():
+                        authors.append({"name": str(r[0]).strip(), "total": r[1]})
             except Exception:
                 pass
             self._send_json({"ok": True, "group": group, "authors": authors})
