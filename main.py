@@ -4,11 +4,25 @@
 import asyncio
 import sys
 
-# Windows 终端 Unicode/Emoji 输出兼容保护
+# Windows 终端 Unicode/Emoji 输出与 asyncio Proactor IOCP 保护
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    try:
+        from asyncio.windows_events import _OverlappedFuture
+        _orig_set_exception = _OverlappedFuture.set_exception
+
+        def _safe_set_exception(self, exception):
+            if not self.done():
+                try:
+                    _orig_set_exception(self, exception)
+                except asyncio.InvalidStateError:
+                    pass
+
+        _OverlappedFuture.set_exception = _safe_set_exception
     except Exception:
         pass
 

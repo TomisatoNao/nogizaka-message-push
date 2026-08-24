@@ -868,6 +868,18 @@ async def main() -> None:
     # 7. 可选启动网页管理端（config.json 的 web_admin.enabled 控制）
     #    重启回调运行在 HTTP 处理线程：走优雅停机流程，清理完毕后 execv 自替换
     loop = asyncio.get_running_loop()
+
+    # Windows 平台 IOCP 异步操作中止容错（防止 WinError 995 异常中断事件循环）
+    def _loop_exception_handler(current_loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, (ConnectionResetError, OSError)) and getattr(exc, "winerror", None) == 995:
+            return
+        if isinstance(exc, asyncio.InvalidStateError) and sys.platform == "win32":
+            return
+        current_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_loop_exception_handler)
+
     restart_requested = False
     poll_event = asyncio.Event()
 
