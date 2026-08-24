@@ -502,24 +502,20 @@ async def _run_cycle() -> None:
                 return_exceptions=True,
             )
 
-            # Phase 2: 按 shuffled 顺序逐个成员串行推送
-            error_members = []
-            for i, result in enumerate(fetch_results):
+            # Phase 2: 多成员并发流水线推送（各成员内部保持时间顺序，跨成员完全并发）
+            async def _push_one_member(i: int, result) -> str | None:
                 member = shuffled[i]
                 name = member['m_name'].replace(" ", "")
 
                 if isinstance(result, Exception):
                     log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
-                    error_members.append(name)
-                    continue
+                    return name
 
                 if result is None:
                     log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
-                    error_members.append(name)
-                    continue
+                    return name
 
                 new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
-                # 单个成员的推送异常不应波及其他成员（record_member_push 内部已记 TRANSIENT 错误）
                 try:
                     ok = await fetcher.push_member_messages(
                         member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
@@ -527,11 +523,14 @@ async def _run_cycle() -> None:
                 except Exception:
                     log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
                     health.get_tracker().record_member_push(name, False)
-                    error_members.append(name)
-                    continue
+                    return name
 
-                if not ok:
-                    error_members.append(name)
+                return None if ok else name
+
+            push_results = await asyncio.gather(
+                *[_push_one_member(i, res) for i, res in enumerate(fetch_results)]
+            )
+            error_members = [name for name in push_results if name]
 
             if not error_members:
                 log_all(f"🔍 巡查完毕 [{member_names}]")

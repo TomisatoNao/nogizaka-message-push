@@ -135,158 +135,157 @@ class SocialForwarder:
         async def _do_broadcast():
             any_success = False
             errors = []
+            tasks = []
 
-            # ── A. Telegram Bot 推送 ──────────────────────────────
+            # ── A. Telegram Bot 并发推送 ──────────────────────────────
             if getattr(cfg, "ENABLE_TG_BOT", False) and (not target_channels or any(c == "tg" or c.startswith("tg:") for c in target_channels)):
-                try:
-                    for b in tgbot.get_configured_bots():
-                        if not b.token or not b.target_chat:
+                for b in tgbot.get_configured_bots():
+                    if not b.token or not b.target_chat:
+                        continue
+                    if target_channels:
+                        tg_matches = [c for c in target_channels if c == "tg" or c == f"tg:{b.target_chat}" or c == f"tg:{getattr(b, 'name', '')}"]
+                        if not tg_matches:
                             continue
-                        if target_channels:
-                            tg_matches = [c for c in target_channels if c == "tg" or c == f"tg:{b.target_chat}" or c == f"tg:{getattr(b, 'name', '')}"]
-                            if not tg_matches:
-                                continue
-                        else:
-                            # 1) 平台开关校验
-                            if not getattr(b, f"push_{plat}", True):
-                                continue
-                            # 2) 成员过滤（若本动态归属于某个成员且该通道配置了成员过滤）
-                            if m_name and b.member_filter and not match_member_filter(m_name, b.member_filter):
-                                continue
-                            # 3) 社媒账号过滤（若该通道配置了社媒账号白名单）
-                            if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
-                                continue
+                    else:
+                        if not getattr(b, f"push_{plat}", True):
+                            continue
+                        if m_name and b.member_filter and not match_member_filter(m_name, b.member_filter):
+                            continue
+                        if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
+                            continue
 
-                        # 发送文本
-                        t_ok = await b._post_message(b.target_chat, full_text)
-                        # 发送媒体
-                        for m in post.media:
-                            fp = m.local_path
-                            if fp and os.path.exists(fp):
-                                if m.type == "image":
-                                    try:
-                                        with open(fp, "rb") as photo_file:
-                                            await b._bot.send_photo(chat_id=b.target_chat, photo=photo_file)
-                                    except Exception as ex:
-                                        log_all(f"⚠️ TG Bot 发送图片异常: {ex}", is_error=True)
-                                elif m.type == "video":
-                                    try:
-                                        with open(fp, "rb") as video_file:
-                                            await b._bot.send_video(chat_id=b.target_chat, video=video_file)
-                                    except Exception as ex:
-                                        log_all(f"⚠️ TG Bot 发送视频异常: {ex}", is_error=True)
-                        if t_ok:
-                            any_success = True
-                except Exception as e:
-                    errors.append(f"Telegram 推送失败: {e}")
+                    async def _send_tg_post(target_bot=b):
+                        try:
+                            t_ok = await target_bot._post_message(target_bot.target_chat, full_text)
+                            for m in post.media:
+                                fp = m.local_path
+                                if fp and os.path.exists(fp):
+                                    if m.type == "image":
+                                        try:
+                                            with open(fp, "rb") as photo_file:
+                                                await target_bot._bot.send_photo(chat_id=target_bot.target_chat, photo=photo_file)
+                                        except Exception as ex:
+                                            log_all(f"⚠️ TG Bot 发送图片异常: {ex}", is_error=True)
+                                    elif m.type == "video":
+                                        try:
+                                            with open(fp, "rb") as video_file:
+                                                await target_bot._bot.send_video(chat_id=target_bot.target_chat, video=video_file)
+                                        except Exception as ex:
+                                            log_all(f"⚠️ TG Bot 发送视频异常: {ex}", is_error=True)
+                            return t_ok
+                        except Exception as e:
+                            errors.append(f"Telegram 推送失败: {e}")
+                            return False
 
-            # ── B. NapCat QQ 群推送 ──────────────────────────────
+                    tasks.append(_send_tg_post())
+
+            # ── B. NapCat QQ 群并发推送 ──────────────────────────────
             if getattr(cfg, "ENABLE_NAPCAT_QQ", False) and (not target_channels or any(c == "napcat" or c.startswith("napcat:") for c in target_channels)):
-                try:
-                    chain = [{"type": "text", "data": {"text": full_text}}]
-                    for m in post.media:
-                        fp = m.local_path
-                        if fp and os.path.exists(fp):
-                            abs_uri = "file:///" + os.path.abspath(fp).replace("\\", "/")
-                            if m.type == "image":
-                                chain.append({"type": "image", "data": {"file": abs_uri}})
-                            elif m.type == "video":
-                                chain.append({"type": "video", "data": {"file": abs_uri}})
-                            elif m.type == "audio":
-                                chain.append({"type": "record", "data": {"file": abs_uri}})
-                    # 按照各路由配置精准路由
-                    routes = getattr(cfg, "NAPCAT_ROUTES", [])
-                    for r in routes:
-                        gid = r.get("group_id")
-                        if not gid:
+                chain = [{"type": "text", "data": {"text": full_text}}]
+                for m in post.media:
+                    fp = m.local_path
+                    if fp and os.path.exists(fp):
+                        abs_uri = "file:///" + os.path.abspath(fp).replace("\\", "/")
+                        if m.type == "image":
+                            chain.append({"type": "image", "data": {"file": abs_uri}})
+                        elif m.type == "video":
+                            chain.append({"type": "video", "data": {"file": abs_uri}})
+                        elif m.type == "audio":
+                            chain.append({"type": "record", "data": {"file": abs_uri}})
+
+                for r in getattr(cfg, "NAPCAT_ROUTES", []):
+                    gid = r.get("group_id")
+                    if not gid:
+                        continue
+                    if target_channels:
+                        nap_matches = [c for c in target_channels if c == "napcat" or c == f"napcat:{gid}"]
+                        if not nap_matches:
                             continue
-                        if target_channels:
-                            nap_matches = [c for c in target_channels if c == "napcat" or c == f"napcat:{gid}"]
-                            if not nap_matches:
-                                continue
-                        else:
-                            # 1) 平台开关校验
-                            if not r.get(f"push_{plat}", True):
-                                continue
-                            # 2) 成员过滤
-                            m_filters = r.get("member_filter") or []
-                            if m_name and m_filters and not match_member_filter(m_name, m_filters):
-                                continue
-                            # 3) 社媒账号过滤
-                            s_filters = r.get("social_filter") or []
-                            if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
-                                continue
+                    else:
+                        if not r.get(f"push_{plat}", True):
+                            continue
+                        m_filters = r.get("member_filter") or []
+                        if m_name and m_filters and not match_member_filter(m_name, m_filters):
+                            continue
+                        s_filters = r.get("social_filter") or []
+                        if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
+                            continue
 
-                        ok = await napcat.send_qq_message(gid, chain)
-                        if ok:
-                            any_success = True
-                except Exception as e:
-                    errors.append(f"NapCat 推送失败: {e}")
+                    async def _send_napcat_post(target_gid=gid):
+                        try:
+                            return await napcat.send_qq_message(target_gid, chain)
+                        except Exception as e:
+                            errors.append(f"NapCat 推送失败 (群 {target_gid}): {e}")
+                            return False
 
-            # ── C. QQ 官方机器人推送 ─────────────────────────────
+                    tasks.append(_send_napcat_post())
+
+            # ── C. QQ 官方机器人并发推送 ─────────────────────────────
             if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False) and (not target_channels or any(c == "qq_official" or c.startswith("official:") for c in target_channels)):
-                try:
-                    bots = qq_official.get_configured_bots()
-                    for bot in bots:
-                        send_private = bool(bot.target_openid)
-                        send_group = bool(getattr(bot, "group_openid", None))
+                for bot in qq_official.get_configured_bots():
+                    send_private = bool(bot.target_openid)
+                    send_group = bool(getattr(bot, "group_openid", None))
 
-                        if target_channels:
-                            priv_keys = {
-                                "qq_official",
-                                f"official:{bot.name}",
-                                f"official:{bot.name}:private",
-                                f"official:{bot.app_id}",
-                                f"official:{bot.app_id}:private",
-                                f"official:{bot.target_openid}",
-                            }
-                            grp_keys = {
-                                "qq_official",
-                                f"official:{bot.name}",
-                                f"official:{bot.name}:group",
-                                f"official:{bot.app_id}",
-                                f"official:{bot.app_id}:group",
-                                f"official:{getattr(bot, 'group_openid', '')}",
-                            }
-                            send_private = send_private and any(k in target_channels for k in priv_keys if k)
-                            send_group = send_group and any(k in target_channels for k in grp_keys if k)
-                            if not send_private and not send_group:
-                                continue
-                        else:
-                            # 1) 平台开关校验
-                            if not getattr(bot, f"push_{plat}", True):
-                                continue
-                            # 2) 成员过滤
-                            if m_name and bot.member_filter and not match_member_filter(m_name, bot.member_filter):
-                                continue
-                            # 3) 社媒账号过滤
-                            if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
-                                continue
+                    if target_channels:
+                        priv_keys = {
+                            "qq_official",
+                            f"official:{bot.name}",
+                            f"official:{bot.name}:private",
+                            f"official:{bot.app_id}",
+                            f"official:{bot.app_id}:private",
+                            f"official:{bot.target_openid}",
+                        }
+                        grp_keys = {
+                            "qq_official",
+                            f"official:{bot.name}",
+                            f"official:{bot.name}:group",
+                            f"official:{bot.app_id}",
+                            f"official:{bot.app_id}:group",
+                            f"official:{getattr(bot, 'group_openid', '')}",
+                        }
+                        send_private = send_private and any(k in target_channels for k in priv_keys if k)
+                        send_group = send_group and any(k in target_channels for k in grp_keys if k)
+                        if not send_private and not send_group:
+                            continue
+                    else:
+                        if not getattr(bot, f"push_{plat}", True):
+                            continue
+                        if m_name and bot.member_filter and not match_member_filter(m_name, bot.member_filter):
+                            continue
+                        if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
+                            continue
 
-                        if send_private and bot.target_openid:
-                            await bot.send_private_text(bot.target_openid, full_text)
-                            any_success = True
-                        if send_group and getattr(bot, "group_openid", None):
-                            await bot.send_group_text(bot.group_openid, full_text)
-                            any_success = True
+                    async def _send_official_post(b=bot, sp=send_private, sg=send_group):
+                        try:
+                            if sp and b.target_openid:
+                                await b.send_private_text(b.target_openid, full_text)
+                            if sg and getattr(b, "group_openid", None):
+                                await b.send_group_text(b.group_openid, full_text)
 
-                        # 发送媒体附件（图片 / 视频 / 音频）
-                        for m in post.media:
-                            fp = m.local_path
-                            if fp and os.path.exists(fp):
-                                try:
-                                    with open(fp, "rb") as mf:
-                                        m_bytes = mf.read()
-                                    if m_bytes:
-                                        m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
-                                        if send_private and bot.target_openid:
-                                            await bot.send_media_file("users", bot.target_openid, m_type, m_bytes)
-                                        if send_group and getattr(bot, "group_openid", None):
-                                            await bot.send_media_file("groups", bot.group_openid, m_type, m_bytes)
-                                except Exception as ex:
-                                    log_all(f"⚠️ QQ 官方 Bot 发送媒体异常: {ex}", is_error=True)
-                except Exception as e:
-                    errors.append(f"QQ 官方机器人推送失败: {e}")
+                            for m in post.media:
+                                fp = m.local_path
+                                if fp and os.path.exists(fp):
+                                    try:
+                                        with open(fp, "rb") as mf:
+                                            m_bytes = mf.read()
+                                        if m_bytes:
+                                            m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
+                                            if sp and b.target_openid:
+                                                await b.send_media_file("users", b.target_openid, m_type, m_bytes)
+                                            if sg and getattr(b, "group_openid", None):
+                                                await b.send_media_file("groups", b.group_openid, m_type, m_bytes)
+                                    except Exception as ex:
+                                        log_all(f"⚠️ QQ 官方 Bot 发送媒体异常: {ex}", is_error=True)
+                            return True
+                        except Exception as e:
+                            errors.append(f"QQ 官方机器人推送失败 [{b.name}]: {e}")
+                            return False
+
+                    tasks.append(_send_official_post())
+
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                any_success = any(isinstance(r, bool) and r for r in results)
 
             return any_success, errors
 

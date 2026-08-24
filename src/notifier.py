@@ -24,20 +24,20 @@ def enabled_channels() -> list[str]:
 
 
 async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
-    """向已启用的通道广播成员消息。
+    """向已启用的各通道并发广播成员消息。
 
-    解耦模式下：各通道按自己的 target/group 和 member_filter 进行独立路由。
+    解耦模式下：各通道按自己的 target/group 和 member_filter 进行独立路由与并发投递。
     返回 True 表示至少一个通道发送成功，或没有启用任何通道（不应重试）；
     返回 False 表示启用的通道全部失败（需要按重试逻辑处理）。
     """
+    import asyncio
     m_name = member.get("name", "未知成员")
     m_id = member.get("id")
-    napcat_ok = True
+    tasks = []
 
-    # 1. NapCat QQ 路由
+    # 1. NapCat QQ 路由并发任务
     if cfg.ENABLE_NAPCAT_QQ:
         routes = getattr(cfg, "NAPCAT_ROUTES", [])
-        matched_any = False
         for route in routes:
             if not route.get("push_message", True):
                 continue
@@ -45,160 +45,145 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
             if match_member_filter(m_name, filters, m_id):
                 gid = route.get("group_id")
                 if gid:
-                    matched_any = True
-                    ok = await send_qq_message(gid, message_chain)
-                    health.get_tracker().record_channel("napcat", ok, f"群 {gid} 发送失败")
-                    if not ok:
-                        napcat_ok = False
-                        log_all(f"⚠️ [通道: NapCat | 目标群: {gid} | 成员: {m_name}] 消息推送失败", is_error=True)
-                    else:
-                        log_all(f"✅ [通道: NapCat | 目标群: {gid} | 成员: {m_name}] 消息推送成功", is_debug=True)
-        if not matched_any:
-            napcat_ok = True
+                    async def _send_napcat(target_gid=gid):
+                        ok = await send_qq_message(target_gid, message_chain)
+                        health.get_tracker().record_channel("napcat", ok, f"群 {target_gid} 发送失败")
+                        if not ok:
+                            log_all(f"⚠️ [通道: NapCat | 目标群: {target_gid} | 成员: {m_name}] 消息推送失败", is_error=True)
+                        else:
+                            log_all(f"✅ [通道: NapCat | 目标群: {target_gid} | 成员: {m_name}] 消息推送成功", is_debug=True)
+                        return ok
+                    tasks.append(_send_napcat())
 
-    # 2. QQ 官方 Bot 路由
+    # 2. QQ 官方 Bot 路由并发任务
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
         bots = get_configured_bots()
-        media_payloads = None
         if bots:
             media_payloads = await qq_official.download_media_payloads(member, message_chain)
+            for bot in bots:
+                # 单聊目标（target_openid）
+                if bot.target_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                    async def _send_bot_private(b=bot):
+                        ok = await b.send_message_chain(member, message_chain, media_payloads=media_payloads)
+                        health.get_tracker().record_channel(f"official:{b.name}", ok)
+                        if not ok:
+                            log_all(f"⚠️ [通道: 官方Bot:{b.name} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送失败", is_error=True)
+                        else:
+                            log_all(f"✅ [通道: 官方Bot:{b.name} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送成功", is_debug=True)
+                        return ok
+                    tasks.append(_send_bot_private())
 
-        # 单聊目标（target_openid）—— 受 member_filter 过滤
-        for bot in bots:
-            if not bot.target_openid or not bot.push_message:
-                continue
-            if not match_member_filter(m_name, bot.member_filter, m_id):
-                continue
-            ok = await bot.send_message_chain(member, message_chain, media_payloads=media_payloads)
-            health.get_tracker().record_channel(f"official:{bot.name}", ok)
-            if not ok:
-                log_all(f"⚠️ [通道: 官方Bot:{bot.name} | 目标: {bot.target_openid[:10]}... | 成员: {m_name}] 单聊推送失败", is_error=True)
-            else:
-                log_all(f"✅ [通道: 官方Bot:{bot.name} | 目标: {bot.target_openid[:10]}... | 成员: {m_name}] 单聊推送成功", is_debug=True)
+                # 群聊目标（group_openid）
+                if bot.group_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                    async def _send_bot_group(b=bot):
+                        ok = await b.send_message_chain_to_group(b.group_openid, member, message_chain, media_payloads=media_payloads)
+                        health.get_tracker().record_channel(f"official:{b.name}:group", ok)
+                        if not ok:
+                            log_all(f"⚠️ [通道: 官方Bot:{b.name} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送失败", is_error=True)
+                        else:
+                            log_all(f"✅ [通道: 官方Bot:{b.name} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送成功", is_debug=True)
+                        return ok
+                    tasks.append(_send_bot_group())
 
-        # 群聊目标（group_openid）—— 受 member_filter 过滤
-        for bot in bots:
-            if not bot.group_openid or not bot.push_message:
-                continue
-            if not match_member_filter(m_name, bot.member_filter, m_id):
-                continue
-            ok = await bot.send_message_chain_to_group(
-                bot.group_openid, member, message_chain, media_payloads=media_payloads)
-            health.get_tracker().record_channel(f"official:{bot.name}:group", ok)
-            if not ok:
-                log_all(f"⚠️ [通道: 官方Bot:{bot.name} | 目标群: {bot.group_openid[:10]}... | 成员: {m_name}] 群推送失败", is_error=True)
-            else:
-                log_all(f"✅ [通道: 官方Bot:{bot.name} | 目标群: {bot.group_openid[:10]}... | 成员: {m_name}] 群推送成功", is_debug=True)
-
-    # 3. TG Bot 路由
+    # 3. TG Bot 路由并发任务
     if cfg.ENABLE_TG_BOT:
         tg_bots = tgbot.get_configured_bots()
         for bot in tg_bots:
-            if not bot.target_chat or not bot.push_message:
-                continue
-            if not match_member_filter(m_name, bot.member_filter, m_id):
-                continue
-            tg_ok = await bot.send_member_message(message_chain)
-            health.get_tracker().record_channel(f"tg:{bot.name}", tg_ok)
-            if not tg_ok:
-                log_all(f"⚠️ [通道: TG:{bot.name} | TargetChat: {bot.target_chat} | 成员: {m_name}] 推送失败", is_error=True)
-            else:
-                log_all(f"✅ [通道: TG:{bot.name} | TargetChat: {bot.target_chat} | 成员: {m_name}] 推送成功", is_debug=True)
+            if bot.target_chat and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                async def _send_tg(b=bot):
+                    tg_ok = await b.send_member_message(message_chain)
+                    health.get_tracker().record_channel(f"tg:{b.name}", tg_ok)
+                    if not tg_ok:
+                        log_all(f"⚠️ [通道: TG:{b.name} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送失败", is_error=True)
+                    else:
+                        log_all(f"✅ [通道: TG:{b.name} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送成功", is_debug=True)
+                    return tg_ok
+                tasks.append(_send_tg())
 
-    if cfg.ENABLE_NAPCAT_QQ:
-        return napcat_ok
-    return True
+    if not tasks:
+        return True
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return any(isinstance(r, bool) and r for r in results)
 
 
 async def send_report_message(text: str) -> bool:
-    """向所有已启用通道发送运行报告（每日摘要等，非警报语义、无前缀）。
-    目标取告警通道。"""
-    any_ok = False
+    """向所有已启用通道并发发送运行报告（每日摘要等，非警报语义、无前缀）。"""
+    import asyncio
+    tasks = []
 
     if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
-        routes = getattr(cfg, "NAPCAT_ROUTES", [])
-        for route in routes:
-            if not route.get("push_alert"):
-                continue
-            gid = route.get("group_id")
-            if gid:
-                ok = await send_qq_message(gid, [{"type": "text", "data": {"text": text}}])
-                any_ok = any_ok or ok
+        for route in getattr(cfg, "NAPCAT_ROUTES", []):
+            if route.get("push_alert") and route.get("group_id"):
+                tasks.append(send_qq_message(route["group_id"], [{"type": "text", "data": {"text": text}}]))
 
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
         for bot in get_configured_bots():
-            if not bot.target_openid or not bot.push_alert:
-                continue
-            if await bot.send_text(text):
-                any_ok = True
+            if bot.target_openid and bot.push_alert:
+                tasks.append(bot.send_text(text))
 
     if getattr(cfg, "ENABLE_TG_BOT", False):
         for bot in tgbot.get_configured_bots():
-            if not bot.target_chat or not bot.push_alert:
-                continue
-            if await bot.send_text(text):
-                any_ok = True
+            if bot.target_chat and bot.push_alert:
+                tasks.append(bot.send_text(text))
 
-    return any_ok
+    if not tasks:
+        return False
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return any(isinstance(r, bool) and r for r in results)
 
 
 async def send_alert_message(target_group: int, text: str) -> bool:
-    """向所有配置为推送告警的通道发送系统警报。"""
+    """向所有配置为推送告警的通道并发发送系统警报。"""
+    import asyncio
     channels = enabled_channels()
     if not channels:
         log_all(f"⏸️ 没有可用的推送通道，警报未发送: {text}", is_error=True)
         return False
 
-    any_ok = False
+    tasks = []
 
-    # NapCat 群告警（发给开启了 push_alert 的路由）
+    # NapCat 群告警
     if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
-        routes = getattr(cfg, "NAPCAT_ROUTES", [])
-        for route in routes:
-            if not route.get("push_alert"):
-                continue
-            gid = route.get("group_id")
-            if gid:
-                alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
-                ok = await send_qq_message(gid, alert_chain)
-                if ok:
-                    any_ok = True
-                else:
-                    health.get_tracker().record_error(
-                        f"NapCat 告警发送失败 (群 {gid})", ErrorTier.TRANSIENT
-                    )
-                    if error_logger:
-                        error_logger.error(f"NapCat 告警发送失败: {text}")
+        for route in getattr(cfg, "NAPCAT_ROUTES", []):
+            if route.get("push_alert") and route.get("group_id"):
+                gid = route["group_id"]
+                async def _send_napcat_alert(target_gid=gid):
+                    alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
+                    ok = await send_qq_message(target_gid, alert_chain)
+                    if not ok:
+                        health.get_tracker().record_error(f"NapCat 告警发送失败 (群 {target_gid})", ErrorTier.TRANSIENT)
+                        if error_logger:
+                            error_logger.error(f"NapCat 告警发送失败: {text}")
+                    return ok
+                tasks.append(_send_napcat_alert())
 
-    # QQ 官方 Bot 告警 — 发给开启了 push_alert 的 Bot
+    # QQ 官方 Bot 告警
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
-        bots = get_configured_bots()
-        for bot in bots:
-            if not bot.target_openid or not bot.push_alert:
-                continue
-            ok = await bot.send_text(f"📢 系统警报\n{text}")
-            if ok:
-                any_ok = True
-            else:
-                health.get_tracker().record_error(
-                    f"官方Bot [{bot.name}] 告警发送失败", ErrorTier.TRANSIENT
-                )
+        for bot in get_configured_bots():
+            if bot.target_openid and bot.push_alert:
+                async def _send_bot_alert(b=bot):
+                    ok = await b.send_text(f"📢 系统警报\n{text}")
+                    if not ok:
+                        health.get_tracker().record_error(f"官方Bot [{b.name}] 告警发送失败", ErrorTier.TRANSIENT)
+                    return ok
+                tasks.append(_send_bot_alert())
 
-    # TG Bot 告警 — 发给开启了 push_alert 的 Bot
+    # TG Bot 告警
     if getattr(cfg, "ENABLE_TG_BOT", False):
-        tg_bots = tgbot.get_configured_bots()
-        for bot in tg_bots:
-            if not bot.push_alert or not bot.target_chat:
-                continue
-            ok = await bot.send_text(f"📢 系统警报\n{text}")
-            if ok:
-                any_ok = True
-            else:
-                health.get_tracker().record_error(
-                    f"TG Bot [{bot.name}] 告警发送失败", ErrorTier.TRANSIENT
-                )
+        for bot in tgbot.get_configured_bots():
+            if bot.push_alert and bot.target_chat:
+                async def _send_tg_alert(b=bot):
+                    ok = await b.send_text(f"📢 系统警报\n{text}")
+                    if not ok:
+                        health.get_tracker().record_error(f"TG Bot [{b.name}] 告警发送失败", ErrorTier.TRANSIENT)
+                    return ok
+                tasks.append(_send_tg_alert())
 
-    return any_ok
+    if not tasks:
+        return False
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return any(isinstance(r, bool) and r for r in results)
 
 
 # ── 博客推送 ──
@@ -338,8 +323,6 @@ async def send_blog_post(post: dict) -> bool:
     except Exception as e:
         log_all(f"💡 长图卡片预渲染跳过或失败，自动降级为标准图文: {e}", is_debug=True)
 
-    any_ok = False
-
     # 辅助函数：向 QQ 官方 Bot 发送全量原始写真
     async def _send_qq_official_raw_images(bot, scope, target):
         local_paths = post.get("image_paths") or []
@@ -373,79 +356,72 @@ async def send_blog_post(post: dict) -> bool:
                 log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送异常: {ex}", is_debug=True)
             await asyncio.sleep(0.4)
 
+    tasks = []
+
     # ----------------------------------------------------
-    # Channel 1: QQ 官方 Bot (受 push_blog + blog_filter 控制)
+    # Channel 1: QQ 官方 Bot 并发分发
     # ----------------------------------------------------
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
         from src.platforms.qq_official import get_configured_bots
-        bots = get_configured_bots()
-        for bot in bots:
-            if not bot.group_openid and not bot.target_openid:
+        for bot in get_configured_bots():
+            if not bot.target_openid and not bot.group_openid:
                 continue
             if not getattr(bot, "push_blog", False):
                 continue
             if bot.blog_filter and group_key not in bot.blog_filter:
                 continue
 
-            try:
-                scope = "groups" if bot.group_openid else "users"
-                target = bot.group_openid if bot.group_openid else bot.target_openid
-                mode = getattr(bot, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
+            async def _send_official_blog(b=bot):
+                try:
+                    scope = "groups" if b.group_openid else "users"
+                    target = b.group_openid if b.group_openid else b.target_openid
+                    mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
 
-                # Step 1: 所有模式统一发送博客提醒头
-                if scope == "groups":
-                    await bot.send_group_text(target, header_text)
-                else:
-                    await bot.send_private_text(target, header_text)
-                await asyncio.sleep(0.5)
-
-                # Step 2: 严格根据 mode 分发内容
-                if mode == "card_only":
-                    # ── 模式 A: 仅长图卡片（极简防刷屏）──
-                    sent_card = False
-                    if card_path and card_path.exists():
-                        with open(card_path, "rb") as f:
-                            card_bytes = f.read()
-                        sent_card = await bot.send_media_file(scope, target, "image", card_bytes)
-                        await asyncio.sleep(0.5)
-
-                    if not sent_card:
-                        log_all(f"⚠️ 官方 Bot [{bot.name}] 长图发送未成功或未渲染，仅长图模式降级发送双语正文", is_debug=True)
-                        if pairs:
-                            await bot.send_translation_qq(scope, target, pairs)
-
-                elif mode == "card_and_images":
-                    # ── 模式 B: 长图卡片 + 高清原图写真 ──
-                    sent_card = False
-                    if card_path and card_path.exists():
-                        with open(card_path, "rb") as f:
-                            card_bytes = f.read()
-                        sent_card = await bot.send_media_file(scope, target, "image", card_bytes)
-                        await asyncio.sleep(0.5)
-
-                    if sent_card:
-                        if media_urls:
-                            await _send_qq_official_raw_images(bot, scope, target)
+                    if scope == "groups":
+                        await b.send_group_text(target, header_text)
                     else:
-                        # 卡片未生成，降级为传统图文（原图 + 正文）
+                        await b.send_private_text(target, header_text)
+                    await asyncio.sleep(0.3)
+
+                    if mode == "card_only":
+                        sent_card = False
+                        if card_path and card_path.exists():
+                            with open(card_path, "rb") as f:
+                                card_bytes = f.read()
+                            sent_card = await b.send_media_file(scope, target, "image", card_bytes)
+                        if not sent_card and pairs:
+                            await b.send_translation_qq(scope, target, pairs)
+
+                    elif mode == "card_and_images":
+                        sent_card = False
+                        if card_path and card_path.exists():
+                            with open(card_path, "rb") as f:
+                                card_bytes = f.read()
+                            sent_card = await b.send_media_file(scope, target, "image", card_bytes)
+                            await asyncio.sleep(0.3)
+
+                        if sent_card:
+                            if media_urls:
+                                await _send_qq_official_raw_images(b, scope, target)
+                        else:
+                            if media_urls:
+                                await _send_qq_official_raw_images(b, scope, target)
+                            if pairs:
+                                await b.send_translation_qq(scope, target, pairs)
+                    else:
                         if media_urls:
-                            await _send_qq_official_raw_images(bot, scope, target)
+                            await _send_qq_official_raw_images(b, scope, target)
                         if pairs:
-                            await bot.send_translation_qq(scope, target, pairs)
+                            await b.send_translation_qq(scope, target, pairs)
+                    return True
+                except Exception as e:
+                    log_all(f"⚠️ 博客推送失败 [{b.name}]: {e}", is_error=True)
+                    return False
 
-                else:
-                    # ── 模式 C: 传统经典模式 (text_and_images) ──
-                    if media_urls:
-                        await _send_qq_official_raw_images(bot, scope, target)
-                    if pairs:
-                        await bot.send_translation_qq(scope, target, pairs)
-
-                any_ok = True
-            except Exception as e:
-                log_all(f"⚠️ 博客推送失败 [{bot.name}]: {e}", is_error=True)
+            tasks.append(_send_official_blog())
 
     # ----------------------------------------------------
-    # Channel 2: NapCat (受 push_blog + blog_filter 控制)
+    # Channel 2: NapCat 并发分发
     # ----------------------------------------------------
     if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
         routes = getattr(cfg, "NAPCAT_ROUTES", [])
@@ -459,68 +435,64 @@ async def send_blog_post(post: dict) -> bool:
             if not gid:
                 continue
 
-            from src.platforms.napcat import send_qq_message
-            try:
-                mode = route.get("blog_card_mode") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
+            async def _send_napcat_blog(r=route, target_gid=gid):
+                from src.platforms.napcat import send_qq_message
+                try:
+                    mode = r.get("blog_card_mode") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
+                    await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": header_text}}])
+                    await asyncio.sleep(0.3)
 
-                # Step 1: 所有模式统一发送博客提醒头
-                await send_qq_message(int(gid), [{"type": "text", "data": {"text": header_text}}])
-                await asyncio.sleep(0.5)
-
-                # Step 2: 严格根据 mode 分发内容
-                if mode == "card_only":
-                    sent_card = False
-                    if card_path and card_path.exists():
-                        card_file_uri = f"file:///{card_path.resolve().as_posix()}"
-                        sent_card = await send_qq_message(int(gid), [{"type": "image", "data": {"file": card_file_uri}}])
-                        await asyncio.sleep(0.5)
-
-                    if not sent_card:
-                        if pairs:
+                    if mode == "card_only":
+                        sent_card = False
+                        if card_path and card_path.exists():
+                            card_file_uri = f"file:///{card_path.resolve().as_posix()}"
+                            sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
+                        if not sent_card and pairs:
                             from src.platforms.qq_official import _escape_qq_md
                             blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
                             body_txt = "\n\n".join(blocks)
-                            await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
+                            await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
 
-                elif mode == "card_and_images":
-                    sent_card = False
-                    if card_path and card_path.exists():
-                        card_file_uri = f"file:///{card_path.resolve().as_posix()}"
-                        sent_card = await send_qq_message(int(gid), [{"type": "image", "data": {"file": card_file_uri}}])
-                        await asyncio.sleep(0.5)
+                    elif mode == "card_and_images":
+                        sent_card = False
+                        if card_path and card_path.exists():
+                            card_file_uri = f"file:///{card_path.resolve().as_posix()}"
+                            sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
+                            await asyncio.sleep(0.3)
 
-                    if sent_card:
-                        if media_urls:
-                            raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                            await send_qq_message(int(gid), raw_chain)
+                        if sent_card:
+                            if media_urls:
+                                raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
+                                await send_qq_message(int(target_gid), raw_chain)
+                        else:
+                            if media_urls:
+                                raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
+                                await send_qq_message(int(target_gid), raw_chain)
+                                await asyncio.sleep(0.3)
+                            if pairs:
+                                from src.platforms.qq_official import _escape_qq_md
+                                blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
+                                body_txt = "\n\n".join(blocks)
+                                await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
                     else:
                         if media_urls:
                             raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                            await send_qq_message(int(gid), raw_chain)
-                            await asyncio.sleep(0.5)
+                            await send_qq_message(int(target_gid), raw_chain)
+                            await asyncio.sleep(0.3)
                         if pairs:
                             from src.platforms.qq_official import _escape_qq_md
                             blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
                             body_txt = "\n\n".join(blocks)
-                            await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
+                            await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
+                    return True
+                except Exception as e:
+                    log_all(f"⚠️ NapCat 博客推送失败 (群 {target_gid}): {e}", is_error=True)
+                    return False
 
-                else:
-                    if media_urls:
-                        raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                        await send_qq_message(int(gid), raw_chain)
-                        await asyncio.sleep(0.5)
-                    if pairs:
-                        from src.platforms.qq_official import _escape_qq_md
-                        blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
-                        body_txt = "\n\n".join(blocks)
-                        await send_qq_message(int(gid), [{"type": "text", "data": {"text": body_txt}}])
-
-                any_ok = True
-            except Exception as e:
-                log_all(f"⚠️ NapCat 博客推送失败 (群 {gid}): {e}", is_error=True)
+            tasks.append(_send_napcat_blog())
 
     # ----------------------------------------------------
-    # Channel 3: Telegram (受 push_blog + blog_filter 控制)
+    # Channel 3: Telegram 并发分发
     # ----------------------------------------------------
     if getattr(cfg, "ENABLE_TG_BOT", False):
         from src.platforms.tgbot import get_configured_bots
@@ -533,49 +505,49 @@ async def send_blog_post(post: dict) -> bool:
             if bot.blog_filter and group_key not in bot.blog_filter:
                 continue
 
-            try:
-                mode = getattr(bot, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
+            async def _send_tg_blog(b=bot):
+                try:
+                    mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
+                    await b._send_html(b.target_chat, header_text)
+                    await asyncio.sleep(0.3)
 
-                # Step 1: 所有模式统一发送博客提醒头
-                await bot._send_html(bot.target_chat, header_text)
-                await asyncio.sleep(0.8)
+                    if mode == "card_only":
+                        sent_card = False
+                        if card_path and card_path.exists():
+                            sent_card = await b.send_photo_file(str(card_path))
+                        if not sent_card and pairs:
+                            await b.send_translation_tg(pairs)
 
-                # Step 2: 严格根据 mode 分发内容
-                if mode == "card_only":
-                    sent_card = False
-                    if card_path and card_path.exists():
-                        sent_card = await bot.send_photo_file(str(card_path))
-                        await asyncio.sleep(0.8)
+                    elif mode == "card_and_images":
+                        sent_card = False
+                        if card_path and card_path.exists():
+                            sent_card = await b.send_photo_file(str(card_path))
+                            await asyncio.sleep(0.3)
 
-                    if not sent_card:
-                        if pairs:
-                            await bot.send_translation_tg(pairs)
-
-                elif mode == "card_and_images":
-                    sent_card = False
-                    if card_path and card_path.exists():
-                        sent_card = await bot.send_photo_file(str(card_path))
-                        await asyncio.sleep(0.8)
-
-                    if sent_card:
-                        if media_urls:
-                            await bot.send_media_group_photos(media_urls)
+                        if sent_card:
+                            if media_urls:
+                                await b.send_media_group_photos(media_urls)
+                        else:
+                            if media_urls:
+                                await b.send_media_group_photos(media_urls)
+                                await asyncio.sleep(0.3)
+                            if pairs:
+                                await b.send_translation_tg(pairs)
                     else:
                         if media_urls:
-                            await bot.send_media_group_photos(media_urls)
-                            await asyncio.sleep(0.8)
+                            await b.send_media_group_photos(media_urls)
+                            await asyncio.sleep(0.3)
                         if pairs:
-                            await bot.send_translation_tg(pairs)
+                            await b.send_translation_tg(pairs)
+                    return True
+                except Exception as e:
+                    log_all(f"⚠️ TG 博客推送失败 [{b.name}]: {e}", is_error=True)
+                    return False
 
-                else:
-                    if media_urls:
-                        await bot.send_media_group_photos(media_urls)
-                        await asyncio.sleep(0.8)
-                    if pairs:
-                        await bot.send_translation_tg(pairs)
+            tasks.append(_send_tg_blog())
 
-                any_ok = True
-            except Exception as e:
-                log_all(f"⚠️ TG 博客推送失败 [{bot.name}]: {e}", is_error=True)
+    if not tasks:
+        return True
 
-    return any_ok
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return any(isinstance(r, bool) and r for r in results)
