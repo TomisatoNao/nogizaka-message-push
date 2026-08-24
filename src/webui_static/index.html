@@ -799,7 +799,7 @@
         <span style="font-size:12.5px; color:var(--muted); min-width:180px;">智谱开放平台 Key (.env)</span>
         <span id="zhipuKeyStatus"></span>
         <button class="btn small" id="btnFillZhipuKey" type="button">填写</button>
-        <button class="btn small danger" id="btnClearZhipuKey" type="button" style="display:none;">清空 / 禁用</button>
+        <button class="btn small danger" id="btnClearZhipuKey" type="button" style="display:none;">清空</button>
       </div>
     </div>
     <details class="help-box" style="margin-top: 10px;">
@@ -2385,7 +2385,7 @@ function openSecretDialog(title, hint, fields, account, opts) {
   const canDelete = singleField && singleField.env !== "__password__" && envStatus[singleField.env];
   if ($("secretDelete")) {
     $("secretDelete").style.display = canDelete ? "inline-block" : "none";
-    $("secretDelete").textContent = "🗑️ 清空并禁用此 Key";
+    $("secretDelete").textContent = "🗑️ 清空此凭证";
     $("secretDelete").onclick = async () => {
       $("secretDialog").close();
       await clearEnvSecret(singleField.env, singleField.label);
@@ -2581,10 +2581,10 @@ function openAccountCredDialog(accId) {
 }
 
 async function clearEnvSecret(envKey, name) {
-  const ok = await uiConfirm(`确定要清空并禁用【${name}】吗？\n\n清空后将从 .env 移除该项配置，系统热重载后将停止使用该服务。`, {
+  const ok = await uiConfirm(`确定要清空【${name}】吗？\n\n清空后将从 .env 移除该项配置，系统热重载后立即生效。`, {
     title: `清空【${name}】确认`,
     danger: true,
-    yesText: "确认清空并禁用",
+    yesText: "确认清空",
   });
   if (!ok) return;
   try {
@@ -2598,7 +2598,7 @@ async function clearEnvSecret(envKey, name) {
     if (data.env_status) envStatus = data.env_status;
     renderGeneral();
     renderSocial();
-    msg(`✅ 已成功清空并禁用 ${name}` + (data.reloaded ? "（热重载已生效）" : ""), data.reloaded ? "ok" : "err");
+    msg(`✅ 已成功清空 ${name}` + (data.reloaded ? "（热重载已生效）" : ""), data.reloaded ? "ok" : "err");
   } catch (e) {
     msg("清空失败：" + e.message, "err");
   }
