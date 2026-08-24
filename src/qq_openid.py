@@ -246,9 +246,9 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                             sender = author.get("member_openid", "") or author.get("user_openid", "")
                             scope = "groups"
                             target_id = group_openid
-                            # 清理开头的 @机器人 标记与空白
-                            content = re.sub(r"^\s*<@![^>]+>\s*", "", raw_content)
-                            content = re.sub(r"^\s*@\S+\s*", "", content).strip()
+                            # 清理开头的 @机器人 标记与空白（支持带空格昵称与 QQ 官方标签）
+                            content = re.sub(r"<@![^>]+>", "", raw_content).strip()
+                            content = re.sub(r"^@.*?(?=\s*/|\s*https?://|\s*$)", "", content).strip()
                         else:
                             group_openid = ""
                             sender = author.get("user_openid", "")
