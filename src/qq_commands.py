@@ -34,9 +34,17 @@ def _fmt_duration(seconds: float) -> str:
 def _jst_str(utc_str: str) -> str:
     try:
         dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        return dt.astimezone(JST).strftime("%m-%d %H:%M")
+        return dt.astimezone(JST).strftime("%Y-%m-%d %H:%M")
     except (ValueError, TypeError):
         return utc_str[:16]
+
+
+def _clean_body(text: str, limit: int = 100) -> str:
+    if not text:
+        return ""
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    cleaned = " ".join(lines)
+    return cleaned if len(cleaned) <= limit else cleaned[:limit] + "…"
 
 
 def _clip(text: str, limit: int) -> str:
@@ -54,9 +62,9 @@ def _cmd_help(_args: str) -> str:
         "【📊 系统与监控】\n"
         "• /status — 查看程序运行状态、Token寿命与轮询周期\n"
         "• /members — 查看当前各平台已订阅监控的偶像名单\n"
-        "• /ping — 快速测试机器人连接状态与响应延迟\n\n"
+        "• /ping — 快速测试机器人连接状态与网络延迟\n\n"
         "【🔍 消息与归档】\n"
-        "• /latest [成员名] [条数] — 获取指定成员最新消息（如 /latest 冨里奈央 3）\n"
+        "• /latest [成员名] [条数] — 获取指定成员最新动态（如 /latest 冨里奈央 3）\n"
         "• /search <关键词> — 全文检索中日文归档（如 /search 富士急）\n"
         "• /stats — 查看归档统计概况与今日更新量\n\n"
         "【🌐 社媒自动解析与 AI 双语翻译】\n"
@@ -66,7 +74,8 @@ def _cmd_help(_args: str) -> str:
 
 
 def _cmd_ping(_args: str) -> str:
-    return "🏓 Pong! 系统与 WebSocket 链路运行正常～"
+    now_jst = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    return f"🏓 Pong! 系统与 WebSocket 通信链路正常\n⏱️ 当前时间: {now_jst} (JST)"
 
 
 def _cmd_status(_args: str) -> str:
@@ -75,42 +84,42 @@ def _cmd_status(_args: str) -> str:
 
     snap = health.get_tracker().snapshot()
     lines = [
-        "📊 系统运行状态",
-        f"• 运行时间: {_fmt_duration(snap['uptime_seconds'])} (第 {snap['cycle_count']} 轮巡查)"
+        "📊 坂道推送助手 · 系统运行状态\n",
+        f"⏱️ 运行时长: {_fmt_duration(snap['uptime_seconds'])} (第 {snap['cycle_count']} 轮巡查)"
     ]
 
     nxt = snap.get("next_cycle")
     if nxt:
         left = nxt["at_epoch"] - time.time()
-        lines.append(f"• 下次巡查: {_fmt_duration(left)} 后 {nxt.get('tag', '')}".strip())
+        lines.append(f"⏰ 下次巡查: {_fmt_duration(left)} 后 {nxt.get('tag', '')}".strip())
 
     tokens = []
     for acc_id in cfg.ACCOUNTS:
         remaining = get_token_remaining_seconds(acc_id)
         if remaining is None:
-            tokens.append(f"{acc_id}: 未知")
+            tokens.append(f"• {acc_id}: 未知")
         elif remaining <= 0:
-            tokens.append(f"{acc_id}: 已失效🔴")
+            tokens.append(f"• {acc_id}: 已失效🔴")
         else:
-            tokens.append(f"{acc_id}: {_fmt_duration(remaining)}")
+            tokens.append(f"• {acc_id}: {_fmt_duration(remaining)}")
     if tokens:
-        lines.append("• 账号凭证:\n  " + "\n  ".join(tokens))
+        lines.append("\n🔑 账号状态:\n  " + "\n  ".join(tokens))
 
     channels = snap.get("channels") or {}
     if channels:
-        ch_lines = [f"{n}: 成功率 {c['success']}/{c['total']}" for n, c in channels.items()]
-        lines.append("• 推送通道: " + " | ".join(ch_lines))
+        ch_lines = [f"• {n}: 成功率 {c['success']}/{c['total']}" for n, c in channels.items()]
+        lines.append("\n📢 推送通道:\n  " + "\n  ".join(ch_lines))
 
     bad = [m["name"] for m in snap.get("members", []) if not m["fetch_ok"] or not m["push_ok"]]
     if bad:
-        lines.append(f"• 异常成员: ⚠️ {'、'.join(bad)}")
+        lines.append(f"\n👥 成员监控: ⚠️ 存在异常 ({'、'.join(bad)})")
     else:
-        lines.append("• 成员状态: ✅ 全部正常")
+        lines.append(f"\n👥 成员监控: ✅ 全部 {len(cfg.MONITOR_LIST)} 位成员正常")
 
     persistent = [e for e in snap.get("errors", []) if e["tier"] == "PERSISTENT"]
     if persistent:
-        lines.append(f"• 待处理告警: ⚠️ {len(persistent)} 条 ({_clip(persistent[-1]['msg'], 40)})")
-    return "\n".join(lines)
+        lines.append(f"\n⚠️ 待处理告警: {len(persistent)} 条 ({_clip(persistent[-1]['msg'], 40)})")
+    return "\n".join(lines).strip()
 
 
 def _cmd_members(_args: str) -> str:
@@ -164,7 +173,7 @@ def _cmd_latest(args: str) -> str:
 
     months = archive.list_months(member)
     if not months:
-        return f"💬 {member.replace('_', ' ')} 暂无历史归档记录。"
+        return f"💬 【{member.replace('_', ' ')}】暂无历史归档记录。"
 
     msgs: list[dict] = []
     for m in months:
@@ -173,15 +182,15 @@ def _cmd_latest(args: str) -> str:
             break
     picked = sorted(msgs, key=lambda x: x.get("updated_at", ""))[-count:]
     if not picked:
-        return f"💬 {member.replace('_', ' ')} 暂无历史归档记录。"
+        return f"💬 【{member.replace('_', ' ')}】暂无历史归档记录。"
 
-    lines = [f"💬 {member.replace('_', ' ')} 最近 {len(picked)} 条动态："]
-    for msg in reversed(picked):
-        head = f"[{_jst_str(msg.get('published_at') or msg.get('updated_at', ''))}]"
-        kind = {"picture": "🖼", "image": "🖼", "video": "🎬", "voice": "🎤"}.get(msg.get("type"), "")
-        body = _clip(msg.get("_translation") or msg.get("text") or "", 80) or "（多媒体消息）"
-        lines.append(f"{head}{kind} {body}")
-    return "\n".join(lines)
+    lines = [f"💬 【{member.replace('_', ' ')}】最新 {len(picked)} 条动态：\n"]
+    for i, msg in enumerate(reversed(picked), 1):
+        time_str = _jst_str(msg.get("published_at") or msg.get("updated_at", ""))
+        kind = {"picture": "🖼 [图片]", "image": "🖼 [图片]", "video": "🎬 [视频]", "voice": "🎤 [语音]"}.get(msg.get("type"), "💬 [消息]")
+        body = _clean_body(msg.get("_translation") or msg.get("text") or "", 90) or "（多媒体附件）"
+        lines.append(f"{i}. 📅 {time_str} {kind}\n   {body}\n")
+    return "\n".join(lines).strip()
 
 
 def _cmd_search(args: str) -> str:
@@ -197,12 +206,13 @@ def _cmd_search(args: str) -> str:
     hits = archive.search(member, query)
     if not hits:
         return f"🔍 关键词「{query}」未检索到相关内容。"
-    lines = [f"🔍 关键词「{query}」命中 {len(hits)} 条，展示最近 {min(len(hits), MAX_LIST_ITEMS)} 条："]
-    for msg in hits[:MAX_LIST_ITEMS]:
-        head = f"[{_jst_str(msg.get('published_at') or msg.get('updated_at', ''))}]"
-        body = _clip(msg.get("_translation") or msg.get("text") or "", 70)
-        lines.append(f"{head} {body}")
-    return "\n".join(lines)
+    lines = [f"🔍 检索关键词「{query}」· 命中 {len(hits)} 条（展示最新 {min(len(hits), MAX_LIST_ITEMS)} 条）：\n"]
+    for i, msg in enumerate(hits[:MAX_LIST_ITEMS], 1):
+        time_str = _jst_str(msg.get("published_at") or msg.get("updated_at", ""))
+        kind = {"picture": "🖼", "image": "🖼", "video": "🎬", "voice": "🎤"}.get(msg.get("type"), "💬")
+        body = _clean_body(msg.get("_translation") or msg.get("text") or "", 90) or "（多媒体附件）"
+        lines.append(f"{i}. 📅 {time_str} {kind}\n   {body}\n")
+    return "\n".join(lines).strip()
 
 
 def _cmd_stats(_args: str) -> str:
@@ -212,18 +222,18 @@ def _cmd_stats(_args: str) -> str:
     if not members:
         return "📚 数据库中暂无归档数据。"
     today = datetime.now(JST).strftime("%Y-%m-%d")
-    lines = ["📚 系统归档统计概览"]
+    lines = ["📚 系统归档统计概览\n"]
     total_all = 0
     for name in members[:MAX_LIST_ITEMS]:
         months = archive.list_months(name)
         total = sum(m["count"] for m in months)
         total_all += total
         today_n = archive.day_counts(name).get(today, 0)
-        lines.append(f"• {name.replace('_', ' ')}: 共 {total} 条" + (f" (今日+{today_n})" if today_n else ""))
+        lines.append(f"• {name.replace('_', ' ')}: 共 {total} 条 / {len(months)} 个月" + (f" (今日 +{today_n})" if today_n else ""))
     if len(members) > MAX_LIST_ITEMS:
         lines.append(f"（另有 {len(members) - MAX_LIST_ITEMS} 位成员未列出）")
-    lines.append(f"\n📊 累计归档总数: {total_all} 条")
-    return "\n".join(lines)
+    lines.append(f"\n📈 全局累计已归档: {total_all} 条记录")
+    return "\n".join(lines).strip()
 
 
 _COMMANDS = {
