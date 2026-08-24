@@ -2581,7 +2581,12 @@ function openAccountCredDialog(accId) {
 }
 
 async function clearEnvSecret(envKey, name) {
-  if (!confirm(`⚠️ 确定要清空并禁用 ${name} 吗？\n\n清空后将从 .env 移除该项配置，系统热重载后将停止使用该服务。`)) return;
+  const ok = await uiConfirm(`确定要清空并禁用【${name}】吗？\n\n清空后将从 .env 移除该项配置，系统热重载后将停止使用该服务。`, {
+    title: `清空【${name}】确认`,
+    danger: true,
+    yesText: "确认清空并禁用",
+  });
+  if (!ok) return;
   try {
     msg(`正在移除 ${name}…`, "");
     const data = await api("/api/secrets", {
