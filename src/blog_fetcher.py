@@ -183,12 +183,76 @@ def _save_records(records: dict[str, str], db: sqlite3.Connection | None = None)
 # ── 主循环 ──
 
 
+async def _process_single_post(post: dict, key: str, group_name: str,
+                                client: httpx.AsyncClient, need_detail: bool,
+                                fetch_img_fn) -> dict:
+    """并发抓取单篇博客的详情、图片与 AI 双语翻译。"""
+    import json
+    post["group_key"] = key
+    post["group_name"] = group_name
+
+    # 获取图片/正文/HTML
+    if not post.get("images") and fetch_img_fn:
+        if need_detail:
+            imgs, detail_date, body = await sakurazaka.fetch_detail(client, post["url"])
+            post["images"] = imgs
+            if detail_date:
+                post["date"] = detail_date
+            post["body"] = body
+            try:
+                post["body_html"] = await sakurazaka.fetch_html(client, post["url"])
+            except Exception:
+                post["body_html"] = body
+        else:
+            post["images"] = await fetch_img_fn(client, post["url"])
+            post["body"] = await hinatazaka.fetch_body(client, post["url"])
+            post["body_html"] = await hinatazaka.fetch_html(client, post["url"])
+
+    # 下载图片到本地（并发下载）
+    image_paths = []
+    if post.get("images"):
+        image_paths = await _download_images(
+            client, post["images"], key,
+            post.get("author", ""), post.get("title", ""),
+            timestamp=post.get("date", "").replace("/", "").replace(" ", "_").replace(":", ""))
+
+    # 自动调用 Gemini 翻译（结构化解耦：jp/zh 分离存储，绝不硬拼接单一文本）
+    translated_html = ""
+    content_json = ""
+    translation_model = ""
+    if post.get("body_html"):
+        try:
+            from src import translator
+            if getattr(translator, "_http_client", None) is None:
+                translator.initialize(client)
+            log_all(f"🔄 正在后台翻译博客: {post.get('author', '')} - {post.get('title', '')}")
+            structured, model_name = await translator.translate_blog_structured(
+                post["body_html"],
+                post.get("author", ""),
+                key
+            )
+            if structured:
+                content_json = json.dumps(structured, ensure_ascii=False)
+                translated_html = translator.blocks_to_html(structured)
+                translation_model = model_name or ""
+                log_all(f"✅ 后台博客翻译完成（模型: {translation_model}）")
+        except Exception as e:
+            log_all(f"⚠️ 自动翻译博客失败: {e}", is_debug=True)
+
+    post["image_paths"] = image_paths
+    post["translation"] = translated_html
+    post["content_json"] = content_json
+    post["translation_model"] = translation_model
+    return post
+
+
 async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                          raw_config: dict) -> list[dict]:
-    """执行一次博客巡查，返回本轮新发现的博客列表。
+    """并发执行博客巡查（乃木坂46 / 樱坂46 / 日向坂46 多协程并发拉取与解析）。
 
     返回的每个 post 额外包含 group_key 和 group_name。
     """
+    import asyncio
 
     blog_cfg = raw_config.get("blog_monitor") or {}
     if not blog_cfg.get("enabled", True):
@@ -198,20 +262,20 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
     records_dirty = False
     new_posts = []
 
-    for group_name, fetch_fn, fetch_img_fn, key, need_detail in TASKS:
+    async def _check_group(group_name: str, fetch_fn, fetch_img_fn, key: str, need_detail: bool):
+        nonlocal records_dirty
         if not blog_cfg.get(key, True):
-            continue  # 该团体被禁用
+            return []  # 该团体被禁用
 
         try:
             posts = await fetch_fn(client)
         except Exception:
-            continue
+            return []
 
         if not posts:
-            continue
+            return []
 
         last_url = records.get(key, "")
-        # 水印 diff：posts 按 newest→oldest，找 last_url 之前的所有新帖
         unseen = []
         for p in posts:
             if p["url"] == last_url:
@@ -223,15 +287,15 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             records[key] = posts[0]["url"]
             records_dirty = True
             log_all(f"📝 [{group_name}] 首轮初始化，记录水印: {posts[0]['url'][:60]}...")
-            continue
+            return []
         # 离线恢复：持久化记录之后很久没抓取（水印脱节），直接重置水印，不推送积压
         elif len(unseen) == len(posts):
             records[key] = posts[0]["url"]
             records_dirty = True
             log_all(f"📝 [{group_name}] 水印已脱节，重置水印到最新，忽略中间积压的推送...")
-            continue
+            return []
 
-        # 双重防御：过滤掉数据库中已经存在（已归档过）的博客，彻底避免重复翻译与推送
+        # 双重防御：过滤掉数据库中已经存在（已归档过）的博客
         real_unseen = []
         for p in unseen:
             try:
@@ -247,91 +311,48 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             records_dirty = True
 
         if not real_unseen:
-            continue
+            return []
 
-        log_all(f"📝 [{group_name}] 发现 {len(real_unseen)} 篇新博客")
+        log_all(f"📝 [{group_name}] 发现 {len(real_unseen)} 篇新博客，并发解析中...")
 
-        # 按 oldest→newest 顺序处理
-        for post in reversed(real_unseen):
-            post["group_key"] = key
-            post["group_name"] = group_name
+        # 并发解析新博客
+        tasks = [
+            _process_single_post(post, key, group_name, client, need_detail, fetch_img_fn)
+            for post in reversed(real_unseen)
+        ]
+        return await asyncio.gather(*tasks)
 
-            # 获取图片/正文/HTML
-            if not post.get("images") and fetch_img_fn:
-                if need_detail:
-                    imgs, detail_date, body = await sakurazaka.fetch_detail(client, post["url"])
-                    post["images"] = imgs
-                    if detail_date:
-                        post["date"] = detail_date
-                    post["body"] = body
-                    try:
-                        post["body_html"] = await sakurazaka.fetch_html(client, post["url"])
-                    except Exception:
-                        post["body_html"] = body
-                else:
-                    post["images"] = await fetch_img_fn(client, post["url"])
-                    post["body"] = await hinatazaka.fetch_body(client, post["url"])
-                    post["body_html"] = await hinatazaka.fetch_html(client, post["url"])
+    # 3 大团博客并行并发拉取
+    group_tasks = [
+        _check_group(group_name, fetch_fn, fetch_img_fn, key, need_detail)
+        for group_name, fetch_fn, fetch_img_fn, key, need_detail in TASKS
+    ]
+    results = await asyncio.gather(*group_tasks)
 
-            # 下载图片到本地
-            image_paths = []
-            if post.get("images"):
-                image_paths = await _download_images(
-                    client, post["images"], key,
-                    post.get("author", ""), post.get("title", ""),
-                    timestamp=post.get("date", "").replace("/", "").replace(" ", "_").replace(":", ""))
-
-            # 自动调用 Gemini 翻译（结构化解耦：jp/zh 分离存储，绝不硬拼接单一文本）
-            translated_html = ""
-            content_json = ""
-            translation_model = ""
-            if post.get("body_html"):
-                try:
-                    from src import translator
-                    if getattr(translator, "_http_client", None) is None:
-                        translator.initialize(client)
-                    log_all(f"🔄 正在后台翻译博客: {post.get('author', '')} - {post.get('title', '')}")
-                    structured, model_name = await translator.translate_blog_structured(
-                        post["body_html"],
-                        post.get("author", ""),
-                        key
-                    )
-                    if structured:
-                        content_json = json.dumps(structured, ensure_ascii=False)
-                        translated_html = translator.blocks_to_html(structured)
-                        translation_model = model_name or ""
-                        log_all(f"✅ 后台博客翻译完成（模型: {translation_model}）")
-                except Exception as e:
-                    log_all(f"⚠️ 自动翻译博客失败: {e}", is_debug=True)
-
-            post["image_paths"] = image_paths
-            post["translation"] = translated_html
-            post["content_json"] = content_json
-            post["translation_model"] = translation_model
-
-            # 存档到 SQLite
+    # 汇总并安全写入 SQLite 归档
+    for group_posts in results:
+        for post in group_posts:
             try:
                 db.execute("""
                     INSERT OR IGNORE INTO blog_posts
                     (group_key, author, title, url, date, body_html, body_text, translation, content_json, translation_model, images_json, image_paths_json, raw_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    key, post.get("author", ""), post.get("title", ""), post["url"],
+                    post.get("group_key", ""), post.get("author", ""), post.get("title", ""), post["url"],
                     _normalize_date(post.get("date", "")),
                     post.get("body_html", ""), post.get("body", ""),
-                    translated_html,
-                    content_json,
-                    translation_model,
+                    post.get("translation", ""),
+                    post.get("content_json", ""),
+                    post.get("translation_model", ""),
                     json.dumps(post.get("images") or [], ensure_ascii=False),
-                    json.dumps(image_paths, ensure_ascii=False),
+                    json.dumps(post.get("image_paths") or [], ensure_ascii=False),
                     json.dumps(post, ensure_ascii=False, default=str),
                 ))
                 db.commit()
             except Exception:
                 pass
 
-            # 推进水印（每个 post 独立推进，容错）
-            records[key] = post["url"]
+            records[post.get("group_key", "")] = post["url"]
             new_posts.append(post)
 
     # 写回水印到 SQLite 数据库

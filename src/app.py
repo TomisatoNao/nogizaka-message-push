@@ -655,19 +655,20 @@ def _install_stop_handlers(stop_event: asyncio.Event) -> None:
 
 
 async def _init_accounts() -> None:
-    """启动时为所有账号做初始 Token 刷新与握手。
+    """启动时为所有账号并发执行初始 Token 刷新与握手。
     - mobile 账号：使用 refresh_token 换取初始 access_token
     - web 账号：若 Token 临期或需要握手，主动调用 refresh_token 获取并持久化 Set-Cookie
     若已有充足有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
     if not getattr(cfg, "MESSAGE_MONITOR_ENABLED", True):
         log_all("⏸️ Message 监控已关闭，跳过账号初始握手", is_debug=True)
         return
-    for acc_id, acc_cfg in cfg.ACCOUNTS.items():
+
+    async def _init_one(acc_id: str, acc_cfg: dict) -> None:
         is_mobile = acc_cfg.get("auth_method") == "mobile"
         remaining = get_token_remaining_seconds(acc_id)
         if remaining is not None and remaining > 60:
             log_all(f"🔑 账号 {acc_id} Token 有效（剩余 {int(remaining)}s），跳过初始化")
-            continue
+            return
         target_group = _alert_group_for_account(acc_id)
         if is_mobile:
             log_all(f"🔑 移动端账号 {acc_id} 执行初始 Token 刷新...")
@@ -675,6 +676,8 @@ async def _init_accounts() -> None:
         else:
             log_all(f"🔑 Web 账号 {acc_id} 执行初始 Token 刷新与握手...")
             await refresh_token(acc_id, target_group)
+
+    await asyncio.gather(*[_init_one(acc_id, acc_cfg) for acc_id, acc_cfg in cfg.ACCOUNTS.items()])
 
 
 # 官方 Bot 指令监听：app_id → (client_secret, 任务)。

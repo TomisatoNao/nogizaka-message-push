@@ -243,24 +243,22 @@ class SocialFetcher(BaseFetcher):
             ))
         return items
 
-    # ── 主入口 ───────────────────────────────────────────
-
     def fetch(self) -> list[Post]:
-        """遍历所有账号；单账号异常被隔离，不影响其它账号。"""
+        """多线程并发遍历所有账号；单账号异常被隔离，不影响其它账号。"""
         posts: list[Post] = []
         accounts = self.accounts
         if not accounts:
             log.debug("[%s] 未配置监控账号，跳过", self.platform_name)
             return posts
 
-        for account in accounts:
+        def _check_one(account: str) -> list[Post]:
             log.debug("[%s] 🔎 开始检查账号 @%s", self.platform_name, account)
             try:
                 got = self._fetch_account(account)
             except Exception as e:
                 log.warning("[%s] @%s 检查失败: %s", self.platform_name, account,
                             str(e).replace("\n", " ")[:200])
-                continue
+                return []
             if got:
                 m_name = self.member_name(account)
                 for p in got:
@@ -269,9 +267,27 @@ class SocialFetcher(BaseFetcher):
                     p.extra["account"] = account
                 log.info("[%s] 🆕 @%s 发现 %s 条新内容",
                          self.platform_name, account, len(got))
-                posts.extend(got)
+                return got
             else:
                 log.debug("[%s] ✅ @%s 无新内容", self.platform_name, account)
+                return []
+
+        if len(accounts) == 1:
+            return _check_one(accounts[0])
+
+        import concurrent.futures
+        max_workers = min(len(accounts), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_acc = {executor.submit(_check_one, acc): acc for acc in accounts}
+            for fut in concurrent.futures.as_completed(future_to_acc):
+                try:
+                    res = fut.result()
+                    if res:
+                        posts.extend(res)
+                except Exception as e:
+                    acc = future_to_acc[fut]
+                    log.warning("[%s] @%s 线程异常: %s", self.platform_name, acc, e)
+
         return posts
 
     def _fetch_account(self, account: str) -> list[Post]:
