@@ -256,6 +256,8 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                             target_id = sender
                             content = raw_content.strip()
 
+                        log_all(f"📩 收到官方 Bot [{app_id[:6]}] {t}: scope={scope}, target={target_id[:8]}…, sender={sender[:8]}…, 内容={content!r}")
+
                         try:
                             reply = on_message(content, sender, app_id=app_id, group_openid=group_openid)
                         except TypeError:
@@ -288,14 +290,18 @@ async def _reply(data: dict, target_id: str, text: str,
             payload = {"content": text, "msg_type": 0}
             if data.get("id"):
                 payload["msg_id"] = data["id"]
+            if scope == "groups":
+                payload["msg_seq"] = 1
             resp = await client.post(
                 f"{cfg.QQ_OFFICIAL_API_BASE}/v2/{endpoint}/{target_id}/messages",
                 headers={"Authorization": f"QQBot {token}", "Content-Type": "application/json"},
                 json=payload,
             )
             if resp.status_code >= 400:
-                log_all(f"⚠️ Bot [{scope}] 指令回复失败: HTTP {resp.status_code} {resp.text[:150]}",
+                log_all(f"⚠️ Bot [{scope}:{target_id[:8]}] 指令回复失败: HTTP {resp.status_code} {resp.text[:150]}",
                         is_error=True)
+            else:
+                log_all(f"✅ Bot [{scope}:{target_id[:8]}] 指令回复已送达: HTTP {resp.status_code}")
     except Exception as e:
         log_all(f"⚠️ Bot 指令回复异常: {type(e).__name__}: {e}", is_error=True)
 

@@ -254,14 +254,16 @@ _COMMANDS = {
 # ──────────────────────────────────────────────
 
 def allowed_senders() -> set[str]:
-    """允许使用指令的 openid 白名单。"""
+    """允许使用指令的 openid 白名单（统一转大写以便大小写无关匹配）。"""
     explicit = getattr(cfg, "QQ_COMMANDS_ALLOW", None) or []
     if explicit:
-        return {str(x).strip() for x in explicit if str(x).strip()}
-    res = {b.get("target_openid", "").strip()
-           for b in cfg.QQ_OFFICIAL_BOTS if b.get("target_openid", "").strip()}
-    res.update({b.get("group_openid", "").strip()
-                for b in cfg.QQ_OFFICIAL_BOTS if b.get("group_openid", "").strip()})
+        return {str(x).strip().upper() for x in explicit if str(x).strip()}
+    res = set()
+    for b in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
+        if b.get("target_openid"):
+            res.add(b["target_openid"].strip().upper())
+        if b.get("group_openid"):
+            res.add(b["group_openid"].strip().upper())
     return res
 
 
@@ -403,12 +405,14 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
     target_id = group_openid if group_openid else sender_openid
     scope = "groups" if group_openid else "users"
 
-    # 1. 权限检查
+    # 1. 权限检查（统一大写比对，避免大小写差异导致拦截）
     allow = allowed_senders()
-    # 只要白名单配置了，必须满足 sender_openid 或 group_openid 在白名单内
-    if allow and (sender_openid not in allow and (not group_openid or group_openid not in allow)):
+    sender_norm = (sender_openid or "").strip().upper()
+    group_norm = (group_openid or "").strip().upper()
+
+    if allow and (sender_norm not in allow and (not group_norm or group_norm not in allow)):
         if content.startswith("/") or _SOCIAL_URL_RE.search(content):
-            log_all(f"🔒 拒绝未授权的 Bot 请求: {_clip(content, 40)}（来自 {scope}:{target_id[:12]}…）", is_error=True)
+            log_all(f"🔒 拒绝未授权的 Bot 请求: {_clip(content, 40)}（来自 {scope}:{target_id[:12]}…，白名单项数: {len(allow)}）", is_error=True)
             return "🔒 您所在的账号或群聊未在授权白名单内，如需使用请在 Web 管理后台「授权 OpenID」中添加。"
         return None
 
