@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 
 import httpx
@@ -234,18 +235,37 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                             break  # 收到消息后刚好到时间，也重连
                         if event.get("s") is not None:
                             seq_ref["seq"] = event["s"]
-                        if event.get("op") == 11 or event.get("t") != "C2C_MESSAGE_CREATE":
+                        t = event.get("t", "")
+                        if event.get("op") == 11 or t not in ("C2C_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"):
                             continue
                         data = event.get("d") or {}
                         author = data.get("author") or {}
-                        sender = author.get("user_openid", "")
-                        content = data.get("content", "")
+                        raw_content = data.get("content", "")
+                        if t == "GROUP_AT_MESSAGE_CREATE":
+                            group_openid = data.get("group_openid", "")
+                            sender = author.get("member_openid", "") or author.get("user_openid", "")
+                            scope = "groups"
+                            target_id = group_openid
+                            # 清理开头的 @机器人 标记与空白
+                            content = re.sub(r"^\s*<@![^>]+>\s*", "", raw_content)
+                            content = re.sub(r"^\s*@\S+\s*", "", content).strip()
+                        else:
+                            group_openid = ""
+                            sender = author.get("user_openid", "")
+                            scope = "users"
+                            target_id = sender
+                            content = raw_content.strip()
+
                         try:
-                            reply = on_message(content, sender, app_id=app_id)
+                            reply = on_message(content, sender, app_id=app_id, group_openid=group_openid)
                         except TypeError:
-                            reply = on_message(content, sender)
+                            try:
+                                reply = on_message(content, sender, app_id=app_id)
+                            except TypeError:
+                                reply = on_message(content, sender)
+
                         if reply:
-                            await _reply(data, sender, reply, app_id, client_secret)
+                            await _reply(data, target_id, reply, app_id, client_secret, scope=scope)
                 finally:
                     hb.cancel()
         except asyncio.CancelledError:
@@ -257,23 +277,24 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
             backoff = min(backoff * 2, 300)
 
 
-async def _reply(data: dict, sender_openid: str, text: str,
-                 app_id: str, client_secret: str) -> None:
-    """回复用户私聊。带 msg_id 才算被动回复，不消耗主动推送额度。"""
+async def _reply(data: dict, target_id: str, text: str,
+                 app_id: str, client_secret: str, scope: str = "users") -> None:
+    """被动回复用户私聊或群聊 @ 消息（带 msg_id，不消耗主动推送额度）。"""
     from src.logger import log_all
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             token = await get_access_token(client, app_id, client_secret)
+            endpoint = "groups" if scope == "groups" else "users"
             payload = {"content": text, "msg_type": 0}
             if data.get("id"):
                 payload["msg_id"] = data["id"]
             resp = await client.post(
-                f"{cfg.QQ_OFFICIAL_API_BASE}/v2/users/{sender_openid}/messages",
+                f"{cfg.QQ_OFFICIAL_API_BASE}/v2/{endpoint}/{target_id}/messages",
                 headers={"Authorization": f"QQBot {token}", "Content-Type": "application/json"},
                 json=payload,
             )
             if resp.status_code >= 400:
-                log_all(f"⚠️ Bot 指令回复失败: HTTP {resp.status_code} {resp.text[:150]}",
+                log_all(f"⚠️ Bot [{scope}] 指令回复失败: HTTP {resp.status_code} {resp.text[:150]}",
                         is_error=True)
     except Exception as e:
         log_all(f"⚠️ Bot 指令回复异常: {type(e).__name__}: {e}", is_error=True)
