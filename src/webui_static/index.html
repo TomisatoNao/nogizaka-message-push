@@ -466,6 +466,7 @@
         <span style="font-size: 12.5px; color: var(--muted);">TG Bot Token (.env):</span>
         <span id="tgTokenStatus"></span>
         <button class="btn small" id="btnFillTgToken" type="button">填写</button>
+        <button class="btn small danger" id="btnClearTgToken" type="button" style="display:none;">清空</button>
       </div>
     </div>
   </div>
@@ -654,6 +655,7 @@
       <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Instagram Session ID (.env)</span>
       <span id="igSessionStatus"></span>
       <button class="btn small" id="btnFillIgSession" type="button">填写</button>
+      <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
     </div>
     <details class="help-box" style="margin-top: 10px;">
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">🛡️ Instagram 防风控安全机制说明</summary>
@@ -791,11 +793,13 @@
         <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Google Gemini Key (.env)</span>
         <span id="geminiKeyStatus"></span>
         <button class="btn small" id="btnFillGeminiKey" type="button">填写</button>
+        <button class="btn small danger" id="btnClearGeminiKey" type="button" style="display:none;">清空</button>
       </div>
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <span style="font-size:12.5px; color:var(--muted); min-width:180px;">智谱开放平台 Key (.env)</span>
         <span id="zhipuKeyStatus"></span>
         <button class="btn small" id="btnFillZhipuKey" type="button">填写</button>
+        <button class="btn small danger" id="btnClearZhipuKey" type="button" style="display:none;">清空 / 禁用</button>
       </div>
     </div>
     <details class="help-box" style="margin-top: 10px;">
@@ -1224,9 +1228,12 @@
   </div>
 </details>
 <div id="secretFields"></div>
-<div class="actions">
-<button class="btn" id="secretCancel">取消</button>
-<button class="btn primary" id="secretSave">🔐 保存并自动握手</button>
+<div class="actions" style="display:flex; justify-content:space-between; align-items:center;">
+<button class="btn danger" id="secretDelete" type="button" style="display:none;">🗑️ 清空此凭证</button>
+<div style="display:flex; gap:8px; margin-left:auto;">
+  <button class="btn" id="secretCancel" type="button">取消</button>
+  <button class="btn primary" id="secretSave" type="button">🔐 保存并自动握手</button>
+</div>
 </div>
 </dialog>
 <!-- 账号编辑对话框 -->
@@ -1913,6 +1920,9 @@ function renderGeneral() {
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
+  if ($("btnClearTgToken")) $("btnClearTgToken").style.display = envStatus.TG_BOT_TOKEN ? "inline-block" : "none";
+  if ($("btnClearGeminiKey")) $("btnClearGeminiKey").style.display = envStatus.GEMINI_API_KEY ? "inline-block" : "none";
+  if ($("btnClearZhipuKey")) $("btnClearZhipuKey").style.display = envStatus.ZHIPU_API_KEY ? "inline-block" : "none";
   if ($("sysProxy")) $("sysProxy").value = config.proxy || "";
   renderQqBots();
 }
@@ -2371,6 +2381,17 @@ function openSecretDialog(title, hint, fields, account, opts) {
     }
     box.appendChild(wrap);
   }
+  const singleField = fields.length === 1 ? fields[0] : null;
+  const canDelete = singleField && singleField.env !== "__password__" && envStatus[singleField.env];
+  if ($("secretDelete")) {
+    $("secretDelete").style.display = canDelete ? "inline-block" : "none";
+    $("secretDelete").textContent = "🗑️ 清空并禁用此 Key";
+    $("secretDelete").onclick = async () => {
+      $("secretDialog").close();
+      await clearEnvSecret(singleField.env, singleField.label);
+      if (secretCtx && secretCtx.onDone) { try { secretCtx.onDone(); } catch (e) {} }
+    };
+  }
   $("secretDialog").showModal();
   const first = box.querySelector("input");
   if (first) first.focus();
@@ -2558,26 +2579,53 @@ function openAccountCredDialog(accId) {
     "💡 <b>首次登录免等 1 小时自动握手</b>：只需把初次登录后 timeline 请求的 Token 与 Cookie 贴入（或使用上方一键解析），系统保存后<b>立刻全自动调用 update_token 完成握手</b>并永久持久化长期 Cookie！",
     fields, accId);
 }
+
+async function clearEnvSecret(envKey, name) {
+  if (!confirm(`⚠️ 确定要清空并禁用 ${name} 吗？\n\n清空后将从 .env 移除该项配置，系统热重载后将停止使用该服务。`)) return;
+  try {
+    msg(`正在移除 ${name}…`, "");
+    const data = await api("/api/secrets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ remove: [envKey] }),
+    });
+    if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
+    if (data.env_status) envStatus = data.env_status;
+    renderGeneral();
+    renderSocial();
+    msg(`✅ 已成功清空并禁用 ${name}` + (data.reloaded ? "（热重载已生效）" : ""), data.reloaded ? "ok" : "err");
+  } catch (e) {
+    msg("清空失败：" + e.message, "err");
+  }
+}
+
 $("btnFillTgToken").addEventListener("click", () => openSecretDialog(
   "填写 TG Bot Token", "⚠️ TG Bot 实例在启动时创建，保存后需点右上角「⟳ 重启主程序」生效。",
   [{ env: "TG_BOT_TOKEN", label: "Bot Token", required: true, placeholder: "123456:ABC-DEF...",
      help: "Telegram 找 @BotFather → /newbot 创建后获得，格式如 123456789:AAE0abc...。" }], null));
+if ($("btnClearTgToken")) $("btnClearTgToken").addEventListener("click", () => clearEnvSecret("TG_BOT_TOKEN", "TG Bot Token"));
+
 $("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
   "填写 Gemini API Key", "保存并热重载后立即生效（翻译每次调用时读取最新值）。",
   [{ env: "GEMINI_API_KEY", label: "API Key", required: true, placeholder: "AIza...",
      help: "Google AI Studio（aistudio.google.com/apikey）创建，免费额度即可用。" }], null));
+if ($("btnClearGeminiKey")) $("btnClearGeminiKey").addEventListener("click", () => clearEnvSecret("GEMINI_API_KEY", "Google Gemini Key"));
+
 if ($("btnFillZhipuKey")) {
   $("btnFillZhipuKey").addEventListener("click", () => openSecretDialog(
     "填写智谱开放平台 API Key", "保存并热重载后立即生效（与 Gemini 模型智能轮番交替调用）。",
     [{ env: "ZHIPU_API_KEY", label: "API Key", required: true, placeholder: "xxx.yyy...",
        help: "在智谱开放平台（open.bigmodel.cn）控制台创建，GLM-4-Flash 永久免费。" }], null));
 }
+if ($("btnClearZhipuKey")) $("btnClearZhipuKey").addEventListener("click", () => clearEnvSecret("ZHIPU_API_KEY", "智谱开放平台 Key"));
+
 if ($("btnFillIgSession")) {
   $("btnFillIgSession").addEventListener("click", () => openSecretDialog(
     "填写 Instagram Session ID", "保存并热重载后生效（用于突破未登录限制与抓取 24h 快拍 Story）。",
     [{ env: "INSTAGRAM_SESSIONID", label: "sessionid Cookie", required: true, placeholder: "123456789%3A...",
        help: "登录 Instagram 网页版后，在 F12 Application -> Cookies 中复制 sessionid 的值。" }], null));
 }
+if ($("btnClearIgSession")) $("btnClearIgSession").addEventListener("click", () => clearEnvSecret("INSTAGRAM_SESSIONID", "Instagram Session ID"));
 
 // ── 社交媒体监控 ──────────────────────────────────
 function renderSocial() {
@@ -2608,6 +2656,7 @@ function renderSocial() {
 
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   if ($("igSessionStatus")) $("igSessionStatus").innerHTML = envBadge(envStatus.INSTAGRAM_SESSIONID);
+  if ($("btnClearIgSession")) $("btnClearIgSession").style.display = envStatus.INSTAGRAM_SESSIONID ? "inline-block" : "none";
 }
 
 function collectSocial() {
