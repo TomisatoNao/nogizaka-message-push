@@ -2492,8 +2492,15 @@ if ($("btnSecretSmartParse")) {
       console.warn("后端 smart_parse 失败，退回本地正则提取", e);
     }
 
-    // 2. 本地备用强化正则提取器（处理 Windows cmd 转义符、-b、--cookie、换行）
-    const cleaned = raw.replace(/\^\^/g, "^").replace(/\^"/g, '"').replace(/\^&/g, "&").replace(/\^\|/g, "|");
+    const cleaned = raw.replace(/\^\\\^"/g, '"')
+                       .replace(/\\\^"/g, '"')
+                       .replace(/\^\^/g, "^")
+                       .replace(/\^"/g, '"')
+                       .replace(/\^\{/g, '{')
+                       .replace(/\^\}/g, '}')
+                       .replace(/\^&/g, "&")
+                       .replace(/\^\|/g, "|")
+                       .replace(/\^\$/g, "$");
     if (!tokenVal) {
       const authMatch = cleaned.match(/(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)/i)
                      || cleaned.match(/['"]?(?:authorization|auth|access_token)['"]?\s*:\s*['"](?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)['"]/i);

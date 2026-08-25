@@ -2640,11 +2640,17 @@ class _Handler(BaseHTTPRequestHandler):
         result = {"token": "", "cookie": "", "refresh_token": "", "extracted": []}
 
         group_type = "nogizaka"
+        acc_api_base = ""
+        acc_web_origin = ""
+        acc_app_tag = ""
         if account:
             try:
                 raw_cfg = _load_raw_config()
                 acc_data = raw_cfg.get("accounts", {}).get(account, {})
                 group_type = acc_data.get("group_type") or acc_data.get("group") or "nogizaka"
+                acc_api_base = acc_data.get("api_base") or ""
+                acc_web_origin = acc_data.get("web_origin") or ""
+                acc_app_tag = acc_data.get("app_tag") or ""
             except Exception:
                 pass
 
@@ -2660,16 +2666,62 @@ class _Handler(BaseHTTPRequestHandler):
                     body_json = json.loads(json_str)
                 except Exception:
                     body_json = json.loads(json_str.replace(r'\"', '"'))
-                domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
-                url = f"https://api.message.{domain_part}.com/v2/signin"
+
+                # 从 cURL 中动态提取目标 URL
+                url = ""
+                url_m = re.search(r'(?:--url\s+["\']?|curl\s+["\']?)(https?://[^\s"\'>]+)', cleaned)
+                if url_m and "signin" in url_m.group(1).lower():
+                    url = url_m.group(1).strip().strip('"').strip("'")
+                if not url:
+                    if acc_api_base:
+                        url = f"{acc_api_base.rstrip('/')}/v2/signin"
+                    elif group_type.lower() == "yodel" or "yodel" in cleaned.lower():
+                        url = "https://api.service.yodel-app.com/v2/signin"
+                    else:
+                        domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
+                        url = f"https://api.message.{domain_part}.com/v2/signin"
+
+                # 提取 app-id
+                app_id = ""
+                app_id_m = re.search(r'x-talk-app-id:\s*([^\r\n"\']+)', cleaned, re.IGNORECASE)
+                if app_id_m:
+                    app_id = app_id_m.group(1).strip()
+                if not app_id:
+                    if acc_app_tag:
+                        app_id = f"jp.co.sonymusic.communication.{acc_app_tag} 2.5"
+                    elif group_type.lower() == "yodel" or "yodel" in url:
+                        app_id = "jp.co.sonymusic.communication.yodel 2.5"
+                    else:
+                        app_id = f"jp.co.sonymusic.communication.{group_type} 2.5"
+
+                # 提取 origin 与 referer
+                origin = ""
+                origin_m = re.search(r'origin:\s*([^\r\n"\']+)', cleaned, re.IGNORECASE)
+                if origin_m:
+                    origin = origin_m.group(1).strip()
+                if not origin:
+                    if acc_web_origin:
+                        origin = acc_web_origin.rstrip("/")
+                    elif group_type.lower() == "yodel" or "yodel" in url:
+                        origin = "https://service.yodel-app.com"
+                    else:
+                        domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
+                        origin = f"https://message.{domain_part}.com"
+
                 headers = {
                     "accept": "application/json",
                     "content-type": "application/json",
-                    "origin": f"https://message.{domain_part}.com",
-                    "referer": f"https://message.{domain_part}.com/",
-                    "x-talk-app-id": f"jp.co.sonymusic.communication.{group_type} 2.5",
+                    "origin": origin,
+                    "referer": origin + "/",
+                    "x-talk-app-id": app_id,
                     "x-talk-app-platform": "web"
                 }
+
+                # 附带 cURL 中可能包含的前置 Cookie
+                req_cookie_m = re.search(r'(?:-b|--cookie)\s+["\']([^"\']+)["\']', cleaned, re.IGNORECASE)
+                if req_cookie_m:
+                    headers["cookie"] = req_cookie_m.group(1).strip()
+
                 async with httpx.AsyncClient(timeout=12) as client:
                     r = await client.post(url, headers=headers, json=body_json)
                     if r.status_code == 200:
@@ -2682,18 +2734,20 @@ class _Handler(BaseHTTPRequestHandler):
                             sc_part = sc.split(";")[0].strip()
                             if sc_part and "=" in sc_part:
                                 cookies.append(sc_part)
+                        # 如果请求中带有前置 cookie（如 S5SI 等），一并合并
+                        if req_cookie_m:
+                            for part in req_cookie_m.group(1).split(";"):
+                                p_trim = part.strip()
+                                if p_trim and "=" in p_trim:
+                                    cookies.append(p_trim)
                         if cookies:
-                            # 过滤并保留去重后的 cookie
-                            cookie_parts = []
-                            seen_keys = set()
+                            from config.credentials import _clean_cookie_string
+                            merged = {}
                             for c_item in cookies:
-                                k, _, v = c_item.partition("=")
-                                k = k.strip()
-                                if k and k not in seen_keys:
-                                    seen_keys.add(k)
-                                    cookie_parts.append(f"{k}={v.strip()}")
-                            result["cookie"] = "; ".join(cookie_parts)
-                            result["extracted"].append("session Cookie (由登录响应下发，可长期自动续期)")
+                                merged.update(_clean_cookie_string(c_item))
+                            if merged:
+                                result["cookie"] = "; ".join(f"{k}={v}" for k, v in merged.items())
+                                result["extracted"].append("session Cookie (由登录响应下发，可长期自动续期)")
             except Exception as e:
                 from src.logger import log_all
                 log_all(f"⚠️ smart_parse 模拟登录请求失败: {e}")
