@@ -1132,14 +1132,18 @@
 </div>
 </dialog>
 <!-- 成员选择对话框 -->
-<dialog id="memberPickDialog">
-<h3>从账号拉取成员列表</h3>
-<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px">
+<dialog id="memberPickDialog" style="max-width: 580px; width: 95%;">
+<h3 style="margin-bottom: 12px;">从账号拉取成员列表</h3>
+<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px">
 <div class="chips" id="pickAccountChips"></div>
-<button class="btn small" id="btnFetchMembers">拉取</button>
+<button class="btn primary small" id="btnFetchMembers">🔍 拉取成员</button>
 </div>
-<div id="memberPickList" style="max-height:50vh; overflow-y:auto; min-width:420px"></div>
-<p class="hint" id="memberPickHint">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
+<div id="memberPickToolbar" style="display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px; padding:6px 10px; background:var(--card-soft, rgba(255,255,255,0.03)); border-radius:8px; border:1px solid var(--border)">
+  <div class="chips" id="memberPickFilterChips" style="gap:5px;"></div>
+  <button class="btn small" id="btnAddAllSubscribed" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; font-weight:600; border:none; display:none;">✨ 一键添加所有已订阅</button>
+</div>
+<div id="memberPickList" style="max-height:52vh; overflow-y:auto; min-width:320px; display:flex; flex-direction:column; gap:6px;"></div>
+<p class="hint" id="memberPickHint" style="margin-top:10px;">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
 <div class="actions">
 <button class="btn" id="memberPickClose">关闭</button>
 </div>
@@ -3464,21 +3468,172 @@ function renderMembers() {
   renderQqBots();
 }
 // ── 成员选择器 ───────────────────────────────────
+let _currentFetchedMembers = [];
+let _currentFetchedAccount = "";
+let _memberPickFilter = "all"; // "subscribed" | "open" | "all"
+
+function renderMemberPickItems() {
+  const list = $("memberPickList");
+  list.innerHTML = "";
+  const already = () => new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
+
+  let filtered = _currentFetchedMembers.slice();
+  if (_memberPickFilter === "subscribed") {
+    filtered = filtered.filter(m => m.is_subscribed);
+  } else if (_memberPickFilter === "open") {
+    filtered = filtered.filter(m => m.state === "open");
+  }
+
+  // 排序规则：已订阅置顶 > 在籍 > 毕业；同级按 ID 升序
+  filtered.sort((a, b) => {
+    const subDiff = (b.is_subscribed ? 1 : 0) - (a.is_subscribed ? 1 : 0);
+    if (subDiff !== 0) return subDiff;
+    const stateDiff = (a.state === "open" ? 0 : 1) - (b.state === "open" ? 0 : 1);
+    if (stateDiff !== 0) return stateDiff;
+    const an = /^\d+$/.test(a.id) ? parseInt(a.id, 10) : 1e9;
+    const bn = /^\d+$/.test(b.id) ? parseInt(b.id, 10) : 1e9;
+    return an - bn;
+  });
+
+  if (!filtered.length) {
+    const emptyDiv = document.createElement("div");
+    emptyDiv.style.cssText = "text-align:center; padding:28px 0; color:var(--muted); font-size:13px;";
+    emptyDiv.textContent = _memberPickFilter === "subscribed" ? "🌟 当前账号下暂无正在订阅中的成员" : "暂无符合条件的成员";
+    list.appendChild(emptyDiv);
+    return;
+  }
+
+  for (const m of filtered) {
+    const row = document.createElement("div");
+    const isSub = !!m.is_subscribed;
+    const isExpired = m.sub_state === "expired";
+    const isOpen = m.state === "open";
+
+    row.style.cssText = "display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; border:1px solid " +
+      (isSub ? "rgba(236, 72, 153, 0.45)" : "var(--border)") +
+      "; background:" + (isSub ? "linear-gradient(90deg, rgba(139, 92, 246, 0.12), rgba(236, 72, 153, 0.08))" : "var(--card-soft, rgba(255,255,255,0.02))") + ";";
+
+    // 头像 Thumbnail
+    const avatar = document.createElement("img");
+    avatar.style.cssText = "width:34px; height:34px; border-radius:50%; object-fit:cover; background:var(--border); flex-shrink:0;";
+    if (m.thumbnail) {
+      avatar.src = m.thumbnail;
+      avatar.onerror = () => { avatar.style.display = "none"; };
+    } else {
+      avatar.style.display = "none";
+    }
+
+    // 信息容器
+    const info = document.createElement("div");
+    info.style.cssText = "flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;";
+
+    const nameRow = document.createElement("div");
+    nameRow.style.cssText = "display:flex; align-items:center; gap:6px; flex-wrap:wrap;";
+
+    const idSpan = document.createElement("span");
+    idSpan.style.cssText = "font-family:monospace; font-size:11px; opacity:0.6; padding:1px 4px; background:rgba(255,255,255,0.06); border-radius:4px;";
+    idSpan.textContent = "#" + m.id;
+
+    const nameSpan = document.createElement("span");
+    nameSpan.style.cssText = "font-weight:600; font-size:13.5px;";
+    nameSpan.textContent = m.name;
+
+    nameRow.append(idSpan, nameSpan);
+
+    // 状态 Badge 标签
+    if (isSub) {
+      const subBadge = document.createElement("span");
+      subBadge.style.cssText = "font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px; background:linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; display:inline-flex; align-items:center; gap:2px; box-shadow:0 1px 4px rgba(236,72,153,0.3);";
+      subBadge.textContent = "🌟 已订阅";
+      nameRow.appendChild(subBadge);
+    } else if (isExpired) {
+      const expBadge = document.createElement("span");
+      expBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--muted);";
+      expBadge.textContent = "⏳ 曾订阅";
+      nameRow.appendChild(expBadge);
+    } else if (isOpen) {
+      const openBadge = document.createElement("span");
+      openBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(16,185,129,0.15); color:#10b981;";
+      openBadge.textContent = "🟢 在籍";
+      nameRow.appendChild(openBadge);
+    } else {
+      const gradBadge = document.createElement("span");
+      gradBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.05); color:var(--muted);";
+      gradBadge.textContent = "⚫ 已毕业";
+      nameRow.appendChild(gradBadge);
+    }
+
+    // 副信息（期数、到期时间等）
+    const metaRow = document.createElement("div");
+    metaRow.style.cssText = "font-size:11.5px; color:var(--muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap;";
+    if (m.tags && m.tags.length) {
+      const tagSpan = document.createElement("span");
+      tagSpan.textContent = m.tags.join(" · ");
+      metaRow.appendChild(tagSpan);
+    }
+    if (isSub && m.sub_end) {
+      try {
+        const d = new Date(m.sub_end);
+        if (!isNaN(d.getTime())) {
+          const endSpan = document.createElement("span");
+          endSpan.style.cssText = "color:#f472b6; font-size:11px;";
+          endSpan.textContent = "📅 续费期至 " + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+          metaRow.appendChild(endSpan);
+        }
+      } catch(_) {}
+    }
+    info.append(nameRow, metaRow);
+
+    // 操作按钮
+    const isAdded = already().has(_currentFetchedAccount + ":" + m.id);
+    const btn = mkBtn(isAdded ? "✓ 已添加" : "+ 添加", () => {
+      config.monitor = config.monitor || [];
+      config.monitor.push({ id: m.id, name: m.name, account: _currentFetchedAccount, groups: [] });
+      markDirty(); renderMembers();
+      btn.textContent = "✓ 已添加"; btn.disabled = true; btn.className = "btn small";
+    });
+    btn.className = isAdded ? "btn small" : (isSub ? "btn primary small" : "btn small");
+    if (isAdded) btn.disabled = true;
+
+    row.append(avatar, info, btn);
+    list.appendChild(row);
+  }
+}
+
 $("btnPickMember").addEventListener("click", () => {
   const ids = Object.keys(config.accounts || {});
   if (!ids.length) { uiAlert("先在账号池添加账号"); return; }
   chipGroup("pickAccountChips", ids.map((id) => [id, id]), ids[0]);
   $("memberPickList").innerHTML = "";
+  $("memberPickToolbar").style.display = "none";
   $("memberPickHint").textContent = "选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。";
   $("memberPickDialog").showModal();
 });
 $("memberPickClose").addEventListener("click", () => $("memberPickDialog").close());
 
+$("btnAddAllSubscribed").addEventListener("click", () => {
+  const already = new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
+  const toAdd = _currentFetchedMembers.filter(m => m.is_subscribed && !already.has(_currentFetchedAccount + ":" + m.id));
+  if (!toAdd.length) {
+    uiAlert("所有已订阅成员均已在监控列表中！", "无需重复添加");
+    return;
+  }
+  config.monitor = config.monitor || [];
+  for (const m of toAdd) {
+    config.monitor.push({ id: m.id, name: m.name, account: _currentFetchedAccount, groups: [] });
+  }
+  markDirty();
+  renderMembers();
+  renderMemberPickItems();
+  msg("✅ 已成功添加 " + toAdd.length + " 位已订阅成员到监控列表！", "ok");
+});
+
 $("btnFetchMembers").addEventListener("click", async () => {
   const account = $("pickAccountChips").dataset.value;
   const list = $("memberPickList");
   list.innerHTML = "";
-  $("memberPickHint").textContent = "拉取中…";
+  $("memberPickToolbar").style.display = "none";
+  $("memberPickHint").textContent = "正在拉取成员目录与订阅状态…";
   let data;
   try {
     data = await api("/api/members?account=" + encodeURIComponent(account));
@@ -3490,31 +3645,51 @@ $("btnFetchMembers").addEventListener("click", async () => {
     $("memberPickHint").textContent = "❌ " + (data.errors || []).join("；");
     return;
   }
-  const open = data.members.filter((m) => m.state === "open").length;
-  $("memberPickHint").textContent = "共 " + data.members.length + " 项，" + open + " 个在籍（🟢）。点「添加」后记得回到列表保存。";
-  const already = () => new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
-  const sorted = data.members.slice().sort((a, b) => {
-    const an = /^\d+$/.test(a.id) ? parseInt(a.id, 10) : 1e9;
-    const bn = /^\d+$/.test(b.id) ? parseInt(b.id, 10) : 1e9;
-    return (a.state === "open" ? 0 : 1) - (b.state === "open" ? 0 : 1) || an - bn;
-  });
-  for (const m of sorted) {
-    const row = document.createElement("div");
-    row.style.cssText = "display:flex; align-items:center; gap:10px; padding:5px 4px; border-bottom:1px solid var(--border)";
-    const label = document.createElement("span");
-    label.style.flex = "1";
-    label.textContent = "[" + m.id + "] " + (m.state === "open" ? "🟢" : "⚫") + " " + m.name +
-      (m.tags.length ? "（" + m.tags.join(" · ") + "）" : "");
-    const btn = mkBtn("添加", () => {
-      config.monitor = config.monitor || [];
-      config.monitor.push({ id: m.id, name: m.name, account: account, groups: [] });
-      markDirty(); renderMembers();
-      btn.textContent = "✓ 已添加"; btn.disabled = true;
+
+  _currentFetchedMembers = data.members || [];
+  _currentFetchedAccount = account;
+
+  const subCount = data.subscribed_count || _currentFetchedMembers.filter((m) => m.is_subscribed).length;
+  const openCount = data.open_count || _currentFetchedMembers.filter((m) => m.state === "open").length;
+  const totalCount = data.total || _currentFetchedMembers.length;
+
+  $("memberPickHint").innerHTML = "📊 <b>" + account + "</b>：共 " + totalCount + " 项 · <span style='color:#f472b6; font-weight:600;'>🌟 已订阅 " + subCount + " 人</span> · 🟢 在籍 " + openCount + " 人。点「添加」后记得回到列表保存。";
+
+  // 渲染筛选 Chips
+  const filterChips = $("memberPickFilterChips");
+  filterChips.innerHTML = "";
+  const filterOpts = [
+    ["subscribed", "🌟 仅看已订阅 (" + subCount + ")"],
+    ["open", "🟢 全部在籍 (" + openCount + ")"],
+    ["all", "📋 全部 (" + totalCount + ")"],
+  ];
+  _memberPickFilter = subCount > 0 ? "subscribed" : "open";
+
+  for (const [val, label] of filterOpts) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip" + (val === _memberPickFilter ? " active" : "");
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      filterChips.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+      btn.classList.add("active");
+      _memberPickFilter = val;
+      renderMemberPickItems();
     });
-    if (already().has(account + ":" + m.id)) { btn.textContent = "✓ 已添加"; btn.disabled = true; }
-    row.append(label, btn);
-    list.appendChild(row);
+    filterChips.appendChild(btn);
   }
+
+  // 是否显示「一键添加所有已订阅」按钮
+  const btnAddAll = $("btnAddAllSubscribed");
+  if (subCount > 0) {
+    btnAddAll.style.display = "inline-block";
+    btnAddAll.textContent = "✨ 一键添加所有已订阅 (" + subCount + ")";
+  } else {
+    btnAddAll.style.display = "none";
+  }
+
+  $("memberPickToolbar").style.display = "flex";
+  renderMemberPickItems();
 });
 
 $("btnAddMember").addEventListener("click", () => {

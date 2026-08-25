@@ -972,14 +972,41 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "errors": [err]}, 502)
             return
 
-        slim = [{
-            "id": str(m.get("id", "")),
-            "name": m.get("name") or "(无名)",
-            "state": m.get("state", "?"),
-            "tags": [str(t) for t in (m.get("tags") or [])],
-            "subscription": (m.get("subscription") or {}).get("type", ""),
-        } for m in members]
-        self._send_json({"ok": True, "account": account, "members": slim})
+        slim = []
+        for m in members:
+            sub = m.get("subscription")
+            is_sub = False
+            sub_state = ""
+            sub_end = ""
+            auto_renew = False
+            if isinstance(sub, dict) and sub:
+                sub_state = str(sub.get("state") or "").lower()
+                is_sub = (sub_state == "active")
+                sub_end = str(sub.get("end_at") or "")
+                auto_renew = bool(sub.get("auto_renewing", False))
+
+            slim.append({
+                "id": str(m.get("id", "")),
+                "name": m.get("name") or "(无名)",
+                "state": m.get("state", "?"),
+                "tags": [str(t) for t in (m.get("tags") or [])],
+                "is_subscribed": is_sub,
+                "sub_state": sub_state,
+                "sub_end": sub_end,
+                "auto_renewing": auto_renew,
+                "thumbnail": m.get("thumbnail") or "",
+            })
+
+        sub_count = sum(1 for x in slim if x["is_subscribed"])
+        open_count = sum(1 for x in slim if x["state"] == "open")
+        self._send_json({
+            "ok": True,
+            "account": account,
+            "total": len(slim),
+            "subscribed_count": sub_count,
+            "open_count": open_count,
+            "members": slim,
+        })
 
     # ── 消息归档查看器 ─────────────────────────────
     _ARCHIVE_TYPES = ("text", "picture", "image", "video", "voice")
