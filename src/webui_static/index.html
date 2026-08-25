@@ -1388,6 +1388,7 @@ function markDirty() {
 
 // ── 页面内确认 / 提示（替代原生 confirm/alert）────
 let _confirmResolve = null;
+let _confirmResult = false;
 function _settleConfirm(v) {
   if (_confirmResolve) {
     const r = _confirmResolve;
@@ -1399,6 +1400,7 @@ function _openConfirm(message, { title, yesText, danger, alertOnly } = {}) {
   return new Promise((resolve) => {
     _settleConfirm(false); // 安全结算可能未关闭的前一次 Promise
     _confirmResolve = resolve;
+    _confirmResult = false;
     const dlg = $("confirmDialog");
     if (!dlg) {
       const ok = alertOnly ? (alert(message), true) : confirm(message);
@@ -1429,14 +1431,18 @@ function uiAlert(message, titleOrOpts) {
   return _openConfirm(message, opts);
 }
 $("confirmYes").addEventListener("click", () => {
+  _confirmResult = true;
   try { $("confirmDialog").close(); } catch(e){}
-  _settleConfirm(true);
 });
 $("confirmNo").addEventListener("click", () => {
+  _confirmResult = false;
   try { $("confirmDialog").close(); } catch(e){}
-  _settleConfirm(false);
 });
-$("confirmDialog").addEventListener("close", () => _settleConfirm(false));  // Esc 等价取消
+$("confirmDialog").addEventListener("close", () => {
+  const res = _confirmResult;
+  _confirmResult = false;
+  _settleConfirm(res);
+});
 function msg(text, cls) { 
   const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); 
   const bar = document.querySelector("footer.savebar");
@@ -2868,20 +2874,39 @@ function renderAccounts() {
     btnDel.type = "button";
     btnDel.innerHTML = '<span style="font-size:11px;">🗑️</span><span>删除</span>';
     btnDel.onclick = async () => {
-      const used = (config.monitor || []).filter((m) => m.account === id);
-      if (used.length > 0) {
-        const names = used.map((m) => m.name || m.id).join("、");
-        if (!(await uiConfirm(
-          "账号 " + id + " 下还有 " + used.length + " 个监控成员：\n" + names +
-          "\n\n将连同这些成员一起删除。",
-          { title: "删除账号", yesText: "连同成员一起删除", danger: true }))) return;
-        config.monitor = config.monitor.filter((m) => m.account !== id);
-      } else {
-        if (!(await uiConfirm("删除账号 " + id + "？",
-                              { title: "删除账号", yesText: "删除", danger: true }))) return;
+      try {
+        const used = (config.monitor || []).filter((m) => m.account === id);
+        let confirmed = false;
+        if (used.length > 0) {
+          const names = used.map((m) => m.name || m.id).join("、");
+          confirmed = await uiConfirm(
+            "账号「" + id + "」下还有 " + used.length + " 个监控成员：\n" + names +
+            "\n\n确定删除该账号并连同这些成员一起移除吗？",
+            { title: "删除账号", yesText: "连同成员一起删除", danger: true }
+          );
+          if (!confirmed) return;
+          config.monitor = (config.monitor || []).filter((m) => m.account !== id);
+        } else {
+          confirmed = await uiConfirm("确定删除账号「" + id + "」吗？",
+                                { title: "删除账号", yesText: "删除", danger: true });
+          if (!confirmed) return;
+        }
+
+        if (config.accounts && config.accounts[id]) {
+          delete config.accounts[id];
+        }
+        if (credStatus && credStatus[id]) {
+          delete credStatus[id];
+        }
+
+        markDirty();
+        renderAccounts();
+        renderMembers();
+        msg("已删除账号 " + id + "，点下方「保存并热重载」生效", "ok");
+      } catch (e) {
+        console.error("删除账号异常:", e);
+        uiAlert("删除账号失败: " + e.message, "错误");
       }
-      delete config.accounts[id];
-      markDirty(); renderAccounts(); renderMembers();
     };
 
     opsWrap.append(btnVerify, btnEdit, btnDel);
