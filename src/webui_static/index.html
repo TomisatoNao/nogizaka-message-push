@@ -1140,7 +1140,10 @@
 </div>
 <div id="memberPickToolbar" style="display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px; padding:6px 10px; background:var(--card-soft, rgba(255,255,255,0.03)); border-radius:8px; border:1px solid var(--border)">
   <div class="chips" id="memberPickFilterChips" style="gap:5px;"></div>
-  <button class="btn small" id="btnAddAllSubscribed" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; font-weight:600; border:none; display:none;">✨ 一键添加所有已订阅</button>
+  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+    <button class="btn small" id="btnAddAllSubscribed" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; font-weight:600; border:none; display:none;">✨ 一键添加已订阅</button>
+    <button class="btn small" id="btnAddAllPastSubscribed" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.35); font-weight:600; display:none;">📥 一键添加曾订阅(离线归档)</button>
+  </div>
 </div>
 <div id="memberPickList" style="max-height:52vh; overflow-y:auto; min-width:320px; display:flex; flex-direction:column; gap:6px;"></div>
 <p class="hint" id="memberPickHint" style="margin-top:10px;">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
@@ -3577,7 +3580,7 @@ function renderMembers() {
 // ── 成员选择器 ───────────────────────────────────
 let _currentFetchedMembers = [];
 let _currentFetchedAccount = "";
-let _memberPickFilter = "all"; // "subscribed" | "open" | "all"
+let _memberPickFilter = "all"; // "subscribed" | "past_subscribed" | "open" | "all"
 
 function renderMemberPickItems() {
   const list = $("memberPickList");
@@ -3587,16 +3590,17 @@ function renderMemberPickItems() {
   let filtered = _currentFetchedMembers.slice();
   if (_memberPickFilter === "subscribed") {
     filtered = filtered.filter(m => m.is_subscribed);
+  } else if (_memberPickFilter === "past_subscribed") {
+    filtered = filtered.filter(m => m.is_past_subscribed);
   } else if (_memberPickFilter === "open") {
     filtered = filtered.filter(m => m.state === "open");
   }
 
-  // 排序规则：已订阅置顶 > 在籍 > 毕业；同级按 ID 升序
+  // 排序规则：当前订阅置顶 > 曾订阅/离线 > 在籍 > 毕业；同级按 ID 升序
   filtered.sort((a, b) => {
-    const subDiff = (b.is_subscribed ? 1 : 0) - (a.is_subscribed ? 1 : 0);
-    if (subDiff !== 0) return subDiff;
-    const stateDiff = (a.state === "open" ? 0 : 1) - (b.state === "open" ? 0 : 1);
-    if (stateDiff !== 0) return stateDiff;
+    const aPri = a.is_subscribed ? 3 : (a.is_past_subscribed ? 2 : (a.state === "open" ? 1 : 0));
+    const bPri = b.is_subscribed ? 3 : (b.is_past_subscribed ? 2 : (b.state === "open" ? 1 : 0));
+    if (aPri !== bPri) return bPri - aPri;
     const an = /^\d+$/.test(a.id) ? parseInt(a.id, 10) : 1e9;
     const bn = /^\d+$/.test(b.id) ? parseInt(b.id, 10) : 1e9;
     return an - bn;
@@ -3605,7 +3609,9 @@ function renderMemberPickItems() {
   if (!filtered.length) {
     const emptyDiv = document.createElement("div");
     emptyDiv.style.cssText = "text-align:center; padding:28px 0; color:var(--muted); font-size:13px;";
-    emptyDiv.textContent = _memberPickFilter === "subscribed" ? "🌟 当前账号下暂无正在订阅中的成员" : "暂无符合条件的成员";
+    emptyDiv.textContent = _memberPickFilter === "subscribed"
+      ? "🌟 当前账号下暂无正在订阅中的成员"
+      : (_memberPickFilter === "past_subscribed" ? "⏳ 当前账号下暂无曾经订阅/离线记录" : "暂无符合条件的成员");
     list.appendChild(emptyDiv);
     return;
   }
@@ -3613,12 +3619,14 @@ function renderMemberPickItems() {
   for (const m of filtered) {
     const row = document.createElement("div");
     const isSub = !!m.is_subscribed;
-    const isExpired = m.sub_state === "expired";
+    const isPastSub = !!m.is_past_subscribed;
     const isOpen = m.state === "open";
 
     row.style.cssText = "display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; border:1px solid " +
-      (isSub ? "rgba(236, 72, 153, 0.45)" : "var(--border)") +
-      "; background:" + (isSub ? "linear-gradient(90deg, rgba(139, 92, 246, 0.12), rgba(236, 72, 153, 0.08))" : "var(--card-soft, rgba(255,255,255,0.02))") + ";";
+      (isSub ? "rgba(236, 72, 153, 0.45)" : (isPastSub ? "rgba(245, 158, 11, 0.35)" : "var(--border)")) +
+      "; background:" +
+      (isSub ? "linear-gradient(90deg, rgba(139, 92, 246, 0.12), rgba(236, 72, 153, 0.08))" :
+       (isPastSub ? "rgba(245, 158, 11, 0.07)" : "var(--card-soft, rgba(255,255,255,0.02))")) + ";";
 
     // 头像 Thumbnail
     const avatar = document.createElement("img");
@@ -3651,12 +3659,12 @@ function renderMemberPickItems() {
     if (isSub) {
       const subBadge = document.createElement("span");
       subBadge.style.cssText = "font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px; background:linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; display:inline-flex; align-items:center; gap:2px; box-shadow:0 1px 4px rgba(236,72,153,0.3);";
-      subBadge.textContent = "🌟 已订阅";
+      subBadge.textContent = "🌟 当前订阅";
       nameRow.appendChild(subBadge);
-    } else if (isExpired) {
+    } else if (isPastSub) {
       const expBadge = document.createElement("span");
-      expBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--muted);";
-      expBadge.textContent = "⏳ 曾订阅";
+      expBadge.style.cssText = "font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px; background:rgba(245, 158, 11, 0.18); color:#f59e0b; border:1px solid rgba(245, 158, 11, 0.35); display:inline-flex; align-items:center; gap:2px;";
+      expBadge.textContent = "⏳ 曾订阅 (离线可归档)";
       nameRow.appendChild(expBadge);
     } else if (isOpen) {
       const openBadge = document.createElement("span");
@@ -3666,11 +3674,11 @@ function renderMemberPickItems() {
     } else {
       const gradBadge = document.createElement("span");
       gradBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.05); color:var(--muted);";
-      gradBadge.textContent = "⚫ 已毕业";
+      gradBadge.textContent = "⚫ 离线/已关闭";
       nameRow.appendChild(gradBadge);
     }
 
-    // 副信息（期数、到期时间等）
+    // 副信息（期数、到期时间/历史订阅起止等）
     const metaRow = document.createElement("div");
     metaRow.style.cssText = "font-size:11.5px; color:var(--muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap;";
     if (m.tags && m.tags.length) {
@@ -3683,9 +3691,27 @@ function renderMemberPickItems() {
         const d = new Date(m.sub_end);
         if (!isNaN(d.getTime())) {
           const endSpan = document.createElement("span");
-          endSpan.style.cssText = "color:#f472b6; font-size:11px;";
+          endSpan.style.cssText = "color:#f472b6; font-size:11px; font-weight:500;";
           endSpan.textContent = "📅 续费期至 " + (d.getMonth() + 1) + "月" + d.getDate() + "日";
           metaRow.appendChild(endSpan);
+        }
+      } catch(_) {}
+    } else if (isPastSub) {
+      try {
+        const parts = [];
+        if (m.sub_start) {
+          const d1 = new Date(m.sub_start);
+          if (!isNaN(d1.getTime())) parts.push(d1.getFullYear() + "/" + (d1.getMonth()+1) + "/" + d1.getDate());
+        }
+        if (m.sub_end) {
+          const d2 = new Date(m.sub_end);
+          if (!isNaN(d2.getTime())) parts.push(d2.getFullYear() + "/" + (d2.getMonth()+1) + "/" + d2.getDate());
+        }
+        if (parts.length) {
+          const timeSpan = document.createElement("span");
+          timeSpan.style.cssText = "color:#f59e0b; font-size:11px;";
+          timeSpan.textContent = "📅 曾订阅区间: " + parts.join(" ~ ");
+          metaRow.appendChild(timeSpan);
         }
       } catch(_) {}
     }
@@ -3699,7 +3725,7 @@ function renderMemberPickItems() {
       markDirty(); renderMembers();
       btn.textContent = "✓ 已添加"; btn.disabled = true; btn.className = "btn small";
     });
-    btn.className = isAdded ? "btn small" : (isSub ? "btn primary small" : "btn small");
+    btn.className = isAdded ? "btn small" : (isSub ? "btn primary small" : (isPastSub ? "btn small" : "btn small"));
     if (isAdded) btn.disabled = true;
 
     row.append(avatar, info, btn);
@@ -3735,6 +3761,23 @@ $("btnAddAllSubscribed").addEventListener("click", () => {
   msg("✅ 已成功添加 " + toAdd.length + " 位已订阅成员到监控列表！", "ok");
 });
 
+$("btnAddAllPastSubscribed").addEventListener("click", () => {
+  const already = new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
+  const toAdd = _currentFetchedMembers.filter(m => m.is_past_subscribed && !already.has(_currentFetchedAccount + ":" + m.id));
+  if (!toAdd.length) {
+    uiAlert("所有曾订阅/离线成员均已在监控列表中！", "无需重复添加");
+    return;
+  }
+  config.monitor = config.monitor || [];
+  for (const m of toAdd) {
+    config.monitor.push({ id: m.id, name: m.name, account: _currentFetchedAccount, groups: [] });
+  }
+  markDirty();
+  renderMembers();
+  renderMemberPickItems();
+  msg("✅ 已成功添加 " + toAdd.length + " 位曾订阅成员（用于离线历史归档）！", "ok");
+});
+
 $("btnFetchMembers").addEventListener("click", async () => {
   const account = $("pickAccountChips").dataset.value;
   const list = $("memberPickList");
@@ -3755,25 +3798,31 @@ $("btnFetchMembers").addEventListener("click", async () => {
 
   _currentFetchedMembers = (data.members || []).map((m) => {
     const isSub = !!(m.is_subscribed || m.sub_state === "active" || (m.subscription && m.subscription.state === "active"));
-    return Object.assign({}, m, { is_subscribed: isSub });
+    const isPastSub = !!(m.is_past_subscribed || m.sub_state === "expired" || (!isSub && m.sub_state));
+    return Object.assign({}, m, { is_subscribed: isSub, is_past_subscribed: isPastSub });
   });
   _currentFetchedAccount = account;
 
   const subCount = data.subscribed_count !== undefined ? data.subscribed_count : _currentFetchedMembers.filter((m) => m.is_subscribed).length;
+  const pastCount = data.past_subscribed_count !== undefined ? data.past_subscribed_count : _currentFetchedMembers.filter((m) => m.is_past_subscribed).length;
   const openCount = data.open_count !== undefined ? data.open_count : _currentFetchedMembers.filter((m) => m.state === "open").length;
   const totalCount = data.total !== undefined ? data.total : _currentFetchedMembers.length;
 
-  $("memberPickHint").innerHTML = "📊 <b>" + account + "</b>：共 " + totalCount + " 项 · <span style='color:#f472b6; font-weight:600;'>🌟 已订阅 " + subCount + " 人</span> · 🟢 在籍 " + openCount + " 人。点「添加」后记得回到列表保存。";
+  $("memberPickHint").innerHTML = "📊 <b>" + account + "</b>：共 " + totalCount + " 项 · " +
+    "<span style='color:#f472b6; font-weight:600;'>🌟 当前订阅 " + subCount + " 人</span> · " +
+    "<span style='color:#f59e0b; font-weight:600;'>⏳ 曾订阅(离线归档) " + pastCount + " 人</span> · " +
+    "🟢 在籍 " + openCount + " 人。<br><span style='color:var(--muted); font-size:12px;'>💡 曾订阅成员亦可添加用于离线归档同步历史消息。</span>";
 
   // 渲染筛选 Chips
   const filterChips = $("memberPickFilterChips");
   filterChips.innerHTML = "";
   const filterOpts = [
-    ["subscribed", "🌟 仅看已订阅 (" + subCount + ")"],
+    ["subscribed", "🌟 当前订阅 (" + subCount + ")"],
+    ["past_subscribed", "⏳ 曾订阅/离线 (" + pastCount + ")"],
     ["open", "🟢 全部在籍 (" + openCount + ")"],
     ["all", "📋 全部 (" + totalCount + ")"],
   ];
-  _memberPickFilter = subCount > 0 ? "subscribed" : "open";
+  _memberPickFilter = subCount > 0 ? "subscribed" : (pastCount > 0 ? "past_subscribed" : "open");
 
   for (const [val, label] of filterOpts) {
     const btn = document.createElement("button");
@@ -3789,13 +3838,21 @@ $("btnFetchMembers").addEventListener("click", async () => {
     filterChips.appendChild(btn);
   }
 
-  // 是否显示「一键添加所有已订阅」按钮
+  // 是否显示「一键添加所有已订阅」和「一键添加曾订阅」按钮
   const btnAddAll = $("btnAddAllSubscribed");
   if (subCount > 0) {
     btnAddAll.style.display = "inline-block";
-    btnAddAll.textContent = "✨ 一键添加所有已订阅 (" + subCount + ")";
+    btnAddAll.textContent = "✨ 一键添加当前已订阅 (" + subCount + ")";
   } else {
     btnAddAll.style.display = "none";
+  }
+
+  const btnAddAllPast = $("btnAddAllPastSubscribed");
+  if (pastCount > 0) {
+    btnAddAllPast.style.display = "inline-block";
+    btnAddAllPast.textContent = "📥 一键添加曾订阅 (" + pastCount + ")";
+  } else {
+    btnAddAllPast.style.display = "none";
   }
 
   $("memberPickToolbar").style.display = "flex";

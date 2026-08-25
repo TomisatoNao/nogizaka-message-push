@@ -976,13 +976,19 @@ class _Handler(BaseHTTPRequestHandler):
         for m in members:
             sub = m.get("subscription")
             is_sub = False
+            is_past_sub = False
             sub_state = ""
+            sub_start = ""
             sub_end = ""
+            sub_type = ""
             auto_renew = False
             if isinstance(sub, dict) and sub:
                 sub_state = str(sub.get("state") or "").lower()
                 is_sub = (sub_state == "active")
+                is_past_sub = (sub_state == "expired" or (not is_sub and bool(sub_state)))
+                sub_start = str(sub.get("start_at") or "")
                 sub_end = str(sub.get("end_at") or "")
+                sub_type = str(sub.get("type") or "")
                 auto_renew = bool(sub.get("auto_renewing", False))
 
             slim.append({
@@ -991,19 +997,24 @@ class _Handler(BaseHTTPRequestHandler):
                 "state": m.get("state", "?"),
                 "tags": [str(t) for t in (m.get("tags") or [])],
                 "is_subscribed": is_sub,
+                "is_past_subscribed": is_past_sub,
                 "sub_state": sub_state,
+                "sub_start": sub_start,
                 "sub_end": sub_end,
+                "sub_type": sub_type,
                 "auto_renewing": auto_renew,
                 "thumbnail": m.get("thumbnail") or "",
             })
 
         sub_count = sum(1 for x in slim if x["is_subscribed"])
+        past_count = sum(1 for x in slim if x["is_past_subscribed"])
         open_count = sum(1 for x in slim if x["state"] == "open")
         self._send_json({
             "ok": True,
             "account": account,
             "total": len(slim),
             "subscribed_count": sub_count,
+            "past_subscribed_count": past_count,
             "open_count": open_count,
             "members": slim,
         })
