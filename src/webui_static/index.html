@@ -446,9 +446,10 @@
       </table>
     </div>
     <div class="empty" hidden="" id="memberEmpty">还没有监控成员。</div>
-    <div style="margin-top:12px; display:flex; gap:10px">
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
       <button class="btn" id="btnAddMember" type="button">＋ 手动添加成员</button>
       <button class="btn" id="btnPickMember" type="button">📋 从账号拉取成员列表</button>
+      <button class="btn small" id="btnSyncSubs" type="button" style="margin-left:auto; color:var(--muted); font-size:12px;">🔄 刷新订阅状态</button>
     </div>
   </div>
 </section>
@@ -1490,6 +1491,19 @@ async function api(path, opts = {}) {
   return data;
 }
 
+let subscriptions = {};
+async function loadSubscriptions() {
+  try {
+    const res = await api("/api/subscriptions");
+    if (res && res.ok) {
+      subscriptions = res.subscriptions || {};
+      renderMembers();
+    }
+  } catch (e) {
+    console.warn("加载订阅状态异常:", e);
+  }
+}
+
 async function loadConfig() {
   msg("加载中…", "");
   try {
@@ -1509,6 +1523,7 @@ async function loadConfig() {
     baseline = JSON.stringify(config);
     setDirty(false);
     loadPushTargets();
+    loadSubscriptions();
     msg("已载入 " + data.config_path, "ok");
   } catch (e) {
     msg("载入失败：" + e.message, "err");
@@ -3489,7 +3504,12 @@ function renderMembers() {
     const tr = document.createElement("tr");
 
     const tdId = document.createElement("td");
-    tdId.appendChild(mkInput(m.id || "", (v) => { m.id = v.trim(); }, "55 (可空)", "width:85px"));
+    const idInput = mkInput(m.id || "", (v) => {
+      m.id = v.trim();
+      updateSubBadge();
+    }, "55 (可空)", "width:85px");
+    tdId.appendChild(idInput);
+
     const tdName = document.createElement("td");
     tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里 奈央", "max-width:140px"));
     const tdAcc = document.createElement("td");
@@ -3508,8 +3528,51 @@ function renderMembers() {
       sel.appendChild(opt);
     }
     sel.value = m.account || "";
-    sel.addEventListener("change", () => { m.account = sel.value; markDirty(); });
+    sel.addEventListener("change", () => {
+      m.account = sel.value;
+      markDirty();
+      updateSubBadge();
+    });
     tdAcc.appendChild(sel);
+
+    // 订阅状态徽章展示
+    const subBadge = document.createElement("div");
+    subBadge.className = "member-sub-badge";
+    subBadge.style.cssText = "font-size:11px; margin-top:4px; display:flex; align-items:center; gap:4px; flex-wrap:wrap;";
+
+    function updateSubBadge() {
+      const accId = (m.account || "").trim();
+      const mid = (m.id || "").trim();
+      if (!accId) {
+        subBadge.innerHTML = '<span style="color:var(--muted)">🌐 纯社媒/博客</span>';
+        return;
+      }
+      if (!mid) {
+        subBadge.innerHTML = '<span style="color:var(--muted); opacity:0.8;">⚠️ 未填成员ID</span>';
+        return;
+      }
+      const s = (subscriptions || {})[accId + ":" + mid];
+      if (!s) {
+        subBadge.innerHTML = '<span style="color:var(--muted); font-size:11px;" title="未检测到活跃订阅，抓取引擎将跳过日常轮询">⚪ 未订阅 (跳过抓取)</span>';
+      } else if (s.state === "active") {
+        let renewTxt = "";
+        if (s.end_at) {
+          try {
+            const d = new Date(s.end_at);
+            if (!isNaN(d.getTime())) renewTxt = " · 至 " + (d.getMonth() + 1) + "/" + d.getDate();
+          } catch(_) {}
+        }
+        subBadge.innerHTML = '<span style="color:#10b981; font-weight:600; display:inline-flex; align-items:center; gap:3px;">🌟 已订阅' + renewTxt + '</span>';
+      } else if (s.state === "expired") {
+        subBadge.innerHTML = '<span style="color:#f59e0b; font-weight:500; display:inline-flex; align-items:center; gap:3px;" title="离线模式：跳过日常实时轮询，保留历史归档与社媒监控">⏳ 曾订阅 (离线归档)</span>';
+      } else if (s.state === "closed") {
+        subBadge.innerHTML = '<span style="color:var(--muted)" title="已毕业/关闭">⚫ 离线/已关闭</span>';
+      } else {
+        subBadge.innerHTML = '<span style="color:var(--muted)" title="未订阅，跳过日常抓取">⚪ ' + esc(s.state || "未订阅") + '</span>';
+      }
+    }
+    updateSubBadge();
+    tdAcc.appendChild(subBadge);
 
     const tdSocial = document.createElement("td");
     const soc = m.social || {};
@@ -3864,6 +3927,29 @@ $("btnAddMember").addEventListener("click", () => {
   const firstAccount = Object.keys(config.accounts || {})[0] || "";
   config.monitor.push({ id: "", name: "", account: firstAccount, groups: [] });
   markDirty(); renderMembers();
+});
+
+$("btnSyncSubs").addEventListener("click", async () => {
+  const btn = $("btnSyncSubs");
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = "⏳ 正在同步…";
+  try {
+    msg("正在从各账号官方服务器同步最新订阅状态…", "");
+    const res = await api("/api/subscriptions/sync", { method: "POST" });
+    if (res.ok) {
+      subscriptions = res.subscriptions || {};
+      renderMembers();
+      msg("✅ 已成功同步各账号最新订阅状态！", "ok");
+    } else {
+      msg("❌ 同步失败：" + (res.errors || []).join("；"), "err");
+    }
+  } catch (e) {
+    msg("❌ 同步异常：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 });
 
 // ── 日志 ─────────────────────────────────────────

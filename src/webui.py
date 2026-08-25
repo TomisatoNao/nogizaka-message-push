@@ -931,6 +931,12 @@ class _Handler(BaseHTTPRequestHandler):
             qs = parse_qs(self.path.partition("?")[2])
             refresh = qs.get("refresh", ["0"])[0] in ("1", "true")
             self._send_json({"ok": True, "storage": get_storage_breakdown(force_refresh=refresh)})
+        if path == "/api/subscriptions":
+            if not self._check_auth():
+                return
+            from src.member_directory import get_all_subscriptions
+            subs = get_all_subscriptions()
+            self._send_json({"ok": True, "subscriptions": subs})
             return
 
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
@@ -2387,6 +2393,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, **res})
             except Exception as e:
                 self._send_json({"ok": False, "errors": [f"智能解析异常: {e}"]}, 500)
+            return
+        if path == "/api/subscriptions/sync":
+            if not self._check_auth():
+                return
+            try:
+                import asyncio
+                from src.member_directory import sync_all_accounts_subscriptions, get_all_subscriptions
+                stats = asyncio.run(sync_all_accounts_subscriptions())
+                subs = get_all_subscriptions()
+                self._send_json({"ok": True, "stats": stats, "subscriptions": subs})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"同步订阅状态失败: {e}"]}, 500)
             return
         if path.startswith("/api/archive/"):
             if not self._guard(need_admin=False):

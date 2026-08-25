@@ -156,6 +156,18 @@ async def _fetch_member_messages(member: dict):
             datetime.now(timezone.utc) - timedelta(hours=cfg.BACKTRACK_HOURS)
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # ── 订阅感知优化：未订阅/已离线成员跳过日常实时抓取 ──
+    from src.member_directory import is_member_active_subscription, get_member_subscription
+    sub_is_active = is_member_active_subscription(account_id, m_id)
+    if sub_is_active is False:
+        if is_first_fetch:
+            log_all(f"ℹ️ [成员ID: {m_id} | 名字: {m_name}] 处于曾订阅/离线状态，首次巡查尝试建立历史归档 (past_messages)", is_debug=True)
+        else:
+            sub_info = get_member_subscription(account_id, m_id) or {}
+            sub_state_txt = sub_info.get("state", "未订阅")
+            log_all(f"⏸️ [成员ID: {m_id} | 名字: {m_name}] 订阅状态为【{sub_state_txt}】，跳过实时抓取 (保留社媒/博客/离线归档)", is_debug=True)
+            return None
+
     id_list, id_set = load_sent_ids(group_type, m_id)
     l_time_ref = [l_time]
 
@@ -235,6 +247,8 @@ async def _fetch_member_messages(member: dict):
 
                 if truly_new:
                     log_response(resp.text)
+                elif is_first_fetch:
+                    archive.set_timeline_watermark(group_type, m_id, l_time_ref[0])
 
                 _health_tracker().record_member_fetch(m_name, True)
                 return (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock)

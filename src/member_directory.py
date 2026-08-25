@@ -95,4 +95,172 @@ async def fetch_member_directory(
         return None, f"响应不是合法 JSON: {resp.text[:200]}"
     if groups is None:
         return None, f"响应结构不认识: {str(resp.json())[:200]}"
+
+    # 自动保存/刷新该账号成员的订阅元数据至 SQLite 数据库
+    try:
+        save_account_subscriptions(account_id, groups)
+    except Exception:
+        pass
+
     return groups, None
+
+
+def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
+    """持久化保存/更新指定账号下所有成员的订阅状态与元数据至 SQLite。"""
+    if not groups or not account_id:
+        return
+    import time
+    from src.auth import get_auth_db, _lock
+    conn = get_auth_db()
+    now_ts = time.time()
+    rows = []
+    for g in groups:
+        mid = str(g.get("id") or "")
+        if not mid:
+            continue
+        mname = str(g.get("name") or "")
+        sub = g.get("subscription")
+        g_state = str(g.get("state") or "")
+
+        if isinstance(sub, dict) and sub:
+            sub_st = str(sub.get("state") or "").lower()
+            if sub_st == "active":
+                state = "active"
+            elif sub_st == "expired":
+                state = "expired"
+            else:
+                state = sub_st or "unsubscribed"
+            sub_type = str(sub.get("type") or "")
+            start_at = str(sub.get("start_at") or "")
+            end_at = str(sub.get("end_at") or "")
+            auto_renew = 1 if sub.get("auto_renewing") else 0
+        elif g_state in ("closed", "inactive"):
+            state = "closed"
+            sub_type = ""
+            start_at = ""
+            end_at = ""
+            auto_renew = 0
+        else:
+            state = "unsubscribed"
+            sub_type = ""
+            start_at = ""
+            end_at = ""
+            auto_renew = 0
+
+        rows.append((account_id, mid, mname, state, sub_type, start_at, end_at, auto_renew, now_ts))
+
+    with _lock:
+        try:
+            with conn:
+                conn.executemany("""
+                    INSERT INTO member_subscriptions (
+                        account_id, member_id, member_name, state, sub_type, start_at, end_at, auto_renewing, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(account_id, member_id) DO UPDATE SET
+                        member_name = excluded.member_name,
+                        state = excluded.state,
+                        sub_type = excluded.sub_type,
+                        start_at = excluded.start_at,
+                        end_at = excluded.end_at,
+                        auto_renewing = excluded.auto_renewing,
+                        updated_at = excluded.updated_at;
+                """, rows)
+        except Exception:
+            pass
+
+
+def get_member_subscription(account_id: str, member_id: str) -> dict | None:
+    """查询指定账号+成员ID的最新订阅缓存。"""
+    if not account_id or not member_id:
+        return None
+    from src.auth import get_auth_db, _lock
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.execute("""
+                SELECT state, sub_type, start_at, end_at, auto_renewing, updated_at, member_name
+                FROM member_subscriptions
+                WHERE account_id = ? AND member_id = ?
+            """, (account_id, str(member_id)))
+            row = cur.fetchone()
+            if row:
+                return {
+                    "state": row[0],
+                    "sub_type": row[1],
+                    "start_at": row[2],
+                    "end_at": row[3],
+                    "auto_renewing": bool(row[4]),
+                    "updated_at": row[5],
+                    "member_name": row[6],
+                }
+        except Exception:
+            return None
+    return None
+
+
+def get_all_subscriptions(account_id: str = "") -> dict[str, dict]:
+    """获取所有已缓存的订阅字典，以 'account_id:member_id' 为 key。"""
+    from src.auth import get_auth_db, _lock
+    conn = get_auth_db()
+    result = {}
+    with _lock:
+        try:
+            if account_id:
+                cur = conn.execute("""
+                    SELECT account_id, member_id, state, sub_type, start_at, end_at, auto_renewing, updated_at, member_name
+                    FROM member_subscriptions WHERE account_id = ?
+                """, (account_id,))
+            else:
+                cur = conn.execute("""
+                    SELECT account_id, member_id, state, sub_type, start_at, end_at, auto_renewing, updated_at, member_name
+                    FROM member_subscriptions
+                """)
+            for row in cur.fetchall():
+                acc, mid, state, sub_type, start_at, end_at, auto_renew, upd, mname = row
+                result[f"{acc}:{mid}"] = {
+                    "account_id": acc,
+                    "member_id": mid,
+                    "member_name": mname,
+                    "state": state,
+                    "sub_type": sub_type,
+                    "start_at": start_at,
+                    "end_at": end_at,
+                    "auto_renewing": bool(auto_renew),
+                    "updated_at": upd,
+                }
+        except Exception:
+            pass
+    return result
+
+
+def is_member_active_subscription(account_id: str, member_id: str) -> bool | None:
+    """快速判断成员是否处于活跃订阅中。返回 True（活跃）、False（未订阅/已过期/离线）、None（未缓存）。"""
+    sub = get_member_subscription(account_id, member_id)
+    if sub is None:
+        return None
+    return sub.get("state") == "active"
+
+
+async def sync_all_accounts_subscriptions(client: httpx.AsyncClient | None = None) -> dict[str, int]:
+    """并发同步所有已配置且凭据可用的账号的成员订阅状态。"""
+    from config.credentials import validate_account_cred
+    stats = {}
+    should_close = False
+    if client is None:
+        client = httpx.AsyncClient(timeout=20)
+        should_close = True
+
+    try:
+        for acc_id in list(cfg.ACCOUNTS.keys()):
+            ok, _ = validate_account_cred(acc_id)
+            if not ok:
+                continue
+            groups, err = await fetch_member_directory(client, acc_id)
+            if groups:
+                stats[acc_id] = len(groups)
+    except Exception:
+        pass
+    finally:
+        if should_close:
+            await client.aclose()
+    return stats

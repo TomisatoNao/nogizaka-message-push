@@ -108,6 +108,21 @@ def get_auth_db() -> sqlite3.Connection:
                 fingerprint TEXT NOT NULL
             );
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS member_subscriptions (
+                account_id TEXT NOT NULL,
+                member_id TEXT NOT NULL,
+                member_name TEXT NOT NULL,
+                state TEXT NOT NULL,
+                sub_type TEXT,
+                start_at TEXT,
+                end_at TEXT,
+                auto_renewing INTEGER DEFAULT 0,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (account_id, member_id)
+            );
+        """)
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）

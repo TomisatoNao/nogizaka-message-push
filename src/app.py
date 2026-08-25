@@ -848,6 +848,13 @@ async def main() -> None:
     #    send_alert_message，此时 napcat._client / tgbot._bot 必须已就绪，否则告警静默丢失。
     await _init_accounts()
 
+    # 4.5 启动成员订阅状态同步（后台异步更新 SQLite 订阅状态缓存）
+    try:
+        from src.member_directory import sync_all_accounts_subscriptions
+        asyncio.create_task(sync_all_accounts_subscriptions(http_client))
+    except Exception as e:
+        log_all(f"⚠️ 初始同步账号订阅状态异常: {e}", is_debug=True)
+
     # 5. 启动健康检查（改进 3）
     await _health_check(qq_client)
 
