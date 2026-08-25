@@ -512,6 +512,12 @@ async def _run_cycle() -> None:
                     return name
 
                 if result is None:
+                    acc_id = member.get("account_id") or ""
+                    mid = str(member.get("m_id") or "")
+                    from src.member_directory import is_member_active_subscription
+                    if not acc_id or not mid or is_member_active_subscription(acc_id, mid) is False:
+                        # 纯社媒/博客或未订阅/离线成员，跳过是正常调度，不作为巡查异常
+                        return None
                     log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
                     return name
 
