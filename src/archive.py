@@ -252,7 +252,7 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
         log_all(f"⚠️ SQLite 保存消息数据失败: {e}", is_error=True)
 
 
-def sync_all_to_sqlite() -> int:
+def sync_all_to_sqlite(force: bool = False) -> int:
     """自动扫描磁盘下所有历史归档 JSON，高性能单事务批量全量同步导入 SQLite 数据库。"""
     root = archive_root()
     if not root.is_dir():
@@ -261,6 +261,16 @@ def sync_all_to_sqlite() -> int:
     conn = init_db()
     if not conn:
         return 0
+
+    if not force:
+        try:
+            cur = conn.execute("SELECT COUNT(*) FROM messages;")
+            row = cur.fetchone()
+            if row and row[0] > 0:
+                log_all(f"💾 SQLite 归档已就绪（共 {row[0]} 条记录）", is_debug=True)
+                return row[0]
+        except Exception:
+            pass
 
     all_rows = []
     fts_rows = []
@@ -786,12 +796,16 @@ def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
     return ok_ids, fail_ids
 
 
-def realign_archive_timezones() -> int:
+def realign_archive_timezones(force: bool = False) -> int:
     """全自动历史数据对齐：扫描全部已归档消息，按 JST (UTC+9) 真实年月纠正跨月错位数据。
     返回修正的消息条数。
     """
     root = archive_root()
     if not root.is_dir():
+        return 0
+
+    marker_file = root / ".timezone_realigned"
+    if not force and marker_file.exists():
         return 0
 
     realigned_count = 0
@@ -898,6 +912,10 @@ def realign_archive_timezones() -> int:
 
     # 清空 day_cache 缓存以保证最新
     _day_cache.clear()
+    try:
+        marker_file.touch(exist_ok=True)
+    except Exception:
+        pass
     if realigned_count > 0:
         log_all(f"🕒 历史归档时区自动自愈完成：已纠正 {realigned_count} 条跨月时区错位消息至 JST 年月")
     return realigned_count
