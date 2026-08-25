@@ -769,7 +769,7 @@ async function loadBlogPage(pageNum) {
   
   setPageLoading(true);
   try {
-    let perPage = (pageNum === 1 && !searchQuery && !curBlogDate) ? 25 : 24;
+    let perPage = 24;
     let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + pageNum + "&per_page=" + perPage;
     if (curBlogAuthor) url += "&author=" + encodeURIComponent(curBlogAuthor);
     if (curBlogDate) url += "&date=" + encodeURIComponent(curBlogDate);
