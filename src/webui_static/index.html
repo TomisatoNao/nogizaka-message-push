@@ -1397,8 +1397,12 @@ function _openConfirm(message, { title, yesText, danger, alertOnly } = {}) {
     yes.focus();
   });
 }
-function uiConfirm(message, opts) { return _openConfirm(message, opts || {}); }
-function uiAlert(message, title) { return _openConfirm(message, { title: title, alertOnly: true }); }
+function uiAlert(message, titleOrOpts) {
+  const opts = (typeof titleOrOpts === "object" && titleOrOpts !== null)
+    ? Object.assign({ alertOnly: true }, titleOrOpts)
+    : { title: titleOrOpts, alertOnly: true };
+  return _openConfirm(message, opts);
+}
 function _settleConfirm(v) {
   if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(v); }
 }
@@ -2551,10 +2555,13 @@ $("secretSave").addEventListener("click", async () => {
     renderGeneral(); renderAccounts();
 
     if (data.handshake) {
-      if (data.handshake.ok) {
+      const isWarn = (data.handshake.details && data.handshake.details.warning) || (data.handshake.msg && data.handshake.msg.startsWith("⚠️"));
+      if (data.handshake.ok && !isWarn) {
         uiAlert(data.handshake.msg, { title: "✅ 凭证自动握手成功" });
+      } else if (data.handshake.ok && isWarn) {
+        uiAlert(data.handshake.msg, { title: "⚠️ 握手提醒（Token 可用但缺少自动续期会话）", danger: true });
       } else {
-        uiAlert(data.handshake.msg, { title: "⚠️ 握手提醒", danger: true });
+        uiAlert(data.handshake.msg, { title: "❌ 握手失败", danger: true });
       }
     }
 
@@ -2798,8 +2805,14 @@ function renderAccounts() {
           body: JSON.stringify({ account: id }),
         });
         if (res.ok) {
-          uiAlert(res.msg || "✅ 握手测试成功！", { title: "账号握手成功" });
-          msg(res.msg || "✅ 账号握手成功", "ok");
+          const isWarn = (res.details && res.details.warning) || (res.msg && res.msg.startsWith("⚠️"));
+          if (isWarn) {
+            uiAlert(res.msg, { title: "⚠️ 握手提醒（Token 可用但缺少自动续期会话）", danger: true });
+            msg(res.msg || "⚠️ 握手提醒", "warn");
+          } else {
+            uiAlert(res.msg || "✅ 握手测试成功！", { title: "账号握手成功" });
+            msg(res.msg || "✅ 账号握手成功", "ok");
+          }
         } else {
           uiAlert(res.msg || ("❌ 验证失败：" + (res.errors || []).join("\n")), { title: "握手失败", danger: true });
           msg(res.msg || "❌ 验证失败", "err");
