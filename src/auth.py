@@ -210,6 +210,28 @@ def delete_account_credential(account_id: str) -> bool:
             return False
 
 
+def rename_account_credential(old_account_id: str, new_account_id: str) -> bool:
+    """在数据库中重命名账号凭证，并同步更新指纹记录。"""
+    if old_account_id == new_account_id:
+        return True
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE account_credentials SET account_id = ? WHERE account_id = ?",
+                    (new_account_id, old_account_id)
+                )
+                conn.execute(
+                    "UPDATE env_fingerprints SET account_id = ? WHERE account_id = ?",
+                    (new_account_id, old_account_id)
+                )
+            return True
+        except Exception as e:
+            log_all(f"⚠️ 重命名账号凭证失败 ({old_account_id} -> {new_account_id}): {e}", is_error=True)
+            return False
+
+
 def list_account_credentials() -> dict[str, dict]:
     """列出数据库中所有账号凭证。"""
     conn = get_auth_db()

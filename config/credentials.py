@@ -826,3 +826,18 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
             return False, f"❌ 验证网络异常: {format_httpx_error(e)}", {"auth_method": "web"}
 
     return False, "❌ 凭证不完整，无法完成验证", {"auth_method": "web"}
+
+
+def rename_account(old_id: str, new_id: str) -> None:
+    """内存与数据库中同步重命名账号凭证与刷新锁。"""
+    if old_id == new_id:
+        return
+    if old_id in ACCOUNT_CREDS:
+        ACCOUNT_CREDS[new_id] = ACCOUNT_CREDS.pop(old_id)
+    if old_id in _REFRESH_LOCKS:
+        _REFRESH_LOCKS[new_id] = _REFRESH_LOCKS.pop(old_id)
+    try:
+        from src import auth
+        auth.rename_account_credential(old_id, new_id)
+    except Exception:
+        pass

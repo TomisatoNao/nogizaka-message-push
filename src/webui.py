@@ -2321,6 +2321,26 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/secrets":
             self._handle_secrets()
             return
+        if path == "/api/accounts/rename":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            old_id = str(body.get("old_id", "")).strip()
+            new_id = str(body.get("new_id", "")).strip()
+            if not old_id or not new_id:
+                self._send_json({"ok": False, "errors": ["缺少 old_id 或 new_id 参数"]}, 400)
+                return
+            try:
+                from config import credentials
+                credentials.rename_account(old_id, new_id)
+                from src.logger import log_all
+                log_all(f"🔄 账号凭证与状态已同步重命名: {old_id} -> {new_id}")
+                self._send_json({"ok": True, "old_id": old_id, "new_id": new_id})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"重命名账号失败: {e}"]}, 500)
+            return
         if path == "/api/accounts/verify":
             if not self._check_auth():
                 return

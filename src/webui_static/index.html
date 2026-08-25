@@ -2914,10 +2914,10 @@ function chipGroup(containerId, options, value) {
 let editingAccountId = null;
 function openAccountDialog(id) {
   editingAccountId = id;
-  const acc = id ? config.accounts[id] : {};
+  const acc = id ? (config.accounts || {})[id] || {} : {};
   $("accountDialogTitle").textContent = id ? "编辑账号 " + id : "添加账号";
   $("accId").value = id || "";
-  $("accId").disabled = !!id;
+  $("accId").disabled = false;
   chipGroup("accGroupChips", [
     ["nogizaka46", "nogizaka46"], ["hinatazaka46", "hinatazaka46"],
     ["sakurazaka46", "sakurazaka46"], ["yodel", "yodel"],
@@ -2932,19 +2932,50 @@ function openAccountDialog(id) {
 }
 $("btnAddAccount").addEventListener("click", () => openAccountDialog(null));
 $("accCancel").addEventListener("click", () => $("accountDialog").close());
-$("accSave").addEventListener("click", () => {
-  const id = $("accId").value.trim();
-  if (!/^[a-z0-9_]+$/.test(id)) { uiAlert("账号 ID 只能用小写字母、数字、下划线"); return; }
-  if (!editingAccountId && config.accounts && config.accounts[id]) { uiAlert("账号 ID 已存在"); return; }
+$("accSave").addEventListener("click", async () => {
+  const newId = $("accId").value.trim();
+  if (!/^[a-z0-9_]+$/.test(newId)) { uiAlert("账号 ID 只能用小写字母、数字、下划线"); return; }
+  if ((!editingAccountId || editingAccountId !== newId) && config.accounts && config.accounts[newId]) {
+    uiAlert("账号 ID「" + newId + "」已存在，请换一个名称");
+    return;
+  }
   const acc = { group: $("accGroupChips").dataset.value };
   if ($("accAuthChips").dataset.value === "mobile") acc.auth = "mobile";
   if ($("accAppTag").value.trim()) acc.app_tag = $("accAppTag").value.trim();
   if ($("accApiBase").value.trim()) acc.api_base = $("accApiBase").value.trim();
   if ($("accWebOrigin").value.trim()) acc.web_origin = $("accWebOrigin").value.trim();
+  
   config.accounts = config.accounts || {};
-  config.accounts[id] = acc;
+
+  if (editingAccountId && editingAccountId !== newId) {
+    const oldId = editingAccountId;
+    delete config.accounts[oldId];
+    // 1. 同步更新监控成员列表中绑定的账号 ID
+    (config.monitor || []).forEach((m) => {
+      if (m.account === oldId) {
+        m.account = newId;
+      }
+    });
+    // 2. 通知后端同步重命名数据库凭证与内存缓存
+    try {
+      await api("/api/accounts/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ old_id: oldId, new_id: newId }),
+      });
+    } catch (e) {
+      console.warn("重命名账号凭证请求异常:", e);
+    }
+  }
+
+  config.accounts[newId] = acc;
   $("accountDialog").close();
-  markDirty(); renderAccounts(); renderMembers();
+  markDirty();
+  renderAccounts();
+  renderMembers();
+  if (editingAccountId && editingAccountId !== newId) {
+    msg("已将账号重命名为 " + newId + "，关联成员已自动同步！", "ok");
+  }
 });
 
 
