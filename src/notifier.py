@@ -31,8 +31,8 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
     返回 False 表示启用的通道全部失败（需要按重试逻辑处理）。
     """
     import asyncio
-    m_name = member.get("name", "未知成员")
-    m_id = member.get("id")
+    m_name = member.get("m_name") or member.get("name") or "未知成员"
+    m_id = member.get("m_id") or member.get("id")
     tasks = []
 
     # 1. NapCat QQ 路由并发任务
