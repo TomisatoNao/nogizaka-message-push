@@ -31,7 +31,10 @@ def api_base(account_id: str, acc_cfg: dict) -> str:
         return get_mobile_api_base(account_id)
     if acc_cfg.get("api_base"):
         return acc_cfg["api_base"]
-    return f"https://api.message.{acc_cfg.get('group_type', '')}.com"
+    group_type = acc_cfg.get("group_type", "")
+    if group_type.lower() == "yodel":
+        return "https://api.service.yodel-app.com"
+    return f"https://api.message.{group_type}.com"
 
 
 def build_headers(account_id: str, acc_cfg: dict) -> dict[str, str]:

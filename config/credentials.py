@@ -334,10 +334,18 @@ def get_web_headers(
     web_origin: str | None = None,
 ) -> dict[str, str]:
     if app_tag is None:
-        app_tag = "nogizaka" if group_type == "nogizaka46" else "keyakizaka"
+        if group_type == "nogizaka46":
+            app_tag = "nogizaka"
+        elif group_type.lower() == "yodel":
+            app_tag = "yodel"
+        else:
+            app_tag = "keyakizaka"
     if web_origin:
         origin  = web_origin
         referer = web_origin.rstrip("/") + "/"
+    elif group_type.lower() == "yodel":
+        origin  = "https://service.yodel-app.com"
+        referer = "https://service.yodel-app.com/"
     else:
         origin  = f"https://message.{group_type}.com"
         referer = f"https://message.{group_type}.com/"
@@ -592,7 +600,9 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
         group_type = acc_cfg["group_type"]
         api_base   = acc_cfg.get("api_base")
         if api_base:
-            url = f"{api_base}/v2/update_token"
+            url = f"{api_base.rstrip('/')}/v2/update_token"
+        elif group_type.lower() == "yodel":
+            url = "https://api.service.yodel-app.com/v2/update_token"
         else:
             url = f"https://api.message.{group_type}.com/v2/update_token"
         cookie_str = "; ".join(f"{k}={v}" for k, v in cred["cookies"].items())
@@ -777,8 +787,13 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
     # 2. 如果 update_token 失败，测试当前 timeline 接口 (GET /v2/groups) 是否能用
     if token:
         group_type = acc_cfg.get("group_type", "nogizaka46")
-        api_base = acc_cfg.get("api_base") or f"https://api.message.{group_type}.com"
-        url = f"{api_base}/v2/groups"
+        if acc_cfg.get("api_base"):
+            api_base = acc_cfg["api_base"]
+        elif group_type.lower() == "yodel":
+            api_base = "https://api.service.yodel-app.com"
+        else:
+            api_base = f"https://api.message.{group_type}.com"
+        url = f"{api_base.rstrip('/')}/v2/groups"
         headers = get_web_headers(
             group_type,
             token=token,
