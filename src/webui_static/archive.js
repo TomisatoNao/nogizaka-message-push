@@ -755,16 +755,6 @@ function selectBlogAuthor(author) {
   loadBlogCalendar();
   loadBlogPage(1);
 }
-  
-  const p = new URLSearchParams({ blog: curBlogGroup });
-  if (author) p.set("author", author);
-  selfHashUpdate = true;
-  location.hash = p.toString();
-  setTimeout(() => { selfHashUpdate = false; }, 0);
-  
-  loadBlogCalendar();
-  loadBlogPage(1);
-}
 
 // ── 渲染博客网格 ─────────────────────────────────────
 async function loadBlogPage(pageNum) {
