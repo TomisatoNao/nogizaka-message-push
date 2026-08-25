@@ -171,7 +171,35 @@
   </div>
   <div id="timeline"></div>
   <div id="blogGrid" class="blog-grid" style="display:none;">
-    <div id="blogAuthorBar" class="blog-author-bar"></div>
+    <div id="blogAuthorBar" class="blog-author-bar">
+      <!-- 博客作者快捷下拉选择器 -->
+      <div class="author-dropdown-wrap" id="blogAuthorDropdownWrap">
+        <button class="btn author-select-btn" id="btnBlogAuthorDropdown" type="button" title="点击展开全部作者与快速搜索">
+          <span class="a-icon">👥</span>
+          <span class="a-cur-name" id="curBlogAuthorDisplay">全部成员</span>
+          <span class="arrow">▾</span>
+        </button>
+        <!-- 作者选择弹出菜单 (带实时搜索) -->
+        <div class="author-popover" id="blogAuthorPopover" style="display:none;">
+          <div class="author-popover-header">
+            <div class="author-popover-search">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="blogAuthorSearchInput" placeholder="输入作者姓名快速查找..." autocomplete="off" />
+              <button class="clear-btn" id="btnBlogAuthorSearchClear" type="button" style="display:none;">✕</button>
+            </div>
+            <span class="author-count-badge" id="blogAuthorTotalBadge">共 0 位</span>
+          </div>
+          <div class="author-popover-list" id="blogAuthorPopoverList"></div>
+        </div>
+      </div>
+
+      <!-- 快速切换 作者 Chips 滚动容器 -->
+      <div class="author-chips-scroll-wrap" id="blogAuthorChipsScrollWrap">
+        <button class="chip-scroll-btn prev" id="btnAuthorScrollPrev" type="button" title="向左滚动">‹</button>
+        <div class="chips blog-author-chips" id="blogAuthorChips"></div>
+        <button class="chip-scroll-btn next" id="btnAuthorScrollNext" type="button" title="向右滚动">›</button>
+      </div>
+    </div>
     <div id="blogHero" class="blog-hero" style="display:none;"></div>
     <div id="blogCards" class="blog-cards"></div>
     <div id="blogPagination" class="blog-pagination" style="display:none;"></div>

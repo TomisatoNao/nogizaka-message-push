@@ -529,14 +529,19 @@ async function loadBlogGroupChips() {
     const bg = await api("/api/archive/blog_groups");
     if (bg.ok) blogGroups = bg.groups;
     const box = $("blogGroupChips");
+    if (!box) return;
     box.innerHTML = "";
-    const BLOG_NAMES = {hinatazaka:"📝 日向坂46", nogizaka:"📝 乃木坂46", sakurazaka:"📝 樱坂46"};
+    const BLOG_NAMES = {hinatazaka:"日向坂46", nogizaka:"乃木坂46", sakurazaka:"樱坂46"};
+    const BLOG_ICONS = {hinatazaka:"☀️", nogizaka:"💜", sakurazaka:"🌸"};
     for (const g of blogGroups) {
       const b = document.createElement("button");
       b.className = "chip";
       if (g.key === curBlogGroup && curMode === "blog") b.classList.add("active");
       b.dataset.key = g.key;
-      b.textContent = (BLOG_NAMES[g.key] || g.key) + "（" + g.total + "）";
+      const numStr = g.total >= 1000 ? (g.total / 1000).toFixed(1).replace(/\.0$/, '') + "k" : g.total;
+      const icon = BLOG_ICONS[g.key] || "📝";
+      const name = BLOG_NAMES[g.key] || g.key;
+      b.innerHTML = '<span class="chip-name">' + icon + ' ' + esc(name) + '</span><span class="chip-num" title="' + (g.total || 0).toLocaleString() + ' 篇博客">' + numStr + '</span>';
       b.addEventListener("click", () => { selectBlogGroup(g.key); });
       box.appendChild(b);
     }
@@ -577,6 +582,8 @@ function syncChipHighlight() {
 }
 
 // ── 博客相关逻辑 ─────────────────────────────────────
+let curGroupAuthors = [];
+
 async function selectBlogGroup(key, author = "") {
   curMode = "blog";
   curMember = "";
@@ -611,42 +618,143 @@ async function selectBlogGroup(key, author = "") {
 async function loadBlogAuthors(key) {
   try {
     const data = await api("/api/archive/blog_authors?group=" + encodeURIComponent(key));
-    const bar = $("blogAuthorBar");
-    bar.innerHTML = "";
     if (data.ok && data.authors) {
-      const allBtn = document.createElement("button");
-      allBtn.className = "blog-author-chip" + (!curBlogAuthor ? " active" : "");
-      allBtn.textContent = "全部成员";
-      allBtn.onclick = () => selectBlogAuthor("");
-      bar.appendChild(allBtn);
-      
-      data.authors.forEach(a => {
-        if (!a || !a.name || !a.name.trim()) return;
-        const btn = document.createElement("button");
-        const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
-        btn.className = "blog-author-chip" + (isMatch ? " active" : "");
-        btn.textContent = a.name;
-        btn.onclick = () => selectBlogAuthor(a.name);
-        bar.appendChild(btn);
-      });
+      curGroupAuthors = data.authors.filter(a => a && a.name && a.name.trim());
+      renderBlogAuthorChips();
+      renderBlogAuthorPopover("");
+      updateBlogAuthorDisplay();
     }
   } catch (e) {}
+}
+
+function renderBlogAuthorChips() {
+  const box = $("blogAuthorChips");
+  if (!box) return;
+  box.innerHTML = "";
+
+  // 全部成员
+  const allBtn = document.createElement("button");
+  allBtn.className = "chip" + (!curBlogAuthor ? " active" : "");
+  allBtn.innerHTML = '<span class="chip-name">全部成员</span><span class="chip-num">' + curGroupAuthors.length + '人</span>';
+  allBtn.onclick = () => selectBlogAuthor("");
+  box.appendChild(allBtn);
+
+  curGroupAuthors.forEach(a => {
+    const btn = document.createElement("button");
+    const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
+    btn.className = "chip" + (isMatch ? " active" : "");
+    btn.dataset.author = a.name;
+    const cntStr = a.count ? '<span class="chip-num" title="' + a.count.toLocaleString() + ' 篇博客">' + (a.count >= 1000 ? (a.count / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : a.count) + '</span>' : '';
+    btn.innerHTML = '<span class="chip-name">' + esc(a.name) + '</span>' + cntStr;
+    btn.onclick = () => selectBlogAuthor(a.name);
+    box.appendChild(btn);
+  });
+}
+
+function renderBlogAuthorPopover(filterKeyword = "") {
+  const list = $("blogAuthorPopoverList");
+  if (!list) return;
+  list.innerHTML = "";
+  const kw = filterKeyword.toLowerCase().trim();
+  const filtered = curGroupAuthors.filter(a => !kw || a.name.toLowerCase().includes(kw));
+
+  if ($("blogAuthorTotalBadge")) {
+    $("blogAuthorTotalBadge").textContent = "共 " + curGroupAuthors.length + " 位" + (kw ? " · 匹配 " + filtered.length + " 位" : "");
+  }
+
+  // 全部成员选项
+  if (!kw) {
+    const allItem = document.createElement("div");
+    allItem.className = "author-popover-item" + (!curBlogAuthor ? " active" : "");
+    allItem.innerHTML = '<div class="a-name-txt"><span>👥</span><span>全部成员</span></div><span class="a-cnt">' + curGroupAuthors.length + ' 人</span>';
+    allItem.addEventListener("click", () => {
+      closeBlogAuthorPopover();
+      selectBlogAuthor("");
+    });
+    list.appendChild(allItem);
+  }
+
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "text-align:center; padding:16px 0; color:var(--muted); font-size:12px;";
+    empty.textContent = "未找到匹配作者";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const a of filtered) {
+    const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
+    const item = document.createElement("div");
+    item.className = "author-popover-item" + (isMatch ? " active" : "");
+    const cntTxt = a.count ? a.count.toLocaleString() + ' 篇' : '作者';
+    item.innerHTML = '<div class="a-name-txt"><span>✍️</span><span>' + esc(a.name) + '</span></div>' +
+                     '<span class="a-cnt">' + cntTxt + '</span>';
+    item.addEventListener("click", () => {
+      closeBlogAuthorPopover();
+      selectBlogAuthor(a.name);
+    });
+    list.appendChild(item);
+  }
+}
+
+function updateBlogAuthorDisplay() {
+  if ($("curBlogAuthorDisplay")) {
+    $("curBlogAuthorDisplay").textContent = curBlogAuthor || "全部成员";
+  }
+}
+
+function toggleBlogAuthorPopover() {
+  const pop = $("blogAuthorPopover");
+  const btn = $("btnBlogAuthorDropdown");
+  if (!pop) return;
+  const isOpen = pop.style.display !== "none";
+  if (isOpen) {
+    closeBlogAuthorPopover();
+  } else {
+    pop.style.display = "flex";
+    if (btn) btn.classList.add("active");
+    if ($("blogAuthorSearchInput")) {
+      $("blogAuthorSearchInput").value = "";
+      if ($("btnBlogAuthorSearchClear")) $("btnBlogAuthorSearchClear").style.display = "none";
+      renderBlogAuthorPopover("");
+      setTimeout(() => $("blogAuthorSearchInput").focus(), 50);
+    }
+  }
+}
+
+function closeBlogAuthorPopover() {
+  const pop = $("blogAuthorPopover");
+  const btn = $("btnBlogAuthorDropdown");
+  if (pop) pop.style.display = "none";
+  if (btn) btn.classList.remove("active");
 }
 
 function selectBlogAuthor(author) {
   curBlogAuthor = author;
   curBlogDate = "";
+  updateBlogAuthorDisplay();
   renderCalendar();
-  const btns = $("blogAuthorBar").querySelectorAll(".blog-author-chip");
-  btns.forEach(b => {
-    const isAll = (!author && b.textContent === "全部成员");
-    const isMatch = author && (b.textContent === author || b.textContent.replace(/[\s　_]+/g, "") === author.replace(/[\s　_]+/g, ""));
-    if (isAll || isMatch) {
-      b.classList.add("active");
-    } else {
-      b.classList.remove("active");
+  
+  const chips = $("blogAuthorChips") ? $("blogAuthorChips").querySelectorAll(".chip") : [];
+  chips.forEach(b => {
+    const isAll = (!author && b.textContent.includes("全部成员"));
+    const isMatch = author && b.dataset.author && (b.dataset.author === author || b.dataset.author.replace(/[\s　_]+/g, "") === author.replace(/[\s　_]+/g, ""));
+    const act = !!(isAll || isMatch);
+    b.classList.toggle("active", act);
+    if (act) {
+      b.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
     }
   });
+  
+  const p = new URLSearchParams({ blog: curBlogGroup });
+  if (author) p.set("author", author);
+  selfHashUpdate = true;
+  location.hash = p.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+  
+  loadBlogCalendar();
+  loadBlogPage(1);
+}
   
   const p = new URLSearchParams({ blog: curBlogGroup });
   if (author) p.set("author", author);
@@ -1939,6 +2047,53 @@ if ($("memberChips")) {
     if (e.deltaY !== 0) {
       e.preventDefault();
       $("memberChips").scrollLeft += e.deltaY;
+    }
+  }, { passive: false });
+}
+
+// ── 博客作者下拉选择器与横向滚动控制 ───────────────
+if ($("btnBlogAuthorDropdown")) {
+  $("btnBlogAuthorDropdown").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleBlogAuthorPopover();
+  });
+}
+document.addEventListener("click", (e) => {
+  const wrap = $("blogAuthorDropdownWrap");
+  if (wrap && !wrap.contains(e.target)) {
+    closeBlogAuthorPopover();
+  }
+});
+if ($("blogAuthorSearchInput")) {
+  $("blogAuthorSearchInput").addEventListener("input", (e) => {
+    const val = e.target.value;
+    if ($("btnBlogAuthorSearchClear")) $("btnBlogAuthorSearchClear").style.display = val ? "block" : "none";
+    renderBlogAuthorPopover(val);
+  });
+}
+if ($("btnBlogAuthorSearchClear")) {
+  $("btnBlogAuthorSearchClear").addEventListener("click", () => {
+    $("blogAuthorSearchInput").value = "";
+    $("btnBlogAuthorSearchClear").style.display = "none";
+    renderBlogAuthorPopover("");
+    $("blogAuthorSearchInput").focus();
+  });
+}
+if ($("btnAuthorScrollPrev")) {
+  $("btnAuthorScrollPrev").addEventListener("click", () => {
+    if ($("blogAuthorChips")) $("blogAuthorChips").scrollBy({ left: -220, behavior: "smooth" });
+  });
+}
+if ($("btnAuthorScrollNext")) {
+  $("btnAuthorScrollNext").addEventListener("click", () => {
+    if ($("blogAuthorChips")) $("blogAuthorChips").scrollBy({ left: 220, behavior: "smooth" });
+  });
+}
+if ($("blogAuthorChips")) {
+  $("blogAuthorChips").addEventListener("wheel", (e) => {
+    if (e.deltaY !== 0) {
+      e.preventDefault();
+      $("blogAuthorChips").scrollLeft += e.deltaY;
     }
   }, { passive: false });
 }
