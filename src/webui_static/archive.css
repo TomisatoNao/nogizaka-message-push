@@ -982,10 +982,288 @@
   /* Blog Reader Overlay */
   .blog-reader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 1000; overflow-y: auto; display: block; }
   .br-header { position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 12px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm); z-index: 10; }
-  .sub-nav { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); border-top: none; border-bottom: 1px solid var(--border-soft); position: sticky; top: 60px; z-index: 30; overflow: visible !important; }
-  .sub-nav .chips { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; scrollbar-width: none; }
-  .sub-nav .chips::-webkit-scrollbar { display: none; }
-  .sub-nav .chip { flex-shrink: 0; }
+  .sub-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: color-mix(in srgb, var(--card) 85%, transparent);
+    backdrop-filter: blur(14px) saturate(1.3);
+    -webkit-backdrop-filter: blur(14px) saturate(1.3);
+    border-top: none;
+    border-bottom: 1px solid var(--border-soft);
+    position: sticky;
+    top: 60px;
+    z-index: 30;
+    overflow: visible !important;
+  }
+  
+  .sub-nav-member-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    position: relative;
+  }
+
+  /* 成员下拉选择器 */
+  .member-dropdown-wrap {
+    position: relative;
+    flex-shrink: 0;
+    z-index: 35;
+  }
+  .member-select-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 12%, var(--card));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    color: var(--text-strong, var(--text));
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all var(--tr-fast);
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .member-select-btn:hover, .member-select-btn.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 20%, var(--card));
+    color: var(--accent);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .member-select-btn .m-cur-count {
+    font-size: 11.5px;
+    color: var(--muted);
+    font-weight: normal;
+  }
+  .member-select-btn .arrow {
+    font-size: 11px;
+    transition: transform var(--tr-fast);
+    opacity: 0.7;
+  }
+  .member-select-btn.active .arrow {
+    transform: rotate(180deg);
+  }
+
+  /* 成员弹出选择卡片 */
+  .member-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 300px;
+    max-height: 420px;
+    background: var(--card-solid, var(--card, #1c1c1e));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 16px 36px rgba(0,0,0,0.35);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+    animation: popoverSlide 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes popoverSlide {
+    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .member-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .member-popover-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+  }
+  .member-popover-search .search-icon {
+    position: absolute;
+    left: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .member-popover-search input {
+    width: 100%;
+    padding: 5px 24px 5px 26px;
+    font-size: 12.5px;
+    border-radius: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    outline: none;
+    transition: border-color var(--tr-fast);
+  }
+  .member-popover-search input:focus {
+    border-color: var(--accent);
+  }
+  .member-popover-search .clear-btn {
+    position: absolute;
+    right: 6px;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .member-count-badge {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .member-popover-list {
+    overflow-y: auto;
+    max-height: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-right: 2px;
+    scrollbar-width: thin;
+  }
+  .member-popover-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    color: var(--text);
+    font-size: 13px;
+    text-decoration: none;
+    border: 1px solid transparent;
+  }
+  .member-popover-item:hover {
+    background: color-mix(in srgb, var(--accent) 12%, var(--card));
+    color: var(--accent);
+  }
+  .member-popover-item.active {
+    background: var(--accent);
+    color: #fff !important;
+    font-weight: 600;
+  }
+  .member-popover-item .m-name-txt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .member-popover-item .m-cnt {
+    font-size: 11px;
+    opacity: 0.75;
+    padding: 1px 6px;
+    background: rgba(0,0,0,0.12);
+    border-radius: 10px;
+  }
+  .member-popover-item.active .m-cnt {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+  }
+
+  /* 快速切换 Chips 滚动容器 */
+  .member-chips-scroll-wrap {
+    display: flex;
+    align-items: center;
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    gap: 4px;
+  }
+  .member-chips-scroll-wrap .chips {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    scrollbar-width: none;
+    scroll-behavior: smooth;
+    padding: 2px 4px;
+    align-items: center;
+  }
+  .member-chips-scroll-wrap .chips::-webkit-scrollbar {
+    display: none;
+  }
+  .member-chips-scroll-wrap .chip {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    background: color-mix(in srgb, var(--card) 90%, transparent);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    color: var(--text);
+  }
+  .member-chips-scroll-wrap .chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  }
+  .member-chips-scroll-wrap .chip.active {
+    background: var(--accent);
+    color: #fff !important;
+    border-color: var(--accent);
+    font-weight: 600;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .member-chips-scroll-wrap .chip .chip-num {
+    font-size: 10.5px;
+    opacity: 0.8;
+    background: rgba(0,0,0,0.15);
+    padding: 1px 5px;
+    border-radius: 8px;
+  }
+  .member-chips-scroll-wrap .chip.active .chip-num {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+  }
+
+  .chip-scroll-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--card-solid, var(--card));
+    border: 1px solid var(--border);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    cursor: pointer;
+    flex-shrink: 0;
+    z-index: 5;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    padding: 0;
+  }
+  .chip-scroll-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--card));
+    transform: scale(1.1);
+  }
+
+  /* 博客分组 Chips */
+  .blog-group-chips {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
   .br-title { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); }
   .br-content { padding: 30px 20px 80px; max-width: 760px; margin: 0 auto; width: 100%; line-height: 1.8; font-size: 16px; background: var(--card); min-height: 100vh; border-left: 1px solid var(--border); border-right: 1px solid var(--border); box-shadow: var(--shadow-sm); }
   .br-content a { color: var(--accent); text-decoration: none; word-break: break-all; transition: opacity var(--tr); }

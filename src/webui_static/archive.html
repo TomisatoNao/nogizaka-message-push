@@ -56,9 +56,42 @@
   
   <!-- 独立悬浮过滤条 -->
   <div class="sub-nav" id="subNav" style="display:none;">
-  <div class="chips" id="memberChips"></div>
-  <div class="chips" id="blogGroupChips" style="display:none;"></div>
-</div>
+    <!-- 消息模式下的成员选择区 -->
+    <div class="sub-nav-member-bar" id="subNavMemberBar">
+      <!-- 成员快捷下拉选择器 -->
+      <div class="member-dropdown-wrap" id="memberDropdownWrap">
+        <button class="btn member-select-btn" id="btnMemberDropdown" type="button" title="点击展开全员列表与快速搜索">
+          <span class="m-icon">👥</span>
+          <span class="m-cur-name" id="curMemberDisplay">选择成员</span>
+          <span class="m-cur-count" id="curMemberCount"></span>
+          <span class="arrow">▾</span>
+        </button>
+
+        <!-- 成员选择弹出卡片 (PopOver) -->
+        <div class="member-popover" id="memberPopover" style="display:none;">
+          <div class="member-popover-header">
+            <div class="member-popover-search">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="memberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
+              <button class="clear-btn" id="btnMemberSearchClear" type="button" style="display:none;">✕</button>
+            </div>
+            <span class="member-count-badge" id="memberTotalBadge">共 0 人</span>
+          </div>
+          <div class="member-popover-list" id="memberPopoverList"></div>
+        </div>
+      </div>
+
+      <!-- 快速切换 Chips 滚动容器 (带优雅渐变与左右平滑滚动) -->
+      <div class="member-chips-scroll-wrap" id="memberChipsScrollWrap">
+        <button class="chip-scroll-btn prev" id="btnChipScrollPrev" type="button" title="向左滚动">‹</button>
+        <div class="chips member-chips" id="memberChips"></div>
+        <button class="chip-scroll-btn next" id="btnChipScrollNext" type="button" title="向右滚动">›</button>
+      </div>
+    </div>
+
+    <!-- 博客模式下的官方博客分组 -->
+    <div class="chips blog-group-chips" id="blogGroupChips" style="display:none;"></div>
+  </div>
 
 <div id="archiveHome" class="home active">
   <!-- 骨架屏 -->

@@ -380,7 +380,7 @@ function switchMainTab(mode, keepHash) {
   $("tabBlog").classList.toggle("active", mode === "blog");
   
   $("subNav").style.display = mode === "home" ? "none" : "";
-  $("memberChips").style.display = mode === "msg" ? "" : "none";
+  if ($("subNavMemberBar")) $("subNavMemberBar").style.display = mode === "msg" ? "flex" : "none";
   $("blogGroupChips").style.display = mode === "blog" ? "" : "none";
 
   if (mode === "home") {
@@ -433,18 +433,9 @@ async function loadMembers(skipSelect = false) {
               "新消息会自动归档；历史消息用 python tools/backfill_archive.py 回填。");
     return;
   }
-  // 渲染成员 chips
-  const box = $("memberChips");
-  box.innerHTML = "";
-  for (const m of members) {
-    const b = document.createElement("button");
-    b.className = "chip";
-    if (m.name === curMember && curMode === "msg") b.classList.add("active");
-    b.dataset.key = m.name;
-    b.textContent = "💬 " + m.display + "（" + m.total + "）";
-    b.addEventListener("click", () => { hideHome(); selectMember(m.name); });
-    box.appendChild(b);
-  }
+  // 渲染成员 chips & popover
+  renderMemberChips();
+  renderMemberPopover("");
   
   loadBlogGroupChips();
 
@@ -452,6 +443,85 @@ async function loadMembers(skipSelect = false) {
   if (skipSelect) return;
   const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
   await selectMember(wanted, true);
+}
+
+function renderMemberChips() {
+  const box = $("memberChips");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const m of members) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    if (m.name === curMember && curMode === "msg") b.classList.add("active");
+    b.dataset.key = m.name;
+    const numStr = m.total >= 1000 ? (m.total / 1000).toFixed(1).replace(/\.0$/, '') + "k" : m.total;
+    b.innerHTML = '<span class="chip-name">' + esc(m.display) + '</span>' +
+                  '<span class="chip-num" title="' + (m.total || 0).toLocaleString() + ' 条消息">' + numStr + '</span>';
+    b.addEventListener("click", () => {
+      hideHome();
+      selectMember(m.name);
+    });
+    box.appendChild(b);
+  }
+}
+
+function renderMemberPopover(filterKeyword = "") {
+  const list = $("memberPopoverList");
+  if (!list) return;
+  list.innerHTML = "";
+  const kw = filterKeyword.toLowerCase().trim();
+  const filtered = members.filter(m => !kw || m.display.toLowerCase().includes(kw) || m.name.toLowerCase().includes(kw));
+  
+  if ($("memberTotalBadge")) {
+    $("memberTotalBadge").textContent = "共 " + members.length + " 人" + (kw ? " · 匹配 " + filtered.length + " 人" : "");
+  }
+
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "text-align:center; padding:20px 0; color:var(--muted); font-size:12px;";
+    empty.textContent = "未找到匹配成员";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const m of filtered) {
+    const item = document.createElement("div");
+    item.className = "member-popover-item" + (m.name === curMember && curMode === "msg" ? " active" : "");
+    item.innerHTML = '<div class="m-name-txt"><span>💬</span><span>' + esc(m.display) + '</span></div>' +
+                     '<span class="m-cnt">' + (m.total || 0).toLocaleString() + ' 条</span>';
+    item.addEventListener("click", () => {
+      closeMemberPopover();
+      hideHome();
+      selectMember(m.name);
+    });
+    list.appendChild(item);
+  }
+}
+
+function toggleMemberPopover() {
+  const pop = $("memberPopover");
+  const btn = $("btnMemberDropdown");
+  if (!pop) return;
+  const isOpen = pop.style.display !== "none";
+  if (isOpen) {
+    closeMemberPopover();
+  } else {
+    pop.style.display = "flex";
+    if (btn) btn.classList.add("active");
+    if ($("memberSearchInput")) {
+      $("memberSearchInput").value = "";
+      if ($("btnMemberSearchClear")) $("btnMemberSearchClear").style.display = "none";
+      renderMemberPopover("");
+      setTimeout(() => $("memberSearchInput").focus(), 50);
+    }
+  }
+}
+
+function closeMemberPopover() {
+  const pop = $("memberPopover");
+  const btn = $("btnMemberDropdown");
+  if (pop) pop.style.display = "none";
+  if (btn) btn.classList.remove("active");
 }
 
 async function loadBlogGroupChips() {
@@ -485,14 +555,25 @@ function _enterMemberMode() {
   $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "";
 }
 
-// 根据 curMember / curBlogGroup 同步所有 chip 高亮状态
+// 根据 curMember / curBlogGroup 同步所有 chip 高亮状态与主选择器显示
 function syncChipHighlight() {
   $("memberChips").querySelectorAll(".chip").forEach(c => {
-    c.classList.toggle("active", curMode === "msg" && c.dataset.key === curMember);
+    const isAct = curMode === "msg" && c.dataset.key === curMember;
+    c.classList.toggle("active", isAct);
+    if (isAct) {
+      c.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    }
   });
   $("blogGroupChips").querySelectorAll(".chip").forEach(c => {
     c.classList.toggle("active", curMode === "blog" && c.dataset.key === curBlogGroup);
   });
+  if (curMode === "msg" && curMember) {
+    const curObj = members.find(m => m.name === curMember);
+    if (curObj) {
+      if ($("curMemberDisplay")) $("curMemberDisplay").textContent = curObj.display;
+      if ($("curMemberCount")) $("curMemberCount").textContent = "（" + (curObj.total || 0).toLocaleString() + "）";
+    }
+  }
 }
 
 // ── 博客相关逻辑 ─────────────────────────────────────
@@ -1813,6 +1894,53 @@ if (archiveBtnEl && archiveDropdownEl) {
       archiveDropdownEl.classList.remove("open");
     }
   });
+}
+
+// ── 成员快捷下拉选择器与横向滚动控制 ───────────────
+if ($("btnMemberDropdown")) {
+  $("btnMemberDropdown").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleMemberPopover();
+  });
+}
+document.addEventListener("click", (e) => {
+  const wrap = $("memberDropdownWrap");
+  if (wrap && !wrap.contains(e.target)) {
+    closeMemberPopover();
+  }
+});
+if ($("memberSearchInput")) {
+  $("memberSearchInput").addEventListener("input", (e) => {
+    const val = e.target.value;
+    if ($("btnMemberSearchClear")) $("btnMemberSearchClear").style.display = val ? "block" : "none";
+    renderMemberPopover(val);
+  });
+}
+if ($("btnMemberSearchClear")) {
+  $("btnMemberSearchClear").addEventListener("click", () => {
+    $("memberSearchInput").value = "";
+    $("btnMemberSearchClear").style.display = "none";
+    renderMemberPopover("");
+    $("memberSearchInput").focus();
+  });
+}
+if ($("btnChipScrollPrev")) {
+  $("btnChipScrollPrev").addEventListener("click", () => {
+    $("memberChips").scrollBy({ left: -220, behavior: "smooth" });
+  });
+}
+if ($("btnChipScrollNext")) {
+  $("btnChipScrollNext").addEventListener("click", () => {
+    $("memberChips").scrollBy({ left: 220, behavior: "smooth" });
+  });
+}
+if ($("memberChips")) {
+  $("memberChips").addEventListener("wheel", (e) => {
+    if (e.deltaY !== 0) {
+      e.preventDefault();
+      $("memberChips").scrollLeft += e.deltaY;
+    }
+  }, { passive: false });
 }
 
 // ── 登录状态 ─────────────────────────────────────
