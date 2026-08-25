@@ -167,23 +167,18 @@ async def _fetch_member_messages(member: dict):
             # ── URL 构建 ──
             if is_mobile:
                 base = acc_cfg.get("api_base") or get_mobile_api_base(account_id)
-                url = (
-                    f"{base}/v2/groups/{m_id}/timeline"
-                    f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
-                )
-                past_url = f"{base}/v2/groups/{m_id}/past_messages"
             elif acc_cfg.get("api_base"):
-                url = (
-                    f"{acc_cfg['api_base']}/v2/groups/{m_id}/timeline"
-                    f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
-                )
-                past_url = f"{acc_cfg['api_base']}/v2/groups/{m_id}/past_messages"
+                base = acc_cfg["api_base"]
+            elif group_type.lower() == "yodel":
+                base = "https://api.service.yodel-app.com"
             else:
-                url = (
-                    f"https://api.message.{group_type}.com/v2/groups/{m_id}/timeline"
-                    f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
-                )
-                past_url = f"https://api.message.{group_type}.com/v2/groups/{m_id}/past_messages"
+                base = f"https://api.message.{group_type}.com"
+
+            url = (
+                f"{base.rstrip('/')}/v2/groups/{m_id}/timeline"
+                f"?updated_from={quote(l_time_ref[0])}&count=200&order=asc"
+            )
+            past_url = f"{base.rstrip('/')}/v2/groups/{m_id}/past_messages"
 
             # ── Header 构建 ──
             if is_mobile:

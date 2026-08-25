@@ -360,6 +360,12 @@ def _match_account_credentials(cfg: dict) -> dict:
         if "group" in acc:
             acc["group_type"] = acc.pop("group")
 
+        # Yodel 专属默认配置补全
+        if str(acc.get("group_type", "")).lower() == "yodel":
+            acc.setdefault("api_base", "https://api.service.yodel-app.com")
+            acc.setdefault("web_origin", "https://service.yodel-app.com")
+            acc.setdefault("app_tag", "yodel")
+
     return cfg
 
 
