@@ -1388,17 +1388,38 @@ function markDirty() {
 
 // ── 页面内确认 / 提示（替代原生 confirm/alert）────
 let _confirmResolve = null;
+function _settleConfirm(v) {
+  if (_confirmResolve) {
+    const r = _confirmResolve;
+    _confirmResolve = null;
+    try { r(v); } catch(e) {}
+  }
+}
 function _openConfirm(message, { title, yesText, danger, alertOnly } = {}) {
   return new Promise((resolve) => {
+    _settleConfirm(false); // 安全结算可能未关闭的前一次 Promise
     _confirmResolve = resolve;
+    const dlg = $("confirmDialog");
+    if (!dlg) {
+      const ok = alertOnly ? (alert(message), true) : confirm(message);
+      _settleConfirm(ok);
+      return;
+    }
     $("confirmTitle").textContent = title || (alertOnly ? "提示" : "确认操作");
     $("confirmBody").textContent = message;
     $("confirmNo").hidden = !!alertOnly;
     const yes = $("confirmYes");
     yes.textContent = yesText || (alertOnly ? "知道了" : "确定");
     yes.className = "btn " + (danger ? "danger-solid" : "primary");
-    $("confirmDialog").showModal();
-    yes.focus();
+    try {
+      if (dlg.open) dlg.close();
+      dlg.showModal();
+      yes.focus();
+    } catch (e) {
+      console.warn("showModal 失败，回退原生对话框:", e);
+      const ok = alertOnly ? (alert(message), true) : confirm(message);
+      _settleConfirm(ok);
+    }
   });
 }
 function uiAlert(message, titleOrOpts) {
@@ -1407,11 +1428,14 @@ function uiAlert(message, titleOrOpts) {
     : { title: titleOrOpts, alertOnly: true };
   return _openConfirm(message, opts);
 }
-function _settleConfirm(v) {
-  if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(v); }
-}
-$("confirmYes").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(true); });
-$("confirmNo").addEventListener("click", () => { $("confirmDialog").close(); _settleConfirm(false); });
+$("confirmYes").addEventListener("click", () => {
+  try { $("confirmDialog").close(); } catch(e){}
+  _settleConfirm(true);
+});
+$("confirmNo").addEventListener("click", () => {
+  try { $("confirmDialog").close(); } catch(e){}
+  _settleConfirm(false);
+});
 $("confirmDialog").addEventListener("close", () => _settleConfirm(false));  // Esc 等价取消
 function msg(text, cls) { 
   const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); 
@@ -2057,7 +2081,9 @@ function renderQqBots() {
           } catch (e) { /* 密钥清理失败不阻断配置删除 */ }
           secretsWritten.delete(bot.name);
         }
-        config.qq_official_bots.splice(idx, 1);
+        const curIdx = (config.qq_official_bots || []).indexOf(bot);
+        if (curIdx >= 0) config.qq_official_bots.splice(curIdx, 1);
+        else config.qq_official_bots.splice(idx, 1);
         // 同步剔除服务端状态里的该条目：否则删到最后一个 Bot 时，
         // 内存里已空而 status 还留着声明条目，会被误当成 .env 遗留槽位渲染
         qqBotStatus = (qqBotStatus || []).filter((s) => s.name !== bot.name);
@@ -3226,7 +3252,9 @@ function renderNapcat() {
     btnDel.className = "btn btn-danger";
     btnDel.textContent = "删除";
     btnDel.onclick = () => {
-      config.napcat_routes.splice(idx, 1);
+      const curIdx = (config.napcat_routes || []).indexOf(r);
+      if (curIdx >= 0) config.napcat_routes.splice(curIdx, 1);
+      else config.napcat_routes.splice(idx, 1);
       markDirty(); renderNapcat();
     };
     tdAct.appendChild(btnDel);
@@ -3294,7 +3322,9 @@ function renderTGBots() {
     btnDel.className = "btn btn-danger";
     btnDel.textContent = "删除";
     btnDel.onclick = () => {
-      config.tg_bots.splice(idx, 1);
+      const curIdx = (config.tg_bots || []).indexOf(b);
+      if (curIdx >= 0) config.tg_bots.splice(curIdx, 1);
+      else config.tg_bots.splice(idx, 1);
       markDirty(); renderTGBots();
     };
     tdAct.appendChild(btnDel);
@@ -3455,9 +3485,20 @@ function renderMembers() {
 
     const tdOps = document.createElement("td");
     tdOps.appendChild(mkBtn("删除", async () => {
-      if (!(await uiConfirm("删除成员 " + (m.name || m.id) + "？",
+      // 空白草稿行（未填 ID 且未填名字）直接删除，无需弹窗确认
+      if (!m.id && !m.name) {
+        const curIdx = (config.monitor || []).indexOf(m);
+        if (curIdx >= 0) config.monitor.splice(curIdx, 1);
+        else config.monitor.splice(idx, 1);
+        markDirty(); renderMembers();
+        return;
+      }
+      const displayName = m.name || m.id || "未命名成员";
+      if (!(await uiConfirm("确定删除监控成员「" + displayName + "」吗？",
                             { title: "删除成员", yesText: "删除", danger: true }))) return;
-      config.monitor.splice(idx, 1);
+      const curIdx = (config.monitor || []).indexOf(m);
+      if (curIdx >= 0) config.monitor.splice(curIdx, 1);
+      else config.monitor.splice(idx, 1);
       markDirty(); renderMembers();
     }, "danger"));
 
