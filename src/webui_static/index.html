@@ -1424,6 +1424,9 @@ function _openConfirm(message, { title, yesText, danger, alertOnly } = {}) {
     }
   });
 }
+function uiConfirm(message, opts) {
+  return _openConfirm(message, opts || {});
+}
 function uiAlert(message, titleOrOpts) {
   const opts = (typeof titleOrOpts === "object" && titleOrOpts !== null)
     ? Object.assign({ alertOnly: true }, titleOrOpts)
