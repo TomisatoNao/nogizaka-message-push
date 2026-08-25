@@ -1876,9 +1876,31 @@ class _Handler(BaseHTTPRequestHandler):
                     params.extend([q_like, q_like, q_like])
                 total = db.execute(
                     f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]
+
+                # 计算分页与偏移：
+                # 默认首页展示模式（无关键词搜索且无日期筛选）：第1页包含 1 张 Hero 顶置大卡片 + 24 张完整网格 (共 25 篇，满 6 行 × 4 列无缺口)
+                # 第 2 页及之后为标准的 24 篇网格 (6 行 × 4 列)
+                has_hero_mode = (not q and not date_filter and not (year and month))
+                if has_hero_mode:
+                    if page == 1:
+                        limit = 25
+                        offset = 0
+                    else:
+                        limit = 24
+                        offset = 25 + (page - 2) * 24
+                    
+                    if total <= 25:
+                        total_pages = 1
+                    else:
+                        total_pages = 1 + (total - 25 + 24 - 1) // 24
+                else:
+                    limit = per_page
+                    offset = (page - 1) * per_page
+                    total_pages = max(1, (total + per_page - 1) // per_page)
+
                 rows = db.execute(
                     f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?",
-                    params + [per_page, (page - 1) * per_page],
+                    params + [limit, offset],
                 ).fetchall()
                 for r in rows:
                     d = dict(r)
@@ -1921,7 +1943,6 @@ class _Handler(BaseHTTPRequestHandler):
                     posts.append(d)
             except Exception:
                 pass
-            total_pages = max(1, (total + per_page - 1) // per_page)
             self._send_json({
                 "ok": True, "group": group, "posts": posts,
                 "total": total, "page": page, "total_pages": total_pages,
