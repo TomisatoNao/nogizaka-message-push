@@ -3646,12 +3646,15 @@ $("btnFetchMembers").addEventListener("click", async () => {
     return;
   }
 
-  _currentFetchedMembers = data.members || [];
+  _currentFetchedMembers = (data.members || []).map((m) => {
+    const isSub = !!(m.is_subscribed || m.sub_state === "active" || (m.subscription && m.subscription.state === "active"));
+    return Object.assign({}, m, { is_subscribed: isSub });
+  });
   _currentFetchedAccount = account;
 
-  const subCount = data.subscribed_count || _currentFetchedMembers.filter((m) => m.is_subscribed).length;
-  const openCount = data.open_count || _currentFetchedMembers.filter((m) => m.state === "open").length;
-  const totalCount = data.total || _currentFetchedMembers.length;
+  const subCount = data.subscribed_count !== undefined ? data.subscribed_count : _currentFetchedMembers.filter((m) => m.is_subscribed).length;
+  const openCount = data.open_count !== undefined ? data.open_count : _currentFetchedMembers.filter((m) => m.state === "open").length;
+  const totalCount = data.total !== undefined ? data.total : _currentFetchedMembers.length;
 
   $("memberPickHint").innerHTML = "📊 <b>" + account + "</b>：共 " + totalCount + " 项 · <span style='color:#f472b6; font-weight:600;'>🌟 已订阅 " + subCount + " 人</span> · 🟢 在籍 " + openCount + " 人。点「添加」后记得回到列表保存。";
 
