@@ -1192,18 +1192,24 @@ class _Handler(BaseHTTPRequestHandler):
 
         if sub == "members":
             members = []
-            monitor_names = {}
+            monitor_map = {}
             for m in getattr(cfg, "MONITOR_LIST", []):
                 norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
-                monitor_names[norm] = m.get("m_name", "")
+                monitor_map[norm] = {
+                    "display": m.get("m_name", ""),
+                    "group": m.get("group_type", "")
+                }
 
             for name in _archive.list_members():
                 months = _archive.list_months(name)
                 norm = name.replace(" ", "").replace("　", "").replace("_", "")
-                display = monitor_names.get(norm) or name.replace("_", " ")
+                info = monitor_map.get(norm) or {}
+                display = info.get("display") or name.replace("_", " ")
+                group = info.get("group") or _archive.infer_member_group(name)
                 members.append({
                     "name": name,
                     "display": display,
+                    "group": group,
                     "months": len(months),
                     "total": sum(m["count"] for m in months),
                 })

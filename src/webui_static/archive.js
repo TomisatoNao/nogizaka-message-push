@@ -227,6 +227,16 @@ function fmtDateKey(utc) {
          "-" + String(d.getUTCDate()).padStart(2, "0");
 }
 
+function getCurGroup() {
+  const mObj = members.find(x => x.name === curMember);
+  if (mObj && mObj.group) return mObj.group.toLowerCase();
+  const nm = (curMember || "").replace(/[\s_　]/g, "");
+  if (/^(金村|大野|佐藤|片山|坂井|下田|山下葉|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test(nm)) return "hinatazaka";
+  if (/^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test(nm)) return "sakurazaka";
+  if (/^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test(nm)) return "nogizaka";
+  return "";
+}
+
 // ── 日历 ─────────────────────────────────────────
 async function loadCalendar() {
   if (curMode === "blog") {
@@ -1670,6 +1680,8 @@ function renderBubble(msg) {
   if (msg.id) b.dataset.msgId = String(msg.id);
 
   const pubTimeStr = fmtTime(msg.published_at);
+  const curGroup = getCurGroup();
+
   let uploadBadgeHtml = "";
   if (msg.upload_at) {
     const uDt = new Date(msg.upload_at);
@@ -1680,15 +1692,21 @@ function renderBubble(msg) {
 
     // 智能判定「预设定时」：
     // 1. 时差 >= 1小时 (3600s)
-    // 2. 整点/半点投放 (:00 / :30 分) + 定时管道秒 (:37 / :09 / :07) 且时差 >= 5分钟 (300s)
-    // 3. 命中标准定时管道秒数 (:37 / :09) 且时差 >= 25分钟 (1500s)（常规即时审核流转一般在 3~15 分钟内）
+    // 2. 整点/半点投放 (:00 / :30 分) + 本团定时秒 且时差 >= 5分钟 (300s)
+    // 3. 命中【本团专属】定时管道秒数 且时差 >= 25分钟 (1500s)
     const pubJst = toJst(msg.published_at);
     const pSec = pubJst.getUTCSeconds();
     const pMin = pubJst.getUTCMinutes();
-    const isCronSec = (pSec === 37 || pSec === 9 || pSec === 7);
     const isRoundTime = (pMin === 0 || pMin === 30);
+
+    let isCronSec = false;
+    if (curGroup === "hinatazaka") isCronSec = (pSec === 37);
+    else if (curGroup === "sakurazaka") isCronSec = (pSec === 9 || pSec === 28);
+    else if (curGroup === "nogizaka") isCronSec = (pSec === 45);
+    else isCronSec = (pSec === 37 || pSec === 9 || pSec === 45 || pSec === 28);
+
     const isScheduled = (diffSec >= 3600) ||
-                        (isRoundTime && isCronSec && diffSec >= 300) ||
+                        (isRoundTime && (pSec === 0 || pSec === 1 || isCronSec) && diffSec >= 300) ||
                         (isCronSec && diffSec >= 1500);
 
     const tooltip = "📸 成员真实上传/拍摄于 (JST): " + fmtCopyTime(msg.upload_at) +
@@ -1701,23 +1719,48 @@ function renderBubble(msg) {
       '<span class="ub-delay">(+' + esc(durStr) + ')</span>' +
       '</span>';
   } else {
-    // 纯文本消息：无底层媒体文件时间戳，根据三坂官方定时管道与整点特征智能推断
+    // 纯文本消息：严格根据【当前成员所属坂道】的专属定时管道与整点特征智能推断
     const pubJst = toJst(msg.published_at);
     const pSec = pubJst.getUTCSeconds();
     const pMin = pubJst.getUTCMinutes();
-    const isCronSec = (pSec === 37 || pSec === 9 || pSec === 7 || pSec === 28);
     const isRoundTime = (pMin === 0 || pMin === 30);
-    const isSpecialTime = isRoundTime && (pSec === 0 || pSec === 1 || isCronSec);
 
-    if (isCronSec || isSpecialTime) {
-      let pipeDesc = "";
-      if (pSec === 37) pipeDesc = "日向坂:37s 管道";
-      else if (pSec === 9) pipeDesc = "樱坂:09s 管道";
-      else if (pSec === 7) pipeDesc = "乃木坂:07s 管道";
-      else if (pSec === 28) pipeDesc = "定时管道:28s";
-      else if (isRoundTime) pipeDesc = "整点/半点 投放";
+    let isMatch = false;
+    let pipeDesc = "";
 
-      const tooltip = "🤖 疑似预设定时消息\n特征：命中 " + pipeDesc + " (JST " + pubTimeStr + ")\n说明：纯文本消息无媒体上传时间戳，根据官方固定分发管道特征推断";
+    if (curGroup === "hinatazaka") {
+      if (pSec === 37) {
+        isMatch = true;
+        pipeDesc = "日向坂:37s 管道";
+      } else if (isRoundTime && (pSec === 0 || pSec === 1)) {
+        isMatch = true;
+        pipeDesc = "整点/半点 投放";
+      }
+    } else if (curGroup === "sakurazaka") {
+      if (pSec === 9 || pSec === 28) {
+        isMatch = true;
+        pipeDesc = "樱坂:" + String(pSec).padStart(2, "0") + "s 管道";
+      } else if (isRoundTime && (pSec === 0 || pSec === 1)) {
+        isMatch = true;
+        pipeDesc = "整点/半点 投放";
+      }
+    } else if (curGroup === "nogizaka") {
+      if (pSec === 45) {
+        isMatch = true;
+        pipeDesc = "乃木坂:45s 管道";
+      } else if (isRoundTime && (pSec === 0 || pSec === 1)) {
+        isMatch = true;
+        pipeDesc = "整点/半点 投放";
+      }
+    } else {
+      if (isRoundTime && (pSec === 0 || pSec === 1)) {
+        isMatch = true;
+        pipeDesc = "整点/半点 投放";
+      }
+    }
+
+    if (isMatch) {
+      const tooltip = "🤖 疑似预设定时消息\n特征：命中 " + pipeDesc + " (JST " + pubTimeStr + ")\n说明：纯文本消息无媒体上传时间戳，根据所属坂道官方分发管道特征推断";
 
       uploadBadgeHtml = '<span class="upload-badge is-inferred" title="' + esc(tooltip) + '">' +
         '<span class="ub-icon">⏰ 疑似定时</span> ' +

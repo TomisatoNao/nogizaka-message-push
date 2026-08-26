@@ -608,6 +608,43 @@ def extract_upload_time(msg: dict) -> str | None:
         return None
 
 
+def infer_member_group(name: str) -> str:
+    """根据成员姓名或配置推断所属坂道：'nogizaka' | 'sakurazaka' | 'hinatazaka' | ''。"""
+    import config.config as cfg
+    norm = name.replace(" ", "").replace("　", "").replace("_", "")
+    for m in getattr(cfg, "MONITOR_LIST", []):
+        m_norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
+        if m_norm == norm:
+            return m.get("group_type", "")
+
+    hinata_names = [
+        "金村", "大野", "佐藤", "片山", "坂井", "下田", "山下葉", "大田", "正源司", "藤嶌", "渡辺", "小坂",
+        "加藤", "齐藤", "佐佐木", "東村", "松田好", "河田", "丹生", "濱岸", "富田", "高本", "高瀬",
+        "上村ひ", "高橋", "森本", "山口", "平尾", "平岡", "竹内", "岸", "小西", "清水理", "宮地", "石塚"
+    ]
+    sakura_names = [
+        "石森", "小池", "小林", "田村保", "森田", "藤吉", "山崎", "谷口", "中川", "山田", "浅井", "的野",
+        "上村莉", "齋藤冬", "菅井", "土生", "守屋", "渡邉理", "渡辺梨", "井上梨", "遠藤光", "大園", "大沼",
+        "幸阪", "武元", "増本", "松田里", "村井", "村山", "山下瞳", "小島", "向井"
+    ]
+    nogi_names = [
+        "冨里", "賀喜", "一ノ瀬", "井上和", "川崎", "五百城", "中西", "池田", "奥田", "菅原", "小川",
+        "秋元", "生田", "生驹", "伊藤", "岩本", "梅澤", "遠藤さ", "久保", "齋藤飛", "阪口", "佐藤楓",
+        "柴田", "白石", "新内", "鈴木", "高山", "田村真", "筒井", "西野", "橋本", "樋口", "星野",
+        "松村", "向井葉", "山下美", "弓木", "与田", "川端", "小津"
+    ]
+    for k in hinata_names:
+        if k in norm:
+            return "hinatazaka"
+    for k in sakura_names:
+        if k in norm:
+            return "sakurazaka"
+    for k in nogi_names:
+        if k in norm:
+            return "nogizaka"
+    return ""
+
+
 # ──────────────────────────────────────────────
 # 公开接口
 # ──────────────────────────────────────────────
