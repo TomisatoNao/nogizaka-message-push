@@ -850,15 +850,17 @@
     <div class="grid">
       <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
       <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
+      <label class="switch"><input id="imageTaggingOn" type="checkbox"/><span class="track"></span>自动识别图片标签 (AI 打标)</label>
       <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
       <label class="field">摘要时间（JST 整点）
         <input id="summaryHour" max="23" min="0" type="number"/>
       </label>
     </div>
     <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 归档与反向心跳摘要说明</summary>
+      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 归档与自动标签说明</summary>
       <div class="hint" style="margin-top: 6px;">
-        归档内容可在 <a href="/archive">📖 消息归档</a> 页浏览；归档的访问权限（是否允许游客免登录浏览）可在「🔑 用户」选项卡中统一管理。
+        • <b>自动识别图片标签</b>：开启后后台自动使用视觉模型对新图片提取特征标签；关闭时<b>停止自动打标签</b>，且归档页<b>不显示自动识别出的标签</b>，<b>对手动自定义标签功能完全无影响</b>。<br/>
+        • 归档内容可在 <a href="/archive">📖 消息归档</a> 页浏览；归档的访问权限（是否允许游客免登录浏览）可在「🔑 用户」选项卡中统一管理。
       </div>
     </details>
   </div>
@@ -1981,6 +1983,7 @@ function renderGeneral() {
   const ar = config.archive || {};
   $("archiveOn").checked = !!ar.enabled;
   $("archiveMedia").checked = ar.media !== false;
+  $("imageTaggingOn").checked = config.image_tagging === true || config.enable_image_tagging === true;
   const au = config.auth || {};
   const isPublic = au.archive_public === true;
   if ($("authArchivePublic")) $("authArchivePublic").checked = isPublic;
@@ -2306,6 +2309,7 @@ function collectGeneral() {
     dir: (config.archive || {}).dir || "data/archive",
     media: $("archiveMedia").checked,
   };
+  config.image_tagging = $("imageTaggingOn").checked;
   const isPublic = Boolean($("authArchivePublic") && $("authArchivePublic").checked);
   config.auth = config.auth || {};
   config.auth.enabled = config.auth.enabled !== false;

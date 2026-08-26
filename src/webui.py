@@ -139,7 +139,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
 ]
 # 其余键统一归入「可选覆盖」分区，按此顺序排列，未列出的键按字母序跟在后面
-_OPTIONAL_ORDER = ["qq_send_interval", "translate", "gemini_models", "gemini_min_interval", "translate_timeout"]
+_OPTIONAL_ORDER = ["qq_send_interval", "translate", "image_tagging", "gemini_models", "gemini_min_interval", "translate_timeout"]
 _OPTIONAL_COMMENT = "── 可选覆盖 ──（不写则用内置默认值）"
 
 
@@ -1240,6 +1240,8 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
                 msgs = [m for m in msgs if m.get("type") in wanted]
+            import config.config as cfg
+            show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
             total = len(msgs)
             start = (page - 1) * per_page
             slim = [{
@@ -1247,7 +1249,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "type": m.get("type"),
                 "text": m.get("text", ""),
                 "translation": m.get("_translation", ""),
-                "tags": m.get("_tags", ""),
+                "tags": m.get("_tags", "") if show_auto_tags else "",
                 "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
@@ -1307,6 +1309,8 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
             hits = _archive.search(member, query, type_filter=wanted)
+            import config.config as cfg
+            show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
             total = len(hits)
             start = (page - 1) * per_page
             slim = [{
@@ -1314,7 +1318,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "type": m.get("type"),
                 "text": m.get("text", ""),
                 "translation": m.get("_translation", ""),
-                "tags": m.get("_tags", ""),
+                "tags": m.get("_tags", "") if show_auto_tags else "",
                 "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
