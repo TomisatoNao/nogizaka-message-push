@@ -224,6 +224,16 @@
     border: 1px solid rgba(245, 158, 11, 0.3);
     font-weight: 500;
   }
+  .bubble .upload-badge.is-delayed {
+    background: rgba(14, 165, 233, 0.12);
+    color: #0284c7;
+    border: 1px solid rgba(14, 165, 233, 0.3);
+    font-weight: 500;
+  }
+  .bubble .upload-badge.is-delayed:hover {
+    border-color: #0284c7;
+    box-shadow: 0 1px 5px rgba(14, 165, 233, 0.25);
+  }
   .bubble .upload-badge.is-inferred {
     background: rgba(99, 102, 241, 0.12);
     color: #6366f1;
