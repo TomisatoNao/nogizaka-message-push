@@ -1677,7 +1677,20 @@ function renderBubble(msg) {
     const diffSec = Math.max(0, Math.round((pDt.getTime() - uDt.getTime()) / 1000));
     const uFormatted = fmtUploadTime(msg.upload_at, msg.published_at);
     const durStr = fmtDelayDuration(diffSec);
-    const isScheduled = diffSec >= 7200; // >= 2 小时视为明显预设定时
+
+    // 智能判定「预设定时」：
+    // 1. 时差 >= 1小时 (3600s)
+    // 2. 整点/半点投放 (:00 / :30 分) + 定时管道秒 (:37 / :09 / :07) 且时差 >= 5分钟 (300s)
+    // 3. 命中标准定时管道秒数 (:37 / :09) 且时差 >= 25分钟 (1500s)（常规即时审核流转一般在 3~15 分钟内）
+    const pubJst = toJst(msg.published_at);
+    const pSec = pubJst.getUTCSeconds();
+    const pMin = pubJst.getUTCMinutes();
+    const isCronSec = (pSec === 37 || pSec === 9 || pSec === 7);
+    const isRoundTime = (pMin === 0 || pMin === 30);
+    const isScheduled = (diffSec >= 3600) ||
+                        (isRoundTime && isCronSec && diffSec >= 300) ||
+                        (isCronSec && diffSec >= 1500);
+
     const tooltip = "📸 成员真实上传/拍摄于 (JST): " + fmtCopyTime(msg.upload_at) +
       "\n📢 STF审核发布 (JST): " + fmtCopyTime(msg.published_at) +
       "\n⏱️ 审核流转 / 预设耗时: " + durStr;
