@@ -1705,7 +1705,7 @@ function renderBubble(msg) {
     const pubJst = toJst(msg.published_at);
     const pSec = pubJst.getUTCSeconds();
     const pMin = pubJst.getUTCMinutes();
-    const isCronSec = (pSec === 37 || pSec === 9 || pSec === 7);
+    const isCronSec = (pSec === 37 || pSec === 9 || pSec === 7 || pSec === 28);
     const isRoundTime = (pMin === 0 || pMin === 30);
     const isSpecialTime = isRoundTime && (pSec === 0 || pSec === 1 || isCronSec);
 
@@ -1714,6 +1714,7 @@ function renderBubble(msg) {
       if (pSec === 37) pipeDesc = "日向坂:37s 管道";
       else if (pSec === 9) pipeDesc = "樱坂:09s 管道";
       else if (pSec === 7) pipeDesc = "乃木坂:07s 管道";
+      else if (pSec === 28) pipeDesc = "定时管道:28s";
       else if (isRoundTime) pipeDesc = "整点/半点 投放";
 
       const tooltip = "🤖 疑似预设定时消息\n特征：命中 " + pipeDesc + " (JST " + pubTimeStr + ")\n说明：纯文本消息无媒体上传时间戳，根据官方固定分发管道特征推断";
