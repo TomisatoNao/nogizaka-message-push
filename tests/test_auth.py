@@ -339,7 +339,8 @@ def main() -> None:
         cfg.AUTH_ENABLED, cfg.AUTH_ARCHIVE_PUBLIC, cfg.AUTH_SESSION_HOURS = orig_flags
 
     print("=" * 50)
-    print("🎉 全部测试通过！账号系统工作正常")
+def test_auth_all() -> None:
+    main()
 
 
 if __name__ == "__main__":

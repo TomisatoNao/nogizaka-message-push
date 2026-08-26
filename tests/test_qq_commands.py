@@ -210,7 +210,8 @@ def main() -> None:
         cfg.QQ_COMMANDS_ALLOW = saved["allow"]
 
     print("=" * 50)
-    print("🎉 全部测试通过！官方 Bot 指令工作正常")
+def test_qq_commands_all() -> None:
+    main()
 
 
 if __name__ == "__main__":

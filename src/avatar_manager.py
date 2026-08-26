@@ -197,6 +197,8 @@ def save_member_avatar_record(group_key: str, name: str, display_name: str, avat
             """, (group_key, norm, disp, avatar_url, local_file, now_ts))
     except Exception as e:
         log_all(f"⚠️ 保存头像记录失败: {e}", is_debug=True)
+    finally:
+        conn.close()
 
 
 async def sync_all_avatars(force: bool = False) -> dict[str, int]:
@@ -262,6 +264,8 @@ def get_member_avatar_path(name: str, group_key: str = "") -> Optional[str]:
                 return local_file
     except Exception:
         pass
+    finally:
+        conn.close()
 
     # 兜底：直接按常规命名查找本地文件
     for g in ([group_key] if group_key else ["nogizaka", "sakurazaka", "hinatazaka", "yodel", "msg"]):
@@ -290,4 +294,6 @@ def get_member_avatar_map() -> dict[str, str]:
                 res[name] = remote_url
     except Exception:
         pass
+    finally:
+        conn.close()
     return res

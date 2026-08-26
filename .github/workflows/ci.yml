@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install ruff pytest pytest-asyncio
+          pip install ruff pytest pytest-asyncio pytest-cov
 
       - name: Lint (ruff)
         run: ruff check .
@@ -60,5 +60,5 @@ jobs:
       - name: Blog card test
         run: python tests/test_blog_card.py
 
-      - name: Pytest full suite
-        run: pytest
+      - name: Pytest full suite with coverage
+        run: pytest --cov=src --cov-report=term

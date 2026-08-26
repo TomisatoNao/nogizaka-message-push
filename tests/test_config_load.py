@@ -110,5 +110,9 @@ def main() -> None:
     print("🎉 全部测试通过！config.py facade 工作正常")
 
 
+def test_config_load_all() -> None:
+    main()
+
+
 if __name__ == "__main__":
     main()
