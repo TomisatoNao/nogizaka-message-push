@@ -111,7 +111,8 @@ async def main():
         local_file = msg.get("_local_file", "")
         print(f"[{i}/{len(pending)}] [{m_name}] {local_file} ... ", end="", flush=True)
 
-        tags = await tag_image(m_name, local_file)
+        msg_text = msg.get("text") or msg.get("_translation") or ""
+        tags = await tag_image(m_name, local_file, text=msg_text)
         if not tags:
             print("❌ 打标签失败")
             fail += 1

@@ -116,7 +116,11 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         return
 
     archived_ids, failed_ids = archive.load_archived_ids(m_name)
-    cursor = progress.get(key) or start_from
+    saved_cursor = progress.get(key)
+    if start_from != DEFAULT_START:
+        cursor = min(start_from, saved_cursor) if saved_cursor else start_from
+    else:
+        cursor = saved_cursor or start_from
     print(f"▸ {m_name}（账号 {account_id}）从 {cursor} 开始，已归档 {len(archived_ids)} 条"
           + (f"，待重试媒体 {len(failed_ids)} 条" if failed_ids else ""))
 
