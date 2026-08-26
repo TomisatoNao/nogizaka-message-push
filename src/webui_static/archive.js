@@ -540,10 +540,17 @@ function renderMemberPopover(filterKeyword = "") {
       if (!avatarText) avatarText = "💬";
       if (m.name.includes("マネダコ")) avatarText = "🐙";
 
+      let avatarHTML = '';
+      if (m.avatar) {
+        avatarHTML = '<img class="mpi-avatar-img" src="' + esc(m.avatar) + '" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + g.cls + '" style="display:none;">' + esc(avatarText) + '</span>';
+      } else {
+        avatarHTML = '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>';
+      }
+
       const item = document.createElement("div");
       item.className = "member-popover-item " + g.cls + (m.name === curMember && curMode === "msg" ? " active" : "");
       item.innerHTML = '<div class="m-name-txt">' +
-                       '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>' +
+                       avatarHTML +
                        '<span class="mpi-name">' + esc(m.display) + '</span>' +
                        '</div>' +
                        '<span class="m-cnt">' + (m.total || 0).toLocaleString() + ' 条</span>';
@@ -743,8 +750,15 @@ function renderBlogAuthorPopover(filterKeyword = "") {
     if (avText.length > 2) avText = avText.slice(-2);
     if (!avText) avText = "✍️";
 
+    let avHTML = '';
+    if (a.avatar) {
+      avHTML = '<img class="mpi-avatar-img" src="' + esc(a.avatar) + '" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + grpClass + '" style="display:none;">' + esc(avText) + '</span>';
+    } else {
+      avHTML = '<span class="mpi-avatar ' + grpClass + '">' + esc(avText) + '</span>';
+    }
+
     item.innerHTML = '<div class="a-name-txt">' +
-                     '<span class="mpi-avatar ' + grpClass + '">' + esc(avText) + '</span>' +
+                     avHTML +
                      '<span class="mpi-name">' + esc(a.name) + '</span>' +
                      '</div>' +
                      '<span class="a-cnt">' + cntTxt + '</span>';
@@ -2634,10 +2648,15 @@ function renderHome(data) {
     let avatarText = (m.display || "").replace(/[\s_　]/g, "");
     if (avatarText.length > 2) avatarText = avatarText.slice(-2);
     if (!avatarText) avatarText = "💬";
-    if (m.name.includes("マネダコ")) avatarText = "🐙";
+    let avHTML = '';
+    if (m.avatar) {
+      avHTML = '<img class="mbc-avatar-img" src="' + esc(m.avatar) + '" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';" /><div class="mbc-avatar ' + grpClass + '" style="display:none;">' + esc(avatarText) + '</div>';
+    } else {
+      avHTML = '<div class="mbc-avatar ' + grpClass + '">' + esc(avatarText) + '</div>';
+    }
 
     secHTML += '<div class="member-bento-card ' + grpClass + '" data-name="' + esc(m.name) + '">';
-    secHTML += '<div class="mbc-avatar ' + grpClass + '">' + esc(avatarText) + '</div>';
+    secHTML += avHTML;
     secHTML += '<div class="mbc-info">';
     secHTML += '<div class="mbc-top"><span class="mbc-name">' + esc(m.display) + '</span><span class="mbc-pill ' + grpClass + '">' + grpName + '</span></div>';
     secHTML += '<div class="mbc-meta">' + (m.stats?.total || 0).toLocaleString() + ' 条归档 · ' + (m.stats?.months || 0) + ' 个月</div>';

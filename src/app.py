@@ -984,6 +984,16 @@ async def main() -> None:
         asyncio.create_task(_daily_summary_loop()) if cfg.DAILY_SUMMARY_ENABLED else None
     )
 
+    # 异步非阻塞预热成员与博客作者头像
+    async def _bg_avatar_warmup():
+        try:
+            from src.avatar_manager import sync_all_avatars
+            await sync_all_avatars(force=False)
+        except Exception:
+            pass
+
+    asyncio.create_task(_bg_avatar_warmup())
+
     # 官方 Bot 指令监听（私聊 Bot 查状态 / 归档）
     global _main_loop
     _main_loop = loop

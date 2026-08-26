@@ -859,6 +859,17 @@
     box-shadow: var(--shadow-md);
     background: var(--card-soft);
   }
+  .mbc-avatar-img {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    object-fit: cover;
+    object-position: top center;
+    background: var(--card-soft);
+    border: 1px solid var(--border-soft);
+    flex-shrink: 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  }
   .mbc-avatar {
     width: 36px;
     height: 36px;
@@ -1675,6 +1686,17 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .mpi-avatar-img {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    object-fit: cover;
+    object-position: top center;
+    background: var(--card-soft);
+    border: 1px solid var(--border-soft);
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   }
   .mpi-avatar {
     width: 26px;

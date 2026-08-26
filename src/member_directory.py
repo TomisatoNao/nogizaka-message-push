@@ -147,6 +147,16 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
             end_at = ""
             auto_renew = 0
 
+        thumb = str(g.get("thumbnail") or "")
+        if thumb and mname:
+            try:
+                from src.avatar_manager import save_member_avatar_record
+                acc_cfg = cfg.ACCOUNTS.get(account_id) or {}
+                grp_k = acc_cfg.get("group_type") or "msg"
+                save_member_avatar_record(grp_k, mname, mname, thumb)
+            except Exception:
+                pass
+
         rows.append((account_id, mid, mname, state, sub_type, start_at, end_at, auto_renew, now_ts))
 
     with _lock:

@@ -1190,6 +1190,34 @@ class _Handler(BaseHTTPRequestHandler):
         def qp(key: str, default: str = "") -> str:
             return (qs.get(key) or [default])[0]
 
+        if sub == "avatar":
+            name = qp("name")
+            group = qp("group")
+            from src import avatar_manager
+            rel_path = avatar_manager.get_member_avatar_path(name, group)
+            if rel_path:
+                full_path = Path("data/avatars") / rel_path
+                if full_path.exists():
+                    ext = full_path.suffix.lower()
+                    ctype = "image/jpeg"
+                    if ext == ".png":
+                        ctype = "image/png"
+                    elif ext == ".webp":
+                        ctype = "image/webp"
+                    try:
+                        data = full_path.read_bytes()
+                        self.send_response(200)
+                        self.send_header("Content-Type", ctype)
+                        self.send_header("Content-Length", str(len(data)))
+                        self.send_header("Cache-Control", "public, max-age=2592000")
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
+                    except Exception:
+                        pass
+            self._send_json({"ok": False, "errors": ["Avatar not found"]}, 404)
+            return
+
         if sub == "members":
             members = []
             monitor_map = {}
@@ -1200,16 +1228,21 @@ class _Handler(BaseHTTPRequestHandler):
                     "group": m.get("group_type", "")
                 }
 
+            from src import avatar_manager
+            avatar_map = avatar_manager.get_member_avatar_map()
+
             for name in _archive.list_members():
                 months = _archive.list_months(name)
                 norm = name.replace(" ", "").replace("　", "").replace("_", "")
                 info = monitor_map.get(norm) or {}
                 display = info.get("display") or name.replace("_", " ")
                 group = info.get("group") or _archive.infer_member_group(name)
+                avatar = avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or ""
                 members.append({
                     "name": name,
                     "display": display,
                     "group": group,
+                    "avatar": avatar,
                     "months": len(months),
                     "total": sum(m["count"] for m in months),
                 })
@@ -1545,10 +1578,14 @@ class _Handler(BaseHTTPRequestHandler):
                 norm = name.replace(" ", "").replace("　", "").replace("_", "")
                 display = monitor_names.get(norm) or name.replace("_", " ")
                 group = _archive.infer_member_group(name)
+                from src import avatar_manager
+                avatar_map = avatar_manager.get_member_avatar_map()
+                avatar = avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or ""
                 members.append({
                     "name": name,
                     "display": display,
                     "group": group,
+                    "avatar": avatar,
                     "stats": stats,
                     "monthly": monthly,
                     "days": days,
@@ -1920,13 +1957,18 @@ class _Handler(BaseHTTPRequestHandler):
             authors = []
             try:
                 db = _get_blog_db()
+                from src import avatar_manager
+                avatar_map = avatar_manager.get_member_avatar_map()
                 for r in db.execute("""
                     SELECT author, COUNT(*)
                     FROM blog_posts WHERE group_key=? AND author != '' AND author IS NOT NULL
                     GROUP BY author ORDER BY COUNT(*) DESC
                 """, (group,)).fetchall():
                     if r[0] and str(r[0]).strip():
-                        authors.append({"name": str(r[0]).strip(), "total": r[1]})
+                        a_name = str(r[0]).strip()
+                        norm_a = a_name.replace(" ", "").replace("　", "").replace("_", "")
+                        avatar = avatar_map.get(f"{group}:{norm_a}") or avatar_map.get(norm_a) or ""
+                        authors.append({"name": a_name, "total": r[1], "avatar": avatar})
             except Exception:
                 pass
             self._send_json({"ok": True, "group": group, "authors": authors})
