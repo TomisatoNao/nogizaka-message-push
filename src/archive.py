@@ -509,35 +509,64 @@ async def _merge_write(m_name: str, dt: datetime, record: dict) -> None:
 async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
     """下载消息媒体，返回带 _local_file / _download_failed 字段的增量记录。"""
     file_url = msg.get("file", "")
+    thumb_url = msg.get("thumbnail", "")
     msg_id = str(msg.get("id", "0"))
     ts = dt.strftime("%Y%m%d_%H%M%S")
     dest_dir = _month_dir(m_name, dt) / _media_subdir(msg.get("type", ""))
     dest_dir.mkdir(parents=True, exist_ok=True)
     member_root = _member_root(m_name)
 
-    # 已有本地文件（按 时间戳_id 前缀匹配，扩展名无关）→ 直接复用
+    # 已有本地文件（按 时间戳_id 前缀匹配，扩展名无关）→ 检查大小后直接复用
     for existing in os.listdir(dest_dir):
         if existing.startswith(f"{ts}_{msg_id}") and not existing.endswith(".tmp"):
-            rel = (dest_dir / existing).relative_to(member_root).as_posix()
-            return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_local_file": rel}
+            f_path = dest_dir / existing
+            try:
+                if f_path.stat().st_size > 0:
+                    rel = f_path.relative_to(member_root).as_posix()
+                    return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_local_file": rel}
+                else:
+                    f_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     tmp_path = dest_dir / f"{ts}_{msg_id}.tmp"
     ok = False
+    used_url = file_url
     assert _media_sem is not None, "archive.initialize() 未调用"
+
+    # 优先下载主媒体文件；主文件失效/404 时若为图片且有缩略图则回退
+    candidate_urls = [u for u in [file_url, thumb_url] if u]
+    if not candidate_urls:
+        return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_download_failed": True}
+
     async with _media_sem:
-        try:
-            client = _media_client
-            assert client is not None
-            async with client.stream("GET", file_url, timeout=120) as resp:
-                if resp.status_code == 200:
-                    with open(tmp_path, "wb") as f:
-                        async for chunk in resp.aiter_bytes(1 << 16):
-                            f.write(chunk)
-                    ok = True
-                else:
-                    log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code}: {file_url[:80]}", is_debug=True)
-        except Exception as e:
-            log_all(f"⚠️ 归档媒体下载失败: {file_url[:80]} — {type(e).__name__}: {e}", is_debug=True)
+        client = _media_client
+        assert client is not None
+        for u in candidate_urls:
+            if ok:
+                break
+            for attempt in range(3):
+                try:
+                    async with client.stream("GET", u, timeout=60, follow_redirects=True) as resp:
+                        if resp.status_code == 200:
+                            with open(tmp_path, "wb") as f:
+                                async for chunk in resp.aiter_bytes(1 << 16):
+                                    f.write(chunk)
+                            if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                                ok = True
+                                used_url = u
+                                break
+                            else:
+                                log_all(f"⚠️ 归档媒体下载为空文件 (第 {attempt+1} 次尝试): {u[:80]}", is_debug=True)
+                        elif resp.status_code in (403, 404, 410):
+                            log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (资源已失效或无权访问): {u[:80]}", is_debug=True)
+                            break
+                        else:
+                            log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (第 {attempt+1} 次重试): {u[:80]}", is_debug=True)
+                except Exception as e:
+                    log_all(f"⚠️ 归档媒体下载异常 (第 {attempt+1} 次重试): {u[:80]} — {type(e).__name__}: {e}", is_debug=True)
+                if attempt < 2:
+                    await asyncio.sleep(1.0 * (attempt + 1))
 
     if not ok:
         try:
@@ -546,7 +575,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
             pass
         return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_download_failed": True}
 
-    ext = _guess_extension(file_url, _sniff_content_type(tmp_path))
+    ext = _guess_extension(used_url, _sniff_content_type(tmp_path))
     final_path = dest_dir / f"{ts}_{msg_id}{ext}"
     os.replace(tmp_path, final_path)
     rel = final_path.relative_to(member_root).as_posix()

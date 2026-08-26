@@ -1663,55 +1663,63 @@ async function fetchStatus() {
     : '<span class="cred miss">' + badText + "</span>";
 
   const tokens = $("stTokens");
-  tokens.innerHTML = "";
-  const names = Object.keys(data.tokens || {});
-  if (!names.length) tokens.innerHTML = '<tr><td colspan="3" class="empty">（无数据）</td></tr>';
-  for (const acc of names) {
-    const t = data.tokens[acc];
-    let badge;
-    if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效（需重新填凭证）</span>';
-    else if (t.remaining < (data.token_warn_seconds || 600))
-      badge = '<span class="cred" style="color:var(--warn)">🔄 即将自动续期</span>';
-    else badge = '<span class="cred ok">✓ 正常</span>';
-    tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
-      (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
+  if (tokens) {
+    tokens.innerHTML = "";
+    const names = Object.keys(data.tokens || {});
+    if (!names.length) tokens.innerHTML = '<tr><td colspan="3" class="empty">（无数据）</td></tr>';
+    for (const acc of names) {
+      const t = data.tokens[acc];
+      let badge;
+      if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效（需重新填凭证）</span>';
+      else if (t.remaining < (data.token_warn_seconds || 600))
+        badge = '<span class="cred" style="color:var(--warn)">🔄 即将自动续期</span>';
+      else badge = '<span class="cred ok">✓ 正常</span>';
+      tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
+        (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
+    }
   }
 
   const channels = $("stChannels");
-  channels.innerHTML = "";
-  const chNames = Object.keys(data.channels || {});
-  if (!chNames.length) channels.innerHTML = '<tr><td colspan="4" class="empty">（本周期还没有发送记录）</td></tr>';
-  for (const name of chNames) {
-    const c = data.channels[name];
-    channels.innerHTML += "<tr><td><b>" + esc(name) + "</b></td><td>" + c.success + " / " + c.total +
-      "</td><td>" + okBadge(c.healthy, "✓ 正常", "⚠️ 有失败") +
-      "</td><td>" + esc(c.last_error || "—") + "</td></tr>";
+  if (channels) {
+    channels.innerHTML = "";
+    const chNames = Object.keys(data.channels || {});
+    if (!chNames.length) channels.innerHTML = '<tr><td colspan="4" class="empty">（本周期还没有发送记录）</td></tr>';
+    for (const name of chNames) {
+      const c = data.channels[name];
+      channels.innerHTML += "<tr><td><b>" + esc(name) + "</b></td><td>" + c.success + " / " + c.total +
+        "</td><td>" + okBadge(c.healthy, "✓ 正常", "⚠️ 有失败") +
+        "</td><td>" + esc(c.last_error || "—") + "</td></tr>";
+    }
   }
 
   const members = $("stMembers");
-  members.innerHTML = "";
-  if (!(data.members || []).length) members.innerHTML = '<tr><td colspan="4" class="empty">（无数据）</td></tr>';
-  for (const m of data.members || []) {
-    members.innerHTML += "<tr><td><b>" + esc(m.name) + "</b></td>" +
-      "<td>" + okBadge(m.fetch_ok, "✓", "✗") + "</td>" +
-      "<td>" + okBadge(m.push_ok, "✓", "✗") + "</td>" +
-      "<td>" + esc((m.last_error || "—").slice(0, 120)) + "</td></tr>";
+  if (members) {
+    members.innerHTML = "";
+    if (!(data.members || []).length) members.innerHTML = '<tr><td colspan="4" class="empty">（无数据）</td></tr>';
+    for (const m of data.members || []) {
+      members.innerHTML += "<tr><td><b>" + esc(m.name) + "</b></td>" +
+        "<td>" + okBadge(m.fetch_ok, "✓", "✗") + "</td>" +
+        "<td>" + okBadge(m.push_ok, "✓", "✗") + "</td>" +
+        "<td>" + esc((m.last_error || "—").slice(0, 120)) + "</td></tr>";
+    }
   }
 
   const errBox = $("stErrors");
-  if (!(data.errors || []).length) {
-    errBox.className = "empty";
-    errBox.textContent = "（无）";
-  } else {
-    errBox.className = "";
-    errBox.innerHTML = "";
-    for (const e of data.errors.slice().reverse()) {
-      const div = document.createElement("div");
-      div.style.cssText = "padding:3px 0; font-size:13px;" +
-        (e.tier === "PERSISTENT" ? "color:var(--err)" : "color:var(--muted)");
-      div.textContent = "[" + (e.tier === "PERSISTENT" ? "需处理" : "临时") + "] " + e.msg +
-        "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + "）";
-      errBox.appendChild(div);
+  if (errBox) {
+    if (!(data.errors || []).length) {
+      errBox.className = "empty";
+      errBox.textContent = "（无）";
+    } else {
+      errBox.className = "";
+      errBox.innerHTML = "";
+      for (const e of data.errors.slice().reverse()) {
+        const div = document.createElement("div");
+        div.style.cssText = "padding:3px 0; font-size:13px;" +
+          (e.tier === "PERSISTENT" ? "color:var(--err)" : "color:var(--muted)");
+        div.textContent = "[" + (e.tier === "PERSISTENT" ? "需处理" : "临时") + "] " + e.msg +
+          "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + "）";
+        errBox.appendChild(div);
+      }
     }
   }
 }

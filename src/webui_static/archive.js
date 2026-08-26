@@ -1660,11 +1660,68 @@ function renderBubble(msg) {
       html += '<img loading="lazy"' + dim + ' data-lb="' + (images.length - 1) + '" src="' + esc(url) + '" alt="">';
     }
   } else if (msg.download_failed) {
-    html += '<div class="miss">⚠️ 媒体文件下载失败（可用回填工具重试）</div>';
+    html += '<div class="miss">⚠️ 媒体文件下载失败 ' +
+      (window._isArchiveAdmin ? '<button type="button" class="btn small retry-dl-btn" style="margin-left:8px; padding:2px 8px; font-size:12px; vertical-align:middle;">🔄 重试下载</button>' : '（可用回填工具重试）') +
+      '</div>';
   }
   if (msg.text) html += '<div class="text">' + formatMessageText(msg.text, searchQuery) + "</div>";
   if (msg.translation) html += '<div class="trans">' + formatMessageText(msg.translation, searchQuery) + "</div>";
   b.innerHTML = html;
+
+  const retryBtn = b.querySelector(".retry-dl-btn");
+  if (retryBtn) {
+    retryBtn.addEventListener("click", async () => {
+      retryBtn.disabled = true;
+      retryBtn.textContent = "⏳ 下载中…";
+      const msgId = msg.id;
+      const msgYear = msg.year || curYM.year;
+      const msgMonth = msg.month || curYM.month;
+      try {
+        const resp = await fetch("/api/archive/retry_download?member=" + encodeURIComponent(curMember), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: msgId, year: msgYear, month: msgMonth }),
+        });
+        const data = await resp.json();
+        if (data.ok && data.media_url) {
+          showToast("🎉 媒体文件下载成功！", "ok");
+          msg.download_failed = false;
+          msg.media_url = data.media_url;
+          const missDiv = b.querySelector(".miss");
+          if (missDiv) {
+            const url = mediaUrl(data.media_url);
+            let mediaEl;
+            if (msg.type === "video") {
+              mediaEl = document.createElement("video");
+              mediaEl.controls = true;
+              mediaEl.preload = "metadata";
+              mediaEl.src = url;
+            } else if (msg.type === "voice") {
+              mediaEl = document.createElement("audio");
+              mediaEl.controls = true;
+              mediaEl.preload = "metadata";
+              mediaEl.src = url;
+            } else {
+              images.push({ url: url, caption: (msg.text || "").slice(0, 80) });
+              mediaEl = document.createElement("img");
+              mediaEl.loading = "lazy";
+              mediaEl.dataset.lb = String(images.length - 1);
+              mediaEl.src = url;
+            }
+            missDiv.replaceWith(mediaEl);
+          }
+        } else {
+          showToast("重试失败：" + (data.errors || []).join("；"), "error");
+          retryBtn.disabled = false;
+          retryBtn.textContent = "🔄 重试下载";
+        }
+      } catch (e) {
+        showToast("重试失败：" + e.message, "error");
+        retryBtn.disabled = false;
+        retryBtn.textContent = "🔄 重试下载";
+      }
+    });
+  }
 
   // ── 标签 ──
   const allTags = [];
