@@ -60,5 +60,14 @@ jobs:
       - name: Blog card test
         run: python tests/test_blog_card.py
 
+      - name: Avatar manager test
+        run: pytest tests/test_avatar_manager.py
+
+      - name: Member directory test
+        run: pytest tests/test_member_directory.py
+
+      - name: Social single test
+        run: pytest tests/test_social_single.py
+
       - name: Pytest full suite with coverage
         run: pytest --cov=src --cov-report=term

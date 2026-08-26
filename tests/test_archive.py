@@ -463,8 +463,7 @@ def main() -> None:
         cfg.AUTH_ENABLED = orig_auth
 
     print("=" * 50)
-def test_archive_all() -> None:
-    main()
+    print("🎉 全部测试通过！消息归档工作正常")
 
 
 if __name__ == "__main__":

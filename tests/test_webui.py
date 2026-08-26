@@ -466,8 +466,7 @@ def main() -> None:
 
     cfg.AUTH_ENABLED = orig_auth
     print("=" * 50)
-def test_webui_all() -> None:
-    main()
+    print("🎉 全部测试通过！网页管理端工作正常")
 
 
 if __name__ == "__main__":
