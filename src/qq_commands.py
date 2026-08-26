@@ -295,29 +295,30 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
         # 1. 解析动态
         post = parser.parse(url)
 
-        # 2. 并发执行：媒体多线程下载 与 AI 智能翻译
+        # 2. 并发执行：媒体多线程下载 与 异步 AI 智能翻译（带 10s 快速超时）
         downloader = MediaDownloader(raw_cfg)
         forwarder = SocialForwarder(raw_cfg, downloader)
 
-        def _do_translate():
-            translated = forwarder._translate(post.text) if post.text else None
-            if translated:
-                post.extra["_translated"] = translated
-            alts = collect_alts(post)
-            alt_zh: dict = {}
-            for idx, text in alts:
-                zh = forwarder._translate(text)
-                if zh:
-                    alt_zh[idx] = zh
-            if alts:
-                post.extra["_alt_texts"] = {str(i): t for i, t in alts}
-                if alt_zh:
-                    post.extra["_alt_translated"] = {str(i): v for i, v in alt_zh.items()}
-            return translated, alt_zh
+        async def _do_translate_async():
+            t_res = None
+            if post.text:
+                try:
+                    from src import translator
+                    t_res = await asyncio.wait_for(translator.translate_text(post.text, "社媒", "偶像"), timeout=10.0)
+                    if t_res and t_res.strip() != post.text.strip():
+                        post.extra["_translated"] = t_res.strip()
+                except Exception as ex:
+                    log_all(f"⚠️ [社媒翻译] AI 翻译跳过/超时: {ex}", is_debug=True)
+            return t_res
 
         download_task = asyncio.to_thread(downloader.download, post)
-        translate_task = asyncio.to_thread(_do_translate)
-        _, (translated, alt_zh) = await asyncio.gather(download_task, translate_task)
+        translate_task = _do_translate_async()
+        _, translated = await asyncio.gather(download_task, translate_task)
+
+        alt_zh: dict = {}
+        alts = collect_alts(post)
+        if alts:
+            post.extra["_alt_texts"] = {str(i): t for i, t in alts}
 
         full_text = build_post_message(post, translated, alt_zh)
 
@@ -349,12 +350,14 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             return
 
         # 5. 回复正文（包含标题、原帖正文与双语翻译）
+        log_all(f"📤 [社媒解析] 开始向 {scope}:{target_id[:8]}… 发送动态正文与 {len(post.media)} 个媒体附件...")
         if scope == "groups":
             await target_bot.send_group_text(target_id, full_text)
         else:
             await target_bot.send_private_text(target_id, full_text)
 
         # 6. 回复所有高清图片 / 视频媒体附件
+        media_ok = 0
         for m in post.media:
             fp = m.local_path
             if fp and os.path.exists(fp):
@@ -364,7 +367,11 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
                     if m_bytes:
                         m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
                         fname = os.path.basename(fp)
-                        await target_bot.send_media_file(scope, target_id, m_type, m_bytes, filename=fname)
+                        sent = await target_bot.send_media_file(scope, target_id, m_type, m_bytes, filename=fname)
+                        if sent:
+                            media_ok += 1
+                        else:
+                            log_all(f"⚠️ [社媒解析] 媒体附件 {fname} 发送未成功 (API 返回 None)", is_error=True)
                 except Exception as ex:
                     log_all(f"⚠️ [社媒解析] 发送媒体附件异常: {ex}", is_error=True)
 
@@ -375,7 +382,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
         except Exception as ex:
             log_all(f"⚠️ [社媒归档] 保存失败: {ex}", is_error=True)
 
-        log_all(f"✅ [社媒解析] 成功向 {scope}:{target_id[:8]}… 回复 {post.platform} 动态: {post.author}")
+        log_all(f"✅ [社媒解析] 成功向 {scope}:{target_id[:8]}… 回复 {post.platform} 动态: {post.author} (发送 {media_ok}/{len(post.media)} 个媒体)")
 
     except Exception as e:
         log_all(f"⚠️ [社媒解析] 失败: {e}", is_error=True)
