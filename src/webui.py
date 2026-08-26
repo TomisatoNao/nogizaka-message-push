@@ -1802,7 +1802,7 @@ class _Handler(BaseHTTPRequestHandler):
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
                         })
 
-            time_tunnel = sorted(rand_msgs + rand_blog_msgs, key=lambda x: x.get("published_at", ""), reverse=True)
+            time_tunnel = sorted(rand_msgs + rand_blog_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:6]
 
             # ── 6. 综合统计概览 ──
             total_messages = sum(m["stats"]["total"] for m in members)

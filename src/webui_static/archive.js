@@ -2747,19 +2747,20 @@ function renderHome(data) {
     });
   });
 
-  // 4. 最新动态聚合流 (Message + Blog 双列瀑布流)
+  // 4. 最新动态聚合流 (Message + Blog 双列网格排版，严格对齐)
   const feedDiv = $("homeFeedList");
-  if (recentFeed.length) {
-    let col1HTML = '';
-    let col2HTML = '';
-    recentFeed.forEach((item, i) => {
+  // 保证偶数个卡片，使双列底部完美平齐
+  const evenRecentFeed = recentFeed.length % 2 === 0 ? recentFeed : recentFeed.slice(0, recentFeed.length - 1);
+  if (evenRecentFeed.length) {
+    let cardsHTML = '';
+    evenRecentFeed.forEach((item, i) => {
       let cardHTML = '';
       const dateStr = fmtDate(item.published_at);
       if (item.type === "blog") {
         cardHTML += '<div class="home-msg-card" style="animation-delay:' + (i * .03) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
         cardHTML += '<div class="hmc-header">';
         cardHTML += '<div class="hmc-meta-left">';
-        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
+        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(167,139,250,0.12);color:#a78bfa;">' + esc(item.member_display) + '</span>';
         cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
         cardHTML += '</div>';
         cardHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
@@ -2781,10 +2782,9 @@ function renderHome(data) {
         }
         cardHTML += '</div>';
       }
-      if (i % 2 === 0) col1HTML += cardHTML;
-      else col2HTML += cardHTML;
+      cardsHTML += cardHTML;
     });
-    feedDiv.innerHTML = '<div class="portal-feed-col">' + col1HTML + '</div><div class="portal-feed-col">' + col2HTML + '</div>';
+    feedDiv.innerHTML = cardsHTML;
     feedDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
         hideHome();
@@ -2800,15 +2800,16 @@ function renderHome(data) {
       });
     });
   } else {
-    feedDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无最新动态</div>';
+    feedDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px;grid-column:1/-1;">暂无最新动态</div>';
   }
 
-  // 5. 时光隧道 (Message + Blog 双列瀑布流)
+  // 5. 时光隧道 (Message + Blog 双列网格排版，严格对齐)
   const tunnelDiv = $("homeTimeTunnel");
-  if (timeTunnel && timeTunnel.length) {
-    let col1HTML = '';
-    let col2HTML = '';
-    timeTunnel.forEach((item, i) => {
+  // 保证偶数个卡片，使双列底部完美平齐
+  const evenTimeTunnel = timeTunnel && timeTunnel.length ? (timeTunnel.length % 2 === 0 ? timeTunnel : timeTunnel.slice(0, timeTunnel.length - 1)) : [];
+  if (evenTimeTunnel.length) {
+    let cardsHTML = '';
+    evenTimeTunnel.forEach((item, i) => {
       let cardHTML = '';
       const dateStr = fmtDateFull(item.published_at);
       const d = parseDateSafe(item.published_at);
@@ -2822,7 +2823,7 @@ function renderHome(data) {
         cardHTML += '<div class="hmc-header">';
         cardHTML += '<div class="hmc-meta-left">';
         cardHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
-        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">' + esc(item.member_display) + '</span>';
+        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(167,139,250,0.12);color:#a78bfa;">' + esc(item.member_display) + '</span>';
         cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
         cardHTML += '</div>';
         cardHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
@@ -2848,10 +2849,9 @@ function renderHome(data) {
         }
         cardHTML += '</div>';
       }
-      if (i % 2 === 0) col1HTML += cardHTML;
-      else col2HTML += cardHTML;
+      cardsHTML += cardHTML;
     });
-    tunnelDiv.innerHTML = '<div class="portal-tunnel-col">' + col1HTML + '</div><div class="portal-tunnel-col">' + col2HTML + '</div>';
+    tunnelDiv.innerHTML = cardsHTML;
     tunnelDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
         curMode = "msg";
@@ -2869,7 +2869,7 @@ function renderHome(data) {
       });
     });
   } else {
-    tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px">暂无历史消息</div>';
+    tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px;grid-column:1/-1;">暂无历史消息</div>';
   }
 }
 
