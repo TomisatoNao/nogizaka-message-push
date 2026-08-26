@@ -230,14 +230,23 @@ function fmtDateKey(utc) {
          "-" + String(d.getUTCDate()).padStart(2, "0");
 }
 
+function inferMemberGroup(m) {
+  if (!m) return "";
+  const grp = ((typeof m === "object" ? m.group : "") || "").toLowerCase();
+  if (grp.includes("nogi")) return "nogizaka";
+  if (grp.includes("sakura")) return "sakurazaka";
+  if (grp.includes("hinata") || grp.includes("yodel")) return "hinatazaka";
+
+  const nm = ((typeof m === "object" ? (m.name || m.display || "") : m) || "").replace(/[\s_　]/g, "");
+  if (/^(松尾桜|金村|大野|佐藤|片山|坂井|下田|山下葉|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水|宮地|石塚|マネダコ)/.test(nm)) return "hinatazaka";
+  if (/^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test(nm)) return "sakurazaka";
+  if (/^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津|松尾美)/.test(nm)) return "nogizaka";
+  return "";
+}
+
 function getCurGroup() {
   const mObj = members.find(x => x.name === curMember);
-  if (mObj && mObj.group) return mObj.group.toLowerCase();
-  const nm = (curMember || "").replace(/[\s_　]/g, "");
-  if (/^(金村|大野|佐藤|片山|坂井|下田|山下葉|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test(nm)) return "hinatazaka";
-  if (/^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test(nm)) return "sakurazaka";
-  if (/^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test(nm)) return "nogizaka";
-  return "";
+  return inferMemberGroup(mObj || curMember);
 }
 
 // ── 日历 ─────────────────────────────────────────
@@ -516,12 +525,7 @@ function renderMemberPopover(filterKeyword = "") {
   ];
 
   groups.forEach(g => {
-    const grpMems = filtered.filter(m => {
-      const grp = (m.group || "").toLowerCase();
-      if (g.key === "nogizaka") return grp.includes("nogi") || ['冨里', '賀喜', '松尾'].some(k => m.name.includes(k));
-      if (g.key === "sakurazaka") return grp.includes("sakura") || m.name.includes('石森');
-      return grp.includes("hinata") || grp.includes("yodel") || ['金村', '佐藤', '大野', '片山', '松田好', '小坂', 'マネダコ', '清水', '丹生'].some(k => m.name.includes(k));
-    });
+    const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
 
     if (!grpMems.length) return;
 
@@ -2621,11 +2625,11 @@ function renderHome(data) {
   secHTML += '<div class="pms-header"><span>👥 监控成员快捷通道</span><span class="pms-sub">点击直达对应成员消息时间线</span></div>';
   secHTML += '<div class="portal-members-grid">';
   members.forEach(m => {
-    const grp = (m.group || "").toLowerCase();
+    const gKey = inferMemberGroup(m);
     let grpClass = "hinata";
     let grpName = "日向坂";
-    if (grp.includes("nogi") || ['冨里', '賀喜', '松尾'].some(k => m.name.includes(k))) { grpClass = "nogi"; grpName = "乃木坂"; }
-    else if (grp.includes("sakura") || m.name.includes('石森')) { grpClass = "sakura"; grpName = "樱坂"; }
+    if (gKey === "nogizaka") { grpClass = "nogi"; grpName = "乃木坂"; }
+    else if (gKey === "sakurazaka") { grpClass = "sakura"; grpName = "樱坂"; }
     
     let avatarText = (m.display || "").replace(/[\s_　]/g, "");
     if (avatarText.length > 2) avatarText = avatarText.slice(-2);
