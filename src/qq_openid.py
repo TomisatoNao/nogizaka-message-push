@@ -246,9 +246,18 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                             sender = author.get("member_openid", "") or author.get("user_openid", "")
                             scope = "groups"
                             target_id = group_openid
-                            # 清理开头的 @机器人 标记与空白（支持带空格昵称与 QQ 官方标签）
+                            # 清理开头的 @机器人 标记与空白（支持带空格昵称、XML 标签与中文指令）
                             content = re.sub(r"<@![^>]+>", "", raw_content).strip()
-                            content = re.sub(r"^@.*?(?=\s*/|\s*https?://|\s*$)", "", content).strip()
+                            if "http://" in content or "https://" in content:
+                                url_m = re.search(r"https?://[^\s]+", content)
+                                if url_m:
+                                    content = url_m.group(0)
+                            else:
+                                cmd_m = re.search(r"(?:^|\s+)(/[a-zA-Z0-9_-]+|(?:菜单|帮助|状态|成员|最新|统计|搜索|ping|测试)(?:\s.*|$))", content)
+                                if cmd_m:
+                                    content = cmd_m.group(1).strip()
+                                elif content.startswith("@"):
+                                    content = re.sub(r"^@[^\s]+(?:\s+[^\s]+)?\s*", "", content).strip() or content
                         else:
                             group_openid = ""
                             sender = author.get("user_openid", "")
