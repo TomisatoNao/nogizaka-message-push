@@ -437,12 +437,8 @@ function switchMainTab(mode, keepHash) {
   } else if (mode === "blog") {
     hideHome();
     if (!keepHash) {
-      if (blogGroups && blogGroups.length > 0) {
-        selectBlogGroup(curBlogGroup || blogGroups[0].key);
-      } else {
-        location.hash = "blog="; // 触发 hashchange 或 reload
-        showBlogHome();
-      }
+      const gKey = curBlogGroup || (blogGroups[0] ? blogGroups[0].key : "nogizaka");
+      selectBlogGroup(gKey);
     }
   }
 }
@@ -450,21 +446,6 @@ function switchMainTab(mode, keepHash) {
 if ($("tabHome")) $("tabHome").addEventListener("click", () => goHome());
 $("tabMsg").addEventListener("click", () => switchMainTab("msg"));
 $("tabBlog").addEventListener("click", () => switchMainTab("blog"));
-
-function showBlogHome() {
-  $('archiveHome').classList.remove('active');
-  $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
-  document.querySelector('.layout').style.display = '';
-  $("timeline").innerHTML = '<div class="center">请在上方选择一个坂道组</div>';
-  $("blogGrid").style.display = "none";
-  $("timeline").style.display = "";
-  $("loadMore").hidden = true;
-  $("emptyHint").hidden = true;
-  document.querySelectorAll(".toolbar")[0].style.display = "none";
-  document.querySelectorAll(".toolbar")[1].style.display = "none";
-  $("archiveSide").style.display = "none";
-  syncChipHighlight();
-}
 
 // ── 数据加载 ─────────────────────────────────────
 async function loadMembers(skipSelect = false) {
@@ -1493,48 +1474,6 @@ function syncHash() {
   setTimeout(() => { selfHashUpdate = false; }, 0);
 }
 
-// 同一标签页里粘贴另一个深链（或前进/后退）时，hash 变了但 SPA 不会重载，
-// 需要手动把新状态应用上
-window.addEventListener("hashchange", async () => {
-  if (selfHashUpdate) return;
-  const p = new URLSearchParams(location.hash.slice(1));
-  const m = p.get("member") || "";
-  const y = parseInt(p.get("y"), 10), mo = parseInt(p.get("m"), 10);
-  const t = p.get("t") || "";
-  const q = normalizedQuery(p.get("q"));
-  if (t !== curType) {
-    curType = t;
-    $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
-      c.classList.toggle("active", TYPES[i][0] === curType));
-    loadCalendar();
-  }
-  if (m && m !== curMember && members.some((x) => x.name === m)) {
-    searchQuery = q;
-    syncSearchInput();
-    await selectMember(m, true);
-  } else if (p.has("blog")) {
-    const b = p.get("blog") || "";
-    const a = p.get("author") || "";
-    switchMainTab("blog", true);
-    if (b && (b !== curBlogGroup || a !== curBlogAuthor)) {
-      curBlogGroup = b;
-      curBlogAuthor = a;
-      await selectBlogGroup(b);
-      if (a) selectBlogAuthor(a);
-    } else if (!b) {
-      showBlogHome();
-    }
-  } else if (q !== searchQuery) {
-    searchQuery = q;
-    syncSearchInput();
-    if (searchQuery) startSearch(searchQuery, false);
-    else if (curYM) selectMonth(curYM.year, curYM.month);
-  } else if (y && mo && curYM && (y !== curYM.year || mo !== curYM.month)) {
-    await selectMonth(y, mo);
-  } else if (t !== undefined && curYM) {
-    await selectMonth(curYM.year, curYM.month);
-  }
-});
 
 async function selectMonth(year, month) {
   curYM = { year, month };
@@ -2877,8 +2816,10 @@ function goHome() {
   curMember = ""; curBlogGroup = "";
   curType = ""; searchQuery = "";
   syncSearchInput();
-  switchMainTab("home", true);
+  selfHashUpdate = true;
   location.hash = "";
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+  switchMainTab("home", true);
   showHome();
 }
 
@@ -2889,52 +2830,64 @@ function hideHome() {
   _enterMemberMode();
 }
 
-// ── 入口（支持 #member=&y=&m=&t= / #blog=深链 / 首页）────────────
-function boot() {
-  const p = new URLSearchParams(location.hash.slice(1));
+// ── 路由与视图分发 ─────────────────────────────────────
+async function handleRoute(isInitial = false) {
+  const rawHash = (location.hash || "").replace(/^#/, "");
+  const p = new URLSearchParams(rawHash);
+
+  // 1. 博客模式：#blog, #blog=nogizaka, #blog=...
+  if (p.has("blog") || rawHash === "blog") {
+    curMode = "blog";
+    const group = p.get("blog") || curBlogGroup || (blogGroups[0] ? blogGroups[0].key : "nogizaka");
+    const author = p.get("author") || "";
+    switchMainTab("blog", true);
+    await selectBlogGroup(group, author);
+    return;
+  }
+
+  // 2. 消息模式：#msg, #member=..., #y=...
+  if (p.has("member") || p.has("y") || p.has("m") || rawHash === "msg") {
+    curMode = "msg";
+    const mem = p.get("member") || curMember || (members[0] ? members[0].name : "冨里奈央");
+    const t = p.get("t") || "";
+    const q = normalizedQuery(p.get("q"));
+    curType = t;
+    searchQuery = q;
+    syncSearchInput();
+    switchMainTab("msg", true);
+    hideHome();
+    if (mem) {
+      await selectMember(mem, true);
+    }
+    return;
+  }
+
+  // 3. 首页模式（默认无 hash 或 #home）
+  curMode = "home";
+  switchMainTab("home", true);
+  showHome();
+}
+
+// ── 启动入口 ─────────────────────────────────────
+async function boot() {
+  const p = new URLSearchParams((location.hash || "").replace(/^#/, ""));
   curType = p.get("t") || "";
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();
   initTypeChips();
-  
-  if (p.has("blog")) {
-    curMode = "blog";
-    curBlogGroup = p.get("blog") || "";
-    curBlogAuthor = p.get("author") || "";
-    switchMainTab("blog", true);
-    loadMembers(true);
-    if (curBlogGroup) {
-      selectBlogGroup(curBlogGroup, curBlogAuthor);
-    } else {
-      showBlogHome();
-    }
-  } else if (p.has("member") || p.has("y") || p.has("m") || location.hash === "#msg") {
-    curMode = "msg";
-    curMember = p.get("member") || "";
-    switchMainTab("msg", true);
-    hideHome();
-    loadMembers();
-  } else {
-    curMode = "home";
-    switchMainTab("home", true);
-    showHome();
-    loadMembers(true);
-  }
+
+  await loadMembers(true);
+  await handleRoute(true);
 }
+
 boot();
 // 从浏览器 bfcache 恢复时重新加载内容
 window.addEventListener("pageshow", (e) => { if (e.persisted) boot(); });
 
-// hash 变化：无 member 和 blog 回到首页
+// hash 变化时统一由 handleRoute 分发视图
 window.addEventListener("hashchange", () => {
   if (selfHashUpdate) return;
-  const p = new URLSearchParams(location.hash.slice(1));
-  if (!p.has("blog") && !(p.get("member") || "") && location.hash !== "#msg") {
-    if (curMode !== "home") {
-      goHome();
-      loadMembers(true);
-    }
-  }
+  handleRoute(false);
 });
 
 function customPrompt({ title = "请输入", message = "", placeholder = "", defaultValue = "", icon = "📥", confirmText = "提交", showCheckbox = false, checkText = "" } = {}) {
