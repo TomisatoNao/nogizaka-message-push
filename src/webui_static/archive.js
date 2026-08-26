@@ -525,24 +525,55 @@ function renderMemberPopover(filterKeyword = "") {
 
   if (!filtered.length) {
     const empty = document.createElement("div");
-    empty.style.cssText = "text-align:center; padding:20px 0; color:var(--muted); font-size:12px;";
+    empty.style.cssText = "text-align:center; padding:20px 0; color:var(--muted); font-size:12.5px;";
     empty.textContent = "未找到匹配成员";
     list.appendChild(empty);
     return;
   }
 
-  for (const m of filtered) {
-    const item = document.createElement("div");
-    item.className = "member-popover-item" + (m.name === curMember && curMode === "msg" ? " active" : "");
-    item.innerHTML = '<div class="m-name-txt"><span>💬</span><span>' + esc(m.display) + '</span></div>' +
-                     '<span class="m-cnt">' + (m.total || 0).toLocaleString() + ' 条</span>';
-    item.addEventListener("click", () => {
-      closeMemberPopover();
-      hideHome();
-      selectMember(m.name);
+  // 按坂道分组
+  const groups = [
+    { key: "nogizaka", name: "乃木坂46", icon: "💜", cls: "nogi" },
+    { key: "sakurazaka", name: "樱坂46", icon: "🌸", cls: "sakura" },
+    { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" }
+  ];
+
+  groups.forEach(g => {
+    const grpMems = filtered.filter(m => {
+      const grp = (m.group || "").toLowerCase();
+      if (g.key === "nogizaka") return grp.includes("nogi") || ['冨里', '賀喜', '松尾'].some(k => m.name.includes(k));
+      if (g.key === "sakurazaka") return grp.includes("sakura") || m.name.includes('石森');
+      return grp.includes("hinata") || grp.includes("yodel") || ['金村', '佐藤', '大野', '片山', '松田好', '小坂', 'マネダコ', '清水', '丹生'].some(k => m.name.includes(k));
     });
-    list.appendChild(item);
-  }
+
+    if (!grpMems.length) return;
+
+    const gHead = document.createElement("div");
+    gHead.className = "popover-group-header " + g.cls;
+    gHead.innerHTML = '<span>' + g.icon + ' ' + g.name + '</span><span class="pgh-cnt">' + grpMems.length + ' 人</span>';
+    list.appendChild(gHead);
+
+    grpMems.forEach(m => {
+      let avatarText = (m.display || "").replace(/[\s_　]/g, "");
+      if (avatarText.length > 2) avatarText = avatarText.slice(-2);
+      if (!avatarText) avatarText = "💬";
+      if (m.name.includes("マネダコ")) avatarText = "🐙";
+
+      const item = document.createElement("div");
+      item.className = "member-popover-item " + g.cls + (m.name === curMember && curMode === "msg" ? " active" : "");
+      item.innerHTML = '<div class="m-name-txt">' +
+                       '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>' +
+                       '<span class="mpi-name">' + esc(m.display) + '</span>' +
+                       '</div>' +
+                       '<span class="m-cnt">' + (m.total || 0).toLocaleString() + ' 条</span>';
+      item.addEventListener("click", () => {
+        closeMemberPopover();
+        hideHome();
+        selectMember(m.name);
+      });
+      list.appendChild(item);
+    });
+  });
 }
 
 function toggleMemberPopover() {
@@ -575,23 +606,12 @@ async function loadBlogGroupChips() {
   try {
     const bg = await api("/api/archive/blog_groups");
     if (bg.ok) blogGroups = bg.groups;
-    const box = $("blogGroupChips");
-    if (!box) return;
-    box.innerHTML = "";
-    const BLOG_NAMES = {hinatazaka:"日向坂46", nogizaka:"乃木坂46", sakurazaka:"樱坂46"};
-    const BLOG_ICONS = {hinatazaka:"☀️", nogizaka:"💜", sakurazaka:"🌸"};
-    for (const g of blogGroups) {
-      const b = document.createElement("button");
-      b.className = "chip";
-      if (g.key === curBlogGroup && curMode === "blog") b.classList.add("active");
-      b.dataset.key = g.key;
+    blogGroups.forEach(g => {
       const numStr = g.total >= 1000 ? (g.total / 1000).toFixed(1).replace(/\.0$/, '') + "k" : g.total;
-      const icon = BLOG_ICONS[g.key] || "📝";
-      const name = BLOG_NAMES[g.key] || g.key;
-      b.innerHTML = '<span class="chip-name">' + icon + ' ' + esc(name) + '</span><span class="chip-num" title="' + (g.total || 0).toLocaleString() + ' 篇博客">' + numStr + '</span>';
-      b.addEventListener("click", () => { selectBlogGroup(g.key); });
-      box.appendChild(b);
-    }
+      if (g.key === "nogizaka" && $("bgNogiBadge")) $("bgNogiBadge").textContent = "(" + numStr + ")";
+      if (g.key === "sakurazaka" && $("bgSakuraBadge")) $("bgSakuraBadge").textContent = "(" + numStr + ")";
+      if (g.key === "hinatazaka" && $("bgHinataBadge")) $("bgHinataBadge").textContent = "(" + numStr + ")";
+    });
     syncChipHighlight();
   } catch(e) {}
 }
@@ -607,18 +627,8 @@ function _enterMemberMode() {
   $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "";
 }
 
-// 根据 curMember / curBlogGroup 同步所有 chip 高亮状态与主选择器显示
+// 根据 curMember / curBlogGroup 同步状态与主选择器显示
 function syncChipHighlight() {
-  $("memberChips").querySelectorAll(".chip").forEach(c => {
-    const isAct = curMode === "msg" && c.dataset.key === curMember;
-    c.classList.toggle("active", isAct);
-    if (isAct) {
-      c.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-    }
-  });
-  $("blogGroupChips").querySelectorAll(".chip").forEach(c => {
-    c.classList.toggle("active", curMode === "blog" && c.dataset.key === curBlogGroup);
-  });
   if (curMode === "msg" && curMember) {
     const curObj = members.find(m => m.name === curMember);
     if (curObj) {
@@ -626,6 +636,10 @@ function syncChipHighlight() {
       if ($("curMemberCount")) $("curMemberCount").textContent = "（" + (curObj.total || 0).toLocaleString() + "）";
     }
   }
+  // 同步博客分组 Segmented Control
+  document.querySelectorAll("#blogGroupSegment .seg-btn").forEach(btn => {
+    btn.classList.toggle("active", curMode === "blog" && btn.dataset.key === curBlogGroup);
+  });
 }
 
 // ── 博客相关逻辑 ─────────────────────────────────────
@@ -709,11 +723,15 @@ function renderBlogAuthorPopover(filterKeyword = "") {
     $("blogAuthorTotalBadge").textContent = "共 " + curGroupAuthors.length + " 位" + (kw ? " · 匹配 " + filtered.length + " 位" : "");
   }
 
+  let grpClass = "hinata";
+  if (curBlogGroup.includes("nogi")) grpClass = "nogi";
+  else if (curBlogGroup.includes("sakura")) grpClass = "sakura";
+
   // 全部成员选项
   if (!kw) {
     const allItem = document.createElement("div");
     allItem.className = "author-popover-item" + (!curBlogAuthor ? " active" : "");
-    allItem.innerHTML = '<div class="a-name-txt"><span>👥</span><span>全部成员</span></div><span class="a-cnt">' + curGroupAuthors.length + ' 人</span>';
+    allItem.innerHTML = '<div class="a-name-txt"><span class="mpi-avatar ' + grpClass + '">👥</span><span class="mpi-name">全部作者</span></div><span class="a-cnt">' + curGroupAuthors.length + ' 人</span>';
     allItem.addEventListener("click", () => {
       closeBlogAuthorPopover();
       selectBlogAuthor("");
@@ -734,7 +752,14 @@ function renderBlogAuthorPopover(filterKeyword = "") {
     const item = document.createElement("div");
     item.className = "author-popover-item" + (isMatch ? " active" : "");
     const cntTxt = a.count ? a.count.toLocaleString() + ' 篇' : '作者';
-    item.innerHTML = '<div class="a-name-txt"><span>✍️</span><span>' + esc(a.name) + '</span></div>' +
+    let avText = (a.name || "").replace(/[\s_　]/g, "");
+    if (avText.length > 2) avText = avText.slice(-2);
+    if (!avText) avText = "✍️";
+
+    item.innerHTML = '<div class="a-name-txt">' +
+                     '<span class="mpi-avatar ' + grpClass + '">' + esc(avText) + '</span>' +
+                     '<span class="mpi-name">' + esc(a.name) + '</span>' +
+                     '</div>' +
                      '<span class="a-cnt">' + cntTxt + '</span>';
     item.addEventListener("click", () => {
       closeBlogAuthorPopover();
@@ -746,7 +771,7 @@ function renderBlogAuthorPopover(filterKeyword = "") {
 
 function updateBlogAuthorDisplay() {
   if ($("curBlogAuthorDisplay")) {
-    $("curBlogAuthorDisplay").textContent = curBlogAuthor || "全部成员";
+    $("curBlogAuthorDisplay").textContent = curBlogAuthor || "全部作者";
   }
 }
 
@@ -2273,26 +2298,15 @@ if ($("btnMemberSearchClear")) {
     $("memberSearchInput").focus();
   });
 }
-if ($("btnChipScrollPrev")) {
-  $("btnChipScrollPrev").addEventListener("click", () => {
-    $("memberChips").scrollBy({ left: -220, behavior: "smooth" });
+// ── 博客三坂分组分段控制器点击事件 ───────────────
+document.querySelectorAll("#blogGroupSegment .seg-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const k = btn.dataset.key;
+    if (k) selectBlogGroup(k);
   });
-}
-if ($("btnChipScrollNext")) {
-  $("btnChipScrollNext").addEventListener("click", () => {
-    $("memberChips").scrollBy({ left: 220, behavior: "smooth" });
-  });
-}
-if ($("memberChips")) {
-  $("memberChips").addEventListener("wheel", (e) => {
-    if (e.deltaY !== 0) {
-      e.preventDefault();
-      $("memberChips").scrollLeft += e.deltaY;
-    }
-  }, { passive: false });
-}
+});
 
-// ── 博客作者下拉选择器与横向滚动控制 ───────────────
+// ── 博客作者下拉选择器控制 ───────────────
 if ($("btnBlogAuthorDropdown")) {
   $("btnBlogAuthorDropdown").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -2319,24 +2333,6 @@ if ($("btnBlogAuthorSearchClear")) {
     renderBlogAuthorPopover("");
     $("blogAuthorSearchInput").focus();
   });
-}
-if ($("btnAuthorScrollPrev")) {
-  $("btnAuthorScrollPrev").addEventListener("click", () => {
-    if ($("blogAuthorChips")) $("blogAuthorChips").scrollBy({ left: -220, behavior: "smooth" });
-  });
-}
-if ($("btnAuthorScrollNext")) {
-  $("btnAuthorScrollNext").addEventListener("click", () => {
-    if ($("blogAuthorChips")) $("blogAuthorChips").scrollBy({ left: 220, behavior: "smooth" });
-  });
-}
-if ($("blogAuthorChips")) {
-  $("blogAuthorChips").addEventListener("wheel", (e) => {
-    if (e.deltaY !== 0) {
-      e.preventDefault();
-      $("blogAuthorChips").scrollLeft += e.deltaY;
-    }
-  }, { passive: false });
 }
 
 // ── 登录状态 ─────────────────────────────────────

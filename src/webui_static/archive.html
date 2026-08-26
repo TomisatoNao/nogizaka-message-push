@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script src="/static/theme.js"></script>
-<link rel="stylesheet" href="/static/archive.css?v=2.9">
+<link rel="stylesheet" href="/static/archive.css?v=3.0">
 
 </head>
 <body>
@@ -53,45 +53,6 @@
     <button id="logoutBtn" hidden class="btn subdued-btn" style="white-space:nowrap;">🚪 登出</button>
   </div>
 </header>
-  
-  <!-- 独立悬浮过滤条 -->
-  <div class="sub-nav" id="subNav" style="display:none;">
-    <!-- 消息模式下的成员选择区 -->
-    <div class="sub-nav-member-bar" id="subNavMemberBar">
-      <!-- 成员快捷下拉选择器 -->
-      <div class="member-dropdown-wrap" id="memberDropdownWrap">
-        <button class="btn member-select-btn" id="btnMemberDropdown" type="button" title="点击展开全员列表与快速搜索">
-          <span class="m-icon">👥</span>
-          <span class="m-cur-name" id="curMemberDisplay">选择成员</span>
-          <span class="m-cur-count" id="curMemberCount"></span>
-          <span class="arrow">▾</span>
-        </button>
-
-        <!-- 成员选择弹出卡片 (PopOver) -->
-        <div class="member-popover" id="memberPopover" style="display:none;">
-          <div class="member-popover-header">
-            <div class="member-popover-search">
-              <span class="search-icon">🔍</span>
-              <input type="text" id="memberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
-              <button class="clear-btn" id="btnMemberSearchClear" type="button" style="display:none;">✕</button>
-            </div>
-            <span class="member-count-badge" id="memberTotalBadge">共 0 人</span>
-          </div>
-          <div class="member-popover-list" id="memberPopoverList"></div>
-        </div>
-      </div>
-
-      <!-- 快速切换 Chips 滚动容器 (带优雅渐变与左右平滑滚动) -->
-      <div class="member-chips-scroll-wrap" id="memberChipsScrollWrap">
-        <button class="chip-scroll-btn prev" id="btnChipScrollPrev" type="button" title="向左滚动">‹</button>
-        <div class="chips member-chips" id="memberChips"></div>
-        <button class="chip-scroll-btn next" id="btnChipScrollNext" type="button" title="向右滚动">›</button>
-      </div>
-    </div>
-
-    <!-- 博客模式下的官方博客分组 -->
-    <div class="chips blog-group-chips" id="blogGroupChips" style="display:none;"></div>
-  </div>
 
 <div id="archiveHome" class="home active">
   <!-- 骨架屏 -->
@@ -117,7 +78,7 @@
     <div class="portal-sec">
       <div class="portal-sec-title">
         <span>🏛️ 归档板块专区</span>
-        <span class="portal-sec-sub">点击卡片直达对应频道</span>
+        <span class="portal-sec-sub">三坂专属官方频道与监控成员快捷直达</span>
       </div>
     </div>
     <div class="portal-sections-grid" id="portalSections"></div>
@@ -156,7 +117,30 @@
   </div>
 </aside>
 <main>
-  <div class="toolbar">
+  <div class="toolbar msg-toolbar">
+    <!-- 成员快捷下拉选择器 (PopOver) -->
+    <div class="member-dropdown-wrap" id="memberDropdownWrap">
+      <button class="btn member-select-btn" id="btnMemberDropdown" type="button" title="点击展开全员列表与快速搜索">
+        <span class="m-icon">👥</span>
+        <span class="m-cur-name" id="curMemberDisplay">选择成员</span>
+        <span class="m-cur-count" id="curMemberCount"></span>
+        <span class="arrow">▾</span>
+      </button>
+
+      <!-- 成员选择弹出卡片 (PopOver) -->
+      <div class="member-popover" id="memberPopover" style="display:none;">
+        <div class="member-popover-header">
+          <div class="member-popover-search">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="memberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
+            <button class="clear-btn" id="btnMemberSearchClear" type="button" style="display:none;">✕</button>
+          </div>
+          <span class="member-count-badge" id="memberTotalBadge">共 0 人</span>
+        </div>
+        <div class="member-popover-list" id="memberPopoverList"></div>
+      </div>
+    </div>
+
     <button class="nav" id="prevMonth">← 上月</button>
     <select id="monthSelect"></select>
     <button class="nav" id="nextMonth">下月 →</button>
@@ -171,12 +155,19 @@
   </div>
   <div id="timeline"></div>
   <div id="blogGrid" class="blog-grid" style="display:none;">
-    <div id="blogAuthorBar" class="blog-author-bar">
+    <div class="toolbar blog-toolbar">
+      <!-- 博客三坂分段控制器 -->
+      <div class="segmented-control" id="blogGroupSegment">
+        <button type="button" class="seg-btn active" data-key="nogizaka">💜 乃木坂46 <span class="seg-badge" id="bgNogiBadge"></span></button>
+        <button type="button" class="seg-btn" data-key="sakurazaka">🌸 樱坂46 <span class="seg-badge" id="bgSakuraBadge"></span></button>
+        <button type="button" class="seg-btn" data-key="hinatazaka">🩵 日向坂46 <span class="seg-badge" id="bgHinataBadge"></span></button>
+      </div>
+
       <!-- 博客作者快捷下拉选择器 -->
       <div class="author-dropdown-wrap" id="blogAuthorDropdownWrap">
         <button class="btn author-select-btn" id="btnBlogAuthorDropdown" type="button" title="点击展开全部作者与快速搜索">
           <span class="a-icon">👥</span>
-          <span class="a-cur-name" id="curBlogAuthorDisplay">全部成员</span>
+          <span class="a-cur-name" id="curBlogAuthorDisplay">全部作者</span>
           <span class="arrow">▾</span>
         </button>
         <!-- 作者选择弹出菜单 (带实时搜索) -->
@@ -193,12 +184,7 @@
         </div>
       </div>
 
-      <!-- 快速切换 作者 Chips 滚动容器 -->
-      <div class="author-chips-scroll-wrap" id="blogAuthorChipsScrollWrap">
-        <button class="chip-scroll-btn prev" id="btnAuthorScrollPrev" type="button" title="向左滚动">‹</button>
-        <div class="chips blog-author-chips" id="blogAuthorChips"></div>
-        <button class="chip-scroll-btn next" id="btnAuthorScrollNext" type="button" title="向右滚动">›</button>
-      </div>
+      <span class="stats" id="blogStats" style="margin-left:auto;"></span>
     </div>
     <div id="blogHero" class="blog-hero" style="display:none;"></div>
     <div id="blogCards" class="blog-cards"></div>
@@ -272,6 +258,6 @@
 <!-- Toast Container -->
 <div id="toastContainer" class="toast-container"></div>
 
-<script src="/static/archive.js?v=2.9"></script>
+<script src="/static/archive.js?v=3.0"></script>
 </body>
 </html>
