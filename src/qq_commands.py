@@ -42,7 +42,7 @@ def _jst_str(utc_str: str) -> str:
 def _clean_body(text: str, limit: int = 100) -> str:
     if not text:
         return ""
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
     cleaned = " ".join(lines)
     return cleaned if len(cleaned) <= limit else cleaned[:limit] + "…"
 
@@ -129,8 +129,11 @@ def _cmd_members(_args: str) -> str:
     group_map = {"nogizaka46": "乃木坂46", "sakurazaka46": "櫻坂46", "hinatazaka46": "日向坂46"}
     grouped: dict[str, list[str]] = {}
     for m in cfg.MONITOR_LIST:
-        g_name = group_map.get(m.get("group", ""), "其他成员")
-        grouped.setdefault(g_name, []).append(f"• {m['m_name']} (ID: {m['m_id']})")
+        g_key = m.get("group") or m.get("group_type") or ""
+        g_name = group_map.get(g_key, "其他成员")
+        m_id = m.get("m_id") or m.get("id") or ""
+        id_str = f" (id={m_id})" if m_id else ""
+        grouped.setdefault(g_name, []).append(f"• {m.get('m_name') or m.get('name')}{id_str}")
     
     lines = [f"👥 监控偶像名单（共 {len(cfg.MONITOR_LIST)} 位）"]
     for g_name, mems in grouped.items():
@@ -169,7 +172,7 @@ def _cmd_latest(args: str) -> str:
     name_hint = " ".join(parts)
     member = _resolve_member(name_hint)
     if not member:
-        return f"❓ 没找到成员「{name_hint}」的归档。\n💡 发送 /members 可查看当前已监控成员名单。"
+        return f"❓ 没找到该成员「{name_hint}」的归档。\n💡 发送 /members 可查看当前已监控成员名单。"
 
     months = archive.list_months(member)
     if not months:
@@ -205,7 +208,7 @@ def _cmd_search(args: str) -> str:
 
     hits = archive.search(member, query)
     if not hits:
-        return f"🔍 关键词「{query}」未检索到相关内容。"
+        return f"🔍 关键词「{query}」没有命中相关内容。"
     lines = [f"🔍 检索关键词「{query}」· 命中 {len(hits)} 条（展示最新 {min(len(hits), MAX_LIST_ITEMS)} 条）：\n"]
     for i, msg in enumerate(hits[:MAX_LIST_ITEMS], 1):
         time_str = _jst_str(msg.get("published_at") or msg.get("updated_at", ""))
@@ -412,29 +415,24 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
     from src.logger import log_all
 
     content = (text or "").strip()
-    target_id = group_openid if group_openid else sender_openid
-    scope = "groups" if group_openid else "users"
+    if not content:
+        return None
 
-    # 1. 权限检查（统一大写比对，避免大小写差异导致拦截）
+    # 1. 权限检查（统一大写比对，白名单为空或不在白名单内均静默不响应）
     allow = allowed_senders()
+    if not allow:
+        return None
+
     sender_norm = (sender_openid or "").strip().upper()
     group_norm = (group_openid or "").strip().upper()
 
-    if allow and (sender_norm not in allow and (not group_norm or group_norm not in allow)):
-        if content.startswith("/") or _SOCIAL_URL_RE.search(content):
-            log_all(f"🔒 拒绝未授权的 Bot 请求: {_clip(content, 40)}（来自 {scope}:{target_id[:12]}…，白名单项数: {len(allow)}）", is_error=True)
-            return "🔒 您所在的账号或群聊未在授权白名单内，如需使用请在 Web 管理后台「授权 OpenID」中添加。"
+    if sender_norm not in allow and (not group_norm or group_norm not in allow):
         return None
 
-    # 2. 空内容或常规打招呼
-    if not content or content.lower() in ("你好", "hi", "hello", "在吗", "bot", "机器人"):
-        return (
-            "👋 您好！我是坂道消息推送助手。\n\n"
-            "💡 发送 /help 或「菜单」可查看完整功能列表；\n"
-            "🌐 直接发送 X / Instagram / TikTok 链接可自动抓取原图并附带 AI 双语翻译～"
-        )
+    target_id = group_openid if group_openid else sender_openid
+    scope = "groups" if group_openid else "users"
 
-    # 3. 识别是否包含社媒链接
+    # 2. 识别是否包含社媒链接
     social_match = _SOCIAL_URL_RE.search(content)
     if social_match:
         url = social_match.group(0)
@@ -442,7 +440,7 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
         log_all(f"🤖 [社媒解析] 收到来自 {scope}:{target_id[:8]}… 的社媒链接: {url[:50]}")
         return "🔍 已识别社媒链接，正在解析、提取原图/视频与 AI 双语翻译并回复给您…"
 
-    # 4. 指令解析（支持 / 开头 或 中文简写指令）
+    # 3. 指令解析（支持 / 开头 或 预定义中文简写指令）
     cmd_name = ""
     cmd_args = ""
     if content.startswith("/"):
@@ -454,33 +452,26 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
             cmd_name = first_word
             cmd_args = rest
 
-    if cmd_name:
-        cmd_key = cmd_name.lower().strip()
-        handler = _COMMANDS.get(cmd_key)
-        if handler is not None:
-            try:
-                reply = handler(cmd_args.strip())
-            except Exception as e:
-                log_all(f"⚠️ Bot 指令 /{cmd_key} 执行失败: {type(e).__name__}: {e}", is_error=True)
-                return f"⚠️ 指令执行出错: {type(e).__name__}"
+    if not cmd_name:
+        return None
 
-            log_all(f"🤖 Bot 指令 /{cmd_key} 已成功响应", is_debug=True)
-            return _clip_reply(reply)
-        else:
-            # 收到未知指令，优雅引导
-            return (
-                f"❓ 未知指令「/{_clip(cmd_name, 20)}」\n\n"
-                f"💡 您可以发送 /help 或「菜单」查看完整可用功能列表。"
-            )
+    cmd_key = cmd_name.lower().strip()
+    handler = _COMMANDS.get(cmd_key)
+    if handler is not None:
+        try:
+            reply = handler(cmd_args.strip())
+        except Exception as e:
+            log_all(f"⚠️ Bot 指令 /{cmd_key} 执行失败: {type(e).__name__}: {e}", is_error=True)
+            return f"⚠️ 指令执行出错: {type(e).__name__}"
 
-    # 5. 群聊中 @机器人 收到普通文本
-    if group_openid:
+        log_all(f"🤖 Bot 指令 /{cmd_key} 已成功响应", is_debug=True)
+        return _clip_reply(reply)
+    else:
+        # 收到未知指令
         return (
-            "💡 未识别的操作指令。\n"
-            "发送 /help 查看可用指令，或直接发送 X / IG / TikTok 链接抓取翻译～"
+            f"❓ 未知指令「/{_clip(cmd_name, 20)}」\n\n"
+            f"💡 您可以发送 /help 或「菜单」查看完整可用功能列表。"
         )
-
-    return None
 
 
 def _clip_reply(text: str) -> str:

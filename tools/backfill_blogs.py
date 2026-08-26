@@ -155,8 +155,8 @@ async def backfill_hinatazaka(client: httpx.AsyncClient, db: sqlite3.Connection,
             for a in articles:
                 links = a.find_all("a")
                 post_url = ""
-                for l in links:
-                    href = l.get("href", "")
+                for link in links:
+                    href = link.get("href", "")
                     if "diary/detail" in href:
                         post_url = urljoin("https://www.hinatazaka46.com", href)
                         break

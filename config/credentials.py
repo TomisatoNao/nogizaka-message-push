@@ -844,15 +844,14 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
 
 
 def rename_account(old_id: str, new_id: str) -> None:
-    """内存与数据库中同步重命名账号凭证与刷新锁。"""
+    """内存与数据库中同步重命名账号凭证。"""
     if old_id == new_id:
         return
     if old_id in ACCOUNT_CREDS:
         ACCOUNT_CREDS[new_id] = ACCOUNT_CREDS.pop(old_id)
-    if old_id in _REFRESH_LOCKS:
-        _REFRESH_LOCKS[new_id] = _REFRESH_LOCKS.pop(old_id)
     try:
         from src import auth
         auth.rename_account_credential(old_id, new_id)
     except Exception:
         pass
+
