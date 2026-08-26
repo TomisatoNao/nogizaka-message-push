@@ -1544,9 +1544,11 @@ class _Handler(BaseHTTPRequestHandler):
 
                 norm = name.replace(" ", "").replace("　", "").replace("_", "")
                 display = monitor_names.get(norm) or name.replace("_", " ")
+                group = _archive.infer_member_group(name)
                 members.append({
                     "name": name,
                     "display": display,
+                    "group": group,
                     "stats": stats,
                     "monthly": monthly,
                     "days": days,

@@ -122,7 +122,10 @@ function formatMessageText(str, query) {
 
 function formatCardText(str, maxLen = 160) {
   if (!str) return "";
-  let s = str.replace(/%%%/g, "");
+  let s = str.replace(/%%%/g, "")
+             .replace(/\[(?:opt|img|image|video|voice|media|emoji)[^\]]*\]/gi, "")
+             .replace(/<[^>]+>/g, "")
+             .replace(/[ \t]+/g, " ");
   // 压缩连续换行与多余空行
   s = s.replace(/\n\s*\n+/g, "\n").trim();
   if (s.length > maxLen) s = s.slice(0, maxLen).trim() + "...";
@@ -2460,46 +2463,73 @@ function renderHome(data) {
   const recentFeed = data.recent_feed || [];
   const timeTunnel = data.time_tunnel || [];
 
-  // 1. Portal Hero 看板
+  // 1. Portal Hero 顶级数字看板
   const heroDiv = $("portalHero");
   let heroHTML = '';
   heroHTML += '<div class="portal-hero-top">';
+  heroHTML += '<div class="portal-hero-brand">';
   heroHTML += '<div class="portal-hero-icon">🌸</div>';
   heroHTML += '<div class="portal-hero-title-box">';
-  heroHTML += '<div class="portal-hero-title">坂道综合归档总览</div>';
-  heroHTML += '<div class="portal-hero-sub">乃木坂46 · 樱坂46 · 日向坂46 官方 Message 与三团官方博客数字化总库</div>';
+  heroHTML += '<div class="portal-hero-badge-row">';
+  heroHTML += '<span class="portal-pill-brand nogi">乃木坂46</span>';
+  heroHTML += '<span class="portal-pill-brand sakura">樱坂46</span>';
+  heroHTML += '<span class="portal-pill-brand hinata">日向坂46</span>';
+  heroHTML += '<span class="portal-status-live"><span class="pulse-dot"></span> 实时监控同步中</span>';
+  heroHTML += '</div>';
+  heroHTML += '<h1 class="portal-hero-title">坂道综合数字化归档总库</h1>';
+  heroHTML += '<div class="portal-hero-sub">乃木坂46 · 樱坂46 · 日向坂46 全量 Message 私信 / 官方博客数字化资产中心</div>';
   heroHTML += '</div></div>';
+  heroHTML += '</div>';
 
+  // 4 个 Bento Metric 卡片
   heroHTML += '<div class="portal-metric-grid">';
-  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">💌 官方 Message</span><span class="portal-metric-val">' + (summary.total_messages || 0).toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">条</small></span><span class="portal-metric-sub">' + (summary.member_count || 0) + ' 位监控成员</span></div>';
-  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">📝 官方博客</span><span class="portal-metric-val">' + (summary.total_blogs || 0).toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">篇</small></span><span class="portal-metric-sub">3 团全量 · ' + (summary.blog_author_count || 0) + ' 位作者</span></div>';
-  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">📊 全站归档总计</span><span class="portal-metric-val">' + (summary.total_all || 0).toLocaleString() + ' <small style="font-size:12px;font-weight:normal;color:var(--muted)">项</small></span><span class="portal-metric-sub">' + (summary.first_date || '2012/02') + ' — ' + (summary.last_date || '2026/08') + '</span></div>';
-  
+  heroHTML += '<div class="portal-metric-card" id="heroCardMsg" title="点击直达 Message 时间线">';
+  heroHTML += '<div class="pm-top"><span class="pm-icon msg">💬</span><span class="pm-tag">Message 归档</span></div>';
+  heroHTML += '<div class="pm-val">' + (summary.total_messages || 0).toLocaleString() + ' <small>条</small></div>';
+  heroHTML += '<div class="pm-sub">' + (summary.member_count || 0) + ' 位重点监控成员 ↗</div>';
+  heroHTML += '</div>';
+
+  heroHTML += '<div class="portal-metric-card" id="heroCardBlog" title="点击直达官方博客中心">';
+  heroHTML += '<div class="pm-top"><span class="pm-icon blog">📝</span><span class="pm-tag">官方博客总库</span></div>';
+  heroHTML += '<div class="pm-val">' + (summary.total_blogs || 0).toLocaleString() + ' <small>篇</small></div>';
+  heroHTML += '<div class="pm-sub">3 团全量 · ' + (summary.blog_author_count || 0) + ' 位作者 ↗</div>';
+  heroHTML += '</div>';
+
+  const totalMedia = (summary.total_pictures || 0) + (summary.total_videos || 0) + (summary.total_voices || 0);
+  heroHTML += '<div class="portal-metric-card">';
+  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">多媒体资产</span></div>';
+  heroHTML += '<div class="pm-val">' + (totalMedia > 0 ? totalMedia.toLocaleString() : (summary.total_all || 0).toLocaleString()) + ' <small>项</small></div>';
+  heroHTML += '<div class="pm-sub">包含高清写真 · 视频 · 语音</div>';
+  heroHTML += '</div>';
+
   const lu = summary.last_updated ? fmtDate(summary.last_updated) : '—';
-  heroHTML += '<div class="portal-metric"><span class="portal-metric-label">⚡ 最近更新动态</span><span class="portal-metric-val" style="font-size:14px; margin-top:3px;">' + lu + '</span><span class="portal-metric-sub">实时监控同步中</span></div>';
+  heroHTML += '<div class="portal-metric-card">';
+  heroHTML += '<div class="pm-top"><span class="pm-icon clock">⏳</span><span class="pm-tag">时间跨度</span></div>';
+  heroHTML += '<div class="pm-val" style="font-size:16.5px; margin-top:2px;">' + (summary.first_date || '2012/02') + ' — ' + (summary.last_date || '2026/08') + '</div>';
+  heroHTML += '<div class="pm-sub">最近更新: ' + lu + '</div>';
+  heroHTML += '</div>';
   heroHTML += '</div>';
 
   const today = summary.today_stats || {};
   let actionHTML = '';
   if (today.total > 0) {
-    actionHTML += '<button class="portal-today-btn" id="portalTodayBtn">🔥 今日全站有 <b>' + today.total + '</b> 条新动态（Message ' + (today.messages || 0) + ' 条 · 博客 ' + (today.blogs || 0) + ' 篇）· 点击速览 →</button>';
+    actionHTML += '<button class="portal-today-btn" id="portalTodayBtn">🔥 今日全站新收录 <b>' + today.total + '</b> 条动态（Message ' + (today.messages || 0) + ' 条 · 博客 ' + (today.blogs || 0) + ' 篇）· 点击速览 →</button>';
   } else {
-    actionHTML += '<span style="font-size:12.5px;color:var(--muted)">✨ 历史消息与官方博客数据已同步至最新</span>';
+    actionHTML += '<span style="font-size:12.5px;color:var(--muted)">✨ 历史消息与官方博客数字化资产库已同步就绪</span>';
   }
-  heroHTML += '<div class="portal-hero-banner">' + actionHTML + '<span style="font-size:12px;color:var(--muted)">📅 ' + (summary.first_date || '2012/02') + ' 起</span></div>';
+  heroHTML += '<div class="portal-hero-banner">' + actionHTML + '<span style="font-size:12px;color:var(--muted)">📅 ' + (summary.first_date || '2012/02') + ' 至今</span></div>';
   heroDiv.innerHTML = heroHTML;
 
-  // 今日动态按钮跳转
-  const todayBtn = $("portalTodayBtn");
-  if (todayBtn) {
-    todayBtn.addEventListener("click", () => {
-      const feedSec = $("homeFeedList");
-      if (feedSec) {
-        const topY = feedSec.getBoundingClientRect().top + window.scrollY - 80;
-        window.scrollTo({ top: topY, behavior: "smooth" });
-      }
-    });
-  }
+  // 快捷跳转
+  $("heroCardMsg")?.addEventListener("click", () => switchMainTab("msg"));
+  $("heroCardBlog")?.addEventListener("click", () => switchMainTab("blog"));
+  $("portalTodayBtn")?.addEventListener("click", () => {
+    const feedSec = $("homeFeedList");
+    if (feedSec) {
+      const topY = feedSec.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: topY, behavior: "smooth" });
+    }
+  });
 
   // 2. 综合写真画廊
   const strip = $("photoStrip");
@@ -2613,76 +2643,109 @@ function renderHome(data) {
     if (dragMoved) { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); }
   }, true);
 
-  // 3. 核心归档专区入口 (Message 专区 + Blog 专区)
+  // 3. 核心归档专区入口：三坂官方频道便当卡 + 成员快捷入口
   const secDiv = $("portalSections");
   let secHTML = '';
 
-  // 3.1 Message 专区卡片
-  secHTML += '<div class="portal-sec-card">';
-  secHTML += '<div class="portal-sec-card-head">';
-  secHTML += '<div class="portal-sec-card-title"><span>💬 官方 Message 专区</span><span class="portal-sec-sub" style="font-weight:normal">(' + (summary.total_messages || 0).toLocaleString() + ' 条)</span></div>';
-  secHTML += '<a class="portal-sec-card-jump" id="jumpToMsg">进入消息时间线 →</a>';
+  // 3.1 三坂官方频道卡片 (3-Group Channel Bento Cards)
+  secHTML += '<div class="portal-channels-grid">';
+  
+  // 乃木坂46
+  const nogiBlog = blogGroups.find(g => g.key === "nogizaka") || {};
+  const nogiMsgCount = members.filter(m => (m.group || '').includes('nogi')).reduce((acc, x) => acc + (x.stats?.total || 0), 0);
+  secHTML += '<div class="channel-bento-card nogi" data-group="nogizaka">';
+  secHTML += '<div class="cbc-header"><div class="cbc-brand"><span class="cbc-icon">💜</span><div><div class="cbc-name">乃木坂46 频道</div><div class="cbc-meta">Message & 官方博客总库</div></div></div><span class="cbc-jump">进入频道 →</span></div>';
+  secHTML += '<div class="cbc-stats"><div class="cbc-stat"><span class="cs-label">💬 Message</span><span class="cs-val">' + nogiMsgCount.toLocaleString() + ' <small>条</small></span></div><div class="cbc-stat"><span class="cs-label">📝 官方博客</span><span class="cs-val">' + (nogiBlog.total || 0).toLocaleString() + ' <small>篇</small></span></div></div>';
+  secHTML += '<div class="cbc-actions"><button class="cbc-btn msg" data-action="msg" data-target="冨里奈央">进入消息</button><button class="cbc-btn blog" data-action="blog" data-group="nogizaka">浏览博客</button></div>';
   secHTML += '</div>';
-  secHTML += '<div class="portal-inner-list">';
-  members.forEach(m => {
-    secHTML += '<div class="portal-member-row" data-name="' + esc(m.name) + '">';
-    secHTML += '<div class="pmr-left">';
-    secHTML += '<div class="pmr-avatar">' + (m.display ? m.display.slice(0, 1) : '💬') + '</div>';
-    secHTML += '<div>';
-    secHTML += '<div class="pmr-name">' + esc(m.display) + '</div>';
-    secHTML += '<div class="pmr-meta">' + (m.stats.months || 0) + ' 个月归档 · 本月 ' + (m.stats.this_month || 0) + ' 条</div>';
-    secHTML += '</div></div>';
-    secHTML += '<div class="pmr-right">' + (m.stats.total || 0).toLocaleString() + ' 条 ↗</div>';
-    secHTML += '</div>';
-  });
-  secHTML += '</div></div>';
 
-  // 3.2 Blog 专区卡片
-  secHTML += '<div class="portal-sec-card">';
-  secHTML += '<div class="portal-sec-card-head">';
-  secHTML += '<div class="portal-sec-card-title"><span>📝 坂道官方博客专区</span><span class="portal-sec-sub" style="font-weight:normal">(' + (summary.total_blogs || 0).toLocaleString() + ' 篇)</span></div>';
-  secHTML += '<a class="portal-sec-card-jump" id="jumpToBlog">进入博客中心 →</a>';
+  // 樱坂46
+  const sakuraBlog = blogGroups.find(g => g.key === "sakurazaka") || {};
+  const sakuraMsgCount = members.filter(m => (m.group || '').includes('sakura')).reduce((acc, x) => acc + (x.stats?.total || 0), 0);
+  secHTML += '<div class="channel-bento-card sakura" data-group="sakurazaka">';
+  secHTML += '<div class="cbc-header"><div class="cbc-brand"><span class="cbc-icon">🌸</span><div><div class="cbc-name">樱坂46 频道</div><div class="cbc-meta">Message & 官方博客总库</div></div></div><span class="cbc-jump">进入频道 →</span></div>';
+  secHTML += '<div class="cbc-stats"><div class="cbc-stat"><span class="cs-label">💬 Message</span><span class="cs-val">' + sakuraMsgCount.toLocaleString() + ' <small>条</small></span></div><div class="cbc-stat"><span class="cs-label">📝 官方博客</span><span class="cs-val">' + (sakuraBlog.total || 0).toLocaleString() + ' <small>篇</small></span></div></div>';
+  secHTML += '<div class="cbc-actions"><button class="cbc-btn msg" data-action="msg" data-target="石森_璃花">进入消息</button><button class="cbc-btn blog" data-action="blog" data-group="sakurazaka">浏览博客</button></div>';
   secHTML += '</div>';
-  secHTML += '<div class="portal-inner-list">';
-  blogGroups.forEach(g => {
-    const lp = g.latest_post || {};
-    secHTML += '<div class="portal-group-row" data-group="' + esc(g.key) + '">';
-    secHTML += '<div class="pmr-left" style="min-width:0;">';
-    secHTML += '<div class="pmr-avatar" style="background:color-mix(in srgb, ' + g.color + ' 15%, transparent); color:' + g.color + ';">' + g.icon + '</div>';
-    secHTML += '<div style="min-width:0;">';
-    secHTML += '<div class="pgr-title">' + esc(g.name) + ' <span style="font-size:11.5px;color:var(--muted);font-weight:normal">(' + g.author_count + ' 位成员)</span></div>';
-    if (lp.title) {
-      secHTML += '<div class="pgr-latest">最新: ' + esc(lp.author) + '《' + esc(lp.title) + '》</div>';
-    }
-    secHTML += '</div></div>';
-    secHTML += '<div class="pgr-right">' + (g.total || 0).toLocaleString() + ' 篇 ↗</div>';
+
+  // 日向坂46
+  const hinataBlog = blogGroups.find(g => g.key === "hinatazaka") || {};
+  const hinataMsgCount = members.filter(m => (m.group || '').includes('hinata') || (m.group || '').includes('yodel') || ['松田好', 'マネダコ'].some(k => (m.name||'').includes(k))).reduce((acc, x) => acc + (x.stats?.total || 0), 0);
+  secHTML += '<div class="channel-bento-card hinata" data-group="hinatazaka">';
+  secHTML += '<div class="cbc-header"><div class="cbc-brand"><span class="cbc-icon">🩵</span><div><div class="cbc-name">日向坂46 频道</div><div class="cbc-meta">Message & 官方博客总库</div></div></div><span class="cbc-jump">进入频道 →</span></div>';
+  secHTML += '<div class="cbc-stats"><div class="cbc-stat"><span class="cs-label">💬 Message</span><span class="cs-val">' + hinataMsgCount.toLocaleString() + ' <small>条</small></span></div><div class="cbc-stat"><span class="cs-label">📝 官方博客</span><span class="cs-val">' + (hinataBlog.total || 0).toLocaleString() + ' <small>篇</small></span></div></div>';
+  secHTML += '<div class="cbc-actions"><button class="cbc-btn msg" data-action="msg" data-target="佐藤_優羽">进入消息</button><button class="cbc-btn blog" data-action="blog" data-group="hinatazaka">浏览博客</button></div>';
+  secHTML += '</div>';
+
+  secHTML += '</div>'; // End portal-channels-grid
+
+  // 3.2 监控成员快捷入口网格 (Member Quick Bento Grid)
+  secHTML += '<div class="portal-member-section">';
+  secHTML += '<div class="pms-header"><span>👥 监控成员快捷通道</span><span class="pms-sub">点击直达对应成员消息时间线</span></div>';
+  secHTML += '<div class="portal-members-grid">';
+  members.forEach(m => {
+    const grp = (m.group || "").toLowerCase();
+    let grpClass = "hinata";
+    let grpName = "日向坂";
+    if (grp.includes("nogi") || ['冨里', '賀喜', '松尾'].some(k => m.name.includes(k))) { grpClass = "nogi"; grpName = "乃木坂"; }
+    else if (grp.includes("sakura") || m.name.includes('石森')) { grpClass = "sakura"; grpName = "樱坂"; }
+    
+    let avatarText = (m.display || "").replace(/[\s_　]/g, "");
+    if (avatarText.length > 2) avatarText = avatarText.slice(-2);
+    if (!avatarText) avatarText = "💬";
+    if (m.name.includes("マネダコ")) avatarText = "🐙";
+
+    secHTML += '<div class="member-bento-card ' + grpClass + '" data-name="' + esc(m.name) + '">';
+    secHTML += '<div class="mbc-avatar ' + grpClass + '">' + esc(avatarText) + '</div>';
+    secHTML += '<div class="mbc-info">';
+    secHTML += '<div class="mbc-top"><span class="mbc-name">' + esc(m.display) + '</span><span class="mbc-pill ' + grpClass + '">' + grpName + '</span></div>';
+    secHTML += '<div class="mbc-meta">' + (m.stats?.total || 0).toLocaleString() + ' 条归档 · ' + (m.stats?.months || 0) + ' 个月</div>';
+    secHTML += '</div>';
+    secHTML += '<span class="mbc-arrow">↗</span>';
     secHTML += '</div>';
   });
   secHTML += '</div></div>';
 
   secDiv.innerHTML = secHTML;
 
-  // 专区卡片点击交互
-  $("jumpToMsg")?.addEventListener("click", () => switchMainTab("msg"));
-  $("jumpToBlog")?.addEventListener("click", () => switchMainTab("blog"));
-
-  secDiv.querySelectorAll('.portal-member-row').forEach(row => {
-    row.addEventListener("click", () => {
-      const mName = row.dataset.name;
-      curMode = "msg";
-      switchMainTab("msg", true);
-      hideHome();
-      selectMember(mName);
+  // 专区卡片与按钮点击交互
+  secDiv.querySelectorAll('.channel-bento-card .cbc-btn').forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const action = btn.dataset.action;
+      if (action === "blog") {
+        const gKey = btn.dataset.group;
+        curMode = "blog";
+        switchMainTab("blog", true);
+        hideHome();
+        selectBlogGroup(gKey);
+      } else {
+        const target = btn.dataset.target;
+        curMode = "msg";
+        switchMainTab("msg", true);
+        hideHome();
+        selectMember(target);
+      }
     });
   });
 
-  secDiv.querySelectorAll('.portal-group-row').forEach(row => {
-    row.addEventListener("click", () => {
-      const gKey = row.dataset.group;
+  secDiv.querySelectorAll('.channel-bento-card').forEach(card => {
+    card.addEventListener("click", () => {
+      const gKey = card.dataset.group;
       curMode = "blog";
       switchMainTab("blog", true);
       hideHome();
       selectBlogGroup(gKey);
+    });
+  });
+
+  secDiv.querySelectorAll('.member-bento-card').forEach(card => {
+    card.addEventListener("click", () => {
+      const mName = card.dataset.name;
+      curMode = "msg";
+      switchMainTab("msg", true);
+      hideHome();
+      selectMember(mName);
     });
   });
 
