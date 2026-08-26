@@ -582,6 +582,32 @@ async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
     return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_local_file": rel}
 
 
+_FN_TIMESTAMP_RE = re.compile(r'(\d{8})[-_](\d{6})')
+
+
+def extract_upload_time(msg: dict) -> str | None:
+    """从消息的媒体文件 URL 或文件名中提取成员真实上传时间戳 (ISO 8601 UTC 字符串)。"""
+    file_url = msg.get("file") or msg.get("thumbnail") or msg.get("_local_file") or ""
+    if not file_url and msg.get("raw_json"):
+        try:
+            raw = json.loads(msg["raw_json"]) if isinstance(msg["raw_json"], str) else msg["raw_json"]
+            file_url = raw.get("file") or raw.get("thumbnail") or raw.get("_local_file") or ""
+        except Exception:
+            pass
+    if not file_url:
+        return None
+    m = _FN_TIMESTAMP_RE.search(file_url)
+    if not m:
+        return None
+    date_str, time_str = m.group(1), m.group(2)
+    try:
+        from datetime import timezone
+        dt_utc = datetime.strptime(f"{date_str}{time_str}", "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        return dt_utc.isoformat()
+    except Exception:
+        return None
+
+
 # ──────────────────────────────────────────────
 # 公开接口
 # ──────────────────────────────────────────────

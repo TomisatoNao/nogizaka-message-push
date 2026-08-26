@@ -1252,6 +1252,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "tags": m.get("_tags", "") if show_auto_tags else "",
                 "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "upload_at": _archive.extract_upload_time(m),
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
                 "download_failed": bool(m.get("_download_failed")),
@@ -1321,6 +1322,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "tags": m.get("_tags", "") if show_auto_tags else "",
                 "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "upload_at": _archive.extract_upload_time(m),
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
                 "download_failed": bool(m.get("_download_failed")),

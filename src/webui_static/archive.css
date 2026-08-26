@@ -139,6 +139,111 @@
             transition: box-shadow var(--tr); }
   .bubble:hover { box-shadow: var(--shadow-md); }
   .bubble .time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+
+  /* 消息气泡 Header 重构与真实上传时间徽章 */
+  .bubble .msg-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  }
+  .bubble .msg-meta-left {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .bubble .msg-meta-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .bubble .pub-time {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    letter-spacing: 0.2px;
+  }
+  .bubble .msg-type-pill {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--border) 70%, transparent);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .bubble .msg-type-pill.type-picture, .bubble .msg-type-pill.type-image {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .bubble .msg-type-pill.type-video {
+    background: rgba(168, 85, 247, 0.12);
+    color: #a855f7;
+    border: 1px solid rgba(168, 85, 247, 0.25);
+  }
+  .bubble .msg-type-pill.type-voice, .bubble .msg-type-pill.type-audio {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+  .bubble .upload-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--card) 85%, transparent);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: help;
+    transition: all var(--tr);
+    user-select: none;
+  }
+  .bubble .upload-badge:hover {
+    border-color: var(--accent);
+    color: var(--text);
+    box-shadow: 0 1px 5px var(--accent-ring);
+  }
+  .bubble .upload-badge.is-scheduled {
+    background: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    font-weight: 500;
+  }
+  .bubble .upload-badge .ub-delay {
+    font-size: 10.5px;
+    opacity: 0.9;
+  }
+  .bubble .copy-btn {
+    font-size: 11.5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card) 80%, transparent);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all var(--tr);
+  }
+  .bubble .copy-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
   .bubble .text { white-space: pre-wrap; line-height: 1.7; }
   .bubble .trans { margin-top: 8px; padding: 8px 11px; background: var(--trans-bg);
                    color: var(--trans-text); border-radius: 9px; font-size: 13.5px;

@@ -174,7 +174,41 @@ function fmtDay(utc) {
 }
 function fmtTime(utc) {
   const d = toJst(utc);
-  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+  return String(d.getUTCHours()).padStart(2, "0") + ":" +
+         String(d.getUTCMinutes()).padStart(2, "0") + ":" +
+         String(d.getUTCSeconds()).padStart(2, "0");
+}
+function fmtUploadTime(uploadUtc, pubUtc) {
+  const uD = toJst(uploadUtc);
+  const pD = toJst(pubUtc);
+  const isSameDay = uD.getUTCFullYear() === pD.getUTCFullYear() &&
+                    uD.getUTCMonth() === pD.getUTCMonth() &&
+                    uD.getUTCDate() === pD.getUTCDate();
+  const timeStr = String(uD.getUTCHours()).padStart(2, "0") + ":" +
+                  String(uD.getUTCMinutes()).padStart(2, "0") + ":" +
+                  String(uD.getUTCSeconds()).padStart(2, "0");
+  if (isSameDay) {
+    return timeStr;
+  }
+  const dateStr = (uD.getUTCMonth() + 1) + "/" + uD.getUTCDate();
+  return dateStr + " " + timeStr;
+}
+function fmtDelayDuration(sec) {
+  if (sec < 0) return "0秒";
+  if (sec < 60) return sec + "秒";
+  const mins = Math.floor(sec / 60);
+  if (mins < 60) {
+    const s = sec % 60;
+    return mins + "分" + (s > 0 ? s + "秒" : "");
+  }
+  const hrs = Math.floor(mins / 60);
+  const remM = mins % 60;
+  if (hrs < 24) {
+    return hrs + "小时" + (remM > 0 ? remM + "分" : "");
+  }
+  const days = Math.floor(hrs / 24);
+  const remH = hrs % 24;
+  return days + "天" + (remH > 0 ? remH + "小时" : "");
 }
 function fmtCopyTime(utc) {
   const d = toJst(utc);
@@ -1634,17 +1668,46 @@ function renderBubble(msg) {
   const b = document.createElement("div");
   b.className = "bubble virtual-card";
   if (msg.id) b.dataset.msgId = String(msg.id);
-  let html = '<div class="time">' + fmtTime(msg.published_at) + " · " + esc(msg.type);
+
+  const pubTimeStr = fmtTime(msg.published_at);
+  let uploadBadgeHtml = "";
+  if (msg.upload_at) {
+    const uDt = new Date(msg.upload_at);
+    const pDt = new Date(msg.published_at);
+    const diffSec = Math.max(0, Math.round((pDt.getTime() - uDt.getTime()) / 1000));
+    const uFormatted = fmtUploadTime(msg.upload_at, msg.published_at);
+    const durStr = fmtDelayDuration(diffSec);
+    const isScheduled = diffSec >= 7200; // >= 2 小时视为明显预设定时
+    const tooltip = "📸 成员真实上传/拍摄于 (JST): " + fmtCopyTime(msg.upload_at) +
+      "\n📢 STF审核发布 (JST): " + fmtCopyTime(msg.published_at) +
+      "\n⏱️ 审核流转 / 预设耗时: " + durStr;
+
+    uploadBadgeHtml = '<span class="upload-badge' + (isScheduled ? ' is-scheduled' : '') + '" title="' + esc(tooltip) + '">' +
+      '<span class="ub-icon">' + (isScheduled ? '⏰ 预设定时' : '📤 真实上传') + '</span> ' +
+      '<span class="ub-time">' + esc(uFormatted) + '</span> ' +
+      '<span class="ub-delay">(+' + esc(durStr) + ')</span>' +
+      '</span>';
+  }
+
+  const hasText = Boolean((msg.text && msg.text.trim()) || (msg.translation && msg.translation.trim()));
+  let jumpHtml = "";
   if (searchQuery && msg.year) {
     const dateKey = fmtDateKey(msg.published_at);
-    html += ' · <a href="#" class="jump" data-date="' + dateKey +
-            '" style="color:var(--accent); text-decoration:none">查看当日 →</a>';
+    jumpHtml = '<a href="#" class="jump" data-date="' + dateKey + '" style="color:var(--accent); text-decoration:none; font-size:12px;">查看当日 →</a>';
   }
-  const hasText = Boolean((msg.text && msg.text.trim()) || (msg.translation && msg.translation.trim()));
-  if (hasText) {
-    html += '<button type="button" class="copy-btn" title="复制整条消息与译文">📋 复制</button>';
-  }
-  html += "</div>";
+  let copyHtml = hasText ? '<button type="button" class="copy-btn" title="复制整条消息与译文">📋 复制</button>' : '';
+
+  let html = '<div class="msg-header">' +
+    '<div class="msg-meta-left">' +
+      '<span class="pub-time" title="官方审核发布时间 (JST): ' + fmtCopyTime(msg.published_at) + '">' + pubTimeStr + '</span>' +
+      '<span class="msg-type-pill type-' + esc(msg.type) + '">' + esc(msg.type) + '</span>' +
+      uploadBadgeHtml +
+    '</div>' +
+    '<div class="msg-meta-right">' +
+      jumpHtml +
+      copyHtml +
+    '</div>' +
+  '</div>';
 
 
 
@@ -1825,7 +1888,11 @@ function renderBubble(msg) {
       const mObj = members.find(x => x.name === curMember);
       const mName = (mObj ? mObj.display : curMember) || "成员";
       const timeStr = fmtCopyTime(msg.published_at);
-      parts.push(mName + " " + timeStr);
+      let headerStr = mName + " " + timeStr;
+      if (msg.upload_at) {
+        headerStr += " [真实上传: " + fmtCopyTime(msg.upload_at) + "]";
+      }
+      parts.push(headerStr);
 
       if (msg.text && msg.text.trim()) {
         parts.push(msg.text.trim());
