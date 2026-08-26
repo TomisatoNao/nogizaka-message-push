@@ -775,15 +775,15 @@ def _on_config_reload(success: bool) -> None:
 
 
 async def main() -> None:
-    print("=== 坂道联合监控系统 ===")
+    # 1. 基础设施
+    init_loggers()
+    log_all("🌸 坂道联合监控系统已启动")
     # 上次的停止信号不该影响本次启动
     try:
         STOP_FILE.unlink(missing_ok=True)
     except OSError:
         pass
 
-    # 1. 基础设施
-    init_loggers()
     load_all_accounts()
     health.initialize(
         summary_interval=cfg.HEALTH_SUMMARY_INTERVAL,
@@ -1006,14 +1006,14 @@ async def main() -> None:
             {loop_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,
         )
         if stop_task in done:
-            print("\n🛑 收到停止信号，安全退出中...")
+            log_all("🛑 收到停止信号，安全退出中...")
             loop_task.cancel()
             await asyncio.gather(loop_task, return_exceptions=True)
         else:
             stop_task.cancel()
             loop_task.result()   # _run_loop 不会正常返回；到这里说明它抛了异常，向上传播
     except KeyboardInterrupt:
-        print("\n🛑 安全退出中...")
+        log_all("🛑 安全退出中...")
     finally:
         if summary_task is not None:
             summary_task.cancel()
@@ -1046,11 +1046,11 @@ async def main() -> None:
                 await _blog_client.aclose()
             except Exception:
                 pass
-        print("✅ 资源清理完毕")
+        log_all("✅ 资源清理完毕")
 
     if restart_requested:
         # 进程自替换：同 PID 拉起全新进程，.env / 模块状态全部重新加载
-        print("🔁 正在重启主程序...")
+        log_all("🔁 正在重启主程序...")
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 

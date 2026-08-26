@@ -100,24 +100,27 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
         tag, color = "INFO ", "\033[32m"
 
     safe_content = redact_sensitive(content)
-    # 逐行截断：多行内容（如状态摘要）每行独立判断，不会被整体切掉
-    safe = "\n".join(
+    # 逐行处理与格式化，确保控制台输出每一行都具备规范统一的 [时间戳 级别] 前缀
+    lines = [
         line if len(line) <= _MAX_LINE_LENGTH else line[:_MAX_LINE_LENGTH] + "...[TRUNCATED]"
         for line in safe_content.split("\n")
-    )
-    try:
-        if _ANSI_SUPPORTED:
-            print(f"{ts} {color}[{tag}]\033[0m {safe}")
-        else:
-            print(f"{ts} [{tag}] {safe}")
-    except UnicodeEncodeError:
-        safe_fallback = safe.encode("gbk", "replace").decode("gbk")
-        if _ANSI_SUPPORTED:
-            print(f"{ts} {color}[{tag}]\033[0m {safe_fallback}")
-        else:
-            print(f"{ts} [{tag}] {safe_fallback}")
-    except Exception:
-        pass
+    ]
+    for line in lines:
+        if not line.strip() and len(lines) > 1:
+            continue
+        try:
+            if _ANSI_SUPPORTED:
+                print(f"{ts} {color}[{tag}]\033[0m {line}")
+            else:
+                print(f"{ts} [{tag}] {line}")
+        except UnicodeEncodeError:
+            line_fallback = line.encode("gbk", "replace").decode("gbk")
+            if _ANSI_SUPPORTED:
+                print(f"{ts} {color}[{tag}]\033[0m {line_fallback}")
+            else:
+                print(f"{ts} [{tag}] {line_fallback}")
+        except Exception:
+            pass
 
     _push_recent(tag.strip(), ts, safe_content)
 

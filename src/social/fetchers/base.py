@@ -80,5 +80,6 @@ class BaseFetcher(ABC):
         try:
             return self.fetch()
         except Exception as e:
-            print(f"[{self.platform_name}] fetcher error: {e}")
+            from src.logger import log_all
+            log_all(f"⚠️ [{self.platform_name}] 抓取异常: {e}", is_error=True)
             return []

@@ -240,11 +240,13 @@ def list_config_history(path: Path | None = None) -> list[dict]:
 
 def save_config(raw: dict, path: Path | None = None) -> None:
     """序列化并原子写回 config.json（写入前把旧版本快照进 history/）。"""
+    from src.logger import log_all
+
     path = path or CONFIG_PATH
     try:
         _snapshot_config(path)
     except OSError as e:
-        print(f"⚠️ 配置历史快照失败（继续保存）: {e}")
+        log_all(f"⚠️ 配置历史快照失败（继续保存）: {e}", is_error=True)
     text = serialize_config(raw)
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
@@ -255,12 +257,14 @@ def save_config(raw: dict, path: Path | None = None) -> None:
 def _trigger_reload() -> bool:
     """写回后触发进程内热重载（测试中可 monkeypatch 掉）。"""
     from config.config import reload as _reload
+    from src.logger import log_all
+
     ok = _reload()
     if _on_reload_cb is not None:
         try:
             _on_reload_cb(ok)
         except Exception as e:
-            print(f"🚨 网页管理端 on_reload 回调异常: {e}")
+            log_all(f"🚨 网页管理端 on_reload 回调异常: {e}", is_error=True)
     return ok
 
 
@@ -3134,7 +3138,8 @@ def start_webui(host: str | None = None, port: int | None = None,
         server = _ThreadingHTTPServer((host, port), _Handler)
         server.daemon_threads = True
     except OSError as e:
-        print(f"🚨 网页管理端启动失败（{host}:{port}）: {e}")
+        from src.logger import log_all
+        log_all(f"🚨 网页管理端启动失败（{host}:{port}）: {e}", is_error=True)
         return None
 
     thread = threading.Thread(target=server.serve_forever, name="webui", daemon=True)
@@ -3153,10 +3158,11 @@ def start_webui(host: str | None = None, port: int | None = None,
         hint = "已启用 token 鉴权"
     else:
         hint = "无鉴权（仅限本机访问时可接受）"
+    from src.logger import log_all
     try:
-        print(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
+        log_all(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
     except Exception:
-        print(f"WebUI started: http://{host}:{server.server_address[1]}/")
+        log_all(f"WebUI started: http://{host}:{server.server_address[1]}/")
     return server
 
 
@@ -3167,6 +3173,7 @@ def start_webui(host: str | None = None, port: int | None = None,
 
 if __name__ == "__main__":
     import config.config as _cfg  # noqa: F401 - 触发 .env 加载与配置校验
+    from src.logger import log_all
 
     server = start_webui()
     if server is None:
@@ -3176,4 +3183,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         server.shutdown()
         server.server_close()
-        print("✅ 网页管理端已停止")
+        log_all("✅ 网页管理端已停止")
