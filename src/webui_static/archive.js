@@ -2472,38 +2472,38 @@ function renderHome(data) {
   heroHTML += '<span class="portal-pill-brand nogi">乃木坂46</span>';
   heroHTML += '<span class="portal-pill-brand sakura">樱坂46</span>';
   heroHTML += '<span class="portal-pill-brand hinata">日向坂46</span>';
-  heroHTML += '<span class="portal-status-live"><span class="pulse-dot"></span> 实时监控同步中</span>';
+  heroHTML += '<span class="portal-status-live"><span class="pulse-dot"></span> 实时监控中</span>';
   heroHTML += '</div>';
-  heroHTML += '<h1 class="portal-hero-title">坂道综合数字化归档总库</h1>';
-  heroHTML += '<div class="portal-hero-sub">乃木坂46 · 樱坂46 · 日向坂46 全量 Message 私信 / 官方博客数字化资产中心</div>';
+  heroHTML += '<h1 class="portal-hero-title">坂道时光归档</h1>';
+  heroHTML += '<div class="portal-hero-sub">乃木坂46 · 樱坂46 · 日向坂46 · 官方 Message 私信与博客全景收录</div>';
   heroHTML += '</div></div>';
   heroHTML += '</div>';
 
   // 4 个 Bento Metric 卡片
   heroHTML += '<div class="portal-metric-grid">';
   heroHTML += '<div class="portal-metric-card" id="heroCardMsg" title="点击直达 Message 时间线">';
-  heroHTML += '<div class="pm-top"><span class="pm-icon msg">💬</span><span class="pm-tag">Message 归档</span></div>';
+  heroHTML += '<div class="pm-top"><span class="pm-icon msg">💬</span><span class="pm-tag">Message 消息</span></div>';
   heroHTML += '<div class="pm-val">' + (summary.total_messages || 0).toLocaleString() + ' <small>条</small></div>';
   heroHTML += '<div class="pm-sub">' + (summary.member_count || 0) + ' 位重点监控成员 ↗</div>';
   heroHTML += '</div>';
 
   heroHTML += '<div class="portal-metric-card" id="heroCardBlog" title="点击直达官方博客中心">';
-  heroHTML += '<div class="pm-top"><span class="pm-icon blog">📝</span><span class="pm-tag">官方博客总库</span></div>';
+  heroHTML += '<div class="pm-top"><span class="pm-icon blog">📝</span><span class="pm-tag">官方博客</span></div>';
   heroHTML += '<div class="pm-val">' + (summary.total_blogs || 0).toLocaleString() + ' <small>篇</small></div>';
   heroHTML += '<div class="pm-sub">3 团全量 · ' + (summary.blog_author_count || 0) + ' 位作者 ↗</div>';
   heroHTML += '</div>';
 
   const totalMedia = (summary.total_pictures || 0) + (summary.total_videos || 0) + (summary.total_voices || 0);
   heroHTML += '<div class="portal-metric-card">';
-  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">多媒体资产</span></div>';
+  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">写真与影音</span></div>';
   heroHTML += '<div class="pm-val">' + (totalMedia > 0 ? totalMedia.toLocaleString() : (summary.total_all || 0).toLocaleString()) + ' <small>项</small></div>';
   heroHTML += '<div class="pm-sub">包含高清写真 · 视频 · 语音</div>';
   heroHTML += '</div>';
 
   const lu = summary.last_updated ? fmtDate(summary.last_updated) : '—';
   heroHTML += '<div class="portal-metric-card">';
-  heroHTML += '<div class="pm-top"><span class="pm-icon clock">⏳</span><span class="pm-tag">时间跨度</span></div>';
-  heroHTML += '<div class="pm-val" style="font-size:16.5px; margin-top:2px;">' + (summary.first_date || '2012/02') + ' — ' + (summary.last_date || '2026/08') + '</div>';
+  heroHTML += '<div class="pm-top"><span class="pm-icon clock">⏳</span><span class="pm-tag">归档年谱</span></div>';
+  heroHTML += '<div class="pm-val" style="font-size:16px; margin-top:2px;">' + (summary.first_date || '2012/02') + ' — ' + (summary.last_date || '2026/08') + '</div>';
   heroHTML += '<div class="pm-sub">最近更新: ' + lu + '</div>';
   heroHTML += '</div>';
   heroHTML += '</div>';
@@ -2511,9 +2511,9 @@ function renderHome(data) {
   const today = summary.today_stats || {};
   let actionHTML = '';
   if (today.total > 0) {
-    actionHTML += '<button class="portal-today-btn" id="portalTodayBtn">🔥 今日全站新收录 <b>' + today.total + '</b> 条动态（Message ' + (today.messages || 0) + ' 条 · 博客 ' + (today.blogs || 0) + ' 篇）· 点击速览 →</button>';
+    actionHTML += '<button class="portal-today-btn" id="portalTodayBtn">🔥 今日收录 <b>' + today.total + '</b> 条动态（Message ' + (today.messages || 0) + ' · 博客 ' + (today.blogs || 0) + '）· 点击速览 →</button>';
   } else {
-    actionHTML += '<span style="font-size:12.5px;color:var(--muted)">✨ 历史消息与官方博客数字化资产库已同步就绪</span>';
+    actionHTML += '<span style="font-size:12.5px;color:var(--muted)">✨ 历史消息与官方博客已全部同步就绪</span>';
   }
   heroHTML += '<div class="portal-hero-banner">' + actionHTML + '<span style="font-size:12px;color:var(--muted)">📅 ' + (summary.first_date || '2012/02') + ' 至今</span></div>';
   heroDiv.innerHTML = heroHTML;
