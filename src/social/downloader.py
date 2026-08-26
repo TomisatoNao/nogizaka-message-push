@@ -120,9 +120,10 @@ class MediaDownloader:
             tasks.append((m.url, dest_file, m))
 
         # 优先使用 requests 直链下载（图片和一般直链速度最快）
-        if tasks and post.platform not in ("tiktok", "douyin"):
+        if tasks:
             download_tasks = [(url, dest) for url, dest, _ in tasks]
-            self.download_many(download_tasks)
+            referer = "https://www.tiktok.com/" if post.platform in ("tiktok", "douyin") else None
+            self.download_many(download_tasks, referer=referer)
             for _, dest_file, m in tasks:
                 if os.path.exists(dest_file) and os.path.getsize(dest_file) > 0:
                     m.local_path = os.path.abspath(dest_file)

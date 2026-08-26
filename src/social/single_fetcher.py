@@ -276,9 +276,116 @@ class SocialUrlParser:
 
 
     def _parse_tiktok(self, url: str) -> Post:
-        m = re.search(r"video/(\d+)", url)
+        # 1. 预处理短链接与追踪参数
+        raw_url = url
+        if any(x in url for x in ("vt.tiktok.com", "vm.tiktok.com", "v.douyin.com", "/t/")):
+            try:
+                r = self.session.head(url, allow_redirects=True, timeout=10)
+                url = r.url
+            except Exception:
+                pass
+
+        m = re.search(r"(?:video|photo|v)/(\d+)", url)
         item_id = m.group(1) if m else "tiktok_post"
-        return self._extract_with_ytdlp(url, platform="tiktok", post_id=item_id)
+        u_match = re.search(r"@([a-zA-Z0-9_.]+)", url)
+        username = u_match.group(1) if u_match else ""
+
+        # 构造纯净的标准 URL
+        clean_url = f"https://www.tiktok.com/@{username}/video/{item_id}" if (username and item_id != "tiktok_post") else url.split("?")[0]
+
+        # 策略 1：使用专用免登录 TikWM / Web API（支持无水印高清视频、完整图文多图、作者头像与文案）
+        try:
+            tikwm_api = f"https://www.tikwm.com/api/?url={requests.utils.quote(clean_url or raw_url)}"
+            resp = self.session.get(tikwm_api, timeout=15)
+            if resp.status_code == 200:
+                res_data = resp.json()
+                if res_data.get("code") == 0 and res_data.get("data"):
+                    d = res_data["data"]
+                    author_obj = d.get("author") or {}
+                    author_name = author_obj.get("nickname") or author_obj.get("unique_id") or username or "TikTok 用户"
+                    handle = author_obj.get("unique_id") or username or ""
+                    avatar = author_obj.get("avatar") or ""
+                    text = d.get("title") or ""
+                    post_id = str(d.get("id") or item_id)
+
+                    media_items = []
+                    images = d.get("images") or []
+                    if images:
+                        for img in images:
+                            if img:
+                                media_items.append(MediaItem(type="image", url=img))
+                    else:
+                        play_url = d.get("play") or d.get("wmplay") or d.get("hdplay")
+                        if play_url:
+                            media_items.append(MediaItem(type="video", url=play_url))
+                        elif d.get("cover"):
+                            media_items.append(MediaItem(type="image", url=d["cover"]))
+
+                    timestamp = ""
+                    create_time = d.get("create_time")
+                    if create_time:
+                        try:
+                            dt = datetime.fromtimestamp(int(create_time), tz=timezone.utc).astimezone(_JST)
+                            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            pass
+
+                    if media_items:
+                        log.info("[single_fetcher] TikTok 通过专用 API 成功解析 %s，获得 %d 个媒体", post_id, len(media_items))
+                        return Post(
+                            platform="tiktok",
+                            post_id=post_id,
+                            author=author_name,
+                            text=text,
+                            media=media_items,
+                            timestamp=timestamp,
+                            extra={
+                                "url": f"https://www.tiktok.com/@{handle}/video/{post_id}" if handle else clean_url,
+                                "username": handle,
+                                "author": author_name,
+                                "avatar_url": avatar,
+                                "source_url": raw_url,
+                            },
+                        )
+        except Exception as ex:
+            log.warning("[single_fetcher] TikTok 专用 API 解析失败 (%s)，尝试备用通道: %s", item_id, ex)
+
+        # 策略 2：回退至 yt-dlp（传入纯净链接并附带 HTTP Headers）
+        try:
+            return self._extract_with_ytdlp(clean_url or raw_url, platform="tiktok", post_id=item_id)
+        except Exception as ytdlp_err:
+            log.warning("[single_fetcher] TikTok yt-dlp 解析失败: %s", ytdlp_err)
+
+        # 策略 3：TikTok 官方 oEmbed API 兜底（至少提取到作者、文案与封面）
+        try:
+            oembed_url = f"https://www.tiktok.com/oembed?url={requests.utils.quote(clean_url or raw_url)}"
+            oresp = self.session.get(oembed_url, timeout=12)
+            if oresp.status_code == 200:
+                odata = oresp.json()
+                author_name = odata.get("author_name") or username or "TikTok 用户"
+                handle = odata.get("author_unique_id") or username or ""
+                text = odata.get("title") or ""
+                thumb = odata.get("thumbnail_url") or ""
+                media_items = [MediaItem(type="image", url=thumb)] if thumb else []
+                return Post(
+                    platform="tiktok",
+                    post_id=item_id,
+                    author=author_name,
+                    text=text,
+                    media=media_items,
+                    timestamp="",
+                    extra={
+                        "url": clean_url,
+                        "username": handle,
+                        "author": author_name,
+                        "avatar_url": "",
+                        "source_url": raw_url,
+                    },
+                )
+        except Exception as oembed_err:
+            log.warning("[single_fetcher] TikTok oEmbed 解析失败: %s", oembed_err)
+
+        raise RuntimeError("TikTok 链接解析失败（已尝试 API/yt-dlp/oEmbed 全通道）")
 
     def _extract_with_ytdlp(self, url: str, platform: str, post_id: str) -> Post:
         """通过 yt-dlp 提取通用社交媒体内容（支持 X/IG/TikTok 视频及图文）。"""
