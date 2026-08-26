@@ -705,7 +705,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
-        self.send_header("Cache-Control", "public, max-age=60")
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 

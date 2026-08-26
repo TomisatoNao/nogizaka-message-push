@@ -586,12 +586,12 @@ _FN_TIMESTAMP_RE = re.compile(r'(\d{8})[-_](\d{6})')
 
 
 def extract_upload_time(msg: dict) -> str | None:
-    """从消息的媒体文件 URL 或文件名中提取成员真实上传时间戳 (ISO 8601 UTC 字符串)。"""
-    file_url = msg.get("file") or msg.get("thumbnail") or msg.get("_local_file") or ""
+    """从消息的媒体文件 URL 中提取成员真实上传时间戳 (ISO 8601 UTC 字符串)。"""
+    file_url = msg.get("file") or msg.get("thumbnail") or ""
     if not file_url and msg.get("raw_json"):
         try:
             raw = json.loads(msg["raw_json"]) if isinstance(msg["raw_json"], str) else msg["raw_json"]
-            file_url = raw.get("file") or raw.get("thumbnail") or raw.get("_local_file") or ""
+            file_url = raw.get("file") or raw.get("thumbnail") or ""
         except Exception:
             pass
     if not file_url:
