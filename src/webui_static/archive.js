@@ -1699,16 +1699,15 @@ function renderBubble(msg) {
     const pMin = pubJst.getUTCMinutes();
     const isRoundTime = (pMin === 0 || pMin === 30);
 
+    const isHinata = curGroup.includes("hinata") || (!curGroup && /^(金村|大野|佐藤|片山|坂井|下田|山下|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test((curMember||"").replace(/[\s_　]/g, "")));
+    const isSakura = curGroup.includes("sakura") || (!curGroup && /^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test((curMember||"").replace(/[\s_　]/g, "")));
+    const isNogi = curGroup.includes("nogi") || (!curGroup && /^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test((curMember||"").replace(/[\s_　]/g, "")));
+
     let isCronSec = false;
-    if (curGroup === "hinatazaka" || (!curGroup && /^(金村|大野|佐藤|片山|坂井|下田|山下|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test((curMember||"").replace(/[\s_　]/g, "")))) {
-      isCronSec = (pSec === 37);
-    } else if (curGroup === "sakurazaka" || (!curGroup && /^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test((curMember||"").replace(/[\s_　]/g, "")))) {
-      isCronSec = (pSec === 9 || pSec === 28);
-    } else if (curGroup === "nogizaka" || (!curGroup && /^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test((curMember||"").replace(/[\s_　]/g, "")))) {
-      isCronSec = (pSec === 45);
-    } else {
-      isCronSec = (pSec === 37 || pSec === 9 || pSec === 45 || pSec === 28);
-    }
+    if (isHinata) isCronSec = (pSec === 37);
+    else if (isSakura) isCronSec = (pSec === 9 || pSec === 28);
+    else if (isNogi) isCronSec = (pSec === 45);
+    else isCronSec = (pSec === 37 || pSec === 9 || pSec === 45 || pSec === 28);
 
     const isScheduled = (diffSec >= 3600) ||
                         (isRoundTime && (pSec === 0 || pSec === 1 || isCronSec) && diffSec >= 300) ||
@@ -1730,10 +1729,14 @@ function renderBubble(msg) {
     const pMin = pubJst.getUTCMinutes();
     const isRoundTime = (pMin === 0 || pMin === 30);
 
+    const isHinata = curGroup.includes("hinata") || (!curGroup && /^(金村|大野|佐藤|片山|坂井|下田|山下|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test((curMember||"").replace(/[\s_　]/g, "")));
+    const isSakura = curGroup.includes("sakura") || (!curGroup && /^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test((curMember||"").replace(/[\s_　]/g, "")));
+    const isNogi = curGroup.includes("nogi") || (!curGroup && /^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test((curMember||"").replace(/[\s_　]/g, "")));
+
     let isMatch = false;
     let pipeDesc = "";
 
-    if (curGroup === "hinatazaka" || (!curGroup && /^(金村|大野|佐藤|片山|坂井|下田|山下|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test((curMember||"").replace(/[\s_　]/g, "")))) {
+    if (isHinata) {
       if (pSec === 37) {
         isMatch = true;
         pipeDesc = "日向坂:37s 管道";
@@ -1741,7 +1744,7 @@ function renderBubble(msg) {
         isMatch = true;
         pipeDesc = "整点/半点 投放";
       }
-    } else if (curGroup === "sakurazaka" || (!curGroup && /^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test((curMember||"").replace(/[\s_　]/g, "")))) {
+    } else if (isSakura) {
       if (pSec === 9 || pSec === 28) {
         isMatch = true;
         pipeDesc = "樱坂:" + String(pSec).padStart(2, "0") + "s 管道";
@@ -1749,7 +1752,7 @@ function renderBubble(msg) {
         isMatch = true;
         pipeDesc = "整点/半点 投放";
       }
-    } else if (curGroup === "nogizaka" || (!curGroup && /^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test((curMember||"").replace(/[\s_　]/g, "")))) {
+    } else if (isNogi) {
       if (pSec === 45) {
         isMatch = true;
         pipeDesc = "乃木坂:45s 管道";

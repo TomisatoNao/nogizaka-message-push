@@ -1247,6 +1247,9 @@ class _Handler(BaseHTTPRequestHandler):
                 wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
                 msgs = [m for m in msgs if m.get("type") in wanted]
             import config.config as cfg
+            show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
+            total = len(msgs)
+            start = (page - 1) * per_page
             grp = _archive.infer_member_group(member)
             slim = [{
                 "id": m.get("id"),
