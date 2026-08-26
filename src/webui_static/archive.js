@@ -425,10 +425,6 @@ function switchMainTab(mode, keepHash) {
   if (tabHome) tabHome.classList.toggle("active", mode === "home");
   $("tabMsg").classList.toggle("active", mode === "msg");
   $("tabBlog").classList.toggle("active", mode === "blog");
-  
-  $("subNav").style.display = mode === "home" ? "none" : "";
-  if ($("subNavMemberBar")) $("subNavMemberBar").style.display = mode === "msg" ? "flex" : "none";
-  $("blogGroupChips").style.display = mode === "blog" ? "" : "none";
 
   if (mode === "home") {
     if (!keepHash) goHome();
@@ -622,7 +618,10 @@ function _enterMemberMode() {
   $("archiveSide").style.display = "";
   $("blogGrid").style.display = "none";
   $("timeline").style.display = "";
-  document.querySelectorAll(".toolbar").forEach(t => t.style.display = "");
+  const msgTb = document.querySelector(".msg-toolbar");
+  if (msgTb) msgTb.style.display = "";
+  const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
+  if (searchTb) searchTb.style.display = "";
   $("tagToggle").parentElement.style.display = "";
   $("searchBox").style.display = $("searchSubmit").style.display = $("searchClear").style.display = "";
 }
@@ -667,8 +666,11 @@ async function selectBlogGroup(key, author = "") {
   $("timeline").style.display = "none";
   $("blogGrid").style.display = "";
   $("archiveSide").style.display = "";
-  document.querySelectorAll(".toolbar")[0].style.display = "none";
-  document.querySelectorAll(".toolbar")[1].style.display = "";
+  
+  const msgTb = document.querySelector(".msg-toolbar");
+  if (msgTb) msgTb.style.display = "none";
+  const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
+  if (searchTb) searchTb.style.display = "";
   $("tagToggle").parentElement.style.display = "none";
   
   await loadBlogAuthors(key);
