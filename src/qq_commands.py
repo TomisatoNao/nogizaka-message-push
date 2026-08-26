@@ -286,7 +286,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
     try:
         from src.social.single_fetcher import SocialUrlParser
         from src.social.downloader import MediaDownloader
-        from src.social.forwarder import SocialForwarder, build_post_message, collect_alts
+        from src.social.forwarder import build_post_message, collect_alts
         from src.platforms import qq_official
 
         raw_cfg = cfg._load_config() if hasattr(cfg, "_load_config") else {}
@@ -297,7 +297,6 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
 
         # 2. 并发执行：媒体多线程下载 与 异步 AI 智能翻译（带 10s 快速超时）
         downloader = MediaDownloader(raw_cfg)
-        forwarder = SocialForwarder(raw_cfg, downloader)
 
         async def _do_translate_async():
             t_res = None
