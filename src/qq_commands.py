@@ -398,8 +398,25 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             pass
 
 
+_recent_social_tasks: dict[str, float] = {}
+
+
 def _trigger_social_reply_task(url: str, target_id: str, scope: str = "users", app_id: str = "") -> None:
-    """在当前 loop 或后台线程中触发解析与回复任务。"""
+    """在当前 loop 或后台线程中触发解析与回复任务（带 30s 幂等防重）。"""
+    from src.logger import log_all
+
+    now_ts = time.time()
+    task_key = f"{scope}:{target_id}:{url}"
+    last_time = _recent_social_tasks.get(task_key, 0.0)
+    if now_ts - last_time < 30.0:
+        log_all(f"ℹ️ [社媒解析] 忽略 30 秒内重复触发的相同解析任务 ({task_key})", is_debug=True)
+        return
+    _recent_social_tasks[task_key] = now_ts
+    if len(_recent_social_tasks) > 200:
+        for k in list(_recent_social_tasks.keys()):
+            if now_ts - _recent_social_tasks[k] > 300:
+                del _recent_social_tasks[k]
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

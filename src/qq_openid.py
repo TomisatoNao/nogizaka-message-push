@@ -25,6 +25,7 @@ import config.config as cfg
 GROUP_AND_C2C_EVENT_INTENT = 1 << 25
 
 SESSION_TIMEOUT = 300      # 无人发消息时 5 分钟自动结束，避免空转占用连接
+_seen_msg_ids: dict[str, float] = {}  # 消息 ID 去重缓存 (msg_id -> monotonic_time)
 
 
 class OpenIdSession:
@@ -239,6 +240,19 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                         if event.get("op") == 11 or t not in ("C2C_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"):
                             continue
                         data = event.get("d") or {}
+
+                        # 消息 ID 级幂等去重（防御腾讯网关重复推送相同事件）
+                        msg_id = data.get("id") or ""
+                        if msg_id:
+                            now_mono = time.monotonic()
+                            if msg_id in _seen_msg_ids:
+                                log_all(f"⚠️ [QQ 网关] 忽略腾讯重复推送的事件 (msg_id={msg_id})", is_debug=True)
+                                continue
+                            _seen_msg_ids[msg_id] = now_mono
+                            if len(_seen_msg_ids) > 1000:
+                                for k in [k for k, v in _seen_msg_ids.items() if now_mono - v > 300]:
+                                    _seen_msg_ids.pop(k, None)
+
                         author = data.get("author") or {}
                         raw_content = data.get("content", "")
                         if t == "GROUP_AT_MESSAGE_CREATE":
