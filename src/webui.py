@@ -1247,9 +1247,7 @@ class _Handler(BaseHTTPRequestHandler):
                 wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
                 msgs = [m for m in msgs if m.get("type") in wanted]
             import config.config as cfg
-            show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
-            total = len(msgs)
-            start = (page - 1) * per_page
+            grp = _archive.infer_member_group(member)
             slim = [{
                 "id": m.get("id"),
                 "type": m.get("type"),
@@ -1259,6 +1257,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                 "upload_at": _archive.extract_upload_time(m),
+                "group": grp,
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
                 "download_failed": bool(m.get("_download_failed")),
@@ -1266,7 +1265,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "h": m.get("thumbnail_height"),
             } for m in msgs[start:start + per_page]]
             self._send_json({
-                "ok": True, "member": member, "year": year, "month": month,
+                "ok": True, "member": member, "group": grp, "year": year, "month": month,
                 "total": total, "page": page,
                 "total_pages": max(1, -(-total // per_page)), "messages": slim,
             })
@@ -1318,6 +1317,7 @@ class _Handler(BaseHTTPRequestHandler):
             hits = _archive.search(member, query, type_filter=wanted)
             import config.config as cfg
             show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
+            grp = _archive.infer_member_group(member)
             total = len(hits)
             start = (page - 1) * per_page
             slim = [{
@@ -1329,6 +1329,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "custom_tags": m.get("_custom_tags", ""),
                 "published_at": m.get("published_at") or m.get("updated_at", ""),
                 "upload_at": _archive.extract_upload_time(m),
+                "group": grp,
                 "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
                               if m.get("_local_file") else None),
                 "download_failed": bool(m.get("_download_failed")),
@@ -1338,7 +1339,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "month": m.get("_month"),
             } for m in hits[start:start + per_page]]
             self._send_json({
-                "ok": True, "member": member, "q": query, "total": total,
+                "ok": True, "member": member, "group": grp, "q": query, "total": total,
                 "page": page, "total_pages": max(1, -(-total // per_page)),
                 "capped": total >= 500, "messages": slim,
             })
