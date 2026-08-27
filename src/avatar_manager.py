@@ -202,8 +202,23 @@ def save_member_avatar_record(group_key: str, name: str, display_name: str, avat
 
 
 async def sync_all_avatars(force: bool = False) -> dict[str, int]:
-    """并发同步并下载所有官方网站头像 + 消息账号头像。"""
+    """并发同步并下载所有官方网站头像 + 消息账号头像（带 3 天智能缓存，避免每次启动重复网络请求）。"""
     async with _lock:
+        conn = get_avatar_db()
+        try:
+            row = conn.execute("SELECT COUNT(*), MAX(updated_at) FROM member_avatars WHERE local_file != ''").fetchone()
+            count = row[0] or 0
+            max_updated = row[1] or 0.0
+            now_ts = time.time()
+            # 若已有 50+ 个成员头像且最近 3 天内已同步过，直接复用本地缓存
+            if not force and count >= 50 and (now_ts - max_updated < 86400 * 3):
+                log_all(f"✨ 成员与博客头像已就绪（已命中本地缓存，共 {count} 位成员）")
+                return {"total": count, "downloaded": count}
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
         counts = {"total": 0, "downloaded": 0}
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             # 1. 抓取三坂官网头像列表

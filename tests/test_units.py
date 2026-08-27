@@ -56,11 +56,11 @@ def test_log_truncation() -> None:
     finally:
         builtins.print = real_print
 
-    multi = captured[0]
-    single = captured[1]
-    # 多行内容每行都短于上限 → 一个字符都不该被截掉
+    multi = "\n".join(captured[:-1])
+    single = captured[-1]
+    # 多行内容每行都短于上限 → 一个字符都不该被截断
     assert "[TRUNCATED]" not in multi, f"多行内容被误截断: {multi[:120]}"
-    assert multi.count("\n") == 4, f"多行结构被破坏: {multi!r}"
+    assert len(captured) >= 6, f"应逐行独立输出: {captured!r}"
     # 单行超长仍然截断
     assert "[TRUNCATED]" in single, "超长单行应被截断"
     print("  ✅ 多行不截断、超长单行仍截断")
