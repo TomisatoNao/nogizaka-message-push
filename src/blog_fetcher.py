@@ -82,6 +82,7 @@ TASKS = [
 
 JST = timezone(timedelta(hours=9))
 BLOG_DB_PATH = Path("data/archive/blogs.db")
+_in_flight_blogs: set[str] = set()
 
 # ── SQLite ──
 
@@ -295,15 +296,20 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             log_all(f"📝 [{group_name}] 水印已脱节，重置水印到最新，忽略中间积压的推送...")
             return []
 
-        # 双重防御：过滤掉数据库中已经存在（已归档过）的博客
+        # 双重防御：过滤掉数据库中已经存在（已归档过）以及正在处理中的博客
         real_unseen = []
         for p in unseen:
+            url = p["url"]
+            if url in _in_flight_blogs:
+                continue
             try:
-                cur = db.execute("SELECT 1 FROM blog_posts WHERE url = ? LIMIT 1;", (p["url"],))
+                cur = db.execute("SELECT 1 FROM blog_posts WHERE url = ? LIMIT 1;", (url,))
                 if not cur.fetchone():
                     real_unseen.append(p)
+                    _in_flight_blogs.add(url)
             except Exception:
                 real_unseen.append(p)
+                _in_flight_blogs.add(url)
 
         # 推进最新水印
         if posts[0]["url"] != records.get(key):

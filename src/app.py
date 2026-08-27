@@ -774,9 +774,63 @@ def _on_config_reload(success: bool) -> None:
         _main_loop.call_soon_threadsafe(_sync_command_listeners)
 
 
+PID_FILE = Path("data/app.pid")
+
+
+def _is_pid_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        PROCESS_QUERY_INFORMATION = 0x0400
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def _kill_pid(pid: int) -> None:
+    try:
+        if sys.platform == "win32":
+            import subprocess
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+        else:
+            import signal
+            os.kill(pid, signal.SIGTERM)
+    except Exception:
+        pass
+
+
+def _acquire_instance_lock() -> None:
+    """确保全机只有一个主程序实例在运行，若存在历史遗留孤儿进程则自动清理接管。"""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    my_pid = os.getpid()
+    if PID_FILE.exists():
+        try:
+            old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+            if old_pid != my_pid and _is_pid_running(old_pid):
+                log_all(f"⚠️ 检测到已存在运行中的主程序旧实例 (PID: {old_pid})，正在接管并终止旧实例...")
+                _kill_pid(old_pid)
+                time.sleep(1.0)
+        except Exception:
+            pass
+    try:
+        PID_FILE.write_text(str(my_pid), encoding="utf-8")
+    except Exception:
+        pass
+
+
 async def main() -> None:
     # 1. 基础设施
     init_loggers()
+    _acquire_instance_lock()
     log_all("🌸 坂道联合监控系统已启动")
     # 上次的停止信号不该影响本次启动
     try:
@@ -1049,9 +1103,14 @@ async def main() -> None:
         log_all("✅ 资源清理完毕")
 
     if restart_requested:
-        # 进程自替换：同 PID 拉起全新进程，.env / 模块状态全部重新加载
+        # 进程自替换：拉起全新进程，.env / 模块状态全部重新加载
         log_all("🔁 正在重启主程序...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        if sys.platform == "win32":
+            import subprocess
+            subprocess.Popen([sys.executable] + sys.argv, close_fds=True)
+            os._exit(0)
+        else:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 if __name__ == "__main__":
