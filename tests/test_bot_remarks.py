@@ -1,4 +1,3 @@
-import pytest
 import config.config as cfg
 from src.platforms.tgbot import TGBot
 from src.platforms.qq_official import QQOfficialBot
