@@ -118,6 +118,25 @@ def init_db() -> sqlite3.Connection | None:
                 PRIMARY KEY (group_type, m_id)
             );
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS letters (
+                id INTEGER PRIMARY KEY,
+                group_id INTEGER,
+                member_name TEXT NOT NULL,
+                member_dir TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                text TEXT,
+                file_url TEXT,
+                local_file TEXT,
+                thumbnail_url TEXT,
+                is_favorite INTEGER DEFAULT 0,
+                raw_json TEXT NOT NULL
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_letters_member ON letters(member_dir, created_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_letters_created ON letters(created_at DESC);")
+
         try:
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -778,6 +797,177 @@ async def wait_pending(timeout: float = 60) -> None:
     """等待后台归档任务收尾（优雅停机用）。"""
     if _bg_tasks:
         await asyncio.wait(list(_bg_tasks), timeout=timeout)
+
+
+# ──────────────────────────────────────────────
+# 粉丝信件 (Fan Letters) 归档与查询
+# ──────────────────────────────────────────────
+def _member_letters_dir(m_name: str) -> Path:
+    d = _member_root(m_name) / "letters"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+async def archive_single_letter(member_name: str, letter: dict, headers: dict | None = None) -> dict:
+    """归档单封粉丝信件：下载高清信纸卡片、持久化至 SQLite letters 表和本地文件。"""
+    letter_id = letter.get("id")
+    if not letter_id or not member_name:
+        return letter
+
+    m_dir = member_dir_name(member_name)
+    raw_json = json.dumps(letter, ensure_ascii=False)
+    created_at = letter.get("created_at") or ""
+    updated_at = letter.get("updated_at") or created_at
+    text = letter.get("text") or ""
+    file_url = letter.get("file") or ""
+    thumbnail_url = letter.get("thumbnail") or ""
+    is_favorite = 1 if letter.get("is_favorite") else 0
+    group_id = letter.get("group_id") or letter.get("member_id") or 0
+
+    # 尝试解析时间并下载信纸原图卡片
+    local_file = ""
+    if file_url:
+        try:
+            dt = parse_jst_datetime(created_at) if created_at else datetime.now(JST_TZ)
+            time_prefix = dt.strftime("%Y%m%d_%H%M%S")
+            letters_dir = _member_letters_dir(member_name)
+            target_path = letters_dir / f"{time_prefix}_{letter_id}.jpg"
+            
+            if target_path.exists() and target_path.stat().st_size > 0:
+                local_file = str(target_path.relative_to(archive_root())).replace("\\", "/")
+            else:
+                client = _media_client
+                async with _media_sem:
+                    try:
+                        if client is not None and not client.is_closed:
+                            resp = await client.get(file_url, headers=headers, timeout=30.0)
+                        else:
+                            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as temp_c:
+                                resp = await temp_c.get(file_url, headers=headers)
+                        if resp.status_code == 200 and len(resp.content) > 0:
+                            target_path.write_bytes(resp.content)
+                            local_file = str(target_path.relative_to(archive_root())).replace("\\", "/")
+                            log_all(f"✉️ [信件归档] 成功保存信件卡片: {m_dir}/letters/{target_path.name} ({len(resp.content)/1024:.1f} KB)", is_debug=True)
+                    except Exception as ex:
+                        log_all(f"⚠️ [信件归档] 下载信件卡片失败 (ID: {letter_id}): {ex}", is_debug=True)
+        except Exception as ex:
+            log_all(f"⚠️ [信件归档] 处理信件媒体异常 (ID: {letter_id}): {ex}", is_debug=True)
+
+    # 写入/更新 SQLite
+    conn = init_db()
+    if conn:
+        try:
+            with conn:
+                conn.execute("""
+                    INSERT INTO letters (id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        group_id=excluded.group_id,
+                        updated_at=excluded.updated_at,
+                        text=excluded.text,
+                        file_url=excluded.file_url,
+                        local_file=COALESCE(NULLIF(excluded.local_file, ''), letters.local_file),
+                        thumbnail_url=excluded.thumbnail_url,
+                        is_favorite=excluded.is_favorite,
+                        raw_json=excluded.raw_json;
+                """, (letter_id, group_id, member_name, m_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json))
+        except Exception as ex:
+            log_all(f"⚠️ 保存信件到 SQLite 失败 (ID: {letter_id}): {ex}", is_debug=True)
+
+    res = dict(letter)
+    if local_file:
+        res["local_file"] = local_file
+    return res
+
+
+async def archive_letters_batch(member_name: str, letters: list[dict], headers: dict | None = None) -> list[dict]:
+    """批量归档信件列表，并更新本地 letters.json 汇总。"""
+    if not member_name or not letters:
+        return []
+    results = []
+    for l_item in letters:
+        r = await archive_single_letter(member_name, l_item, headers=headers)
+        results.append(r)
+
+    # 同步写入/更新本地 letters/letters.json
+    try:
+        letters_dir = _member_letters_dir(member_name)
+        json_path = letters_dir / "letters.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+    except Exception as ex:
+        log_all(f"⚠️ 保存 letters.json 失败 ({member_name}): {ex}", is_debug=True)
+
+    return results
+
+
+def get_existing_letter_ids(member_dir: str) -> set[int]:
+    """获取指定成员已归档的所有信件 ID 集合。"""
+    conn = init_db()
+    if conn:
+        try:
+            rows = conn.execute("SELECT id FROM letters WHERE member_dir = ?;", (member_dir,)).fetchall()
+            return {int(r[0]) for r in rows}
+        except Exception:
+            pass
+    letters = get_archive_letters(member_dir)
+    return {int(item.get("id")) for item in letters if item.get("id")}
+
+
+def get_archive_letters(member_dir: str) -> list[dict]:
+    """从 SQLite 获取指定成员已归档的所有粉丝信件（新在前）。"""
+    conn = init_db()
+    if conn:
+        try:
+            rows = conn.execute("""
+                SELECT id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json
+                FROM letters
+                WHERE member_dir = ?
+                ORDER BY created_at DESC;
+            """, (member_dir,)).fetchall()
+            if rows:
+                out = []
+                for r in rows:
+                    out.append({
+                        "id": r[0],
+                        "group_id": r[1],
+                        "member_name": r[2],
+                        "member_dir": r[3],
+                        "created_at": r[4],
+                        "updated_at": r[5],
+                        "text": r[6],
+                        "file_url": r[7],
+                        "local_file": r[8],
+                        "thumbnail_url": r[9],
+                        "is_favorite": bool(r[10]),
+                    })
+                return out
+        except Exception as ex:
+            log_all(f"⚠️ 从 SQLite 读取信件失败 ({member_dir}): {ex}", is_debug=True)
+
+    # 兜底：从 letters.json 读取
+    json_path = archive_root() / member_dir / "letters" / "letters.json"
+    if json_path.exists():
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def get_letters_count(member_dir: str) -> int:
+    """获取指定成员已归档的信件数量。"""
+    conn = init_db()
+    if conn:
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM letters WHERE member_dir = ?;", (member_dir,)).fetchone()
+            if row:
+                return row[0]
+        except Exception:
+            pass
+    letters = get_archive_letters(member_dir)
+    return len(letters)
 
 
 # ──────────────────────────────────────────────

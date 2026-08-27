@@ -1990,3 +1990,167 @@
     #homeNavLink { padding: 8px 4px; font-size: 15px; }
     .sk-strip > div { width: 148px; }
   }
+
+  /* ── 粉丝信件 (Fan Letters) 专区样式 ── */
+  .letter-grid {
+    padding-top: 10px;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .letter-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .letter-sync-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, var(--card));
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .letter-sync-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .letter-sync-btn.loading .sync-icon {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .letter-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 22px;
+  }
+
+  .letter-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+    position: relative;
+  }
+  .letter-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  }
+
+  .letter-thumb-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 341 / 480;
+    background: color-mix(in srgb, var(--card) 85%, #000);
+    cursor: zoom-in;
+    overflow: hidden;
+  }
+  .letter-thumb-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top center;
+    transition: transform 0.35s ease;
+  }
+  .letter-card:hover .letter-thumb-wrap img {
+    transform: scale(1.02);
+  }
+
+  .letter-zoom-hint {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    backdrop-filter: blur(4px);
+    opacity: 0.85;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .letter-thumb-wrap:hover .letter-zoom-hint {
+    opacity: 1;
+  }
+
+  .letter-body {
+    padding: 16px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+  }
+
+  .letter-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .letter-date {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .letter-badge-id {
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--border-soft);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .letter-text {
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: color-mix(in srgb, var(--card) 60%, var(--bg));
+    border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    max-height: 140px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .letter-fav-star {
+    color: #f59e0b;
+    font-size: 14px;
+  }
+
+  @media (max-width: 640px) {
+    .letter-cards {
+      grid-template-columns: 1fr;
+    }
+  }

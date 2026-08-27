@@ -17,6 +17,7 @@
 # ============================================================
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
@@ -964,7 +965,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "errors": [f"账号凭证不可用: {reason}"]}, 400)
             return
 
-        import asyncio
 
         import httpx
 
@@ -1226,17 +1226,22 @@ class _Handler(BaseHTTPRequestHandler):
         if sub == "members":
             members = []
             monitor_map = {}
-            for m in getattr(cfg, "MONITOR_LIST", []):
+            monitor_order = {}
+            for idx, m in enumerate(getattr(cfg, "MONITOR_LIST", [])):
                 norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
                 monitor_map[norm] = {
                     "display": m.get("m_name", ""),
                     "group": m.get("group_type", "")
                 }
+                monitor_order[norm] = idx
 
             from src import avatar_manager
             avatar_map = avatar_manager.get_member_avatar_map()
 
-            for name in _archive.list_members():
+            raw_members = _archive.list_members()
+            group_priority = {"nogizaka": 0, "sakurazaka": 1, "hinatazaka": 2}
+
+            for name in raw_members:
                 months = _archive.list_months(name)
                 norm = name.replace(" ", "").replace("　", "").replace("_", "")
                 info = monitor_map.get(norm) or {}
@@ -1250,7 +1255,15 @@ class _Handler(BaseHTTPRequestHandler):
                     "avatar": avatar,
                     "months": len(months),
                     "total": sum(m["count"] for m in months),
+                    "_g_pri": group_priority.get(group, 9),
+                    "_m_order": monitor_order.get(norm, 999),
                 })
+
+            members.sort(key=lambda x: (x["_g_pri"], x["_m_order"], x["display"]))
+            for m_item in members:
+                m_item.pop("_g_pri", None)
+                m_item.pop("_m_order", None)
+
             self._send_json({"ok": True, "members": members})
             return
 
@@ -1508,6 +1521,91 @@ class _Handler(BaseHTTPRequestHandler):
             _archive._save_msgs_to_sqlite(member, int(year), int(month), [target_msg])
 
             self._send_json({"ok": True, "id": int(msg_id), "local_file": rel, "media_url": f"/api/archive/media/{member}/{rel}"})
+            return
+
+        if sub == "letters":
+            if not self._guard(need_admin=True):
+                return
+            raw_m = qp("member")
+            member = _archive.member_dir_name(raw_m) if raw_m else ""
+            if not member:
+                self._send_json({"ok": False, "errors": ["缺少成员参数 member"]}, 400)
+                return
+            letters = _archive.get_archive_letters(member)
+            grp = _archive.infer_member_group(member)
+            slim = []
+            for item in letters:
+                loc = item.get("local_file") or ""
+                if loc:
+                    if loc.startswith(member + "/"):
+                        rel_path = loc[len(member) + 1:]
+                    else:
+                        rel_path = loc
+                    media_url = f"/api/archive/media/{member}/{rel_path}"
+                else:
+                    media_url = None
+
+                slim.append({
+                    "id": item.get("id"),
+                    "group_id": item.get("group_id"),
+                    "member_name": item.get("member_name"),
+                    "member_dir": item.get("member_dir"),
+                    "created_at": item.get("created_at"),
+                    "updated_at": item.get("updated_at"),
+                    "text": item.get("text", ""),
+                    "file_url": item.get("file_url"),
+                    "media_url": media_url,
+                    "thumbnail_url": item.get("thumbnail_url"),
+                    "is_favorite": bool(item.get("is_favorite")),
+                })
+            self._send_json({
+                "ok": True,
+                "member": member,
+                "group": grp,
+                "total": len(slim),
+                "letters": slim
+            })
+            return
+
+        if sub == "letters_sync":
+            if not self._guard(need_admin=True):
+                return
+            raw_m = qp("member")
+            if not raw_m:
+                content_len = int(self.headers.get("Content-Length") or 0)
+                if content_len > 0:
+                    body = self._read_body_json()
+                    if body and isinstance(body, dict):
+                        raw_m = body.get("member")
+            if not raw_m:
+                self._send_json({"ok": False, "errors": ["缺少成员参数 member"]}, 400)
+                return
+            member = _archive.member_dir_name(raw_m)
+            target_mem = None
+            norm_raw = raw_m.replace(" ", "").replace("　", "").replace("_", "").lower()
+            for m in getattr(cfg, "MONITOR_LIST", []):
+                m_name = m.get("m_name") or m.get("name", "")
+                norm_m = m_name.replace(" ", "").replace("　", "").replace("_", "").lower()
+                if norm_m == norm_raw or _archive.member_dir_name(m_name) == member:
+                    target_mem = m
+                    break
+            if not target_mem:
+                target_mem = {"name": raw_m, "m_name": raw_m}
+
+            from tools.archive_letters import sync_letters_for_member
+            import httpx
+
+            async def _do_sync():
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    _archive.initialize(client)
+                    return await sync_letters_for_member(target_mem, client)
+
+            try:
+                import asyncio
+                tot, nw = asyncio.run(_do_sync())
+                self._send_json({"ok": True, "member": member, "total": tot, "new": nw, "count": tot})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"同步信件异常: {e}"]}, 500)
             return
 
         if sub == "home":
@@ -1968,17 +2066,29 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 db = _get_blog_db()
                 from src import avatar_manager
+                from src.sakamichi_roster import get_author_sort_tuple
                 avatar_map = avatar_manager.get_member_avatar_map()
-                for r in db.execute("""
+                raw_authors = db.execute("""
                     SELECT author, COUNT(*)
                     FROM blog_posts WHERE group_key=? AND author != '' AND author IS NOT NULL
-                    GROUP BY author ORDER BY COUNT(*) DESC
-                """, (group,)).fetchall():
+                    GROUP BY author
+                """, (group,)).fetchall()
+                for r in raw_authors:
                     if r[0] and str(r[0]).strip():
                         a_name = str(r[0]).strip()
                         norm_a = a_name.replace(" ", "").replace("　", "").replace("_", "")
                         avatar = avatar_map.get(f"{group}:{norm_a}") or avatar_map.get(norm_a) or ""
-                        authors.append({"name": a_name, "total": r[1], "avatar": avatar})
+                        sort_key = get_author_sort_tuple(group, a_name)
+                        authors.append({
+                            "name": a_name,
+                            "total": r[1],
+                            "avatar": avatar,
+                            "_sort": sort_key,
+                        })
+                # 按 期别 - 期别整体账号 - staff（整体按五十音）精准排序
+                authors.sort(key=lambda x: x["_sort"])
+                for a_item in authors:
+                    a_item.pop("_sort", None)
             except Exception:
                 pass
             self._send_json({"ok": True, "group": group, "authors": authors})
@@ -2251,7 +2361,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         if sub == "blogs/delete_translation":
             if getattr(cfg, "AUTH_ENABLED", False):
-                if not self._current_user():
+                user = self._current_user()
+                if not user or user.get("role") != "admin":
                     self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
                     return
 
@@ -2779,7 +2890,6 @@ class _Handler(BaseHTTPRequestHandler):
             return
         proxy = str(body.get("proxy", "")).strip() or None
 
-        import asyncio
         import time
         import httpx
 

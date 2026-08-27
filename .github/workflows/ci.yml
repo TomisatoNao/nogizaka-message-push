@@ -69,5 +69,8 @@ jobs:
       - name: Social single test
         run: pytest tests/test_social_single.py
 
+      - name: Letters test
+        run: pytest tests/test_letters.py
+
       - name: Pytest full suite with coverage
         run: pytest --cov=src --cov-report=term

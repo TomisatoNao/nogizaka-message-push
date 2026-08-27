@@ -143,11 +143,14 @@ async def fetch_sakurazaka_avatars(client: httpx.AsyncClient) -> list[dict]:
 
 
 async def fetch_hinatazaka_avatars(client: httpx.AsyncClient) -> list[dict]:
-    """从日向坂46 官方成员名录获取全体成员写真头像。"""
-    url = "https://www.hinatazaka46.com/s/official/search/artist?ima=0000"
+    """从日向坂46 官方成员名录及博客作者页面获取全体成员与作者头像（含 ポカ）。"""
     results = []
+    seen = set()
+
+    # 1. 官方成员名录
+    url_artist = "https://www.hinatazaka46.com/s/official/search/artist?ima=0000"
     try:
-        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        r = await client.get(url_artist, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
         for li in soup.find_all("li", class_="p-member__item"):
@@ -161,14 +164,62 @@ async def fetch_hinatazaka_avatars(client: httpx.AsyncClient) -> list[dict]:
                         src = "https:" + src
                     elif src.startswith("/"):
                         src = "https://www.hinatazaka46.com" + src
+                    norm = _norm_name(name)
+                    if norm not in seen:
+                        seen.add(norm)
+                        results.append({
+                            "group_key": "hinatazaka",
+                            "name": norm,
+                            "display_name": name,
+                            "avatar_url": src,
+                        })
+    except Exception as e:
+        log_all(f"⚠️ 获取日向坂官方头像列表异常: {e}", is_debug=True)
+
+    # 2. 官方博客作者页面（捕获 ポカ 等特别作者）
+    url_diary = "https://www.hinatazaka46.com/s/official/diary/member?ima=0000"
+    try:
+        r = await client.get(url_diary, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        r.encoding = "utf-8"
+        soup = BeautifulSoup(r.text, "html.parser")
+        for a_tag in soup.find_all("a", href=re.compile(r"ct=\d+")):
+            name_div = a_tag.find(class_="c-blog-face__name")
+            face_div = a_tag.find(class_="c-blog-face__item")
+            if name_div:
+                name = name_div.text.strip()
+                norm = _norm_name(name)
+                src = ""
+                if face_div:
+                    style = face_div.get("style", "")
+                    m_bg = re.search(r"url\((.*?)\)", style)
+                    if m_bg:
+                        src = m_bg.group(1).strip("'\"")
+                if not src and norm in ("ポカ", "poka"):
+                    src = "https://cdn.hinatazaka46.com/images/14/1e6/c3049a93d54c3f9a8ded4694e158b/200_200_102400.jpg"
+                if src and norm not in seen:
+                    seen.add(norm)
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    elif src.startswith("/"):
+                        src = "https://www.hinatazaka46.com" + src
                     results.append({
                         "group_key": "hinatazaka",
-                        "name": _norm_name(name),
+                        "name": norm,
                         "display_name": name,
                         "avatar_url": src,
                     })
     except Exception as e:
-        log_all(f"⚠️ 获取日向坂官方头像列表异常: {e}", is_debug=True)
+        log_all(f"⚠️ 获取日向坂博客作者头像列表异常: {e}", is_debug=True)
+
+    # 确保 ポカ 保底存在
+    if "ポカ" not in seen:
+        results.append({
+            "group_key": "hinatazaka",
+            "name": "ポカ",
+            "display_name": "ポカ",
+            "avatar_url": "https://cdn.hinatazaka46.com/images/14/1e6/c3049a93d54c3f9a8ded4694e158b/200_200_102400.jpg",
+        })
+
     return results
 
 

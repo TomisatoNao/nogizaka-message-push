@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script src="/static/theme.js"></script>
-<link rel="stylesheet" href="/static/archive.css?v=3.7">
+<link rel="stylesheet" href="/static/archive.css?v=4.6">
 
 </head>
 <body>
@@ -26,6 +26,7 @@
       <button class="nav-tab active" id="tabHome"><span class="tab-icon">🏠</span> 首页</button>
       <button class="nav-tab" id="tabMsg"><span class="tab-icon">💬</span> 消息</button>
       <button class="nav-tab" id="tabBlog"><span class="tab-icon">📄</span> 博客</button>
+      <button class="nav-tab" id="tabLetter" hidden style="display:none;"><span class="tab-icon">✉️</span> 信件</button>
     </div>
 
     <!-- 成员归档工具下拉菜单 -->
@@ -190,6 +191,34 @@
     <div id="blogCards" class="blog-cards"></div>
     <div id="blogPagination" class="blog-pagination" style="display:none;"></div>
   </div>
+  <div id="letterGrid" class="letter-grid" style="display:none;">
+    <div class="toolbar letter-toolbar">
+      <div class="member-dropdown-wrap" id="letterMemberDropdownWrap">
+        <button class="btn member-select-btn" id="btnLetterMemberDropdown" type="button" title="点击展开全员列表与快速切换">
+          <span class="m-icon">👥</span>
+          <span class="m-cur-name" id="curLetterMemberDisplay">选择成员</span>
+          <span class="arrow">▾</span>
+        </button>
+        <div class="member-popover" id="letterMemberPopover" style="display:none;">
+          <div class="member-popover-header">
+            <div class="member-popover-search">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="letterMemberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
+              <button class="clear-btn" id="btnLetterMemberSearchClear" type="button" style="display:none;">✕</button>
+            </div>
+            <span class="member-count-badge" id="letterMemberTotalBadge">共 0 人</span>
+          </div>
+          <div class="member-popover-list" id="letterMemberPopoverList"></div>
+        </div>
+      </div>
+
+      <button class="btn letter-sync-btn" id="btnSyncLetters" type="button" title="从官方接口拉取最新信件并下载信纸">
+        <span class="sync-icon">🔄</span> 同步信件
+      </button>
+      <span class="stats" id="letterStats" style="margin-left:auto;"></span>
+    </div>
+    <div id="letterCards" class="letter-cards"></div>
+  </div>
   <button class="nav" id="loadMore" hidden>加载更多 ↓</button>
   <div class="center" id="emptyHint" hidden></div>
 </main>
@@ -258,6 +287,6 @@
 <!-- Toast Container -->
 <div id="toastContainer" class="toast-container"></div>
 
-<script src="/static/archive.js?v=3.7"></script>
+<script src="/static/archive.js?v=4.6"></script>
 </body>
 </html>

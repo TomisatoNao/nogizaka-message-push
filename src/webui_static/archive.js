@@ -73,8 +73,15 @@ window.handleImgError = function(img) {
 };
 
 async function api(path, options = {}) {
+  const headers = Object.assign(
+    {},
+    authToken ? { "X-Auth-Token": authToken } : {},
+    options.headers || {}
+  );
   const resp = await fetch(path, {
-    headers: authToken ? { "X-Auth-Token": authToken } : {},
+    method: options.method || "GET",
+    headers: headers,
+    body: options.body,
     cache: "no-store",
     signal: options.signal,
   });
@@ -427,34 +434,94 @@ async function jumpToDay(dateKey) {
   }, 5000);
 }
 
-// ── 模式切换 ─────────────────────────────────────
+// ── 模式切换与记忆 ─────────────────────────────────────
+function getDefaultNogiMember() {
+  if (!members || !members.length) return "冨里奈央";
+  const nogi = members.find(m => inferMemberGroup(m) === "nogizaka");
+  return nogi ? nogi.name : members[0].name;
+}
+
 function switchMainTab(mode, keepHash) {
   curMode = mode;
+  try { localStorage.setItem("archive_last_main_tab", mode); } catch (_) {}
   const tabHome = $("tabHome");
   if (tabHome) tabHome.classList.toggle("active", mode === "home");
-  $("tabMsg").classList.toggle("active", mode === "msg");
-  $("tabBlog").classList.toggle("active", mode === "blog");
+  if ($("tabMsg")) $("tabMsg").classList.toggle("active", mode === "msg");
+  if ($("tabBlog")) $("tabBlog").classList.toggle("active", mode === "blog");
+  if ($("tabLetter")) $("tabLetter").classList.toggle("active", mode === "letter");
+
+  const side = $("archiveSide");
+  const timeline = $("timeline");
+  const blogGrid = $("blogGrid");
+  const letterGrid = $("letterGrid");
+  const msgToolbar = document.querySelector(".msg-toolbar");
+  const searchToolbar = document.querySelector(".toolbar:not(.msg-toolbar):not(.blog-toolbar):not(.letter-toolbar)");
 
   if (mode === "home") {
     if (!keepHash) goHome();
   } else if (mode === "msg") {
     hideHome();
+    if (letterGrid) letterGrid.style.display = "none";
+    if (blogGrid) blogGrid.style.display = "none";
+    if (timeline) timeline.style.display = "block";
+    if (msgToolbar) msgToolbar.style.display = "flex";
+    if (searchToolbar) searchToolbar.style.display = "flex";
+    if (side) side.style.display = "";
     if (!keepHash) {
-      const wanted = curMember || (members[0] ? members[0].name : "冨里奈央");
+      let saved = null;
+      try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
+      const wanted = (saved && members.some(m => m.name === saved))
+        ? saved
+        : (curMember && members.some(m => m.name === curMember))
+          ? curMember
+          : getDefaultNogiMember();
       selectMember(wanted);
     }
   } else if (mode === "blog") {
     hideHome();
+    if (letterGrid) letterGrid.style.display = "none";
+    if (timeline) timeline.style.display = "none";
+    if (msgToolbar) msgToolbar.style.display = "none";
+    if (searchToolbar) searchToolbar.style.display = "none";
+    if (side) side.style.display = "none";
+    if (blogGrid) blogGrid.style.display = "block";
     if (!keepHash) {
-      const gKey = curBlogGroup || (blogGroups[0] ? blogGroups[0].key : "nogizaka");
-      selectBlogGroup(gKey);
+      let savedGroup = null;
+      let savedAuthor = "";
+      try {
+        savedGroup = localStorage.getItem("archive_last_blog_group");
+        savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
+      } catch (_) {}
+      const gKey = (savedGroup && blogGroups.some(g => g.key === savedGroup)) ? savedGroup : (curBlogGroup || "nogizaka");
+      selectBlogGroup(gKey, savedAuthor);
     }
+  } else if (mode === "letter") {
+    if (!window._isArchiveAdmin) {
+      switchMainTab("msg", keepHash);
+      return;
+    }
+    hideHome();
+    if (timeline) timeline.style.display = "none";
+    if (blogGrid) blogGrid.style.display = "none";
+    if (msgToolbar) msgToolbar.style.display = "none";
+    if (searchToolbar) searchToolbar.style.display = "none";
+    if (side) side.style.display = "none";
+    if (letterGrid) letterGrid.style.display = "block";
+    let saved = null;
+    try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
+    const wanted = (saved && members.some(m => m.name === saved))
+      ? saved
+      : (curLetterMember && members.some(m => m.name === curLetterMember))
+        ? curLetterMember
+        : getDefaultNogiMember();
+    selectLetterMember(wanted);
   }
 }
 
 if ($("tabHome")) $("tabHome").addEventListener("click", () => goHome());
-$("tabMsg").addEventListener("click", () => switchMainTab("msg"));
-$("tabBlog").addEventListener("click", () => switchMainTab("blog"));
+if ($("tabMsg")) $("tabMsg").addEventListener("click", () => switchMainTab("msg"));
+if ($("tabBlog")) $("tabBlog").addEventListener("click", () => switchMainTab("blog"));
+if ($("tabLetter")) $("tabLetter").addEventListener("click", () => switchMainTab("letter"));
 
 // ── 数据加载 ─────────────────────────────────────
 async function loadMembers(skipSelect = false) {
@@ -474,7 +541,13 @@ async function loadMembers(skipSelect = false) {
 
   // skipSelect=true 时只渲染 chips，不自动跳转（首页模式下使用）
   if (skipSelect) return;
-  const wanted = curMember && members.some((m) => m.name === curMember) ? curMember : members[0].name;
+  let saved = null;
+  try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
+  const wanted = (saved && members.some(m => m.name === saved))
+    ? saved
+    : (curMember && members.some(m => m.name === curMember))
+      ? curMember
+      : getDefaultNogiMember();
   await selectMember(wanted, true);
 }
 
@@ -641,6 +714,10 @@ async function selectBlogGroup(key, author = "") {
   curMember = "";
   curBlogGroup = key;
   curBlogAuthor = author || "";
+  try {
+    localStorage.setItem("archive_last_blog_group", key);
+    localStorage.setItem("archive_last_blog_author", curBlogAuthor);
+  } catch (_) {}
   curBlogDate = "";
   searchQuery = "";
   syncSearchInput();
@@ -804,6 +881,7 @@ function closeBlogAuthorPopover() {
 
 function selectBlogAuthor(author) {
   curBlogAuthor = author;
+  try { localStorage.setItem("archive_last_blog_author", author || ""); } catch (_) {}
   curBlogDate = "";
   updateBlogAuthorDisplay();
   renderCalendar();
@@ -1111,7 +1189,7 @@ function updateModeSelectorUI() {
   }
 
   if (delBtn) {
-    if (window._isLoggedIn && hasTrans) {
+    if (window._isArchiveAdmin && hasTrans) {
       delBtn.style.display = "inline-block";
     } else {
       delBtn.style.display = "none";
@@ -1451,6 +1529,7 @@ function _replaceImgUrls(html, images, paths) {
 async function selectMember(name, keepHash) {
   const version = ++memberVersion;
   curMember = name;
+  try { localStorage.setItem("archive_last_msg_member", name); } catch (_) {}
   curBlogGroup = "";     // 切换到成员模式，清空博客分组
   syncChipHighlight();  // 同步 chip 高亮
   if (!keepHash) searchQuery = "";
@@ -2054,15 +2133,28 @@ function showToast(text) {
 
 // ── 灯箱 ─────────────────────────────────────────
 let lbIndex = 0;
-function openLightbox(i, opener) {
-  if (i < 0 || i >= images.length) return;
+function openLightbox(i, opener, caption) {
+  if (typeof i === "string") {
+    if (opener) lightboxOpener = opener;
+    $("lbImg").src = i;
+    $("lbImg").alt = caption || "图片预览";
+    $("lbCounter").style.display = "none";
+    $("lbPrev").style.display = "none";
+    $("lbNext").style.display = "none";
+    $("lightbox").classList.add("open");
+    $("lightbox").setAttribute("aria-hidden", "false");
+    $("lbClose").focus();
+    return;
+  }
+  const idx = Number(i);
+  if (isNaN(idx) || idx < 0 || idx >= images.length) return;
   if (opener) lightboxOpener = opener;
-  lbIndex = i;
-  $("lbImg").src = images[i].url;
-  $("lbImg").alt = images[i].caption || "归档图片";
+  lbIndex = idx;
+  $("lbImg").src = images[idx].url;
+  $("lbImg").alt = images[idx].caption || "归档图片";
   if (images.length > 1) {
     $("lbCounter").style.display = "";
-    $("lbCounter").textContent = (i + 1) + " / " + images.length;
+    $("lbCounter").textContent = (idx + 1) + " / " + images.length;
     $("lbPrev").style.display = "";
     $("lbNext").style.display = "";
   } else {
@@ -2204,6 +2296,11 @@ initInfiniteScroll();
 
 function _updateAdminUI(isAdmin) {
   window._isArchiveAdmin = !!isAdmin;
+  const tabLetter = $("tabLetter");
+  if (tabLetter) {
+    tabLetter.hidden = !isAdmin;
+    tabLetter.style.display = isAdmin ? "inline-flex" : "none";
+  }
   const adminIds = ["adminLink", "archiveToolsDropdown", "btnArchiveMember", "btnArchiveMessage"];
   adminIds.forEach(id => {
     const el = $(id);
@@ -2890,17 +2987,42 @@ async function handleRoute(isInitial = false) {
   // 1. 博客模式：#blog, #blog=nogizaka, #blog=...
   if (p.has("blog") || rawHash === "blog") {
     curMode = "blog";
-    const group = p.get("blog") || curBlogGroup || (blogGroups[0] ? blogGroups[0].key : "nogizaka");
-    const author = p.get("author") || "";
+    let savedGroup = null;
+    let savedAuthor = "";
+    try {
+      savedGroup = localStorage.getItem("archive_last_blog_group");
+      savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
+    } catch (_) {}
+    const group = p.get("blog") || (savedGroup && blogGroups.some(g => g.key === savedGroup) ? savedGroup : curBlogGroup) || "nogizaka";
+    const author = p.get("author") || savedAuthor || "";
     switchMainTab("blog", true);
     await selectBlogGroup(group, author);
+    return;
+  }
+
+  // 1.5 信件模式：#letter, #letter=...
+  if (p.has("letter") || rawHash === "letter") {
+    curMode = "letter";
+    if (!window._isArchiveAdmin) {
+      switchMainTab("msg", true);
+      return;
+    }
+    let saved = null;
+    try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
+    const mem = p.get("letter") || (saved && members.some(m => m.name === saved) ? saved : curLetterMember) || getDefaultNogiMember();
+    switchMainTab("letter", true);
+    if (mem) {
+      await selectLetterMember(mem);
+    }
     return;
   }
 
   // 2. 消息模式：#msg, #member=..., #y=...
   if (p.has("member") || p.has("y") || p.has("m") || rawHash === "msg") {
     curMode = "msg";
-    const mem = p.get("member") || curMember || (members[0] ? members[0].name : "冨里奈央");
+    let saved = null;
+    try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
+    const mem = p.get("member") || (saved && members.some(m => m.name === saved) ? saved : curMember) || getDefaultNogiMember();
     const t = p.get("t") || "";
     const q = normalizedQuery(p.get("q"));
     curType = t;
@@ -3044,5 +3166,275 @@ async function promptArchiveMessage() {
   } catch(e) {
     showToast("请求异常: " + e, "error");
   }
+}
+
+// ── 粉丝信件 (Fan Letters) 交互逻辑 ───────────────────────
+let curLetterMember = "";
+let curLetterImages = [];
+
+function openLetterLightbox(idx) {
+  if (idx < 0 || idx >= curLetterImages.length) return;
+  images = curLetterImages;
+  openLightbox(idx);
+}
+
+async function selectLetterMember(mName) {
+  curLetterMember = mName;
+  try { localStorage.setItem("archive_last_letter_member", mName); } catch (_) {}
+  const mObj = members.find(m => m.name === mName) || { name: mName, display: mName };
+  const disp = $("curLetterMemberDisplay");
+  if (disp) disp.textContent = mObj.display || mName;
+  
+  renderLetterMemberPopover();
+  await loadLetters(mName);
+}
+
+async function loadLetters(mName) {
+  const cardsBox = $("letterCards");
+  const statsBox = $("letterStats");
+  if (!cardsBox) return;
+
+  cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;">🔄</span> 正在加载信件...</div>';
+  if (statsBox) statsBox.textContent = "";
+
+  try {
+    const data = await api("/api/archive/letters?member=" + encodeURIComponent(mName));
+    if (!data.ok) {
+      cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载失败：' + esc((data.errors || []).join("; ")) + '</div>';
+      return;
+    }
+
+    const list = data.letters || [];
+    if (statsBox) {
+      statsBox.textContent = "共 " + list.length + " 封信件";
+    }
+
+    if (!list.length) {
+      cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:16px;">' +
+        '<div style="font-size:36px;margin-bottom:12px;">✉️</div>' +
+        '<div style="font-size:15px;font-weight:600;color:var(--text-strong);">暂无已归档信件</div>' +
+        '<div style="font-size:13px;margin-top:6px;">可点击上方「🔄 同步信件」从官方接口拉取，或在终端运行 <code>python tools/archive_letters.py ' + esc(mName) + '</code></div>' +
+        '</div>';
+      return;
+    }
+
+    curLetterImages = list.map(letter => {
+      const u = letter.media_url || letter.file_url || letter.thumbnail_url || "";
+      let dStr = letter.created_at || "";
+      try {
+        const dt = new Date(letter.created_at);
+        if (!isNaN(dt.getTime())) {
+          dStr = dt.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" });
+        }
+      } catch (_) {}
+      return {
+        url: u,
+        caption: "【" + (letter.member_name || mName) + " 粉丝信件】" + dStr + " · " + (letter.text || "").slice(0, 50)
+      };
+    });
+
+    cardsBox.innerHTML = "";
+    list.forEach((letter, idx) => {
+      const card = document.createElement("div");
+      card.className = "letter-card";
+      
+      let dateStr = letter.created_at || "";
+      try {
+        const dt = new Date(letter.created_at);
+        if (!isNaN(dt.getTime())) {
+          dateStr = dt.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" });
+        }
+      } catch (_) {}
+
+      const imgUrl = letter.media_url || letter.file_url || letter.thumbnail_url || "";
+      const favHTML = letter.is_favorite ? '<span class="letter-fav-star" title="已收藏">★</span>' : '';
+      
+      const textContent = letter.text || "(无正文文字)";
+      const textLen = (letter.text || "").length;
+
+      let thumbHTML = '';
+      if (imgUrl) {
+        thumbHTML = '<div class="letter-thumb-wrap" role="button" tabindex="0" title="点击查看大图">' +
+                    '<img src="' + esc(imgUrl) + '" loading="lazy" decoding="async" alt="信纸卡片" onerror="this.parentElement.style.display=\'none\';" />' +
+                    '<span class="letter-zoom-hint">🔍 查看大图</span>' +
+                    '</div>';
+      }
+
+      card.innerHTML = thumbHTML +
+        '<div class="letter-body">' +
+          '<div class="letter-header-row">' +
+            '<span class="letter-date">📅 ' + esc(dateStr) + '</span>' +
+            '<div style="display:flex;align-items:center;gap:6px;">' +
+              favHTML +
+              '<span class="letter-badge-id">#' + esc(letter.id) + ' · ' + textLen + '字</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="letter-text">' + esc(textContent) + '</div>' +
+        '</div>';
+
+      const thumbEl = card.querySelector(".letter-thumb-wrap");
+      if (thumbEl) {
+        thumbEl.addEventListener("click", () => openLetterLightbox(idx));
+        thumbEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openLetterLightbox(idx);
+          }
+        });
+      }
+
+      cardsBox.appendChild(card);
+    });
+  } catch (err) {
+    cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
+  }
+}
+
+function renderLetterMemberPopover(filterKeyword = "") {
+  const list = $("letterMemberPopoverList");
+  if (!list) return;
+  list.innerHTML = "";
+  const kw = filterKeyword.toLowerCase().trim();
+  const filtered = members.filter(m => !kw || m.display.toLowerCase().includes(kw) || m.name.toLowerCase().includes(kw));
+
+  if ($("letterMemberTotalBadge")) {
+    $("letterMemberTotalBadge").textContent = "共 " + members.length + " 人" + (kw ? " · 匹配 " + filtered.length + " 人" : "");
+  }
+
+  if (!filtered.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "text-align:center; padding:20px 0; color:var(--muted); font-size:12.5px;";
+    empty.textContent = "未找到匹配成员";
+    list.appendChild(empty);
+    return;
+  }
+
+  // 按坂道分组
+  const groups = [
+    { key: "nogizaka", name: "乃木坂46", icon: "💜", cls: "nogi" },
+    { key: "sakurazaka", name: "樱坂46", icon: "🌸", cls: "sakura" },
+    { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" }
+  ];
+
+  groups.forEach(g => {
+    const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
+    if (!grpMems.length) return;
+
+    const gHead = document.createElement("div");
+    gHead.className = "popover-group-header " + g.cls;
+    gHead.innerHTML = '<span>' + g.icon + ' ' + g.name + '</span><span class="pgh-cnt">' + grpMems.length + ' 人</span>';
+    list.appendChild(gHead);
+
+    grpMems.forEach(m => {
+      let avatarText = (m.display || "").replace(/[\s_　]/g, "");
+      if (avatarText.length > 2) avatarText = avatarText.slice(-2);
+      if (!avatarText) avatarText = "✉️";
+      if (m.name.includes("マネダコ")) avatarText = "🐙";
+
+      let avatarHTML = '';
+      if (m.avatar) {
+        avatarHTML = '<img class="mpi-avatar-img" src="' + esc(m.avatar) + '" loading="lazy" decoding="async" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + g.cls + '" style="display:none;">' + esc(avatarText) + '</span>';
+      } else {
+        avatarHTML = '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>';
+      }
+
+      const item = document.createElement("div");
+      item.className = "member-popover-item " + g.cls + (m.name === curLetterMember ? " active" : "");
+      item.innerHTML = '<div class="m-name-txt">' +
+                       avatarHTML +
+                       '<span class="mpi-name">' + esc(m.display) + '</span>' +
+                       '</div>';
+      item.addEventListener("click", () => {
+        closeLetterMemberPopover();
+        selectLetterMember(m.name);
+      });
+      list.appendChild(item);
+    });
+  });
+}
+
+function toggleLetterMemberPopover() {
+  const pop = $("letterMemberPopover");
+  const btn = $("btnLetterMemberDropdown");
+  if (!pop) return;
+  const isOpen = pop.style.display !== "none";
+  if (isOpen) {
+    pop.style.display = "none";
+    if (btn) btn.classList.remove("active");
+  } else {
+    pop.style.display = "flex";
+    if (btn) btn.classList.add("active");
+    renderLetterMemberPopover();
+  }
+}
+
+function closeLetterMemberPopover() {
+  const pop = $("letterMemberPopover");
+  const btn = $("btnLetterMemberDropdown");
+  if (pop) pop.style.display = "none";
+  if (btn) btn.classList.remove("active");
+}
+
+if ($("btnLetterMemberDropdown")) {
+  $("btnLetterMemberDropdown").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleLetterMemberPopover();
+  });
+}
+
+if ($("letterMemberSearchInput")) {
+  $("letterMemberSearchInput").addEventListener("input", (e) => {
+    const kw = e.target.value;
+    if ($("btnLetterMemberSearchClear")) {
+      $("btnLetterMemberSearchClear").style.display = kw ? "block" : "none";
+    }
+    renderLetterMemberPopover(kw);
+  });
+}
+
+if ($("btnLetterMemberSearchClear")) {
+  $("btnLetterMemberSearchClear").addEventListener("click", () => {
+    $("letterMemberSearchInput").value = "";
+    $("btnLetterMemberSearchClear").style.display = "none";
+    renderLetterMemberPopover("");
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const wrap = $("letterMemberDropdownWrap");
+  if (wrap && !wrap.contains(e.target)) {
+    closeLetterMemberPopover();
+  }
+});
+
+if ($("btnSyncLetters")) {
+  $("btnSyncLetters").addEventListener("click", async () => {
+    if (!curLetterMember) return;
+    const btnSync = $("btnSyncLetters");
+    btnSync.classList.add("loading");
+    btnSync.disabled = true;
+    try {
+      const resp = await api("/api/archive/letters_sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ member: curLetterMember })
+      });
+      if (resp.ok) {
+        if (resp.new > 0) {
+          showToast(`信件同步完成！新增 ${resp.new} 封新信件（总计 ${resp.total || 0} 封）。`, "success");
+        } else {
+          showToast(`信件已是最新（共 ${resp.total || 0} 封），无新增信件。`, "info");
+        }
+        await loadLetters(curLetterMember);
+      } else {
+        showToast("同步信件失败: " + (resp.errors || []).join("; "), "error");
+      }
+    } catch (ex) {
+      showToast("同步异常: " + ex, "error");
+    } finally {
+      btnSync.classList.remove("loading");
+      btnSync.disabled = false;
+    }
+  });
 }
 
