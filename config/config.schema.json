@@ -39,6 +39,9 @@
             "type": "string",
             "pattern": "^[a-z0-9_]+$"
           },
+          "remark": {
+            "type": "string"
+          },
           "app_id": {
             "type": "string"
           },
@@ -120,6 +123,9 @@
           "group_id": {
             "type": "integer"
           },
+          "remark": {
+            "type": "string"
+          },
           "push_message": {
             "type": "boolean",
             "default": true
@@ -190,6 +196,9 @@
         ],
         "properties": {
           "name": {
+            "type": "string"
+          },
+          "remark": {
             "type": "string"
           },
           "target_chat": {

@@ -88,10 +88,10 @@ async def _handle_message(member: dict, msg: dict,
             trans_model = model_name or ""
             log_all(f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成 ({trans_model}): {translated[:100]}...", is_debug=True)
 
-    # 归档（后台执行，不阻塞推送；开关 archive.enabled）
-    archive.schedule_archive(member, msg, translated)
+    # 归档（先行下载媒体并持久化，保证本地素材就绪供各推送通道复用）
+    await archive.archive_message(member, msg, translated)
 
-    # 推送各通道
+    # 推送各通道（若含有媒体，各通道直接复用本地素材，免去重复网络请求）
     chain = build_message_chain(m_name, updated, msg, translated, model_name=trans_model)
     if not await send_member_message(member, chain):
         log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息推送失败，保留时间戳等待下次重试", is_error=True)

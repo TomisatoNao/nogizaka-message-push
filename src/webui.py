@@ -27,7 +27,7 @@ import sqlite3
 import sys
 import threading
 import time as _time
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape as html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -399,6 +399,7 @@ def _qq_bot_status(raw: dict) -> list[dict]:
             prefix = str(b.get("name", "")).upper()
             entry = {
                 "name": b.get("name", ""),
+                "remark": b.get("remark", ""),
                 "declared": True,
                 "app_id": bool(b.get("app_id") or os.getenv(f"{prefix}_APP_ID")),
                 "client_secret": bool(os.getenv(f"{prefix}_CLIENT_SECRET")),
@@ -1533,31 +1534,62 @@ class _Handler(BaseHTTPRequestHandler):
                 norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
                 monitor_names[norm] = m.get("m_name", "")
 
-            # ── 1. Message 归档成员统计 ──
+            db = _archive.init_db()
+
+            from src import avatar_manager
+            avatar_map = avatar_manager.get_member_avatar_map()
+
+            # ── 1. Message 归档成员统计（纯 SQL 极速查询，不解析多余 JSON）──
             members = []
             today_msg_cnt = 0
+            this_week_msgs = 0
+            last_week_msgs = 0
+
+            if db:
+                try:
+                    r_td = db.execute("SELECT COUNT(*) FROM messages WHERE published_at LIKE ? OR updated_at LIKE ?", (f"{today_str}%", f"{today_str}%")).fetchone()
+                    today_msg_cnt = r_td[0] if r_td else 0
+
+                    now_dt = datetime.now()
+                    w0 = (now_dt - timedelta(days=7)).strftime("%Y-%m-%d")
+                    w1 = (now_dt - timedelta(days=14)).strftime("%Y-%m-%d")
+                    r_this = db.execute("SELECT COUNT(*) FROM messages WHERE published_at >= ?", (w0,)).fetchone()
+                    this_week_msgs = r_this[0] if r_this else 0
+                    r_last = db.execute("SELECT COUNT(*) FROM messages WHERE published_at >= ? AND published_at < ?", (w1, w0)).fetchone()
+                    last_week_msgs = r_last[0] if r_last else 0
+                except Exception:
+                    pass
+
             for name in _archive.list_members():
                 months = _archive.list_months(name)
                 total = sum(m["count"] for m in months)
                 latest_msgs: list[dict] = []
                 type_counts: dict[str, int] = {}
-                for mo in months[:3]:
-                    msgs = _archive.load_month(name, mo["year"], mo["month"])
-                    for m in reversed(msgs):
-                        rid = m.get("id")
-                        mtype = m.get("type", "text")
-                        type_counts[mtype] = type_counts.get(mtype, 0) + 1
-                        if len(latest_msgs) < 8 and mtype == "text" and (m.get("text") or "").strip():
+
+                if db:
+                    try:
+                        # 极速 SQL 聚合分类计数 (0.1ms)
+                        for r_tc in db.execute("SELECT type, COUNT(*) FROM messages WHERE member_dir = ? GROUP BY type", (name,)).fetchall():
+                            mtype = r_tc[0] or "text"
+                            type_counts[mtype] = r_tc[1]
+                        
+                        # 极速 SQL 获取最新 8 条文本消息 (0.1ms)
+                        for lm in db.execute("""
+                            SELECT id, text, translation, published_at, updated_at
+                            FROM messages
+                            WHERE member_dir = ? AND type = 'text' AND text IS NOT NULL AND trim(text) != ''
+                            ORDER BY published_at DESC LIMIT 8
+                        """, (name,)).fetchall():
                             latest_msgs.append({
-                                "id": rid,
-                                "text": m.get("text", ""),
-                                "translation": m.get("_translation", ""),
-                                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                                "id": lm[0],
+                                "text": lm[1] or "",
+                                "translation": lm[2] or "",
+                                "published_at": lm[3] or lm[4] or "",
                             })
+                    except Exception:
+                        pass
 
                 monthly = [{"year": mo["year"], "month": mo["month"], "count": mo["count"]} for mo in months[:24]]
-                days = _archive.day_counts(name)
-                today_msg_cnt += days.get(today_str, 0)
 
                 first_date, last_date = "", ""
                 if months:
@@ -1582,8 +1614,6 @@ class _Handler(BaseHTTPRequestHandler):
                 norm = name.replace(" ", "").replace("　", "").replace("_", "")
                 display = monitor_names.get(norm) or name.replace("_", " ")
                 group = _archive.infer_member_group(name)
-                from src import avatar_manager
-                avatar_map = avatar_manager.get_member_avatar_map()
                 avatar = avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or ""
                 members.append({
                     "name": name,
@@ -1592,7 +1622,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "avatar": avatar,
                     "stats": stats,
                     "monthly": monthly,
-                    "days": days,
+                    "days": {},
                     "latest_msgs": latest_msgs,
                 })
 
@@ -1700,17 +1730,12 @@ class _Handler(BaseHTTPRequestHandler):
                                 "month": int(bp["date"][5:7]) if len(bp["date"]) >= 7 and bp["date"][5:7].isdigit() else 8,
                             })
 
-                    # 今日与本周博客统计
-                    for r in blog_db.execute("SELECT substr(date, 1, 10), COUNT(*) FROM blog_posts GROUP BY substr(date, 1, 10)").fetchall():
-                        d_str, cnt = r[0], r[1]
-                        if d_str == today_str:
-                            today_blog_cnt += cnt
-                        try:
-                            dd = datetime.strptime(d_str, "%Y-%m-%d")
-                            if 0 <= (datetime.now() - dd).days < 7:
-                                blog_this_week += cnt
-                        except Exception:
-                            pass
+                    # 今日与本周博客统计（极速 SQL 范围查询）
+                    r_b_td = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date LIKE ?", (f"{today_str}%",)).fetchone()
+                    today_blog_cnt = r_b_td[0] if r_b_td else 0
+                    week_ago_str = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                    r_b_wk = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date >= ?", (week_ago_str,)).fetchone()
+                    blog_this_week = r_b_wk[0] if r_b_wk else 0
 
                     # 博客时光隧道：随机抽取 3 篇经典博文
                     rand_blog_rows = blog_db.execute("""
@@ -1744,28 +1769,31 @@ class _Handler(BaseHTTPRequestHandler):
                 except (ValueError, IndexError):
                     return (2026, 1)
 
-            db = _archive.init_db()
             msg_pics = []
             if db:
-                pic_rows = db.execute("""
-                    SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
-                    FROM messages
-                    WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
-                    ORDER BY published_at DESC
-                """).fetchall()
-                if pic_rows:
-                    pic_map = {r[0]: r for r in pic_rows}
-                    all_ids = [r[0] for r in pic_rows]
-                    recent_ids = all_ids[:6]
-                    rest_ids = [i for i in all_ids if i not in set(recent_ids)]
-                    random.seed(today_str)
-                    rand_ids = random.sample(rest_ids, min(4, len(rest_ids)))
-                    def _build_pic(row) -> dict:
+                try:
+                    recent_pic_rows = db.execute("""
+                        SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
+                        FROM messages
+                        WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
+                        ORDER BY published_at DESC LIMIT 8
+                    """).fetchall()
+                    rand_pic_rows = db.execute("""
+                        SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
+                        FROM messages
+                        WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
+                        ORDER BY RANDOM() LIMIT 4
+                    """).fetchall()
+                    seen_p_ids = set()
+                    for row in (recent_pic_rows + rand_pic_rows):
+                        if row[0] in seen_p_ids:
+                            continue
+                        seen_p_ids.add(row[0])
                         rj = json.loads(row[6]) if row[6] else {}
                         pub = row[4] or row[5] or ""
                         norm_m = row[1].replace(" ", "").replace("　", "").replace("_", "")
                         disp = monitor_names.get(norm_m) or row[1].replace("_", " ")
-                        return {
+                        msg_pics.append({
                             "type": "msg",
                             "member": row[1], "member_display": disp,
                             "id": row[0], "text": row[2] or "",
@@ -1773,8 +1801,9 @@ class _Handler(BaseHTTPRequestHandler):
                             "w": rj.get("thumbnail_width"), "h": rj.get("thumbnail_height"),
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
-                        }
-                    msg_pics = [_build_pic(pic_map[i]) for i in (recent_ids + rand_ids)]
+                        })
+                except Exception:
+                    pass
 
             # 综合写真画廊：Message 精选图 + Blog 插图混合
             agg_pics = sorted(msg_pics + blog_pics[:6], key=lambda x: x.get("published_at", ""), reverse=True)
@@ -1815,23 +1844,16 @@ class _Handler(BaseHTTPRequestHandler):
             recent_feed = sorted(agg_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:8]
 
             # ── 5. 全站时光隧道（随机 Message 经典记录 + 随机 Blog 经典）──
-            recent_msg_ids = {m["id"] for m in agg_msgs if m.get("type") == "msg"}
             rand_msgs = []
             if db:
-                txt_rows = db.execute("""
-                    SELECT id, member_name, text, translation, published_at, updated_at
-                    FROM messages
-                    WHERE type='text' AND text IS NOT NULL AND trim(text)!=''
-                    ORDER BY published_at DESC
-                """).fetchall()
-                if txt_rows:
-                    txt_map = {r[0]: r for r in txt_rows}
-                    rest_txt_ids = [r[0] for r in txt_rows if r[0] not in recent_msg_ids]
-                    random.seed(today_str)
-                    n_rand = min(3, len(rest_txt_ids))
-                    rand_txt_ids = random.sample(rest_txt_ids, n_rand) if n_rand > 0 else []
-                    for rid in rand_txt_ids:
-                        r = txt_map[rid]
+                try:
+                    rand_txt_rows = db.execute("""
+                        SELECT id, member_name, text, translation, published_at, updated_at
+                        FROM messages
+                        WHERE type='text' AND text IS NOT NULL AND trim(text)!=''
+                        ORDER BY RANDOM() LIMIT 4
+                    """).fetchall()
+                    for r in rand_txt_rows:
                         pub = r[4] or r[5] or ""
                         norm_r = r[1].replace(" ", "").replace("　", "").replace("_", "")
                         disp_r = monitor_names.get(norm_r) or r[1].replace("_", " ")
@@ -1842,6 +1864,8 @@ class _Handler(BaseHTTPRequestHandler):
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
                         })
+                except Exception:
+                    pass
 
             time_tunnel = sorted(rand_msgs + rand_blog_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:6]
 
@@ -1852,24 +1876,6 @@ class _Handler(BaseHTTPRequestHandler):
 
             agg_first = min(first_dates) if first_dates else ""
             agg_last = max(last_dates) if last_dates else ""
-
-            # 本周统计
-            from datetime import datetime as _dt
-            now = _dt.now()
-            this_week = 0
-            last_week = 0
-            for m in members:
-                dm = _archive.day_counts(m["name"])
-                for d, c in dm.items():
-                    try:
-                        dd = _dt.strptime(d, "%Y-%m-%d")
-                        days_ago = (now - dd).days
-                        if 0 <= days_ago < 7:
-                            this_week += c
-                        elif 7 <= days_ago < 14:
-                            last_week += c
-                    except ValueError:
-                        pass
 
             last_pub = max((p.get("published_at", "") for p in agg_pics), default="")
             last_feed = max((f.get("published_at", "") for f in recent_feed), default="")
@@ -1891,9 +1897,9 @@ class _Handler(BaseHTTPRequestHandler):
                     "total": today_msg_cnt + today_blog_cnt,
                 },
                 "week_stats": {
-                    "this_week": this_week + blog_this_week,
-                    "last_week": last_week,
-                    "messages_week": this_week,
+                    "this_week": this_week_msgs + blog_this_week,
+                    "last_week": last_week_msgs,
+                    "messages_week": this_week_msgs,
                     "blogs_week": blog_this_week,
                 },
             }

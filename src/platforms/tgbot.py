@@ -22,6 +22,7 @@ class TGBot:
     """单个 Telegram Bot 实例，独立管理 token 和发送目标。"""
     
     def __init__(self, name: str, token: str, target_chat: str, 
+                 remark: str = "",
                  member_filter: list[str] | None = None,
                  blog_filter: list[str] | None = None,
                  social_filter: list[str] | None = None,
@@ -34,6 +35,7 @@ class TGBot:
                  push_alert: bool = False,
                  blog_card_mode: str = "card_and_images"):
         self.name = name
+        self.remark = remark
         self.token = token
         self.target_chat = target_chat
         self.member_filter = member_filter or []
@@ -284,6 +286,7 @@ def initialize() -> None:
             
             bot = TGBot(
                 name=bot_cfg.get("name", "tg_unnamed"),
+                remark=bot_cfg.get("remark", ""),
                 token=bot_cfg.get("token", ""),
                 target_chat=bot_cfg.get("target_chat", ""),
                 member_filter=bot_cfg.get("member_filter") or [],
@@ -301,7 +304,8 @@ def initialize() -> None:
             bot.initialize()
             if bot._bot:
                 _bots.append(bot)
-                log_all(f"📝 注册 TG Bot: {bot.name}")
+                display_name = f"{bot.name} ({bot.remark})" if bot.remark else bot.name
+                log_all(f"📝 注册 TG Bot: {display_name}")
 
 def get_configured_bots() -> list[TGBot]:
     return _bots
@@ -361,11 +365,12 @@ async def health_check() -> bool:
         
     any_ok = False
     for bot in _bots:
+        display_name = f"{bot.name} ({bot.remark})" if bot.remark else bot.name
         try:
             me = await bot.get_me()
-            log_all(f"🟢 TG Bot [{bot.name}] 连通正常 (@{me.username})")
+            log_all(f"🟢 TG Bot [{display_name}] 连通正常 (@{me.username})")
             any_ok = True
         except Exception as e:
-            log_all(f"🔴 TG Bot [{bot.name}] 无法连接: {e}", is_error=True)
+            log_all(f"🔴 TG Bot [{display_name}] 无法连接: {e}", is_error=True)
             
     return any_ok

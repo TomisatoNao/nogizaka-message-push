@@ -82,6 +82,44 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
     return content
 
 
+def _compress_image_if_needed(content: bytes, max_bytes: int = int(2.8 * 1024 * 1024)) -> bytes:
+    """如果图片体积超过腾讯开放平台直传限制(~3MB)，通过 PIL 动态无损/高保真压缩。"""
+    if not content or len(content) <= max_bytes:
+        return content
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(content))
+        
+        # 依次尝试优化保存 / 渐进式 JPEG / 质量递减 (85 -> 78 -> 70 -> 60)
+        img_rgb = img.convert("RGB") if img.mode != "RGB" else img
+        for quality in (85, 78, 70, 60):
+            buf = io.BytesIO()
+            img_rgb.save(buf, format="JPEG", quality=quality, optimize=True, progressive=True)
+            res = buf.getvalue()
+            if len(res) <= max_bytes:
+                return res
+        
+        # 如果质量降到 60 仍然超标（极长博客长图），按比例微调缩放宽度
+        w, h = img.size
+        scale = 0.85
+        while scale >= 0.5:
+            new_w = max(400, int(w * scale))
+            new_h = int(h * (new_w / w))
+            resized = img_rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            resized.save(buf, format="JPEG", quality=75, optimize=True)
+            res = buf.getvalue()
+            if len(res) <= max_bytes:
+                return res
+            scale -= 0.15
+
+        return res
+    except Exception as e:
+        log_all(f"⚠️ 图片自动高保真压缩异常: {e}", is_debug=True)
+        return content
+
+
 # ──────────────────────────────────────────────
 # QQ 官方 Bot 实例类
 # ──────────────────────────────────────────────
@@ -89,7 +127,7 @@ class QQOfficialBot:
     """单个 QQ 官方 Bot 实例，独立管理 token 和发送状态。"""
 
     def __init__(self, name: str, app_id: str, client_secret: str, target_openid: str,
-                 group_openid: str = "", member_filter: list[str] | None = None,
+                 group_openid: str = "", remark: str = "", member_filter: list[str] | None = None,
                  blog_filter: list[str] | None = None,
                  social_filter: list[str] | None = None,
                  push_message: bool = True,
@@ -101,6 +139,7 @@ class QQOfficialBot:
                  push_alert: bool = False,
                  blog_card_mode: str = "card_and_images"):
         self.name = name
+        self.remark = remark
         self.app_id = app_id
         self.client_secret = client_secret
         self.target_openid = target_openid
@@ -395,6 +434,15 @@ class QQOfficialBot:
 
         size_bytes = len(content) if content else 0
 
+        # 直传大小限制检查与自适应压缩：
+        # 腾讯 QQ 开放平台直接 Base64 接口 (/files) 针对图片直传有 ~3MB 严格限制 (超出报 40093011 上传文件大小超过限制)
+        if media_type == "image" and size_bytes > int(2.8 * 1024 * 1024):
+            compressed = _compress_image_if_needed(content, max_bytes=int(2.8 * 1024 * 1024))
+            if len(compressed) < size_bytes:
+                log_all(f"📦 官方 QQ Bot [{self.name}] 图片超出直传限制 ({size_bytes/1024/1024:.2f}MB)，已自动高保真压缩至 {len(compressed)/1024/1024:.2f}MB", is_debug=True)
+                content = compressed
+                size_bytes = len(content)
+
         # 如果文件大于 7.8MB，优先使用官方分片上传（保持 100% 原画质，最大支持 200MB）
         if size_bytes > int(7.8 * 1024 * 1024):
             file_info = await self._upload_media_chunked(
@@ -405,6 +453,9 @@ class QQOfficialBot:
             log_all(f"⚠️ 官方 QQ Bot [{self.name}] 分片上传未成功，降级尝试压制后直传", is_debug=True)
             if media_type == "video":
                 content = _compress_video_if_needed(content)
+                size_bytes = len(content)
+            elif media_type == "image":
+                content = _compress_image_if_needed(content)
                 size_bytes = len(content)
 
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
@@ -653,17 +704,33 @@ async def _download_media(file_url: str, source_headers: dict[str, str]) -> byte
 async def download_media_payloads(member: dict,
                                   message_chain: list[dict]) -> list[tuple[str, bytes | None]]:
     """把消息链中的媒体段逐个下载为 (type, bytes|None)，None 表示该项下载失败。
-    多 Bot 场景下由 notifier 调用一次，避免同一文件按 Bot 数重复下载。"""
+    优先复用本地已下载的归档素材，避免同一文件重复网络请求。"""
     items = media_items(message_chain)
     if not items:
         return []
 
     from config.credentials import get_source_headers_for_account
 
-    headers = get_source_headers_for_account(member["account_id"], member["group_type"])
+    headers = get_source_headers_for_account(member.get("account_id", ""), member.get("group_type", ""))
+    m_name = member.get("m_name") or member.get("name") or ""
     payloads: list[tuple[str, bytes | None]] = []
+
     for media_type, file_url in items:
-        payloads.append((media_type, await _download_media(file_url, headers)))
+        # 1. 优先尝试从本地归档磁盘直接读取，零网络开销
+        local_bytes = None
+        if m_name:
+            try:
+                from src import archive
+                local_bytes = archive.find_media_bytes_by_url(m_name, file_url)
+            except Exception:
+                pass
+
+        if local_bytes is not None and len(local_bytes) > 0:
+            log_all(f"📦 [官方Bot] 媒体直接复用本地归档 ({len(local_bytes)} 字节): {file_url[:60]}", is_debug=True)
+            payloads.append((media_type, local_bytes))
+        else:
+            downloaded = await _download_media(file_url, headers)
+            payloads.append((media_type, downloaded))
     return payloads
 
 
@@ -681,6 +748,7 @@ def initialize(client: httpx.AsyncClient) -> None:
             client_secret=bot_cfg.get("client_secret", ""),
             target_openid=bot_cfg.get("target_openid", ""),
             group_openid=bot_cfg.get("group_openid", ""),
+            remark=bot_cfg.get("remark", ""),
             member_filter=bot_cfg.get("member_filter"),
             blog_filter=bot_cfg.get("blog_filter"),
             social_filter=bot_cfg.get("social_filter"),
@@ -695,7 +763,8 @@ def initialize(client: httpx.AsyncClient) -> None:
         )
         bot.initialize(client)
         _bots.append(bot)
-        log_all(f"📝 注册官方 QQ Bot: {bot.name}")
+        display_name = f"{bot.name} ({bot.remark})" if bot.remark else bot.name
+        log_all(f"📝 注册官方 QQ Bot: {display_name}")
 
 
 def reload() -> None:
@@ -712,6 +781,7 @@ def reload() -> None:
             client_secret=bot_cfg.get("client_secret", ""),
             target_openid=bot_cfg.get("target_openid", ""),
             group_openid=bot_cfg.get("group_openid", ""),
+            remark=bot_cfg.get("remark", ""),
             member_filter=bot_cfg.get("member_filter"),
             blog_filter=bot_cfg.get("blog_filter"),
             social_filter=bot_cfg.get("social_filter"),

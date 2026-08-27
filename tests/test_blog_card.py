@@ -105,10 +105,30 @@ async def test_notifier_card_only_routing():
         assert mock_bot.send_translation_qq.call_count == 0
 
 
+@_async_test
+async def test_compress_large_image():
+    from PIL import Image
+    import io
+    import os
+    from src.platforms.qq_official import _compress_image_if_needed
+
+    # Create a noisy image that won't compress trivially
+    img = Image.frombytes("RGB", (1600, 1600), os.urandom(1600 * 1600 * 3))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=95)
+    large_bytes = buf.getvalue()
+    
+    assert len(large_bytes) > 2.0 * 1024 * 1024
+    compressed = _compress_image_if_needed(large_bytes, max_bytes=int(1.5 * 1024 * 1024))
+    assert len(compressed) <= int(1.5 * 1024 * 1024)
+    assert len(compressed) < len(large_bytes)
+
+
 def main():
     asyncio.run(test_blog_card_html_generation())
     asyncio.run(test_blog_card_render_execution())
     asyncio.run(test_notifier_card_only_routing())
+    asyncio.run(test_compress_large_image())
     print("  ✓ test_blog_card 全部通过")
 
 

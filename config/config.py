@@ -306,6 +306,7 @@ def _normalize_config(raw: dict) -> dict:
                 for r in cfg["napcat_routes"]:
                     n_routes.append({
                         "group_id":       r.get("group_id"),
+                        "remark":         r.get("remark", ""),
                         "push_message":   bool(r.get("push_message", True)),
                         "push_blog":      bool(r.get("push_blog", False)),
                         "push_x":         bool(r.get("push_x", True)),
@@ -389,6 +390,7 @@ def _build_qq_official_bots(cfg: dict) -> dict:
             prefix = str(b["name"]).upper()
             bots.append({
                 "name":           b["name"],
+                "remark":         b.get("remark", ""),
                 "app_id":         b.get("app_id") or _env(f"{prefix}_APP_ID", ""),
                 "client_secret":  _env(f"{prefix}_CLIENT_SECRET", ""),
                 "target_openid":  b.get("target_openid") or _env(f"{prefix}_TARGET_OPENID", ""),
@@ -412,6 +414,7 @@ def _build_qq_official_bots(cfg: dict) -> dict:
                 continue
             bots.append({
                 "name":           f"bot_{i}",
+                "remark":         "",
                 "app_id":         app_id,
                 "client_secret":  _env(f"QQ_OFFICIAL_BOT{i}_CLIENT_SECRET", ""),
                 "target_openid":  _env(f"QQ_OFFICIAL_BOT{i}_TARGET_OPENID", ""),
@@ -451,6 +454,7 @@ def _build_tg_bots(cfg: dict) -> dict:
         token = _env(f"{prefix}_TOKEN", "") or global_token
         bots.append({
             "name":           b.get("name", ""),
+            "remark":         b.get("remark", ""),
             "token":          token,
             "target_chat":    str(b.get("target_chat", "")).strip(),
             "push_message":   bool(b.get("push_message", True)),

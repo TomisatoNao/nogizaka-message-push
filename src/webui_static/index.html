@@ -468,7 +468,8 @@
       <table>
         <thead>
           <tr>
-            <th style="white-space:nowrap;">名称</th>
+            <th style="white-space:nowrap;">名称 (ID)</th>
+            <th style="white-space:nowrap;">备注</th>
             <th style="white-space:nowrap;">App ID</th>
             <th style="white-space:nowrap;">个人 OpenID</th>
             <th style="white-space:nowrap;">群 OpenID</th>
@@ -529,6 +530,7 @@
         <thead>
           <tr>
             <th style="white-space:nowrap;">NapCat 群号</th>
+            <th style="white-space:nowrap;">群备注</th>
             <th style="white-space:nowrap;">订阅与过滤规则</th>
             <th style="white-space:nowrap;">操作</th>
           </tr>
@@ -568,6 +570,7 @@
         <thead>
           <tr>
             <th style="white-space:nowrap;">Bot 名称</th>
+            <th style="white-space:nowrap;">备注</th>
             <th style="white-space:nowrap;">Target Chat ID</th>
             <th style="white-space:nowrap;">专属 Token (.env)</th>
             <th style="white-space:nowrap;">订阅与过滤规则</th>
@@ -1026,10 +1029,16 @@
     Secret 会存入 <code>.env</code>，其余存入 <code>config.json</code>。
   </div>
 <div class="secret-field">
-<div class="flabel"><span class="fname">Bot 名称<span class="req">*</span></span>
+<div class="flabel"><span class="fname">Bot 名称（ID）<span class="req">*</span></span>
 <span class="fenv">小写字母 / 数字 / _</span></div>
-<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" id="qqBotName" placeholder="qq_official_bot1" type="text"/>
-<div class="fhelp" id="qqBotNameHelp">你自己起的标识，用于区分多个 Bot，并决定密钥在 .env 里的变量名。</div>
+<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" id="qqBotName" placeholder="official_bot1" type="text"/>
+<div class="fhelp" id="qqBotNameHelp">内部标识，用于在 .env 中生成密钥变量名（如 OFFICIAL_BOT1_CLIENT_SECRET）。</div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">Bot 备注</span>
+<span class="fenv">支持中文 / 随意填写</span></div>
+<input autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" id="qqBotRemark" placeholder="例如：5期生主群 / 发大水 / 乃木坂专属" type="text"/>
+<div class="fhelp">用于在表格、规则配置和推送中更直观识别机器人。</div>
 </div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">App ID<span class="req">*</span></span></div>
@@ -2040,7 +2049,13 @@ function renderQqBots() {
             esc(bot.name.toUpperCase()) + "_CLIENT_SECRET</code>，" +
             "保存后需要重新填一次 Client Secret。";
         }
-      }, "qq_official_bot1", "width:130px"));
+      }, "official_bot1", "width:115px"));
+      const tdRemark = document.createElement("td");
+      tdRemark.appendChild(mkInput(bot.remark || "", (v) => {
+        const t = v.trim();
+        if (t) bot.remark = t; else delete bot.remark;
+        markDirty();
+      }, "例如：5期生群", "width:125px"));
       const tdApp = document.createElement("td");
       tdApp.appendChild(mkInput(bot.app_id || "", (v) => {
         const t = v.trim(); if (t) bot.app_id = t; else delete bot.app_id;
@@ -2059,8 +2074,9 @@ function renderQqBots() {
       tdGroupOpenid.appendChild(gidInput);
 
       const tdSub = document.createElement("td");
+      const botLabel = bot.remark ? `${bot.remark} (${bot.name || '#' + (idx + 1)})` : (bot.name || "#" + (idx + 1));
       tdSub.appendChild(renderSubSummary(bot, () => {
-        openChannelSubDialog(bot, "QQ Bot: " + (bot.name || "#" + (idx + 1)), renderQqBots);
+        openChannelSubDialog(bot, "QQ Bot: " + botLabel, renderQqBots);
       }));
 
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
@@ -2129,7 +2145,7 @@ function renderQqBots() {
         msg("已删除，点「保存并热重载」生效", "ok");
       }, "danger"));
 
-      tr.append(tdName, tdApp, tdOpenid, tdGroupOpenid, tdSub, tdSecret, tdState, tdOps);
+      tr.append(tdName, tdRemark, tdApp, tdOpenid, tdGroupOpenid, tdSub, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
     });
   } else if (!qqBotStatus.filter((s) => !s.declared).length) {
@@ -2201,6 +2217,7 @@ $("btnAddQqBot").addEventListener("click", async () => {
   // QQ_OFFICIAL_BOT1_CLIENT_SECRET，与旧版 .env 编号槽位撞名
   const n = config.qq_official_bots.length + 1;
   $("qqBotName").value = "official_bot" + n;
+  $("qqBotRemark").value = "";
   $("qqBotAppId").value = "";
   $("qqBotSecret").value = "";
   $("qqBotSecret").classList.add("masked");
@@ -2224,6 +2241,7 @@ $("qqBotCancel").addEventListener("click", () => $("qqBotDialog").close());
 
 $("qqBotSave").addEventListener("click", async () => {
   const name = $("qqBotName").value.trim().toLowerCase();
+  const remark = $("qqBotRemark").value.trim();
   const appId = $("qqBotAppId").value.trim();
   const secret = $("qqBotSecret").value.trim();
   const openid = $("qqBotOpenid").value.trim();
@@ -2252,6 +2270,7 @@ $("qqBotSave").addEventListener("click", async () => {
     secretsWritten.add(name);   // 保存前 status 里查不到，前端自己记住
 
     const bot = { name: name, app_id: appId };
+    if (remark) bot.remark = remark;
     if (openid) {
       const openidType = document.querySelector('input[name="qqBotOpenidType"]:checked').value;
       if (openidType === "group") bot.group_openid = openid;
@@ -3336,10 +3355,18 @@ function renderNapcat() {
       if (Number.isFinite(n)) r.group_id = n;
       else r.group_id = null;
     }, "12345678", "width:120px"));
+
+    const tdRemark = document.createElement("td");
+    tdRemark.appendChild(mkInput(r.remark || "", (v) => {
+      const t = v.trim();
+      if (t) r.remark = t; else delete r.remark;
+      markDirty();
+    }, "例如：乃木坂主群", "width:130px"));
     
     const tdSub = document.createElement("td");
+    const rLabel = r.remark ? `${r.remark} (${r.group_id || '#' + (idx + 1)})` : (r.group_id || "#" + (idx + 1));
     tdSub.appendChild(renderSubSummary(r, () => {
-      openChannelSubDialog(r, "NapCat 群: " + (r.group_id || "#" + (idx + 1)), renderNapcat);
+      openChannelSubDialog(r, "NapCat 群: " + rLabel, renderNapcat);
     }));
 
     const tdAct = document.createElement("td");
@@ -3355,7 +3382,7 @@ function renderNapcat() {
     };
     tdAct.appendChild(btnDel);
     
-    tr.append(tdId, tdSub, tdAct);
+    tr.append(tdId, tdRemark, tdSub, tdAct);
     tbody.appendChild(tr);
   });
 }
@@ -3373,6 +3400,13 @@ function renderTGBots() {
       b.name = v.trim().toLowerCase(); 
       markDirty();
     }, "tg_main", "width:110px"));
+
+    const tdRemark = document.createElement("td");
+    tdRemark.appendChild(mkInput(b.remark || "", (v) => {
+      const t = v.trim();
+      if (t) b.remark = t; else delete b.remark;
+      markDirty();
+    }, "例如：频道A", "width:120px"));
     
     const tdChat = document.createElement("td");
     tdChat.appendChild(mkInput(b.target_chat || "", (v) => { 
@@ -3408,8 +3442,9 @@ function renderTGBots() {
     tdSecret.appendChild(secBtn);
 
     const tdSub = document.createElement("td");
+    const bLabel = b.remark ? `${b.remark} (${b.name || '#' + (idx + 1)})` : (b.name || "#" + (idx + 1));
     tdSub.appendChild(renderSubSummary(b, () => {
-      openChannelSubDialog(b, "TG Bot: " + (b.name || "#" + (idx + 1)), renderTGBots);
+      openChannelSubDialog(b, "TG Bot: " + bLabel, renderTGBots);
     }));
     
     const tdAct = document.createElement("td");
@@ -3425,7 +3460,7 @@ function renderTGBots() {
     };
     tdAct.appendChild(btnDel);
     
-    tr.append(tdName, tdChat, tdSecret, tdSub, tdAct);
+    tr.append(tdName, tdRemark, tdChat, tdSecret, tdSub, tdAct);
     tbody.appendChild(tr);
   });
 }

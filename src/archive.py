@@ -96,6 +96,9 @@ def init_db() -> sqlite3.Connection | None:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_year_month ON messages(member_dir, year, month);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_updated_at ON messages(updated_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_pub_desc ON messages(published_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_type_pub ON messages(type, published_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_pub ON messages(member_dir, type, published_at DESC);")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sent_ids (
@@ -504,9 +507,66 @@ async def _merge_write(m_name: str, dt: datetime, record: dict) -> None:
 
 
 # ──────────────────────────────────────────────
-# 媒体下载
 # ──────────────────────────────────────────────
-async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
+# 媒体下载与复用
+# ──────────────────────────────────────────────
+def find_media_bytes_by_url(m_name: str, file_url: str) -> bytes | None:
+    """根据成员名与媒体 URL 查找本地已有归档文件，返回字节内容。用于多通道直接复用已下载媒体。"""
+    if not m_name or not file_url:
+        return None
+    root = _member_root(m_name)
+    if not root.exists():
+        return None
+
+    # 从 URL 提取 msg_id（例如 /172506-20260827-1122 -> 172506）
+    m_match = re.search(r'/(\d+)[-_]', file_url)
+    msg_id = m_match.group(1) if m_match else ""
+    if not msg_id:
+        id_match = re.search(r'/(\d{4,})', file_url)
+        msg_id = id_match.group(1) if id_match else ""
+
+    # 按 URL 中的日期定位年月目录（如 20260827 -> 2026/08）
+    d_match = re.search(r'[-_](\d{4})(\d{2})\d{2}', file_url)
+    target_dirs = []
+    if d_match:
+        year_str, month_str = d_match.group(1), d_match.group(2)
+        m_dir = root / year_str / month_str
+        if m_dir.exists():
+            target_dirs.append(m_dir)
+        m_dir2 = root / (year_str + month_str)
+        if m_dir2.exists():
+            target_dirs.append(m_dir2)
+
+    if not target_dirs:
+        try:
+            for y_dir in root.iterdir():
+                if y_dir.is_dir():
+                    for m_sub in y_dir.iterdir():
+                        if m_sub.is_dir():
+                            target_dirs.append(m_sub)
+                    target_dirs.append(y_dir)
+        except OSError:
+            return None
+
+    for m_dir in target_dirs:
+        for sub in ("images", "videos", "voice", "other"):
+            sub_dir = m_dir / sub
+            if not sub_dir.exists():
+                continue
+            try:
+                for f in os.listdir(sub_dir):
+                    if f.endswith(".tmp"):
+                        continue
+                    if msg_id and (f"_{msg_id}." in f or f"_{msg_id}_" in f or f.startswith(f"{msg_id}_") or f.endswith(f"_{msg_id}")):
+                        p = sub_dir / f
+                        if p.stat().st_size > 0:
+                            return p.read_bytes()
+            except OSError:
+                pass
+    return None
+
+
+async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[str, str] | None = None) -> dict:
     """下载消息媒体，返回带 _local_file / _download_failed 字段的增量记录。"""
     file_url = msg.get("file", "")
     thumb_url = msg.get("thumbnail", "")
@@ -518,7 +578,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
 
     # 已有本地文件（按 时间戳_id 前缀匹配，扩展名无关）→ 检查大小后直接复用
     for existing in os.listdir(dest_dir):
-        if existing.startswith(f"{ts}_{msg_id}") and not existing.endswith(".tmp"):
+        if (existing.startswith(f"{ts}_{msg_id}") or f"_{msg_id}." in existing or f"_{msg_id}_" in existing) and not existing.endswith(".tmp"):
             f_path = dest_dir / existing
             try:
                 if f_path.stat().st_size > 0:
@@ -534,6 +594,24 @@ async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
     used_url = file_url
     assert _media_sem is not None, "archive.initialize() 未调用"
 
+    # 自动解析账号凭据 headers（私有媒体资源需附带鉴权请求头）
+    if not headers:
+        try:
+            from config.credentials import get_source_headers_for_account
+            account_id = msg.get("account_id", "")
+            group_type = msg.get("group_type", "")
+            if not account_id or not group_type:
+                from config.config import MONITOR_LIST
+                for m in MONITOR_LIST:
+                    if m.get("m_name") == m_name or m.get("name") == m_name:
+                        account_id = account_id or m.get("account_id", "")
+                        group_type = group_type or m.get("group_type", "")
+                        break
+            if account_id and group_type:
+                headers = get_source_headers_for_account(account_id, group_type)
+        except Exception:
+            pass
+
     # 优先下载主媒体文件；主文件失效/404 时若为图片且有缩略图则回退
     candidate_urls = [u for u in [file_url, thumb_url] if u]
     if not candidate_urls:
@@ -541,28 +619,31 @@ async def _download_media(m_name: str, dt: datetime, msg: dict) -> dict:
 
     async with _media_sem:
         client = _media_client
-        assert client is not None
         for u in candidate_urls:
             if ok:
                 break
             for attempt in range(3):
                 try:
-                    async with client.stream("GET", u, timeout=60, follow_redirects=True) as resp:
-                        if resp.status_code == 200:
-                            with open(tmp_path, "wb") as f:
-                                async for chunk in resp.aiter_bytes(1 << 16):
-                                    f.write(chunk)
-                            if tmp_path.exists() and tmp_path.stat().st_size > 0:
-                                ok = True
-                                used_url = u
-                                break
-                            else:
-                                log_all(f"⚠️ 归档媒体下载为空文件 (第 {attempt+1} 次尝试): {u[:80]}", is_debug=True)
-                        elif resp.status_code in (403, 404, 410):
-                            log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (资源已失效或无权访问): {u[:80]}", is_debug=True)
+                    if client is not None and not getattr(client, "is_closed", False):
+                        resp = await client.get(u, headers=headers or {}, timeout=60, follow_redirects=True)
+                    else:
+                        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as fallback_client:
+                            resp = await fallback_client.get(u, headers=headers or {})
+
+                    if resp.status_code == 200 and resp.content:
+                        with open(tmp_path, "wb") as f:
+                            f.write(resp.content)
+                        if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                            ok = True
+                            used_url = u
                             break
                         else:
-                            log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (第 {attempt+1} 次重试): {u[:80]}", is_debug=True)
+                            log_all(f"⚠️ 归档媒体下载为空文件 (第 {attempt+1} 次尝试): {u[:80]}", is_debug=True)
+                    elif resp.status_code in (403, 404, 410):
+                        log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (资源已失效或无权访问): {u[:80]}", is_debug=True)
+                        break
+                    else:
+                        log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (第 {attempt+1} 次重试): {u[:80]}", is_debug=True)
                 except Exception as e:
                     log_all(f"⚠️ 归档媒体下载异常 (第 {attempt+1} 次重试): {u[:80]} — {type(e).__name__}: {e}", is_debug=True)
                 if attempt < 2:
@@ -620,7 +701,7 @@ def infer_member_group(name: str) -> str:
     hinata_names = [
         "金村", "大野", "佐藤", "片山", "坂井", "下田", "山下葉", "大田", "正源司", "藤嶌", "渡辺", "小坂",
         "加藤", "齐藤", "佐佐木", "東村", "松田好", "河田", "丹生", "濱岸", "富田", "高本", "高瀬",
-        "上村ひ", "高橋", "森本", "山口", "平尾", "平岡", "竹内", "岸", "小西", "清水", "宮地", "石塚", "松尾桜", "マネダコ"
+        "上村ひ", "高橋", "森本", "山口", "平尾", "平冈", "竹内", "岸", "小西", "清水", "宮地", "石塚", "松尾桜", "マネダコ"
     ]
     sakura_names = [
         "石森", "小池", "小林", "田村保", "森田", "藤吉", "山崎", "谷口", "中川", "山田", "浅井", "的野",
@@ -650,7 +731,7 @@ def infer_member_group(name: str) -> str:
 # ──────────────────────────────────────────────
 async def archive_message(member: dict, msg: dict, translated: str = "") -> None:
     """归档单条消息：按 JST 日本标准时间划分年月，先落 JSON，再下载媒体回填。幂等，可安全重复调用。"""
-    m_name = member.get("m_name", "")
+    m_name = member.get("m_name", "") or member.get("name", "")
     ts_str = msg.get("published_at") or msg.get("updated_at", "")
     if not m_name or not ts_str:
         return
@@ -667,7 +748,12 @@ async def archive_message(member: dict, msg: dict, translated: str = "") -> None
         await _merge_write(m_name, dt, record)
         _local_file = ""
         if cfg.ARCHIVE_MEDIA and msg.get("file") and msg.get("type") in _MEDIA_TYPES:
-            delta = await _download_media(m_name, dt, msg)
+            from config.credentials import get_source_headers_for_account
+            headers = get_source_headers_for_account(
+                member.get("account_id", "") or msg.get("account_id", ""),
+                member.get("group_type", "") or msg.get("group_type", "")
+            )
+            delta = await _download_media(m_name, dt, msg, headers=headers)
             await _merge_write(m_name, dt, delta)
             _local_file = delta.get("_local_file", "")
         # ── 图片后台打标签 ──
@@ -698,6 +784,15 @@ async def wait_pending(timeout: float = 60) -> None:
 # 查询（网页查看器 / 回填工具用）
 # ──────────────────────────────────────────────
 def list_members() -> list[str]:
+    """返回所有有归档消息的成员列表。优先从 SQLite 获取。"""
+    conn = init_db()
+    if conn:
+        try:
+            rows = conn.execute("SELECT DISTINCT member_dir FROM messages ORDER BY member_dir ASC;").fetchall()
+            if rows:
+                return [r[0] for r in rows]
+        except Exception:
+            pass
     root = archive_root()
     if not root.is_dir():
         return []
@@ -728,19 +823,34 @@ def _month_count(json_path: Path) -> int:
 
 
 def list_months(member_dir: str) -> list[dict]:
-    """返回 [{year, month, count}]，新的在前。count 带 mtime 缓存。"""
+    """返回 [{year, month, count}]，新的在前。支持 mtime 缓存与快速统计。"""
     root = archive_root() / member_dir
-    if not root.is_dir():
-        return []
-    out = []
-    for year_dir in sorted((d for d in root.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
-        for month_dir in sorted((d for d in year_dir.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
-            json_path = month_dir / "messages.json"
-            if not json_path.is_file():
-                continue
-            out.append({"year": int(year_dir.name), "month": int(month_dir.name),
-                        "count": _month_count(json_path)})
-    return out
+    if root.is_dir():
+        out = []
+        for year_dir in sorted((d for d in root.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
+            for month_dir in sorted((d for d in year_dir.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
+                json_path = month_dir / "messages.json"
+                if not json_path.is_file():
+                    continue
+                out.append({"year": int(year_dir.name), "month": int(month_dir.name),
+                            "count": _month_count(json_path)})
+        if out:
+            return out
+
+    conn = init_db()
+    if conn:
+        try:
+            rows = conn.execute("""
+                SELECT year, month, COUNT(*) FROM messages
+                WHERE member_dir = ?
+                GROUP BY year, month
+                ORDER BY year DESC, month DESC;
+            """, (member_dir,)).fetchall()
+            if rows:
+                return [{"year": r[0], "month": r[1], "count": r[2]} for r in rows]
+        except Exception:
+            pass
+    return []
 
 
 _ORIGINAL_LIST_MONTHS = list_months

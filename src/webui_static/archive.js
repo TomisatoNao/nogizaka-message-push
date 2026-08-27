@@ -542,7 +542,7 @@ function renderMemberPopover(filterKeyword = "") {
 
       let avatarHTML = '';
       if (m.avatar) {
-        avatarHTML = '<img class="mpi-avatar-img" src="' + esc(m.avatar) + '" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + g.cls + '" style="display:none;">' + esc(avatarText) + '</span>';
+        avatarHTML = '<img class="mpi-avatar-img" src="' + esc(m.avatar) + '" loading="lazy" decoding="async" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + g.cls + '" style="display:none;">' + esc(avatarText) + '</span>';
       } else {
         avatarHTML = '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>';
       }
@@ -752,7 +752,7 @@ function renderBlogAuthorPopover(filterKeyword = "") {
 
     let avHTML = '';
     if (a.avatar) {
-      avHTML = '<img class="mpi-avatar-img" src="' + esc(a.avatar) + '" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + grpClass + '" style="display:none;">' + esc(avText) + '</span>';
+      avHTML = '<img class="mpi-avatar-img" src="' + esc(a.avatar) + '" loading="lazy" decoding="async" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + grpClass + '" style="display:none;">' + esc(avText) + '</span>';
     } else {
       avHTML = '<span class="mpi-avatar ' + grpClass + '">' + esc(avText) + '</span>';
     }
@@ -941,7 +941,7 @@ function renderBlogHero(post) {
 
   let coverHtml = '';
   if (coverUrl) {
-    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" alt=""></div>';
+    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" loading="lazy" decoding="async" alt=""></div>';
   } else {
     // 无封面链接：保留原有无封面样式（📝 占位）
     coverHtml = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
@@ -2379,6 +2379,8 @@ async function openBlogReaderById(blogId) {
   }
 }
 
+let _portalHomeCached = null;
+
 async function showHome() {
   curMode = "home";
   switchMainTab("home", true);
@@ -2387,9 +2389,30 @@ async function showHome() {
   $('backTop').classList.remove('show'); $('backTop').classList.add('force-hide');
   $('archiveHome').classList.add('active');
   
-  // 骨架屏
-  $('homeSkeleton').classList.add('active');
-  $('portalContent').style.display = 'none';
+  // 1. 如果已有内存或 sessionStorage 缓存，优先秒出（0ms 首屏响应）
+  let hasRenderedCache = false;
+  if (!_portalHomeCached) {
+    try {
+      const raw = sessionStorage.getItem("archive_portal_home_cache");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (Date.now() - parsed._ts < 60000)) {
+          _portalHomeCached = parsed.data;
+        }
+      }
+    } catch(e) {}
+  }
+  
+  if (_portalHomeCached) {
+    renderHome(_portalHomeCached);
+    $('homeSkeleton').classList.remove('active');
+    $('portalContent').style.display = '';
+    hasRenderedCache = true;
+  } else {
+    // 骨架屏
+    $('homeSkeleton').classList.add('active');
+    $('portalContent').style.display = 'none';
+  }
   
   try {
     const data = await api("/api/archive/home");
@@ -2401,12 +2424,18 @@ async function showHome() {
         '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
       return;
     }
+    _portalHomeCached = data;
+    try {
+      sessionStorage.setItem("archive_portal_home_cache", JSON.stringify({ _ts: Date.now(), data }));
+    } catch(e) {}
     renderHome(data);
     $('homeSkeleton').classList.remove('active');
     $('portalContent').style.display = '';
   } catch (e) {
-    $('homeSkeleton').classList.remove('active');
-    $('archiveHome').innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
+    if (!hasRenderedCache) {
+      $('homeSkeleton').classList.remove('active');
+      $('archiveHome').innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
+    }
   }
 }
 
@@ -2492,7 +2521,7 @@ function renderHome(data) {
     strip.innerHTML = recentPics.map(p =>
       '<div class="photo-card" data-type="' + p.type + '" data-member="' + esc(p.member || '') + '" data-group="' + esc(p.group_key || '') + '" data-id="' + p.id + '" data-year="' + (p.year || '') + '" data-month="' + (p.month || '') + '">' +
         '<span class="pc-member">' + esc(p.member_display) + '</span>' +
-        '<img src="' + mediaUrl(p.url) + '" data-src="' + esc(p.url) + '" alt="" onerror="handleImgError(this)" onload="this.classList.add(\'loaded\')">' +
+        '<img src="' + mediaUrl(p.url) + '" loading="lazy" decoding="async" data-src="' + esc(p.url) + '" alt="" onerror="handleImgError(this)" onload="this.classList.add(\'loaded\')">' +
         (p.text ? '<div class="pc-overlay"><div class="pc-cap">' + formatMessageText(p.text) + '</div></div>' : '') +
       '</div>'
     ).join('');
@@ -2650,7 +2679,7 @@ function renderHome(data) {
     if (!avatarText) avatarText = "💬";
     let avHTML = '';
     if (m.avatar) {
-      avHTML = '<img class="mbc-avatar-img" src="' + esc(m.avatar) + '" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';" /><div class="mbc-avatar ' + grpClass + '" style="display:none;">' + esc(avatarText) + '</div>';
+      avHTML = '<img class="mbc-avatar-img" src="' + esc(m.avatar) + '" loading="lazy" decoding="async" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';" /><div class="mbc-avatar ' + grpClass + '" style="display:none;">' + esc(avatarText) + '</div>';
     } else {
       avHTML = '<div class="mbc-avatar ' + grpClass + '">' + esc(avatarText) + '</div>';
     }
