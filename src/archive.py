@@ -834,7 +834,7 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
             target_path = letters_dir / f"{time_prefix}_{letter_id}.jpg"
             
             if target_path.exists() and target_path.stat().st_size > 0:
-                local_file = str(target_path.relative_to(archive_root())).replace("\\", "/")
+                local_file = f"{m_dir}/letters/{target_path.name}"
             else:
                 client = _media_client
                 sem = _media_sem if _media_sem is not None else asyncio.Semaphore(3)
@@ -847,7 +847,7 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
                                 resp = await temp_c.get(file_url, headers=headers)
                         if resp.status_code == 200 and len(resp.content) > 0:
                             target_path.write_bytes(resp.content)
-                            local_file = str(target_path.relative_to(archive_root())).replace("\\", "/")
+                            local_file = f"{m_dir}/letters/{target_path.name}"
                             log_all(f"✉️ [信件归档] 成功保存信件卡片: {m_dir}/letters/{target_path.name} ({len(resp.content)/1024:.1f} KB)", is_debug=True)
                     except Exception as ex:
                         log_all(f"⚠️ [信件归档] 下载信件卡片失败 (ID: {letter_id}): {ex}", is_debug=True)
