@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from pathlib import Path
 import time
 
 import httpx
@@ -278,6 +279,10 @@ class QQOfficialBot:
                 if resp.status_code in {200, 201}:
                     return resp
 
+                if resp.status_code == 400 and "/files" in url:
+                    # 允许 /files 接口携带业务错误码 (如 850019/850031) 返回给上层做降级重试
+                    return resp
+
                 log_all(
                     f"⚠️ 官方 QQ Bot [{self.name}] 请求失败 ({attempt + 1}/{max_retries}): "
                     f"HTTP {resp.status_code} | {resp.text[:200]}",
@@ -457,6 +462,22 @@ class QQOfficialBot:
             elif media_type == "image":
                 content = _compress_image_if_needed(content)
                 size_bytes = len(content)
+
+        # 自动嗅探文件真实 Magic Number，防止文件名或 media_type 误标导致 850019 格式不支持
+        if content:
+            header = content[:32]
+            if header.startswith(b"\xff\xd8\xff") or header.startswith(b"\x89PNG\r\n\x1a\n") or header.startswith(b"GIF8") or (header.startswith(b"RIFF") and len(header) >= 12 and header[8:12] == b"WEBP"):
+                media_type = "image"
+                if filename and not filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+                    filename = f"{Path(filename).stem}.jpg"
+            elif (len(header) >= 8 and (b"ftyp" in header[4:12] or header.startswith(b"\x00\x00\x00"))) or header.startswith(b"\x1a\x45\xdf\xa3"):
+                media_type = "video"
+                if filename and not filename.lower().endswith((".mp4", ".mov", ".webm", ".m4v")):
+                    filename = f"{Path(filename).stem}.mp4"
+            elif header.startswith(b"ID3") or header.startswith(b"\xff\xfb") or header.startswith(b"OggS") or (header.startswith(b"RIFF") and len(header) >= 12 and header[8:12] == b"WAVE"):
+                media_type = "record"
+                if filename and not filename.lower().endswith((".mp3", ".wav", ".ogg", ".silk")):
+                    filename = f"{Path(filename).stem}.mp3"
 
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
         size_bytes = len(content) if content else 0

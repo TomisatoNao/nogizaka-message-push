@@ -90,6 +90,62 @@ class _YdlLogger:
         return None
 
 
+def _sniff_and_fix_media_file(fpath: str) -> tuple[str, str]:
+    """根据文件前 32 字节 Magic Number 识别真实类型，必要时自动修正文件扩展名。"""
+    if not os.path.exists(fpath) or os.path.getsize(fpath) == 0:
+        return classify_media(fpath), fpath
+    try:
+        with open(fpath, "rb") as f:
+            header = f.read(32)
+    except Exception:
+        return classify_media(fpath), fpath
+
+    real_type = ""
+    correct_ext = ""
+    if header.startswith(b"\xff\xd8\xff"):
+        real_type = "image"
+        correct_ext = ".jpg"
+    elif header.startswith(b"\x89PNG\r\n\x1a\n"):
+        real_type = "image"
+        correct_ext = ".png"
+    elif header.startswith(b"GIF8"):
+        real_type = "image"
+        correct_ext = ".gif"
+    elif header.startswith(b"RIFF") and len(header) >= 12 and header[8:12] == b"WEBP":
+        real_type = "image"
+        correct_ext = ".webp"
+    elif (len(header) >= 8 and (b"ftyp" in header[4:12] or header.startswith(b"\x00\x00\x00"))):
+        real_type = "video"
+        correct_ext = ".mp4"
+    elif header.startswith(b"\x1a\x45\xdf\xa3"):
+        real_type = "video"
+        correct_ext = ".webm"
+    elif header.startswith(b"ID3") or header.startswith(b"\xff\xfb") or header.startswith(b"\xff\xf3") or header.startswith(b"\xff\xf2"):
+        real_type = "audio"
+        correct_ext = ".mp3"
+    elif header.startswith(b"OggS"):
+        real_type = "audio"
+        correct_ext = ".ogg"
+    elif header.startswith(b"RIFF") and len(header) >= 12 and header[8:12] == b"WAVE":
+        real_type = "audio"
+        correct_ext = ".wav"
+
+    curr_ext = os.path.splitext(fpath)[1].lower()
+    if real_type and correct_ext and curr_ext != correct_ext:
+        new_path = os.path.splitext(fpath)[0] + correct_ext
+        try:
+            if os.path.exists(new_path):
+                os.remove(new_path)
+            os.rename(fpath, new_path)
+            log.info("[downloader] 🔍 自动纠正媒体文件扩展名: %s -> %s (真实类型: %s)",
+                     os.path.basename(fpath), os.path.basename(new_path), real_type)
+            return real_type, new_path
+        except Exception as ex:
+            log.warning("[downloader] 重命名媒体文件失败: %s", ex)
+
+    return real_type or classify_media(fpath), fpath
+
+
 class MediaDownloader:
     """全平台共享的下载器（线程安全）。"""
 
@@ -127,6 +183,7 @@ class MediaDownloader:
             for _, dest_file, m in tasks:
                 if os.path.exists(dest_file) and os.path.getsize(dest_file) > 0:
                     m.local_path = os.path.abspath(dest_file)
+                    m.type, m.local_path = _sniff_and_fix_media_file(m.local_path)
 
         # 若仍有未下载成功的媒体（例如 TikTok / 抖音等需要会话签名的视频直链 403，或直接为视频）
         unresolved = [m for m in post.media if not (m.local_path and os.path.exists(m.local_path))]

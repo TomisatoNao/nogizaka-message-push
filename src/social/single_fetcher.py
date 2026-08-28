@@ -423,7 +423,17 @@ class SocialUrlParser:
         if not info:
             raise RuntimeError("未能从链接提取到内容信息")
 
-        author = info.get("uploader") or info.get("uploader_id") or platform.upper()
+        author = info.get("uploader") or info.get("uploader_id") or ""
+        if not author or author.upper() == platform.upper():
+            if platform == "instagram":
+                m_u = re.search(r"instagram\.com/(?:stories/)?([^/?#\s]+)", url)
+                author = f"@{m_u.group(1)}" if m_u else "Instagram 用户"
+            elif platform == "tiktok":
+                m_u = re.search(r"@([a-zA-Z0-9_.]+)", url)
+                author = f"@{m_u.group(1)}" if m_u else "TikTok 用户"
+            else:
+                author = platform.upper()
+
         text = info.get("description") or info.get("title") or ""
         post_id = str(info.get("id") or post_id)
         timestamp = ""
@@ -437,26 +447,34 @@ class SocialUrlParser:
             # 多图 / 轮播 Carousel
             for e in entries:
                 vcodec = e.get("vcodec") or ""
-                v_url = e.get("url")
+                v_url = e.get("url") or ""
+                ext = (e.get("ext") or "").lower()
+                is_video = (vcodec and vcodec != "none") or ext in ("mp4", "webm", "m4v", "mov") or (".mp4" in v_url.lower())
                 if v_url:
-                    mtype = "video" if (vcodec and vcodec != "none") else "image"
+                    mtype = "video" if is_video else "image"
                     media_items.append(MediaItem(type=mtype, url=v_url))
                 else:
                     thumbnails = e.get("thumbnails") or []
                     if thumbnails:
-                        best_th = thumbnails[-1].get("url")
+                        best_th = thumbnails[-1].get("url") or ""
                         if best_th:
-                            media_items.append(MediaItem(type="image", url=best_th))
+                            mtype = "video" if (".mp4" in best_th.lower()) else "image"
+                            media_items.append(MediaItem(type=mtype, url=best_th))
         else:
             # 单视频或单图
-            v_url = info.get("url")
+            v_url = info.get("url") or ""
             vcodec = info.get("vcodec") or ""
-            if v_url and vcodec and vcodec != "none":
+            ext = (info.get("ext") or "").lower()
+            is_video = (vcodec and vcodec != "none") or ext in ("mp4", "webm", "m4v", "mov") or (".mp4" in v_url.lower())
+            if v_url and is_video:
                 media_items.append(MediaItem(type="video", url=v_url))
+            elif v_url:
+                media_items.append(MediaItem(type="image", url=v_url))
             elif info.get("thumbnails"):
-                best_th = info["thumbnails"][-1].get("url")
+                best_th = info["thumbnails"][-1].get("url") or ""
                 if best_th:
-                    media_items.append(MediaItem(type="image", url=best_th))
+                    mtype = "video" if (".mp4" in best_th.lower()) else "image"
+                    media_items.append(MediaItem(type=mtype, url=best_th))
 
         log.info("[single_fetcher] %s 解析完成，获得 %d 条媒体", platform, len(media_items))
 
