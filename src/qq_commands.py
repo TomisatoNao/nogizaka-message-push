@@ -303,11 +303,11 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             if post.text:
                 try:
                     from src import translator
-                    t_res = await asyncio.wait_for(translator.translate_text(post.text, "社媒", "偶像"), timeout=10.0)
+                    t_res = await asyncio.wait_for(translator.translate_text(post.text, "社媒", "偶像"), timeout=40.0)
                     if t_res and t_res.strip() != post.text.strip():
                         post.extra["_translated"] = t_res.strip()
                 except Exception as ex:
-                    log_all(f"⚠️ [社媒翻译] AI 翻译跳过/超时: {ex}", is_debug=True)
+                    log_all(f"⚠️ [社媒翻译] AI 翻译跳过/超时: {type(ex).__name__} {ex}".strip(), is_debug=True)
             return t_res
 
         download_task = asyncio.to_thread(downloader.download, post)

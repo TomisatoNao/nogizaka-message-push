@@ -66,7 +66,7 @@ class SocialForwarder:
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     future = pool.submit(asyncio.run, translator.translate_text(text, "社媒", "偶像"))
-                    out = future.result(timeout=15)
+                    out = future.result(timeout=40)
             else:
                 out = asyncio.run(translator.translate_text(text, "社媒", "偶像"))
 

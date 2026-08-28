@@ -84,15 +84,15 @@ def initialize(client: httpx.AsyncClient | None = None) -> None:
     _http_client = client
 
 
-async def _post_json(url: str, payload: dict, headers: dict | None = None, custom_client: httpx.AsyncClient = None) -> httpx.Response:
+async def _post_json(url: str, payload: dict, headers: dict | None = None, custom_client: httpx.AsyncClient = None, timeout: float | None = None) -> httpx.Response:
     """发送翻译请求。优先复用当前事件循环内可用的共享连接池。"""
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
-    timeout = getattr(cfg, "TRANSLATE_TIMEOUT", 90)
+    req_timeout = timeout if timeout is not None else getattr(cfg, "TRANSLATE_TIMEOUT", 90)
 
     if custom_client is not None and not custom_client.is_closed:
-        return await custom_client.post(url, json=payload, headers=req_headers, timeout=timeout)
+        return await custom_client.post(url, json=payload, headers=req_headers, timeout=req_timeout)
 
     try:
         curr_loop = asyncio.get_running_loop()
@@ -105,14 +105,14 @@ async def _post_json(url: str, payload: dict, headers: dict | None = None, custo
         t_loop = getattr(transport, "_loop", None)
         if t_loop is None or t_loop is curr_loop:
             try:
-                return await _http_client.post(url, json=payload, headers=req_headers, timeout=timeout)
+                return await _http_client.post(url, json=payload, headers=req_headers, timeout=req_timeout)
             except RuntimeError as ex:
                 if "Event loop" in str(ex):
                     pass  # 跨 loop 导致异常，进入下方独立客户端 fallback
                 else:
                     raise
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=req_timeout) as client:
         return await client.post(url, json=payload, headers=req_headers)
 
 
@@ -211,8 +211,9 @@ def _parse_json_response(res_text: str) -> dict[str, str]:
     return {}
 
 async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncClient = None) -> str:
-    """按 provider 规范请求单条文本翻译。"""
+    """按 provider 规范请求单条文本翻译（带 15s 快速超时以保障多模型快速 Failover）。"""
     provider = model.get("provider", "gemini")
+    text_timeout = getattr(cfg, "TRANSLATE_TEXT_TIMEOUT", 15.0)
     if provider == "zhipu":
         url = model.get("url") or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         headers = {"Authorization": f"Bearer {cfg.ZHIPU_API_KEY}"}
@@ -222,7 +223,7 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
             "temperature": 0.3,
             "max_tokens": 4096,
         }
-        resp = await _post_json(url, payload, headers=headers, custom_client=custom_client)
+        resp = await _post_json(url, payload, headers=headers, custom_client=custom_client, timeout=text_timeout)
         if resp.status_code == 200:
             data = resp.json()
             choices = data.get("choices") or []
@@ -239,7 +240,7 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
         }
-        resp = await _post_json(url, payload, custom_client=custom_client)
+        resp = await _post_json(url, payload, custom_client=custom_client, timeout=text_timeout)
         if resp.status_code == 200:
             return _extract_text_gemini(resp.json(), model["name"])
         elif resp.status_code == 429:
