@@ -8,7 +8,6 @@ from src import archive
 @pytest.mark.asyncio
 async def test_letter_archiving_and_queries(tmp_path):
     orig_dir = cfg.ARCHIVE_DIR
-    orig_db = archive._sqlite_conn
     archive._sqlite_conn = None
     cfg.ARCHIVE_DIR = str(tmp_path)
 
@@ -84,8 +83,11 @@ async def test_letter_archiving_and_queries(tmp_path):
     finally:
         cfg.ARCHIVE_DIR = orig_dir
         if archive._sqlite_conn:
-            archive._sqlite_conn.close()
-        archive._sqlite_conn = orig_db
+            try:
+                archive._sqlite_conn.close()
+            except Exception:
+                pass
+        archive._sqlite_conn = None
 
 
 def test_webui_letters_api_routing():
