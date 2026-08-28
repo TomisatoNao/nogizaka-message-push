@@ -84,6 +84,31 @@ def _bytes_to_base64(data: bytes, ext: str = "jpg") -> str:
     return ""
 
 
+def _get_author_avatar_b64(author: str, group_key: str = "") -> str:
+    """获取博客作者的官方本地缓存头像 Base64 编码。"""
+    try:
+        from src import avatar_manager
+        # 1. 尝试从 avatar_manager 获取本地缓存文件路径
+        rel_path = avatar_manager.get_member_avatar_path(author, group_key)
+        if rel_path:
+            full_path = Path("data/avatars") / rel_path
+            b64 = _file_to_base64(full_path)
+            if b64:
+                return b64
+
+        # 2. 若指定了 group_key 但没找到，尝试跨组查找
+        if group_key:
+            rel_path_any = avatar_manager.get_member_avatar_path(author)
+            if rel_path_any:
+                full_path = Path("data/avatars") / rel_path_any
+                b64 = _file_to_base64(full_path)
+                if b64:
+                    return b64
+    except Exception as e:
+        log_all(f"⚠️ 获取博客作者头像失败 ({author}): {e}", is_debug=True)
+    return ""
+
+
 def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     """根据博客数据与三团配置生成自适应 HTML 模板字符串（大字号排版 + 原文译文紧凑跟随 + 段落间距舒适）。"""
     group_key = post.get("group_key", "").lower()
@@ -183,9 +208,9 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
                 processed_body += "\n" + "\n".join(trailing_imgs)
 
     valid_images_count = sum(1 for b in image_b64_list if b)
-    hero_b64 = next((b for b in image_b64_list if b), "")
-    if hero_b64:
-        avatar_html = f'<img src="{hero_b64}" class="author-avatar" alt="{author}"/>'
+    author_avatar_b64 = post.get("author_avatar_b64") or _get_author_avatar_b64(author, group_key)
+    if author_avatar_b64:
+        avatar_html = f'<img src="{author_avatar_b64}" class="author-avatar" alt="{author}"/>'
     else:
         initial = author[:1] if author else "🌸"
         avatar_html = f'<div class="author-avatar-fallback">{initial}</div>'

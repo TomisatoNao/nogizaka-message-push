@@ -39,6 +39,20 @@ async def test_blog_card_html_generation():
     assert "冨里 奈央" in html
     assert "テストブログ" in html
     assert "GLM-4-Flash" in html
+    assert "author-avatar" in html
+
+    # 测试未知作者优雅降级为文字头像
+    mock_unknown = {
+        "group_key": "nogizaka",
+        "author": "未知成员999",
+        "title": "テスト",
+        "date": "2026-08-19 12:00",
+        "translation": "<p><em>テスト</em></p>",
+        "image_paths": []
+    }
+    html_unk = _generate_html(mock_unknown, [])
+    assert "author-avatar-fallback" in html_unk
+    assert "未" in html_unk
 
 
 @_async_test
