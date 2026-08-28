@@ -30,9 +30,9 @@ log = logging.getLogger("collink")
 DEFAULTS = {
     "enabled": True,
     # 两次请求之间的最小间隔（秒）—— 防止一轮里连续快速打接口
-    "min_request_gap": 15,
+    "min_request_gap": 5,
     # 每小时最多请求次数（含 yt-dlp 的解析与下载）
-    "max_requests_per_hour": 40,
+    "max_requests_per_hour": 120,
     # 连续多少次鉴权/限流失败后熔断
     "failure_threshold": 3,
     # 熔断后暂停多久（秒），默认 6 小时
@@ -74,6 +74,39 @@ class IgSafety:
 
     # ── 准入 ────────────────────────────────────────────
 
+    def peek_blocked(self, config: dict) -> None:
+        """只检查当前是否处于熔断、静默时段或配额超限，不强制等待、不增加计数。"""
+        s = settings(config)
+        if not s.get("enabled", True):
+            return
+        now = time.time()
+        with self._lock:
+            if now < self._blocked_until:
+                left = int(self._blocked_until - now)
+                raise Blocked(
+                    f"Instagram 已熔断（{self._block_reason}），"
+                    f"还需等待 {left // 60} 分钟。这是为保护账号而主动暂停。")
+
+            qh = s.get("quiet_hours") or []
+            if len(qh) == 2:
+                start, end = int(qh[0]) % 24, int(qh[1]) % 24
+                if start != end:
+                    hour = time.localtime(now).tm_hour
+                    in_quiet = (start <= hour < end if start < end
+                                else hour >= start or hour < end)
+                    if in_quiet:
+                        raise Blocked(f"处于静默时段（{start}:00-{end}:00），"
+                                      f"暂不访问 Instagram")
+
+            if now - self._window_start >= 3600:
+                self._window_start = now
+                self._window_count = 0
+            limit = int(s.get("max_requests_per_hour", 120))
+            if self._window_count >= limit:
+                left = int(3600 - (now - self._window_start))
+                raise Blocked(f"本小时 Instagram 请求已达上限 {limit} 次，"
+                              f"{left // 60} 分钟后重置")
+
     def check(self, config: dict, *, what: str = "请求") -> None:
         """请求前调用。不允许时抛 Blocked（调用方应安静跳过本轮）。"""
         s = settings(config)
@@ -104,14 +137,14 @@ class IgSafety:
             if now - self._window_start >= 3600:
                 self._window_start = now
                 self._window_count = 0
-            limit = int(s.get("max_requests_per_hour", 40))
+            limit = int(s.get("max_requests_per_hour", 120))
             if self._window_count >= limit:
                 left = int(3600 - (now - self._window_start))
                 raise Blocked(f"本小时 Instagram 请求已达上限 {limit} 次，"
                               f"{left // 60} 分钟后重置")
 
             # 最小间隔
-            gap = float(s.get("min_request_gap", 15))
+            gap = float(s.get("min_request_gap", 5))
             wait = gap - (now - self._last_request)
         if wait > 0:
             time.sleep(min(wait, gap))

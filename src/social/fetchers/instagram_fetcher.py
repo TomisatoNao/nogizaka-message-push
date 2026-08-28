@@ -194,7 +194,7 @@ class InstagramFetcher(SocialFetcher):
         guard = get_guard()
 
         try:
-            guard.check(self._config, what="轮询")
+            guard.peek_blocked(self._config)
         except Blocked as e:
             now = time.time()
             if now - self._last_blocked_log > 60:
@@ -209,6 +209,9 @@ class InstagramFetcher(SocialFetcher):
             try:
                 posts.extend(self._fetch_feed(account))
                 guard.record_ok()
+            except Blocked as e:
+                log.info("[instagram] ⏸ %s", e)
+                return posts
             except Exception as e:
                 self._note_risk(e)
                 log.warning("[instagram] @%s Feed 检查失败: %s", account,
@@ -217,7 +220,6 @@ class InstagramFetcher(SocialFetcher):
         # Story 是强登录态接口，审查更严 —— 单独用更低的频率
         if cfg.get("include_stories", True) and self._story_due(account):
             try:
-                guard.check(self._config, what="Story")
                 posts.extend(self._fetch_stories(account))
                 guard.record_ok()
                 self._story_checked[account] = time.time()
