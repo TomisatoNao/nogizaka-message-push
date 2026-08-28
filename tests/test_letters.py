@@ -113,11 +113,13 @@ def test_webui_letters_sync_api_routing(monkeypatch):
     from src.webui import _Handler
     from unittest.mock import MagicMock
     import tools.archive_letters as al
+    import src.archive as arc
 
     async def mock_sync(target_mem, client):
         return (3, 1)
 
     monkeypatch.setattr(al, "sync_letters_for_member", mock_sync)
+    monkeypatch.setattr(arc, "initialize", lambda client: None)
 
     handler = _Handler.__new__(_Handler)
     handler.headers = {"Content-Length": "25"}

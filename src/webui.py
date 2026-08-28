@@ -1592,13 +1592,13 @@ class _Handler(BaseHTTPRequestHandler):
             if not target_mem:
                 target_mem = {"name": raw_m, "m_name": raw_m}
 
-            from tools.archive_letters import sync_letters_for_member
+            import tools.archive_letters as _al
             import httpx
 
             async def _do_sync():
                 async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     _archive.initialize(client)
-                    return await sync_letters_for_member(target_mem, client)
+                    return await _al.sync_letters_for_member(target_mem, client)
 
             try:
                 import asyncio
