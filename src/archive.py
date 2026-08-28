@@ -837,7 +837,8 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
                 local_file = str(target_path.relative_to(archive_root())).replace("\\", "/")
             else:
                 client = _media_client
-                async with _media_sem:
+                sem = _media_sem if _media_sem is not None else asyncio.Semaphore(3)
+                async with sem:
                     try:
                         if client is not None and not client.is_closed:
                             resp = await client.get(file_url, headers=headers, timeout=30.0)

@@ -21,11 +21,13 @@ async def test_letter_archiving_and_queries(tmp_path):
         member_name = "冨里 奈央"
         m_dir = archive.member_dir_name(member_name)
 
-        # 准备本地伪造信纸图片
+        # 准备本地伪造信纸图片（避免单元测试触发真实外网下载）
         letter_img_dir = tmp_path / m_dir / "letters"
         letter_img_dir.mkdir(parents=True, exist_ok=True)
-        fake_card = letter_img_dir / "20260425_152512_1404518.jpg"
-        fake_card.write_bytes(b"FAKE_LETTER_CARD_BYTES_12345")
+        fake_card1 = letter_img_dir / "20260425_152512_1404518.jpg"
+        fake_card1.write_bytes(b"FAKE_LETTER_CARD_BYTES_12345")
+        fake_card2 = letter_img_dir / "20251128_210424_1235103.jpg"
+        fake_card2.write_bytes(b"FAKE_LETTER_CARD_BYTES_67890")
 
         test_letters = [
             {
