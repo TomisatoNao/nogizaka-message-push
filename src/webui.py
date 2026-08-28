@@ -1602,7 +1602,17 @@ class _Handler(BaseHTTPRequestHandler):
 
             try:
                 import asyncio
-                tot, nw = asyncio.run(_do_sync())
+                import concurrent.futures
+                try:
+                    _loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    _loop = None
+
+                if _loop and _loop.is_running():
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                        tot, nw = _pool.submit(asyncio.run, _do_sync()).result(timeout=60)
+                else:
+                    tot, nw = asyncio.run(_do_sync())
                 self._send_json({"ok": True, "member": member, "total": tot, "new": nw, "count": tot})
             except Exception as e:
                 self._send_json({"ok": False, "errors": [f"同步信件异常: {e}"]}, 500)
