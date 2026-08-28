@@ -70,7 +70,7 @@ jobs:
         run: pytest -v -s --tb=short tests/test_social_single.py
 
       - name: Letters test
-        run: pytest -v -s --tb=short tests/test_letters.py
+        run: python tests/test_letters.py
 
       - name: Pytest full suite with coverage
         run: pytest --cov=src --cov-report=term

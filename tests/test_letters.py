@@ -1,5 +1,13 @@
+import asyncio
 import json
+import sys
+from pathlib import Path
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 import config.config as cfg
 from src import archive
@@ -109,7 +117,7 @@ def test_webui_letters_api_routing():
     assert data.get("ok") is True
 
 
-def test_webui_letters_sync_api_routing(monkeypatch):
+def test_webui_letters_sync_api_routing(monkeypatch=None):
     from src.webui import _Handler
     from unittest.mock import MagicMock
     import tools.archive_letters as al
@@ -118,22 +126,60 @@ def test_webui_letters_sync_api_routing(monkeypatch):
     async def mock_sync(target_mem, client):
         return (3, 1)
 
-    monkeypatch.setattr(al, "sync_letters_for_member", mock_sync)
-    monkeypatch.setattr(arc, "initialize", lambda client: None)
+    orig_sync = getattr(al, "sync_letters_for_member", None)
+    orig_init = getattr(arc, "initialize", None)
 
-    handler = _Handler.__new__(_Handler)
-    handler.headers = {"Content-Length": "25"}
-    handler.rfile = MagicMock()
-    handler.rfile.read.return_value = json.dumps({"member": "冨里 奈央"}).encode("utf-8")
-    handler.path = "/api/archive/letters_sync"
-    handler.command = "POST"
-    handler._send_json = MagicMock()
-    handler._guard = MagicMock(return_value=True)
-    handler._read_body_json = MagicMock(return_value={"member": "冨里 奈央"})
+    if monkeypatch is not None:
+        monkeypatch.setattr(al, "sync_letters_for_member", mock_sync)
+        monkeypatch.setattr(arc, "initialize", lambda client: None)
+    else:
+        al.sync_letters_for_member = mock_sync
+        arc.initialize = lambda client: None
 
-    handler._handle_archive("letters_sync")
-    assert handler._send_json.called
-    data = handler._send_json.call_args[0][0]
-    assert data.get("ok") is True
-    assert data.get("total") == 3
-    assert data.get("new") == 1
+    try:
+        handler = _Handler.__new__(_Handler)
+        handler.headers = {"Content-Length": "25"}
+        handler.rfile = MagicMock()
+        handler.rfile.read.return_value = json.dumps({"member": "冨里 奈央"}).encode("utf-8")
+        handler.path = "/api/archive/letters_sync"
+        handler.command = "POST"
+        handler._send_json = MagicMock()
+        handler._guard = MagicMock(return_value=True)
+        handler._read_body_json = MagicMock(return_value={"member": "冨里 奈央"})
+
+        handler._handle_archive("letters_sync")
+        assert handler._send_json.called
+        data = handler._send_json.call_args[0][0]
+        assert data.get("ok") is True
+        assert data.get("total") == 3
+        assert data.get("new") == 1
+    finally:
+        if monkeypatch is None:
+            if orig_sync:
+                al.sync_letters_for_member = orig_sync
+            if orig_init:
+                arc.initialize = orig_init
+
+
+def main():
+    import tempfile
+    from pathlib import Path
+    print("=== Test 1: 信件归档与 SQLite 持久化 ===")
+    with tempfile.TemporaryDirectory(prefix="letter_test_") as tdir:
+        asyncio.run(test_letter_archiving_and_queries(Path(tdir)))
+    print("✅ Test 1 通过")
+
+    print("=== Test 2: WebUI letters 端点路由 ===")
+    test_webui_letters_api_routing()
+    print("✅ Test 2 通过")
+
+    print("=== Test 3: WebUI letters_sync 端点路由 ===")
+    test_webui_letters_sync_api_routing()
+    print("✅ Test 3 通过")
+
+    print("==================================================")
+    print("🎉 全部信件归档测试通过！")
+
+
+if __name__ == "__main__":
+    main()
