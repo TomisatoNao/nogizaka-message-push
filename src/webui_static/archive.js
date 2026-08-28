@@ -450,23 +450,10 @@ function switchMainTab(mode, keepHash) {
   if ($("tabBlog")) $("tabBlog").classList.toggle("active", mode === "blog");
   if ($("tabLetter")) $("tabLetter").classList.toggle("active", mode === "letter");
 
-  const side = $("archiveSide");
-  const timeline = $("timeline");
-  const blogGrid = $("blogGrid");
-  const letterGrid = $("letterGrid");
-  const msgToolbar = document.querySelector(".msg-toolbar");
-  const searchToolbar = document.querySelector(".toolbar:not(.msg-toolbar):not(.blog-toolbar):not(.letter-toolbar)");
-
   if (mode === "home") {
     if (!keepHash) goHome();
   } else if (mode === "msg") {
-    hideHome();
-    if (letterGrid) letterGrid.style.display = "none";
-    if (blogGrid) blogGrid.style.display = "none";
-    if (timeline) timeline.style.display = "block";
-    if (msgToolbar) msgToolbar.style.display = "flex";
-    if (searchToolbar) searchToolbar.style.display = "flex";
-    if (side) side.style.display = "";
+    _enterMemberMode();
     if (!keepHash) {
       let saved = null;
       try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
@@ -478,35 +465,19 @@ function switchMainTab(mode, keepHash) {
       selectMember(wanted);
     }
   } else if (mode === "blog") {
-    hideHome();
-    if (letterGrid) letterGrid.style.display = "none";
-    if (timeline) timeline.style.display = "none";
-    if (msgToolbar) msgToolbar.style.display = "none";
-    if (searchToolbar) searchToolbar.style.display = "none";
-    if (side) side.style.display = "none";
-    if (blogGrid) blogGrid.style.display = "block";
-    if (!keepHash) {
-      let savedGroup = null;
-      let savedAuthor = "";
-      try {
-        savedGroup = localStorage.getItem("archive_last_blog_group");
-        savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
-      } catch (_) {}
-      const gKey = (savedGroup && blogGroups.some(g => g.key === savedGroup)) ? savedGroup : (curBlogGroup || "nogizaka");
-      selectBlogGroup(gKey, savedAuthor);
-    }
+    let savedGroup = null;
+    let savedAuthor = "";
+    try {
+      savedGroup = localStorage.getItem("archive_last_blog_group");
+      savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
+    } catch (_) {}
+    const gKey = (savedGroup && blogGroups.some(g => g.key === savedGroup)) ? savedGroup : (curBlogGroup || "nogizaka");
+    selectBlogGroup(gKey, savedAuthor);
   } else if (mode === "letter") {
     if (!window._isArchiveAdmin) {
       switchMainTab("msg", keepHash);
       return;
     }
-    hideHome();
-    if (timeline) timeline.style.display = "none";
-    if (blogGrid) blogGrid.style.display = "none";
-    if (msgToolbar) msgToolbar.style.display = "none";
-    if (searchToolbar) searchToolbar.style.display = "none";
-    if (side) side.style.display = "none";
-    if (letterGrid) letterGrid.style.display = "block";
     let saved = null;
     try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
     const wanted = (saved && members.some(m => m.name === saved))
@@ -539,8 +510,8 @@ async function loadMembers(skipSelect = false) {
   
   loadBlogGroupChips();
 
-  // skipSelect=true 时只渲染 chips，不自动跳转（首页模式下使用）
-  if (skipSelect) return;
+  // skipSelect=true 或非消息模式时只渲染 chips，不自动跳转
+  if (skipSelect || curMode !== "msg") return;
   let saved = null;
   try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
   const wanted = (saved && members.some(m => m.name === saved))
@@ -680,8 +651,17 @@ async function loadBlogGroupChips() {
 function _enterMemberMode() {
   curMode = "msg";
   curBlogGroup = "";
+  if ($("tabHome")) $("tabHome").classList.remove("active");
+  if ($("tabMsg")) $("tabMsg").classList.add("active");
+  if ($("tabBlog")) $("tabBlog").classList.remove("active");
+  if ($("tabLetter")) $("tabLetter").classList.remove("active");
+
+  $('archiveHome').classList.remove('active');
+  $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
+  document.querySelector('.layout').style.display = '';
   $("archiveSide").style.display = "";
   $("blogGrid").style.display = "none";
+  if ($("letterGrid")) $("letterGrid").style.display = "none";
   $("timeline").style.display = "";
   const msgTb = document.querySelector(".msg-toolbar");
   if (msgTb) msgTb.style.display = "";
@@ -722,20 +702,26 @@ async function selectBlogGroup(key, author = "") {
   searchQuery = "";
   syncSearchInput();
   syncChipHighlight();
-  
+
+  if ($("tabHome")) $("tabHome").classList.remove("active");
+  if ($("tabMsg")) $("tabMsg").classList.remove("active");
+  if ($("tabBlog")) $("tabBlog").classList.add("active");
+  if ($("tabLetter")) $("tabLetter").classList.remove("active");
+
   const p = new URLSearchParams({ blog: key });
   if (curBlogAuthor) p.set("author", curBlogAuthor);
   selfHashUpdate = true;
   location.hash = p.toString();
   setTimeout(() => { selfHashUpdate = false; }, 0);
-  
+
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
   document.querySelector('.layout').style.display = '';
   $("timeline").style.display = "none";
   $("blogGrid").style.display = "";
+  if ($("letterGrid")) $("letterGrid").style.display = "none";
   $("archiveSide").style.display = "";
-  
+
   const msgTb = document.querySelector(".msg-toolbar");
   if (msgTb) msgTb.style.display = "none";
   const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
@@ -2480,9 +2466,15 @@ let _portalHomeCached = null;
 
 async function showHome() {
   curMode = "home";
-  switchMainTab("home", true);
-  
+  if ($("tabHome")) $("tabHome").classList.add("active");
+  if ($("tabMsg")) $("tabMsg").classList.remove("active");
+  if ($("tabBlog")) $("tabBlog").classList.remove("active");
+  if ($("tabLetter")) $("tabLetter").classList.remove("active");
+
   document.querySelector('.layout').style.display = 'none';
+  if ($("letterGrid")) $("letterGrid").style.display = "none";
+  if ($("blogGrid")) $("blogGrid").style.display = "none";
+  if ($("timeline")) $("timeline").style.display = "none";
   $('backTop').classList.remove('show'); $('backTop').classList.add('force-hide');
   $('archiveHome').classList.add('active');
   
@@ -2985,8 +2977,8 @@ async function handleRoute(isInitial = false) {
   const p = new URLSearchParams(rawHash);
 
   // 1. 博客模式：#blog, #blog=nogizaka, #blog=...
+  // 1. 博客模式：#blog, #blog=nogizaka, #blog=...
   if (p.has("blog") || rawHash === "blog") {
-    curMode = "blog";
     let savedGroup = null;
     let savedAuthor = "";
     try {
@@ -2995,14 +2987,12 @@ async function handleRoute(isInitial = false) {
     } catch (_) {}
     const group = p.get("blog") || (savedGroup && blogGroups.some(g => g.key === savedGroup) ? savedGroup : curBlogGroup) || "nogizaka";
     const author = p.get("author") || savedAuthor || "";
-    switchMainTab("blog", true);
     await selectBlogGroup(group, author);
     return;
   }
 
   // 1.5 信件模式：#letter, #letter=...
   if (p.has("letter") || rawHash === "letter") {
-    curMode = "letter";
     if (!window._isArchiveAdmin) {
       switchMainTab("msg", true);
       return;
@@ -3010,7 +3000,6 @@ async function handleRoute(isInitial = false) {
     let saved = null;
     try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
     const mem = p.get("letter") || (saved && members.some(m => m.name === saved) ? saved : curLetterMember) || getDefaultNogiMember();
-    switchMainTab("letter", true);
     if (mem) {
       await selectLetterMember(mem);
     }
@@ -3019,7 +3008,6 @@ async function handleRoute(isInitial = false) {
 
   // 2. 消息模式：#msg, #member=..., #y=...
   if (p.has("member") || p.has("y") || p.has("m") || rawHash === "msg") {
-    curMode = "msg";
     let saved = null;
     try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
     const mem = p.get("member") || (saved && members.some(m => m.name === saved) ? saved : curMember) || getDefaultNogiMember();
@@ -3028,8 +3016,6 @@ async function handleRoute(isInitial = false) {
     curType = t;
     searchQuery = q;
     syncSearchInput();
-    switchMainTab("msg", true);
-    hideHome();
     if (mem) {
       await selectMember(mem, true);
     }
@@ -3037,8 +3023,6 @@ async function handleRoute(isInitial = false) {
   }
 
   // 3. 首页模式（默认无 hash 或 #home）
-  curMode = "home";
-  switchMainTab("home", true);
   showHome();
 }
 
@@ -3179,12 +3163,36 @@ function openLetterLightbox(idx) {
 }
 
 async function selectLetterMember(mName) {
+  curMode = "letter";
   curLetterMember = mName;
   try { localStorage.setItem("archive_last_letter_member", mName); } catch (_) {}
   const mObj = members.find(m => m.name === mName) || { name: mName, display: mName };
   const disp = $("curLetterMemberDisplay");
   if (disp) disp.textContent = mObj.display || mName;
-  
+
+  if ($("tabHome")) $("tabHome").classList.remove("active");
+  if ($("tabMsg")) $("tabMsg").classList.remove("active");
+  if ($("tabBlog")) $("tabBlog").classList.remove("active");
+  if ($("tabLetter")) $("tabLetter").classList.add("active");
+
+  $('archiveHome').classList.remove('active');
+  $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
+  document.querySelector('.layout').style.display = '';
+  $("timeline").style.display = "none";
+  $("blogGrid").style.display = "none";
+  if ($("letterGrid")) $("letterGrid").style.display = "block";
+  $("archiveSide").style.display = "none";
+
+  const msgTb = document.querySelector(".msg-toolbar");
+  if (msgTb) msgTb.style.display = "none";
+  const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
+  if (searchTb) searchTb.style.display = "none";
+
+  const p = new URLSearchParams({ letter: mName });
+  selfHashUpdate = true;
+  location.hash = p.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+
   renderLetterMemberPopover();
   await loadLetters(mName);
 }
