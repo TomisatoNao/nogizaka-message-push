@@ -4,8 +4,9 @@
 并会重试之前媒体下载失败（_download_failed）的消息。
 
 用法:
-    python tools/backfill_archive.py                          # 回填所有监控成员
+    python tools/backfill_archive.py                          # 回填所有监控成员（断点续传）
     python tools/backfill_archive.py "冨里 奈央"               # 只回填指定成员（名字或 id 均可，可多个）
+    python tools/backfill_archive.py "佐藤 優羽" --reset       # 重置断点，从最早期全量回填（换号后推荐）
     python tools/backfill_archive.py --from 2023-01-01        # 指定起始日期（默认 2013-01-01）
     python tools/backfill_archive.py --force                  # 跳过"主程序正在运行"检查（不建议）
 
@@ -104,11 +105,15 @@ def _save_progress(progress: dict) -> None:
 
 
 async def backfill_member(client: httpx.AsyncClient, member: dict,
-                          start_from: str, progress: dict) -> None:
+                          start_from: str, progress: dict,
+                          reset_cursor: bool = False,
+                          user_specified_start: bool = False) -> None:
     m_name = member["m_name"]
     account_id = member["account_id"]
     acc_cfg = cfg.ACCOUNTS.get(account_id, {})
-    key = f"{member['group_type']}_{member['m_id']}"
+    # 游标键名绑定账号 ID 与成员 ID，当用户为成员切换不同账号时自动互不干扰
+    key = f"{account_id}_{member['group_type']}_{member['m_id']}"
+    legacy_key = f"{member['group_type']}_{member['m_id']}"
 
     ok, reason = validate_account_cred(account_id)
     if not ok:
@@ -116,9 +121,9 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         return
 
     archived_ids, failed_ids = archive.load_archived_ids(m_name)
-    saved_cursor = progress.get(key)
-    if start_from != DEFAULT_START:
-        cursor = min(start_from, saved_cursor) if saved_cursor else start_from
+    saved_cursor = None if reset_cursor else (progress.get(key) or progress.get(legacy_key))
+    if reset_cursor or user_specified_start:
+        cursor = start_from
     else:
         cursor = saved_cursor or start_from
     print(f"▸ {m_name}（账号 {account_id}）从 {cursor} 开始，已归档 {len(archived_ids)} 条"
@@ -209,11 +214,15 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             break   # 游标不再前进，防止死循环
         cursor = new_cursor
         progress[key] = cursor
+        if legacy_key in progress and legacy_key != key:
+            progress.pop(legacy_key, None)
         _save_progress(progress)
         print(f"  … 游标 {cursor}（本页新归档 {page_new} 条，累计 {total_new}，间隔 {pacer.delay:.1f}s）")
         await pacer.wait()   # 自适应分页间隔
 
     progress[key] = cursor
+    if legacy_key in progress and legacy_key != key:
+        progress.pop(legacy_key, None)
     _save_progress(progress)
     print(f"  ✅ {m_name} 完成，本次新归档 {total_new} 条")
 
@@ -227,10 +236,15 @@ async def main() -> None:
     force = "--force" in args
     args = [a for a in args if a != "--force"]
 
+    reset = "--reset" in args
+    args = [a for a in args if a != "--reset"]
+
+    user_specified_start = False
     start_from = DEFAULT_START
     if "--from" in args:
         i = args.index("--from")
         start_from = f"{args[i + 1]}T00:00:00Z"
+        user_specified_start = True
         args = args[:i] + args[i + 2:]
 
     if main_program_running() and not force:
@@ -261,14 +275,22 @@ async def main() -> None:
         print("⚠️ config.json 的 archive.enabled 是关闭的——回填仍会写入归档目录，"
               "但主程序不会实时归档新消息。")
 
-    print(f"═══ 历史回填（{len(targets)} 个成员，起始 {start_from}）═══")
+    print(f"═══ 历史回填（{len(targets)} 个成员，起始 {start_from}"
+          + ("，--reset 强制从头扫描" if reset else "") + "）═══")
     client = httpx.AsyncClient(timeout=30)
     archive.initialize(client)
     tagger.initialize(client)
     progress = _load_progress()
     try:
         for member in targets:      # 串行：避免同账号并发
-            await backfill_member(client, member, start_from, progress)
+            await backfill_member(
+                client,
+                member,
+                start_from,
+                progress,
+                reset_cursor=reset,
+                user_specified_start=user_specified_start,
+            )
         await tagger.wait_pending(timeout=10)
     finally:
         await client.aclose()

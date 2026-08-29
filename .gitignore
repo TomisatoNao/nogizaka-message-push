@@ -37,5 +37,6 @@ scratch/
 .coverage
 .pytest_cache/
 htmlcov/
-
-
+# 本地私有部署脚本
+tools/deploy_*.py
+tools/deploy_to_nas.py

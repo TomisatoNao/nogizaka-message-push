@@ -3327,7 +3327,7 @@ async function promptArchiveMember() {
 async function promptArchiveMessage() {
   const result = await customPrompt({
     title: "💬 归档成员消息",
-    message: "请输入要补全历史消息的成员姓名（留空代表处理全部监控成员）：",
+    message: "请输入要补全历史消息的成员姓名（留空代表处理全部监控成员）：\n注：系统将自动扫描补全全部历史，已归档的消息自动秒级跳过。",
     placeholder: "例：冨里 奈央（支持多姓名或留空）",
     icon: "💬",
     confirmText: "开始回填消息"
@@ -3339,7 +3339,7 @@ async function promptArchiveMessage() {
     const res = await fetch("/api/archive/messages/backfill", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ member: result.value || "" })
+      body: JSON.stringify({ member: result.value || "", reset: true })
     });
     const data = await res.json();
     showToast(data.msg || (data.ok ? "已成功启动消息归档回填任务！" : "操作失败"), data.ok ? "success" : "error");

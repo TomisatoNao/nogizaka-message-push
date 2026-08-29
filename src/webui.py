@@ -24,6 +24,7 @@ import os
 import random
 import re
 import shutil
+import socket
 import sqlite3
 import sys
 import threading
@@ -251,10 +252,19 @@ def save_config(raw: dict, path: Path | None = None) -> None:
     except OSError as e:
         log_all(f"⚠️ 配置历史快照失败（继续保存）: {e}", is_error=True)
     text = serialize_config(raw)
-    tmp = path.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except OSError:
+        # Fallback for docker bind-mounted files where os.replace fails (Errno 16 Device or resource busy)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _trigger_reload() -> bool:
@@ -334,9 +344,18 @@ def update_env_file(values: dict[str, str], path: Path | None = None,
     lines = out
     for key, val in remaining.items():
         lines.append(f"{key}={_quote_env(val)}")
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    content = "\n".join(lines) + "\n"
+    try:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        # Fallback for docker bind-mounted single files where rename fails with EBUSY (Errno 16)
+        path.write_text(content, encoding="utf-8")
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
     try:
         os.chmod(path, 0o600)
     except OSError:
@@ -2496,9 +2515,12 @@ class _Handler(BaseHTTPRequestHandler):
                 payload = {}
 
             member_name = payload.get("member", "").strip()
+            reset_flag = bool(payload.get("reset", False))
             
             import subprocess
             cmd = [sys.executable, str(_BASE_DIR / "tools" / "backfill_archive.py"), "--force"]
+            if reset_flag:
+                cmd.append("--reset")
             if member_name:
                 cmd.append(member_name)
 
@@ -3369,6 +3391,9 @@ class _Handler(BaseHTTPRequestHandler):
 
 class _ThreadingHTTPServer(ThreadingHTTPServer):
     """静默处理客户端主动断开连接等无害网络异常。"""
+    allow_reuse_address = True
+    allow_reuse_port = getattr(socket, "SO_REUSEPORT", None) is not None
+
     def handle_error(self, request, client_address):
         ex_type, _, _ = sys.exc_info()
         if ex_type in (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
