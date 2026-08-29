@@ -2563,7 +2563,7 @@ function renderHome(data) {
   let heroHTML = '';
   heroHTML += '<div class="portal-hero-top">';
   heroHTML += '<div class="portal-hero-brand">';
-  heroHTML += '<div class="portal-hero-icon"><img src="/static/archive_icon.svg" alt="坂道时光归档"></div>';
+  heroHTML += '<div class="portal-hero-icon"><img src="/static/archive_icon.png" alt="坂道时光归档"></div>';
   heroHTML += '<div class="portal-hero-title-box">';
   heroHTML += '<div class="portal-hero-badge-row">';
   heroHTML += '<span class="portal-pill-brand nogi">乃木坂46</span>';

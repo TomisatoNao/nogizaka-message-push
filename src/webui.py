@@ -692,6 +692,8 @@ class _Handler(BaseHTTPRequestHandler):
             "theme.css": "text/css", "theme.js": "application/javascript",
             "archive.css": "text/css", "archive.js": "application/javascript",
             "admin_icon.svg": "image/svg+xml", "archive_icon.svg": "image/svg+xml",
+            "admin_icon.png": "image/png", "archive_icon.png": "image/png",
+            "admin_hero.png": "image/png", "archive_hero.png": "image/png",
         }
         ctype = allowed.get(name)
         if ctype is None:
@@ -711,7 +713,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         self.send_response(200)
-        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
+        self.send_header("Content-Type", ctype if ctype.startswith("image/") else f"{ctype}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-cache")
@@ -737,11 +739,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         # 共享静态资源（主题 token / 切换脚本 / 样式 / 图标）：登录页也要用，故不设鉴权
-        if path in ("/static/theme.css", "/static/theme.js",
-                    "/static/archive.css", "/static/archive.js",
-                    "/static/admin_icon.svg", "/static/archive_icon.svg"):
-            self._send_static(path.rsplit("/", 1)[1])
-            return
+        if path.startswith("/static/"):
+            filename = path.rsplit("/", 1)[1]
+            if filename in ("theme.css", "theme.js", "archive.css", "archive.js",
+                            "admin_icon.svg", "archive_icon.svg",
+                            "admin_icon.png", "archive_icon.png",
+                            "admin_hero.png", "archive_hero.png"):
+                self._send_static(filename)
+                return
         if path == "/login":
             user = self._current_user()
             if user is not None:
