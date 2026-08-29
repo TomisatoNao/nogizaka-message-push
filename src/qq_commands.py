@@ -267,30 +267,31 @@ _COMMANDS = {
 # ──────────────────────────────────────────────
 
 def allowed_senders() -> set[str]:
-    """允许使用指令的 openid 白名单（统一转大写以便大小写无关匹配）。"""
+    """允许使用指令的 openid 白名单。"""
     mode = getattr(cfg, "QQ_COMMANDS_MODE", "configured")
     if mode == "all":
         return {"*"}
 
     explicit = getattr(cfg, "QQ_COMMANDS_ALLOW", None) or []
-    res = set()
+    explicit_set = set()
     for x in explicit:
         if isinstance(x, dict):
             val = x.get("openid") or x.get("id") or ""
         else:
             val = str(x)
         if val.strip():
-            res.add(val.strip().upper())
+            explicit_set.add(val.strip())
 
     if mode == "whitelist":
-        return res
+        return explicit_set
 
-    # 默认模式 (configured)：自动合并上方已配置的所有 Bot 目标群与私聊 OpenID
+    # 默认模式 (configured)：自动合并上方已配置的所有 Bot 目标群与私聊 OpenID，以及额外显式白名单
+    res = set(explicit_set)
     for b in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
         if b.get("target_openid"):
-            res.add(b["target_openid"].strip().upper())
+            res.add(b["target_openid"].strip())
         if b.get("group_openid"):
-            res.add(b["group_openid"].strip().upper())
+            res.add(b["group_openid"].strip())
     return res
 
 
@@ -463,7 +464,8 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
     sender_norm = (sender_openid or "").strip().upper()
     group_norm = (group_openid or "").strip().upper()
 
-    if "*" not in allow and sender_norm not in allow and (not group_norm or group_norm not in allow):
+    allow_upper = {x.upper() for x in allow}
+    if "*" not in allow and sender_norm not in allow_upper and (not group_norm or group_norm not in allow_upper):
         return None
 
     target_id = group_openid if group_openid else sender_openid

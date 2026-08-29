@@ -84,6 +84,7 @@ def main() -> None:
         "archive_dir": cfg.ARCHIVE_DIR, "archive_enabled": cfg.ARCHIVE_ENABLED,
         "archive_media": cfg.ARCHIVE_MEDIA, "bots": list(cfg.QQ_OFFICIAL_BOTS),
         "monitor": list(cfg.MONITOR_LIST), "allow": list(getattr(cfg, "QQ_COMMANDS_ALLOW", [])),
+        "mode": getattr(cfg, "QQ_COMMANDS_MODE", "configured"),
     }
     cfg.ARCHIVE_DIR = str(tmpdir)
     cfg.ARCHIVE_ENABLED = True
@@ -95,6 +96,7 @@ def main() -> None:
     cfg.MONITOR_LIST.append({"m_name": "测试 成员", "m_id": "55", "group_type": "nogizaka46",
                              "account_id": "acc", "target_groups": [123], "tg_chat_id": ""})
     cfg.QQ_COMMANDS_ALLOW = []
+    cfg.QQ_COMMANDS_MODE = "configured"
 
     try:
         # ── Test 1: 权限白名单 ───────────────────────────
@@ -105,10 +107,12 @@ def main() -> None:
         assert qq_commands.handle("你好", ME) is None, "非指令消息不响应"
         assert qq_commands.handle("", ME) is None
 
+        cfg.QQ_COMMANDS_MODE = "whitelist"
         cfg.QQ_COMMANDS_ALLOW = ["EXPLICIT_ONE"]
         assert qq_commands.allowed_senders() == {"EXPLICIT_ONE"}, "显式白名单应覆盖默认"
         assert qq_commands.handle("/help", ME) is None, "不在显式白名单内应无响应"
         cfg.QQ_COMMANDS_ALLOW = []
+        cfg.QQ_COMMANDS_MODE = "configured"
 
         cfg.QQ_OFFICIAL_BOTS[0]["target_openid"] = ""
         assert qq_commands.allowed_senders() == set()
@@ -208,6 +212,7 @@ def main() -> None:
         cfg.MONITOR_LIST.clear()
         cfg.MONITOR_LIST.extend(saved["monitor"])
         cfg.QQ_COMMANDS_ALLOW = saved["allow"]
+        cfg.QQ_COMMANDS_MODE = saved["mode"]
 
     print("=" * 50)
     print("🎉 全部测试通过！官方 Bot 指令工作正常")
