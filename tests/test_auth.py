@@ -141,6 +141,34 @@ def main() -> None:
         assert auth.authenticate("v1", "viewerpass123") is None, "旧密码应失效"
         print("✅ Test 3 通过\n")
 
+        # ── Test 3.5: Refresh Token 与静默轮换 (RTR) ──────
+        print("=== Test 3.5: Refresh Token 与静默轮换 (RTR) ===")
+        rt = auth.create_refresh_token("admin1", "admin", ttl_days=30)
+        assert rt and len(rt) > 30, "应生成安全高强随机 Refresh Token"
+        assert auth.refresh_token_count() >= 1
+
+        # 校验并单次轮换 (RTR)
+        user_info, new_acc, new_rt = auth.verify_and_rotate_refresh_token(rt, access_ttl_seconds=3600, refresh_ttl_days=30)
+        assert user_info and user_info["username"] == "admin1" and user_info["role"] == "admin"
+        assert new_acc and new_rt and new_rt != rt, "轮换后应生成全新的 Access Token 与 Refresh Token"
+        assert auth.get_session(new_acc) is not None, "新 Access Token 应立即可用"
+
+        # 旧 Refresh Token 应已彻底失效 (单次使用防重放)
+        dead_user, _, _ = auth.verify_and_rotate_refresh_token(rt)
+        assert dead_user is None, "已被轮换的旧 Refresh Token 应立即作废"
+
+        # 销毁单条 Refresh Token
+        auth.destroy_refresh_token(new_rt)
+        dead_user2, _, _ = auth.verify_and_rotate_refresh_token(new_rt)
+        assert dead_user2 is None, "销毁后的 Refresh Token 不应可用"
+
+        # 改密时级联销毁该用户所有 Refresh Token
+        rt_v1 = auth.create_refresh_token("v1", "viewer", ttl_days=30)
+        assert auth.set_password("v1", "evennewerpass")[0]
+        dead_v1, _, _ = auth.verify_and_rotate_refresh_token(rt_v1)
+        assert dead_v1 is None, "改密后该用户的所有 Refresh Token 应全量失效"
+        print("✅ Test 3.5 通过\n")
+
         # ── Test 4: 登录限流 ────────────────────────────
         print("=== Test 4: 登录限流 ===")
         ip = "10.1.2.3"
@@ -198,9 +226,9 @@ def main() -> None:
             assert code == 401 and "错误" in body["errors"][0]
 
             # admin 登录 → 拿 cookie
-            code, body, h = _http("POST", base + "/api/auth/login",
-                                  {"username": "admin1", "password": "adminpass123"})
-            assert code == 200 and body["user"]["role"] == "admin", f"登录应成功: {body}"
+            code, login_data, h = _http("POST", base + "/api/auth/login",
+                                        {"username": "admin1", "password": "adminpass123"})
+            assert code == 200 and login_data["user"]["role"] == "admin", f"登录应成功: {login_data}"
             set_cookie = h.get("Set-Cookie", "")
             assert "HttpOnly" in set_cookie and "SameSite=Strict" in set_cookie, \
                 f"cookie 应带 HttpOnly/SameSite: {set_cookie}"
@@ -216,9 +244,25 @@ def main() -> None:
             code, body, _ = _http("GET", base + "/api/auth/me", headers=ck)
             assert body["user"]["username"] == "admin1"
 
+            # 验证 Refresh Token 接口 (/api/auth/refresh)
+            rt_admin = login_data["refresh_token"]
+            code, rbody, rh = _http("POST", base + "/api/auth/refresh",
+                                    body={"refresh_token": rt_admin})
+            assert code == 200 and rbody["ok"] and rbody["user"]["username"] == "admin1"
+            assert rbody["token"] and rbody["refresh_token"] and rbody["refresh_token"] != rt_admin, "应轮换得到新 Refresh Token"
+            new_rt = rbody["refresh_token"]
+            # 旧 Refresh Token 已被轮换作废
+            code, rbody_fail, _ = _http("POST", base + "/api/auth/refresh",
+                                        body={"refresh_token": rt_admin})
+            assert code == 401, "已使用的 Refresh Token 再次使用应 401"
+            # 新 Refresh Token 可用
+            code, rbody2, _ = _http("POST", base + "/api/auth/refresh",
+                                    body={"refresh_token": new_rt})
+            assert code == 200 and rbody2["ok"]
+
             # viewer 登录 → 只能归档
             code, body, h = _http("POST", base + "/api/auth/login",
-                                  {"username": "v1", "password": "newviewerpass"})
+                                  {"username": "v1", "password": "evennewerpass"})
             assert code == 200 and body["user"]["role"] == "viewer"
             vck = {"Cookie": h.get("Set-Cookie", "").split(";")[0]}
             code, body, _ = _http("GET", base + "/api/archive/members", headers=vck)

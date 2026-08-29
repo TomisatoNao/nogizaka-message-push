@@ -72,6 +72,36 @@ window.handleImgError = function(img) {
   }
 };
 
+let _refreshingPromise = null;
+
+async function silentRefreshToken() {
+  if (!_refreshingPromise) {
+    _refreshingPromise = (async () => {
+      try {
+        const resp = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        });
+        const data = await resp.json();
+        if (data && data.ok) {
+          if (data.token) {
+            authToken = data.token;
+            try { localStorage.setItem("webAdminToken", data.token); } catch (_) {}
+          }
+          return true;
+        }
+        return false;
+      } catch (_) {
+        return false;
+      } finally {
+        _refreshingPromise = null;
+      }
+    })();
+  }
+  return _refreshingPromise;
+}
+
 async function api(path, options = {}) {
   const headers = Object.assign(
     {},
@@ -85,8 +115,20 @@ async function api(path, options = {}) {
     cache: "no-store",
     signal: options.signal,
   });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error((data.errors || ["HTTP " + resp.status]).join("；"));
+
+  if (resp.status === 401 && !options._retried && path !== "/api/auth/refresh" && path !== "/api/auth/login") {
+    const refreshed = await silentRefreshToken();
+    if (refreshed) {
+      return api(path, Object.assign({}, options, { _retried: true }));
+    }
+  }
+
+  let data = null;
+  try { data = await resp.json(); } catch (_) {}
+  if (!resp.ok) {
+    const err = (data && data.errors && data.errors.join("；")) || ("HTTP " + resp.status);
+    throw new Error(err);
+  }
   return data;
 }
 

@@ -45,6 +45,7 @@ _LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.htm
 _404_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "404.html"
 
 _SESSION_COOKIE = "sakamichi_session"
+_REFRESH_COOKIE = "sakamichi_refresh_token"
 
 # 首页 API 缓存（基于 archive.db 的 mtime + 日期，保证每天随机结果不同）
 _home_cache: dict | None = None
@@ -568,11 +569,19 @@ class _Handler(BaseHTTPRequestHandler):
                 return value
         return ""
 
+    def _cookie_refresh_token(self) -> str:
+        raw = self.headers.get("Cookie", "")
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == _REFRESH_COOKIE:
+                return value
+        return ""
+
     def _current_user(self) -> dict | None:
         """解析当前身份：会话 cookie 优先，其次 API token（视为 admin）。"""
         import config.config as cfg
         from src import auth as _auth
-        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 12))) * 3600
+        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
         sess = _auth.get_session(self._cookie_token(), ttl_seconds=ttl)
         if sess:
             return {"username": sess["username"], "role": sess["role"], "via": "session"}
@@ -611,8 +620,26 @@ class _Handler(BaseHTTPRequestHandler):
         if not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
             return True
 
-        # 1. 优先校验已登录身份（已登录则直接根据角色放行，避免并发冲突与额外开销）
+        # 1. 优先校验已登录身份（已登录则直接根据角色放行）
         user = self._current_user()
+        if user is None and is_page:
+            # 页面导航且短效 Session 过期时：尝试通过长效 Refresh Token 自动静默换票
+            refresh_token = self._cookie_refresh_token()
+            if refresh_token:
+                access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
+                refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
+                rot_user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
+                    refresh_token,
+                    access_ttl_seconds=access_ttl,
+                    refresh_ttl_days=refresh_days,
+                )
+                if rot_user:
+                    user = {"username": rot_user["username"], "role": rot_user["role"], "via": "refresh"}
+                    self._pending_set_cookies = [
+                        f"{_SESSION_COOKIE}={new_access}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
+                        f"{_REFRESH_COOKIE}={new_refresh}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
+                    ]
+
         if user is not None:
             if need_admin and user["role"] != "admin":
                 if is_page:
@@ -730,6 +757,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for sc in getattr(self, "_pending_set_cookies", []):
+            self.send_header("Set-Cookie", sc)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1104,18 +1133,81 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         _auth.clear_failures(ip)
-        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 12))) * 3600
-        token = _auth.create_session(user["username"], user["role"], ttl)
+        remember = bool(body.get("remember", True))
+        access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
+        refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30))) if remember else 1
+        token = _auth.create_session(user["username"], user["role"], access_ttl)
+        refresh_token = _auth.create_refresh_token(user["username"], user["role"], ttl_days=refresh_days)
         log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
 
-        body_out = json.dumps({"ok": True, "user": user}, ensure_ascii=False).encode("utf-8")
+        body_out = json.dumps({
+            "ok": True,
+            "user": user,
+            "token": token,
+            "refresh_token": refresh_token,
+        }, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body_out)))
         self.send_header("Cache-Control", "no-store")
         self.send_header(
             "Set-Cookie",
-            f"{_SESSION_COOKIE}={token}; Path=/; Max-Age={ttl}; HttpOnly; SameSite=Strict",
+            f"{_SESSION_COOKIE}={token}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
+        )
+        self.send_header(
+            "Set-Cookie",
+            f"{_REFRESH_COOKIE}={refresh_token}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
+        )
+        self.end_headers()
+        self.wfile.write(body_out)
+
+    def _handle_refresh(self) -> None:
+        """处理 Refresh Token 静默续期换票请求 (Refresh Token Rotation - RTR)。"""
+        import config.config as cfg
+        from src import auth as _auth
+
+        body = self._read_body_json() or {}
+        refresh_token = self._cookie_refresh_token() or str(body.get("refresh_token", "")).strip()
+        if not refresh_token:
+            self._send_json({"ok": False, "errors": ["缺少 Refresh Token"]}, 401)
+            return
+
+        access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
+        refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
+        user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
+            refresh_token,
+            access_ttl_seconds=access_ttl,
+            refresh_ttl_days=refresh_days,
+        )
+        if not user:
+            # 刷新令牌失效，清空客户端 Cookie
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Set-Cookie", f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+            self.send_header("Set-Cookie", f"{_REFRESH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+            body_out = json.dumps({"ok": False, "errors": ["刷新令牌已失效，请重新登录"]}, ensure_ascii=False).encode("utf-8")
+            self.send_header("Content-Length", str(len(body_out)))
+            self.end_headers()
+            self.wfile.write(body_out)
+            return
+
+        body_out = json.dumps({
+            "ok": True,
+            "user": user,
+            "token": new_access,
+            "refresh_token": new_refresh,
+        }, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_out)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Set-Cookie",
+            f"{_SESSION_COOKIE}={new_access}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
+        )
+        self.send_header(
+            "Set-Cookie",
+            f"{_REFRESH_COOKIE}={new_refresh}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
         )
         self.end_headers()
         self.wfile.write(body_out)
@@ -1123,12 +1215,15 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_logout(self) -> None:
         from src import auth as _auth
         _auth.destroy_session(self._cookie_token())
+        _auth.destroy_refresh_token(self._cookie_refresh_token())
         body_out = json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body_out)))
         self.send_header("Set-Cookie",
                          f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+        self.send_header("Set-Cookie",
+                         f"{_REFRESH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
         # 让浏览器丢弃已缓存的归档媒体副本（localhost 视为安全上下文，该头生效）。
         # 刻意不含 "storage"：那会把 localStorage 里的主题偏好一并清掉；
         # 其中真正敏感的 webAdminToken 由前端登出逻辑单独删除。
@@ -2642,6 +2737,9 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/api/auth/login":
             self._handle_login()
+            return
+        if path == "/api/auth/refresh":
+            self._handle_refresh()
             return
         if path == "/api/auth/logout":
             self._handle_logout()

@@ -123,6 +123,19 @@ def get_auth_db() -> sqlite3.Connection:
                 PRIMARY KEY (account_id, member_id)
             );
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                role TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                created_at REAL NOT NULL DEFAULT 0,
+                last_used_at REAL NOT NULL DEFAULT 0
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_username ON refresh_tokens(username);")
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
@@ -422,7 +435,7 @@ def add_user(username: str, password: str, role: str) -> tuple[bool, str]:
 
 
 def set_password(username: str, password: str) -> tuple[bool, str]:
-    """重置/修改密码，并销毁该用户所有活跃会话（强制全端下线）。"""
+    """重置/修改密码，并销毁该用户所有活跃会话与刷新令牌（强制全端下线）。"""
     if len(password or "") < MIN_PASSWORD_LEN:
         return False, f"密码至少 {MIN_PASSWORD_LEN} 位"
     users = load_users()
@@ -431,11 +444,12 @@ def set_password(username: str, password: str) -> tuple[bool, str]:
     users[username]["password"] = hash_password(password)
     save_users(users)
     destroy_user_sessions(username)
+    destroy_user_refresh_tokens(username)
     return True, f"已重置密码: {username}"
 
 
 def delete_user(username: str) -> tuple[bool, str]:
-    """删除用户，并销毁其所有活跃会话。"""
+    """删除用户，并销毁其所有活跃会话与刷新令牌。"""
     users = load_users()
     if username not in users:
         return False, f"用户不存在: {username}"
@@ -445,11 +459,12 @@ def delete_user(username: str) -> tuple[bool, str]:
     del users[username]
     save_users(users)
     destroy_user_sessions(username)
+    destroy_user_refresh_tokens(username)
     return True, f"已删除用户: {username}"
 
 
 def set_role(username: str, role: str) -> tuple[bool, str]:
-    """修改用户角色，并同步更新该用户所有活跃会话的角色权限。"""
+    """修改用户角色，并同步更新该用户所有活跃会话与刷新令牌的角色权限。"""
     if role not in ROLES:
         return False, f"角色必须是 {' / '.join(ROLES)}"
     users = load_users()
@@ -469,6 +484,7 @@ def set_role(username: str, role: str) -> tuple[bool, str]:
         try:
             with conn:
                 conn.execute("UPDATE sessions SET role = ? WHERE username = ?;", (role, username))
+                conn.execute("UPDATE refresh_tokens SET role = ? WHERE username = ?;", (role, username))
         except Exception:
             pass
     return True, f"{username} 角色已改为 {role}"
@@ -646,3 +662,119 @@ def session_count() -> int:
         for t in [t for t, s in _sessions.items() if s["expires_at"] <= now]:
             _sessions.pop(t, None)
         return len(_sessions)
+
+
+# ================================================================
+# 长效刷新令牌管理 (Refresh Token & Silent Rotation)
+# ================================================================
+
+def create_refresh_token(username: str, role: str, ttl_days: int = 30) -> str:
+    """创建并持久化长效刷新令牌 (Refresh Token)。"""
+    token = secrets.token_urlsafe(48)
+    now = time.time()
+    expires_at = now + (max(1, int(ttl_days)) * 86400)
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                # 清理已过期的历史刷新令牌
+                conn.execute("DELETE FROM refresh_tokens WHERE expires_at <= ?;", (now,))
+                conn.execute(
+                    "INSERT INTO refresh_tokens (token, username, role, expires_at, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?);",
+                    (token, username, role, expires_at, now, now),
+                )
+        except Exception as e:
+            log_all(f"⚠️ 写入 refresh_token 异常: {e}", is_error=True)
+    return token
+
+
+def verify_and_rotate_refresh_token(
+    old_token: str,
+    access_ttl_seconds: int = 7200,
+    refresh_ttl_days: int = 30,
+) -> tuple[dict | None, str, str]:
+    """校验并轮换刷新令牌 (Refresh Token Rotation - RTR)。
+
+    返回 (user_dict, new_access_token, new_refresh_token)。
+    若无效或已过期，返回 (None, "", "")。
+    """
+    if not old_token:
+        return None, "", ""
+    now = time.time()
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.execute(
+                "SELECT username, role, expires_at FROM refresh_tokens WHERE token = ? AND expires_at > ?;",
+                (old_token, now),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None, "", ""
+            username, role, _ = row[0], row[1], float(row[2])
+
+            # 确认用户在用户库中仍存在
+            users = load_users()
+            if username not in users:
+                with conn:
+                    conn.execute("DELETE FROM refresh_tokens WHERE username = ?;", (username,))
+                return None, "", ""
+
+            # 保证角色权限是最新的
+            role = users[username].get("role", role)
+
+            # 1. 物理销毁旧的 Refresh Token 并原子化插入新的 Refresh Token (RTR)
+            new_refresh_token = secrets.token_urlsafe(48)
+            new_refresh_expires_at = now + (max(1, int(refresh_ttl_days)) * 86400)
+            with conn:
+                conn.execute("DELETE FROM refresh_tokens WHERE token = ?;", (old_token,))
+                conn.execute(
+                    "INSERT INTO refresh_tokens (token, username, role, expires_at, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?);",
+                    (new_refresh_token, username, role, new_refresh_expires_at, now, now),
+                )
+        except Exception as e:
+            log_all(f"⚠️ 轮换 refresh_token 异常: {e}", is_error=True)
+            return None, "", ""
+
+    # 2. 签发全新 Access Token (Session)
+    new_access_token = create_session(username, role, access_ttl_seconds)
+    return {"username": username, "role": role}, new_access_token, new_refresh_token
+
+
+def destroy_refresh_token(token: str) -> None:
+    """销毁单条长效刷新令牌。"""
+    if not token:
+        return
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                conn.execute("DELETE FROM refresh_tokens WHERE token = ?;", (token,))
+        except Exception:
+            pass
+
+
+def destroy_user_refresh_tokens(username: str) -> None:
+    """销毁指定用户的所有长效刷新令牌。"""
+    if not username:
+        return
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                conn.execute("DELETE FROM refresh_tokens WHERE username = ?;", (username,))
+        except Exception:
+            pass
+
+
+def refresh_token_count() -> int:
+    """返回当前有效的刷新令牌数量。"""
+    conn = get_auth_db()
+    now = time.time()
+    with _lock:
+        try:
+            cur = conn.execute("SELECT COUNT(*) FROM refresh_tokens WHERE expires_at > ?;", (now,))
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            return 0

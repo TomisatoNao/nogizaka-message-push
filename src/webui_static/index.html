@@ -1553,16 +1553,54 @@ function msg(text, cls) {
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 // ── API ─────────────────────────────────────────
+let _refreshingAdminPromise = null;
+
+async function silentRefreshAdminToken() {
+  if (!_refreshingAdminPromise) {
+    _refreshingAdminPromise = (async () => {
+      try {
+        const resp = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        });
+        const data = await resp.json();
+        if (data && data.ok) {
+          if (data.token) {
+            authToken = data.token;
+            try { localStorage.setItem("webAdminToken", data.token); } catch (_) {}
+          }
+          return true;
+        }
+        return false;
+      } catch (_) {
+        return false;
+      } finally {
+        _refreshingAdminPromise = null;
+      }
+    })();
+  }
+  return _refreshingAdminPromise;
+}
+
 async function api(path, opts = {}) {
   opts.headers = Object.assign({}, opts.headers);
   if (authToken) opts.headers["X-Auth-Token"] = authToken;
   const resp = await fetch(path, opts);
+
+  if (resp.status === 401 && !opts._retried && path !== "/api/auth/refresh" && path !== "/api/auth/login") {
+    const refreshed = await silentRefreshAdminToken();
+    if (refreshed) {
+      return api(path, Object.assign({}, opts, { _retried: true }));
+    }
+  }
+
   let data = null;
   try { data = await resp.json(); } catch (_) { /* 保底 */ }
   if (resp.status === 401) {
     const errMsg = (data && data.errors && data.errors[0]) || "";
-    // 账号系统未登录（session 过期/重启丢失）→ 跳登录页
-    if (errMsg === "未登录") {
+    // 账号系统未登录（session 彻底过期）→ 跳登录页
+    if (errMsg.includes("未登录") || errMsg.includes("失效")) {
       window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname + window.location.search);
       throw new Error("未登录");
     }
