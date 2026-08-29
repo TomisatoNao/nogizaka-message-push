@@ -749,7 +749,7 @@ class _Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
                 next_raw = qs.get("next", [""])[0]
                 target = unquote(next_raw) if (next_raw.startswith("/") and not next_raw.startswith("//")) else ("/" if user.get("role") == "admin" else "/archive")
-                if user.get("role") != "admin" and target != "/archive":
+                if user.get("role") != "admin" and not target.startswith("/archive"):
                     target = "/archive"
                 self._redirect(target)
                 return

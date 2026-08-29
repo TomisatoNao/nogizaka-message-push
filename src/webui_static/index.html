@@ -1685,36 +1685,65 @@ async function saveConfig() {
   }
 }
 
-// ── Tab 切换（统一承载于顶栏 Header 中间） ────────
+// ── Tab 切换与 URL 路由（统一承载于顶栏 Header 中间） ────────
+let selfAdminHashUpdate = false;
+
+function switchAdminTab(targetTab, updateHash = true) {
+  if (!targetTab) return;
+  const btn = document.querySelector(`.header-nav .nav-tab[data-tab="${targetTab}"], nav.tabs button[data-tab="${targetTab}"]`);
+  if (!btn) return;
+
+  if (targetTab === "advanced") { 
+    collectGeneral();
+    collectChannels(); 
+    collectSocial();
+    refreshRawJson(); 
+    refreshHistory(); 
+    startLogPolling();
+  } else {
+    stopLogPolling();
+  }
+
+  if (targetTab === "users") {
+    refreshUsers();
+  }
+  
+  if (targetTab === "status") {
+    startStatusPolling();
+  } else {
+    stopStatusPolling();
+  }
+  
+  document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
+
+  if (updateHash) {
+    selfAdminHashUpdate = true;
+    location.hash = targetTab === "status" ? "" : "tab=" + targetTab;
+    setTimeout(() => { selfAdminHashUpdate = false; }, 0);
+  }
+}
+
 document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    const targetTab = btn.dataset.tab;
-    if (!targetTab) return;
-
-    if (targetTab === "advanced") { 
-      collectGeneral();
-      collectChannels(); 
-      collectSocial();
-      refreshRawJson(); 
-      refreshHistory(); 
-      startLogPolling();
-    } else {
-      stopLogPolling();
-    }
-
-    if (targetTab === "users") {
-      refreshUsers();
-    }
-    
-    if (targetTab === "status") {
-      startStatusPolling();
-    } else {
-      stopStatusPolling();
-    }
-    
-    document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
-    document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
+    switchAdminTab(btn.dataset.tab, true);
   });
+});
+
+function handleAdminRoute() {
+  const rawHash = (location.hash || "").replace(/^#/, "");
+  const p = new URLSearchParams(rawHash);
+  const tabFromQuery = new URLSearchParams(location.search).get("tab");
+  const tab = p.get("tab") || rawHash.replace(/^tab=/, "") || tabFromQuery || "status";
+  const validTabs = ["status", "monitors", "channels", "social", "system", "users", "advanced"];
+  if (validTabs.includes(tab)) {
+    switchAdminTab(tab, false);
+  }
+}
+
+window.addEventListener("hashchange", () => {
+  if (selfAdminHashUpdate) return;
+  handleAdminRoute();
 });
 
 // ── 状态页 ───────────────────────────────────────
@@ -5100,7 +5129,7 @@ function renderSocialToolResult(data) {
 
 initCmdOpenidEvents();
 loadConfig();
-startStatusPolling();   // 状态页是默认标签页
+handleAdminRoute();
 
 $("botSubClose").addEventListener("click", () => {
   $("botSubscribeDialog").close();

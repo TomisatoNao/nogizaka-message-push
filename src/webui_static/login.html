@@ -136,6 +136,17 @@ function nextUrl() {
   return (p.startsWith("/") && !p.startsWith("//")) ? p : "/";   // 只接受站内路径，杜绝开放重定向
 }
 
+function getRedirectTarget(user) {
+  const next = nextUrl();
+  if (user && user.role === "admin") {
+    return next;
+  }
+  if (next.startsWith("/archive")) {
+    return next;
+  }
+  return "/archive";
+}
+
 function showNotice(html) {
   $("form").hidden = true;
   $("notice").hidden = false;
@@ -159,7 +170,7 @@ function showNotice(html) {
       return;
     }
     if (me.user) {
-      location.replace(me.user.role === "admin" ? nextUrl() : "/archive");
+      location.replace(getRedirectTarget(me.user));
       return;
     }
   } catch (e) { /* 离线时正常显示表单 */ }
@@ -188,7 +199,7 @@ $("form").addEventListener("submit", async (e) => {
     if (data.ok) {
       msg.className = "msg ok";
       msg.textContent = "✅ 欢迎回来，" + data.user.username;
-      location.href = data.user.role === "admin" ? nextUrl() : "/archive";
+      location.href = getRedirectTarget(data.user);
       return;
     }
     msg.className = "msg err";

@@ -3093,13 +3093,15 @@ async function handleRoute(isInitial = false) {
     return;
   }
 
-  // 2. 消息模式：#msg, #member=..., #y=...
-  if (p.has("member") || p.has("y") || p.has("m") || rawHash === "msg") {
+  // 2. 消息模式：#msg, #member=..., #y=..., #msg_id=...
+  if (p.has("member") || p.has("y") || p.has("m") || p.has("msg_id") || p.has("msg") || rawHash === "msg") {
     let saved = null;
     try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
     const mem = p.get("member") || (saved && members.some(m => m.name === saved) ? saved : curMember) || getDefaultNogiMember();
     const t = p.get("t") || "";
     const q = normalizedQuery(p.get("q"));
+    const msgId = p.get("msg_id") || p.get("msg") || "";
+    if (msgId) targetMsgId = String(msgId);
     curType = t;
     searchQuery = q;
     syncSearchInput();
