@@ -42,6 +42,7 @@ ENV_PATH = _BASE_DIR / ".env"
 _STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
 _ARCHIVE_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "archive.html"
 _LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.html"
+_404_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "404.html"
 
 _SESSION_COOKIE = "sakamichi_session"
 
@@ -719,18 +720,28 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-    def _send_html(self, file_path: Path) -> None:
+    def _send_html(self, file_path: Path, code: int = 200) -> None:
         try:
             body = file_path.read_bytes()
         except OSError:
             self._send_json({"ok": False, "errors": ["页面文件缺失"]}, 500)
             return
-        self.send_response(200)
+        self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_404(self, message: str = "未知路径") -> None:
+        """根据客户端 Accept 头智能返回精美 404 HTML 页面或 JSON 错误。"""
+        accept = self.headers.get("Accept", "")
+        path = self.path.split("?", 1)[0]
+        # 如果是浏览器访问页面（非 API 请求），渲染 404 错误页
+        if not path.startswith("/api/") and ("text/html" in accept or "*/*" in accept or not accept):
+            self._send_html(_404_HTML_PATH, code=404)
+            return
+        self._send_json({"ok": False, "errors": [message]}, 404)
 
     def do_GET(self) -> None:  # noqa: N802 - http.server 约定命名
         if not self._check_host():
@@ -754,6 +765,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._redirect(target)
                 return
             self._send_html(_LOGIN_HTML_PATH)
+            return
+        if path == "/404":
+            self._send_html(_404_HTML_PATH, code=404)
             return
         if path == "/api/auth/me":
             self._handle_auth_me()
@@ -958,7 +972,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "subscriptions": subs})
             return
 
-        self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
+        self._send_404("未知路径")
 
     def _handle_members(self) -> None:
         """拉取账号可见的成员目录（网页选择器用）。?account=<账号ID>"""

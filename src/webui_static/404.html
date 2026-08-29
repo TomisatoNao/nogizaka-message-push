@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
+<title>404 页面迷失 · 坂道监控归档系统</title>
+<link rel="stylesheet" href="/static/theme.css">
+<script src="/static/theme.js"></script>
+<style>
+  :root {
+    --accent2: var(--accent-2, #a78bfa);
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+    box-sizing: border-box;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* 顶部全局主题切换按钮 */
+  .theme-toggle {
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    z-index: 50;
+  }
+
+  /* 背景环境光晕 */
+  .ambient-glow {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 640px;
+    height: 640px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+    animation: pulseGlow 6s ease-in-out infinite alternate;
+  }
+  @keyframes pulseGlow {
+    0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.6; }
+    100% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+  }
+
+  /* 404 核心 Bento 卡片 */
+  .notfound-card {
+    position: relative;
+    z-index: 1;
+    width: min(540px, 100%);
+    padding: 44px 40px 36px;
+    border-radius: 28px;
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 85%, transparent);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    text-align: center;
+    animation: cardRise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes cardRise {
+    from { opacity: 0; transform: translateY(20px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* 顶部品牌微标识 */
+  .brand-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--card) 60%, var(--bg) 40%);
+    border: 1px solid var(--border-soft);
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--text-strong);
+    margin-bottom: 24px;
+  }
+  .brand-badge img {
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+  }
+
+  /* 404 渐变大字与微动画 */
+  .code-hero {
+    font-size: 88px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    margin: 0 0 12px;
+    background: linear-gradient(135deg, var(--accent) 15%, var(--accent2) 85%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 6px 16px color-mix(in srgb, var(--accent) 30%, transparent));
+  }
+
+  .title {
+    font-size: 22px;
+    font-weight: 750;
+    color: var(--text-strong);
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+
+  .description {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0 0 20px;
+  }
+
+  /* 路径展示框 */
+  .path-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: color-mix(in srgb, var(--bg) 75%, var(--card));
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 28px;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  .path-box .icon {
+    font-size: 14px;
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+  .path-box code {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 快捷导航按钮网格 (Bento Grid) */
+  .nav-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 13px 18px;
+    border-radius: 14px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 650;
+    transition: all var(--tr-fast);
+    box-sizing: border-box;
+  }
+
+  .nav-btn.primary {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+    border: 1px solid transparent;
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 35%, transparent);
+    font-size: 15px;
+    padding: 14px 20px;
+  }
+  .nav-btn.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 26px color-mix(in srgb, var(--accent) 48%, transparent);
+  }
+
+  .nav-btn.secondary {
+    background: color-mix(in srgb, var(--card) 80%, var(--bg));
+    border: 1px solid var(--border-soft);
+    color: var(--text-strong);
+  }
+  .nav-btn.secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .nav-btn.subtle {
+    grid-column: 1 / -1;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 10px;
+  }
+  .nav-btn.subtle:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--card) 40%, transparent);
+  }
+
+  /* 倒计时提示 */
+  .countdown-bar {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .countdown-bar strong {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .nav-btn-cancel {
+    background: none;
+    border: none;
+    color: var(--muted);
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+  }
+  .nav-btn-cancel:hover {
+    color: var(--text);
+  }
+
+  /* 手机端适配 */
+  @media (max-width: 540px) {
+    body { padding: 16px; }
+    .notfound-card { padding: 32px 20px 24px; border-radius: 20px; }
+    .code-hero { font-size: 72px; }
+    .title { font-size: 19px; }
+    .nav-grid { grid-template-columns: 1fr; gap: 10px; }
+    .nav-btn.primary { font-size: 14.5px; padding: 13px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" type="button" title="切换主题">🖥️</button>
+<div class="ambient-glow"></div>
+
+<div class="notfound-card">
+  <div class="brand-badge">
+    <img src="/static/archive_icon.svg" alt="Sakamichi Logo">
+    <span>坂道监控 · 归档系统</span>
+  </div>
+
+  <div class="code-hero">404</div>
+  <h1 class="title">页面迷失在坂道途中…</h1>
+  <p class="description">您访问的页面不存在、已被移动，或者输入的链接拼写有误。</p>
+
+  <div class="path-box">
+    <span class="icon">🔗</span>
+    <code id="targetPath">/unknown</code>
+  </div>
+
+  <div class="nav-grid">
+    <a href="/archive" class="nav-btn primary">
+      <span>🏠</span>
+      <span>前往归档首页</span>
+    </a>
+    <a href="/archive#blog=nogizaka" class="nav-btn secondary">
+      <span>📄</span>
+      <span>官方博客</span>
+    </a>
+    <a href="/archive#msg" class="nav-btn secondary">
+      <span>💬</span>
+      <span>消息时间线</span>
+    </a>
+    <a href="/" class="nav-btn subtle">
+      <span>⚙️</span>
+      <span>进入系统管理后台 →</span>
+    </a>
+  </div>
+
+  <div class="countdown-bar">
+    <span>将在 <strong id="timer">10</strong> 秒后自动返回归档首页</span>
+    <span>·</span>
+    <button type="button" id="btnCancelTimer" class="nav-btn-cancel">取消自动跳转</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const targetPathEl = document.getElementById("targetPath");
+if (targetPathEl) {
+  const p = location.pathname + location.search + location.hash;
+  targetPathEl.textContent = p || "/404-not-found";
+}
+
+let timeLeft = 10;
+const timerEl = document.getElementById("timer");
+const cancelBtn = document.getElementById("btnCancelTimer");
+let countdownInterval = null;
+
+if (timerEl) {
+  countdownInterval = setInterval(() => {
+    timeLeft--;
+    if (timerEl) timerEl.textContent = String(timeLeft);
+    if (timeLeft <= 0) {
+      clearInterval(countdownInterval);
+      location.href = "/archive";
+    }
+  }, 1000);
+}
+
+if (cancelBtn) {
+  cancelBtn.addEventListener("click", () => {
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    const bar = document.querySelector(".countdown-bar");
+    if (bar) {
+      bar.innerHTML = '<span>已暂停自动跳转，请选择上方入口继续浏览。</span>';
+    }
+  });
+}
+</script>
+
+</body>
+</html>

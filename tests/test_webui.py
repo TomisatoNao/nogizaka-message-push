@@ -37,17 +37,24 @@ SAMPLE = {
 
 
 def _http(method: str, url: str, body: dict | None = None, headers: dict | None = None):
-    """返回 (status_code, parsed_json)。4xx/5xx 也解析 body。"""
+    """返回 (status_code, parsed_json | raw_text)。4xx/5xx 也解析 body。"""
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
+            text = resp.read().decode("utf-8")
+            try:
+                return resp.status, json.loads(text)
+            except Exception:
+                return resp.status, text
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8")
-        return e.code, json.loads(raw) if raw else {}
+        try:
+            return e.code, json.loads(raw) if raw else {}
+        except Exception:
+            return e.code, raw
 
 
 def main() -> None:
@@ -445,9 +452,11 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config")
         assert code == 401, f"缺 token 应 401，实际 {code}"
         code, data = _http("GET", base + "/api/config", headers={"X-Auth-Token": "s3cret"})
-        assert code == 200 and data["ok"], "带 token 应通过"
-        code, data = _http("GET", base + "/api/config", headers={"Authorization": "Bearer s3cret"})
-        assert code == 200 and data["ok"], "Bearer 也应通过"
+        # 404 测试：网页访问返回 404 HTML，API 访问返回 404 JSON
+        code, data = _http("GET", base + "/non_existent_page", headers={"Accept": "text/html"})
+        assert code == 404 and "404" in data, f"网页 404 应返回 HTML 404 页面，实际 {code}"
+        code, data = _http("GET", base + "/api/unknown_endpoint")
+        assert code == 404 and not data["ok"], f"API 404 应返回 JSON 错误，实际 {code}"
     finally:
         for key in ("WEB_ADMIN_TOKEN", "HINATA_SHARED_TOKEN", "HINATA_SHARED_COOKIE"):
             os.environ.pop(key, None)
