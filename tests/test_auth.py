@@ -349,10 +349,12 @@ def main() -> None:
             code, _, _ = _http("GET", base + "/api/archive/members", headers=ck)
             assert code == 401, "登出后归档 API 也应 401"
 
-            # archive_public：归档免登录，管理端仍受保护
+            # archive_public：归档免登录，管理端仍受保护；未登录访客访问根路径直接跳转至 /archive
             cfg.AUTH_ARCHIVE_PUBLIC = True
             code, _, _ = _http("GET", base + "/archive")
             assert code == 200, "公开模式下归档页应免登录"
+            code, _, hdrs = _http("GET", base + "/")
+            assert code == 302 and hdrs.get("Location") == "/archive", f"公开模式下访客访问首页应 302 至 /archive: {code}, {hdrs}"
             code, _, _ = _http("GET", base + "/api/archive/members")
             assert code == 200, "公开模式下归档 API 应免登录"
             code, _, _ = _http("GET", base + "/api/config")

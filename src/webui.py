@@ -774,6 +774,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "errors": [message]}, 404)
 
     def do_GET(self) -> None:  # noqa: N802 - http.server 约定命名
+        import config.config as cfg
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
@@ -807,6 +808,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_auth_me()
             return
         if path in ("/", "/index.html"):
+            user = self._current_user()
+            # 开启免登录公开归档时，未登录访客访问首页自动跳转至 /archive
+            if user is None and getattr(cfg, "AUTH_ENABLED", False) and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
+                self._redirect("/archive")
+                return
             if not self._guard(need_admin=True, is_page=True):
                 return
             self._send_html(_STATIC_PATH)

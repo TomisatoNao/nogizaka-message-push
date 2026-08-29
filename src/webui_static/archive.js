@@ -2393,7 +2393,7 @@ function _updateAdminUI(isAdmin) {
     tabLetter.hidden = !isAdmin;
     tabLetter.style.display = isAdmin ? "inline-flex" : "none";
   }
-  const adminIds = ["adminLink", "archiveToolsDropdown", "btnArchiveMember", "btnArchiveMessage"];
+  const adminIds = ["archiveToolsDropdown", "btnArchiveMember", "btnArchiveMessage"];
   adminIds.forEach(id => {
     const el = $(id);
     if (el) {
@@ -2488,9 +2488,17 @@ window._isLoggedIn = false;
 (async function initAuth() {
   try {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    const adminLink = $("adminLink");
     if (!me.auth_enabled) { 
       window._isLoggedIn = true; 
       _updateAdminUI(true);
+      if (adminLink) {
+        adminLink.hidden = false;
+        adminLink.style.display = "inline-flex";
+        adminLink.href = "/";
+        adminLink.title = "进入系统管理后台";
+        adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+      }
       $("logoutBtn").hidden = true;
       $("logoutBtn").style.display = "none";
       return; 
@@ -2500,13 +2508,29 @@ window._isLoggedIn = false;
       $("whoami").textContent = "👤 " + me.user.username;
       $("logoutBtn").hidden = false;
       $("logoutBtn").style.display = "inline-flex";
-      _updateAdminUI(me.user.role === "admin");
+      const isAdmin = me.user.role === "admin";
+      _updateAdminUI(isAdmin);
+      if (adminLink) {
+        adminLink.hidden = !isAdmin;
+        adminLink.style.display = isAdmin ? "inline-flex" : "none";
+        adminLink.href = "/";
+        adminLink.title = "进入系统管理后台";
+        adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+      }
     } else {
       window._isLoggedIn = false;
       $("whoami").textContent = "";
       $("logoutBtn").hidden = true;
       $("logoutBtn").style.display = "none";
       _updateAdminUI(false);
+      // 未登录 / 游客免登录模式下：展示「管理后台」按钮，点击前往登录页 /login
+      if (adminLink) {
+        adminLink.hidden = false;
+        adminLink.style.display = "inline-flex";
+        adminLink.href = "/login?next=/";
+        adminLink.title = "登录管理员账号以进入后台";
+        adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+      }
     }
   } catch (e) { /* 忽略 */ }
 })();
