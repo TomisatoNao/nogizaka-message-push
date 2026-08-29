@@ -2958,7 +2958,7 @@ function renderSocial() {
 
 function collectSocial() {
   config.platforms = config.platforms || {};
-  const parseAccs = (val) => val.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean);
+  const parseAccs = (val) => Array.from(new Set(val.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean)));
 
   config.platforms.x = {
     enabled: $("socialXOn").checked,
@@ -3434,8 +3434,8 @@ $("subSave").addEventListener("click", () => {
   currentSubTarget.push_live = $("subLive").checked;
   currentSubTarget.push_alert = $("subAlert").checked;
 
-  currentSubTarget.member_filter = $("subMemberFilter").value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-  currentSubTarget.social_filter = $("subSocialFilter").value.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean);
+  currentSubTarget.member_filter = Array.from(new Set($("subMemberFilter").value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean)));
+  currentSubTarget.social_filter = Array.from(new Set($("subSocialFilter").value.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean)));
 
   const bFilters = [];
   ["hinatazaka", "nogizaka", "sakurazaka"].forEach(k => {
@@ -3696,7 +3696,7 @@ function openMemberSocialDialog(m, idx) {
 $("memSocialCancel").addEventListener("click", () => $("memberSocialDialog").close());
 $("memSocialSave").addEventListener("click", () => {
   if (!currentSocialMember) return;
-  const parseHandles = (str) => str.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean);
+  const parseHandles = (str) => Array.from(new Set(str.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean)));
   const x = parseHandles($("memSocialX").value);
   const ig = parseHandles($("memSocialIg").value);
   const tiktok = parseHandles($("memSocialTiktok").value);
