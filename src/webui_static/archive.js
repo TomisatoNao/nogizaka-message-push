@@ -689,7 +689,7 @@ function syncChipHighlight() {
 // ── 博客相关逻辑 ─────────────────────────────────────
 let curGroupAuthors = [];
 
-async function selectBlogGroup(key, author = "") {
+async function selectBlogGroup(key, author = "", updateHash = true) {
   curMode = "blog";
   curMember = "";
   curBlogGroup = key;
@@ -708,11 +708,13 @@ async function selectBlogGroup(key, author = "") {
   if ($("tabBlog")) $("tabBlog").classList.add("active");
   if ($("tabLetter")) $("tabLetter").classList.remove("active");
 
-  const p = new URLSearchParams({ blog: key });
-  if (curBlogAuthor) p.set("author", curBlogAuthor);
-  selfHashUpdate = true;
-  location.hash = p.toString();
-  setTimeout(() => { selfHashUpdate = false; }, 0);
+  if (updateHash) {
+    const p = new URLSearchParams({ blog: key });
+    if (curBlogAuthor) p.set("author", curBlogAuthor);
+    selfHashUpdate = true;
+    location.hash = p.toString();
+    setTimeout(() => { selfHashUpdate = false; }, 0);
+  }
 
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
@@ -3052,8 +3054,8 @@ async function handleRoute(isInitial = false) {
           const post = res.post;
           const targetGroup = post.group_key || group || "nogizaka";
           const targetAuthor = post.author || author || "";
-          await selectBlogGroup(targetGroup, targetAuthor);
           openBlogReader(post);
+          selectBlogGroup(targetGroup, targetAuthor, false);
         } else {
           showToast("未找到该博客或已被移除", "error");
           await selectBlogGroup(group, author);
@@ -3126,8 +3128,7 @@ async function boot() {
   syncSearchInput();
   initTypeChips();
 
-  await loadMembers(true);
-  await handleRoute(true);
+  await Promise.all([loadMembers(true), handleRoute(true)]);
 }
 
 boot();
