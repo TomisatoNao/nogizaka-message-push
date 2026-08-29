@@ -517,6 +517,7 @@ class _Handler(BaseHTTPRequestHandler):
             result[k] = v[0] if v else ""
         return result
     server_version = "SakamichiWebUI/1.0"
+    timeout = 30  # 单个 Socket 连接最大超时 30s，免疫 Slowloris 慢速挂起 DoS 攻击
 
     # ── 工具 ─────────────────────────────────────────────
     def _send_json(self, obj: dict, code: int = 200) -> None:
@@ -2362,8 +2363,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
                 return
             content_length = int(self.headers.get("Content-Length", 0))
-            if content_length == 0:
-                self._send_json({"ok": False, "msg": "Missing body"}, 400)
+            if content_length <= 0 or content_length > 5 * 1024 * 1024:
+                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
                 return
             body_data = self.rfile.read(content_length).decode("utf-8")
             try:
@@ -2435,6 +2436,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
             content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0 or content_length > 5 * 1024 * 1024:
+                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
+                return
             body = self.rfile.read(content_length)
             try:
                 payload = json.loads(body.decode("utf-8"))
@@ -2472,6 +2476,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
             content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0 or content_length > 5 * 1024 * 1024:
+                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
+                return
             body = self.rfile.read(content_length)
             try:
                 payload = json.loads(body.decode("utf-8"))
@@ -2505,8 +2512,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
             content_length = int(self.headers.get("Content-Length", 0))
-            if content_length == 0:
-                self._send_json({"ok": False, "msg": "Missing body"}, 400)
+            if content_length <= 0 or content_length > 5 * 1024 * 1024:
+                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
                 return
 
             body_data = self.rfile.read(content_length).decode("utf-8")
