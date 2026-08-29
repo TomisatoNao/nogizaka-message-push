@@ -6,7 +6,7 @@ services:
     container_name: sakamichi-push
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "46046:46046"
     environment:
       - TZ=Asia/Tokyo
       # 可直接在此处注入密钥（或写入挂载的 .env 文件）：

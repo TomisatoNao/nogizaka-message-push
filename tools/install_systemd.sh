@@ -120,4 +120,4 @@ echo
 echo "✅ 已安装并启动 ${SERVICE_NAME}"
 echo "   状态: bash tools/install_systemd.sh --status"
 echo "   日志: bash tools/install_systemd.sh --logs"
-echo "   管理端: http://127.0.0.1:8787/"
+echo "   管理端: http://127.0.0.1:46046/"

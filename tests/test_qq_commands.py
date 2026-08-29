@@ -218,5 +218,9 @@ def main() -> None:
     print("🎉 全部测试通过！官方 Bot 指令工作正常")
 
 
+def test_qq_commands() -> None:
+    main()
+
+
 if __name__ == "__main__":
     main()

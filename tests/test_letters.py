@@ -90,12 +90,7 @@ async def test_letter_archiving_and_queries(tmp_path):
 
     finally:
         cfg.ARCHIVE_DIR = orig_dir
-        if archive._sqlite_conn:
-            try:
-                archive._sqlite_conn.close()
-            except Exception:
-                pass
-        archive._sqlite_conn = None
+        archive.close_db()
 
 
 def test_webui_letters_api_routing():

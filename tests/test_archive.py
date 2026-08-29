@@ -466,5 +466,9 @@ def main() -> None:
     print("🎉 全部测试通过！消息归档工作正常")
 
 
+def test_archive() -> None:
+    main()
+
+
 if __name__ == "__main__":
     main()

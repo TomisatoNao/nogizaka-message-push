@@ -100,7 +100,7 @@ _DEFAULTS: dict = {
     # 网页管理端（config.json 的 web_admin 可覆盖；token 在 .env 的 WEB_ADMIN_TOKEN）
     "web_admin_enabled":        False,
     "web_admin_host":           "127.0.0.1",
-    "web_admin_port":           8787,
+    "web_admin_port":           46046,
     # 消息归档（config.json 的 archive 可覆盖）
     "archive_enabled":          False,
     "archive_dir":              "data/archive",

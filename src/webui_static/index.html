@@ -2151,7 +2151,7 @@ function renderGeneral() {
   const wa = config.web_admin || {};
   $("webAdminOn").checked = wa.enabled !== false;
   $("webAdminHost").value = wa.host || "127.0.0.1";
-  $("webAdminPort").value = wa.port || 8787;
+  $("webAdminPort").value = wa.port || 46046;
   const ar = config.archive || {};
   $("archiveOn").checked = !!ar.enabled;
   $("archiveMedia").checked = ar.media !== false;
@@ -2499,7 +2499,7 @@ function collectGeneral() {
   config.web_admin = {
     enabled: $("webAdminOn").checked,
     host: $("webAdminHost").value.trim() || "127.0.0.1",
-    port: num("webAdminPort") ?? 8787,
+    port: num("webAdminPort") ?? 46046,
   };
   config.archive = {
     enabled: $("archiveOn").checked,

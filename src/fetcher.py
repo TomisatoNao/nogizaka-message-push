@@ -306,7 +306,8 @@ async def _fetch_member_messages(member: dict):
                         await _http_client.aclose()
                 except Exception:
                     pass
-                _http_client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+                proxy_url = getattr(cfg, "PROXY", "") or None
+                _http_client = httpx.AsyncClient(timeout=30, proxy=proxy_url, follow_redirects=True)
                 if attempt < MAX_FETCH_ATTEMPTS:
                     await asyncio.sleep(1.0)
                     continue

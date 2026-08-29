@@ -4,7 +4,7 @@ services:
     container_name: sakamichi-push
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "46046:46046"
     environment:
       - TZ=Asia/Tokyo
       # 容器网络直连 NapCat 服务的 HTTP API

@@ -49,7 +49,7 @@ $pidFile = Join-Path $logDir "service.pid"
 # ── 单实例保护 ──────────────────────────────────────────
 # 计划任务的进程往往需要管理员权限才能杀，多开会留下一堆抢不到端口、
 # 却仍在重复抓取推送的孤儿进程。启动前先确认没有实例在跑。
-$port = 8787
+$port = 46046
 try {
     $cfgText = Get-Content (Join-Path $RepoDir "config\config.json") -Raw -ErrorAction Stop
     if ($cfgText -match '"port"\s*:\s*(\d+)') { $port = [int]$Matches[1] }

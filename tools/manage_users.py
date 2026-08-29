@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config.config as cfg  # noqa: E402
 from src import auth  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -115,7 +116,8 @@ def cmd_reset(argv: list[str]) -> int:
         print("✅ 用户库已成功重置！")
         print(f"   • 用户名:   {u}")
         print(f"   • 初始密码: {p}")
-        print("   • 登录地址: http://127.0.0.1:8787/")
+        port = getattr(cfg, "WEB_ADMIN_PORT", 46046)
+        print(f"   • 登录地址: http://127.0.0.1:{port}/")
         print("=" * 60)
         return 0
     else:

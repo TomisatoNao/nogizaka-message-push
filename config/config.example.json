@@ -16,11 +16,11 @@
   // ── Telegram Bot 路由配置 ──
   "tg_bots": [],
 
-  // ── 网页管理端（开箱即用，访问 http://localhost:8787）──
+  // ── 网页管理端（开箱即用，访问 http://localhost:46046）──
   "web_admin": {
     "enabled": true,
     "host": "0.0.0.0",
-    "port": 8787
+    "port": 46046
   },
 
   // ── 消息归档 ──

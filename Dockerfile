@@ -32,20 +32,21 @@ COPY entrypoint.sh .
 COPY config/ ./config/
 COPY src/ ./src/
 COPY tools/ ./tools/
+COPY config/config.example.json ./config.example.json.default
 
 # 赋予执行权限并创建数据与日志目录
 RUN chmod +x entrypoint.sh && \
     mkdir -p data logs
 
 # 暴露 WebUI 端口
-EXPOSE 8787
+EXPOSE 46046
 
 # 声明持久化目录
 VOLUME ["/app/config", "/app/data", "/app/logs"]
 
 # 容器健康检查
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8787/api/health/status || exit 1
+  CMD curl -fsS http://127.0.0.1:46046/api/health/status || exit 1
 
 # 启动入口
 ENTRYPOINT ["./entrypoint.sh"]

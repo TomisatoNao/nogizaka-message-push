@@ -854,7 +854,7 @@ async def main() -> None:
             "🔑 系统首次运行：已为您自动创建初始管理员账号！\n"
             f"   • 用户名:   {admin_user}\n"
             f"   • 初始密码: {admin_pw}\n"
-            "   • Web 管理端: http://127.0.0.1:8787/\n\n"
+            f"   • Web 管理端: http://127.0.0.1:{getattr(cfg, 'WEB_ADMIN_PORT', 46046)}/\n\n"
             "⚠️ 请妥善保存初始密码！若遗忘，可在终端执行：\n"
             f"   python tools/manage_users.py passwd {admin_user}\n"
             "=" * 70 + "\n"

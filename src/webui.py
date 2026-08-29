@@ -537,7 +537,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not _enforce_host_check:
             return True
         host = self.headers.get("Host", "")
-        if host.startswith("["):                    # IPv6: [::1]:8787
+        if host.startswith("["):                    # IPv6: [::1]:46046
             hostname = host[1:].split("]", 1)[0]
         else:
             hostname = host.rsplit(":", 1)[0] if ":" in host else host
@@ -777,6 +777,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
+        # 健康检查探针（Docker / K8s / 负载均衡器监控）：无需鉴权
+        if path in ("/api/health", "/api/health/status"):
+            self._send_json({"ok": True, "status": "healthy", "service": "sakamichi-push"})
+            return
         # 共享静态资源（主题 token / 切换脚本 / 样式 / 图标）：登录页也要用，故不设鉴权
         if path in ("/static/theme.css", "/static/theme.js",
                     "/static/archive.css", "/static/archive.js",
@@ -3389,7 +3393,7 @@ def start_webui(host: str | None = None, port: int | None = None,
     if host is None or port is None:
         import config.config as cfg
         host = host or getattr(cfg, "WEB_ADMIN_HOST", "127.0.0.1")
-        port = port if port is not None else getattr(cfg, "WEB_ADMIN_PORT", 8787)
+        port = port if port is not None else getattr(cfg, "WEB_ADMIN_PORT", 46046)
 
     _enforce_host_check = host in _LOOPBACK_HOSTS
 

@@ -18,7 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
 SAMPLE = {
     "channels": {"napcat": True, "tg": True, "qq_official": False},
     "napcat_api": "http://127.0.0.1:3000/send_group_msg",
-    "web_admin": {"enabled": True, "host": "127.0.0.1", "port": 8787},
+    "web_admin": {"enabled": True, "host": "127.0.0.1", "port": 46046},
     "accounts": {
         "nogizaka_main": {"group": "nogizaka46", "auth": "mobile"},
         "hinata_shared": {"group": "hinatazaka46"},
@@ -451,7 +451,12 @@ def main() -> None:
         os.environ["WEB_ADMIN_TOKEN"] = "s3cret"
         code, data = _http("GET", base + "/api/config")
         assert code == 401, f"缺 token 应 401，实际 {code}"
-        code, data = _http("GET", base + "/api/config", headers={"X-Auth-Token": "s3cret"})
+        # 健康检查探针：即使在设置了 WEB_ADMIN_TOKEN 且未带 Token 的情况下，也必须放行返回 200
+        code, data = _http("GET", base + "/api/health/status")
+        assert code == 200 and data.get("ok") and data.get("status") == "healthy", f"健康检查探针应免鉴权返回 200，实际 {code}, {data}"
+        code, data = _http("GET", base + "/api/health")
+        assert code == 200 and data.get("ok"), f"/api/health 探针应免鉴权返回 200，实际 {code}"
+
         # 404 测试：网页访问返回 404 HTML，API 访问返回 404 JSON
         code, data = _http("GET", base + "/non_existent_page", headers={"Accept": "text/html"})
         assert code == 404 and "404" in data, f"网页 404 应返回 HTML 404 页面，实际 {code}"
@@ -476,6 +481,10 @@ def main() -> None:
     cfg.AUTH_ENABLED = orig_auth
     print("=" * 50)
     print("🎉 全部测试通过！网页管理端工作正常")
+
+
+def test_webui() -> None:
+    main()
 
 
 if __name__ == "__main__":

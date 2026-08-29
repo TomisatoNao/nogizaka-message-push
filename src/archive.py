@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -56,7 +57,10 @@ _media_sem: asyncio.Semaphore | None = None
 _write_locks: dict[str, asyncio.Lock] = {}
 _bg_tasks: set = set()
 
+_local_storage = threading.local()
 _sqlite_conn: sqlite3.Connection | None = None
+_schema_initialized: bool = False
+_schema_lock = threading.Lock()
 _has_fts5: bool = False
 
 
@@ -65,132 +69,163 @@ def get_db_path() -> Path:
 
 
 def init_db() -> sqlite3.Connection | None:
-    """初始化 SQLite 归档数据库与 FTS5 全文索引表。"""
-    global _sqlite_conn, _has_fts5
-    if _sqlite_conn is not None:
-        return _sqlite_conn
+    """初始化 SQLite 归档数据库与 FTS5 全文索引表（支持线程局部独立连接与并发安全）。"""
+    global _sqlite_conn, _has_fts5, _schema_initialized
+
+    conn = getattr(_local_storage, "conn", None)
+    if conn is not None:
+        try:
+            conn.total_changes
+            return conn
+        except Exception:
+            conn = None
 
     db_file = get_db_path()
     try:
         db_file.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_file), timeout=10.0, check_same_thread=False)
+        conn = sqlite3.connect(str(db_file), timeout=30.0, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=30000;")
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                member_name TEXT NOT NULL,
-                member_dir TEXT NOT NULL,
-                year INTEGER NOT NULL,
-                month INTEGER NOT NULL,
-                type TEXT,
-                published_at TEXT,
-                updated_at TEXT,
-                text TEXT,
-                translation TEXT,
-                tags TEXT,
-                local_file TEXT,
-                raw_json TEXT NOT NULL
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_year_month ON messages(member_dir, year, month);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_updated_at ON messages(updated_at DESC);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_pub_desc ON messages(published_at DESC);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_type_pub ON messages(type, published_at DESC);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_pub ON messages(member_dir, type, published_at DESC);")
+        with _schema_lock:
+            if not _schema_initialized:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id TEXT PRIMARY KEY,
+                        member_name TEXT NOT NULL,
+                        member_dir TEXT NOT NULL,
+                        year INTEGER NOT NULL,
+                        month INTEGER NOT NULL,
+                        type TEXT,
+                        published_at TEXT,
+                        updated_at TEXT,
+                        text TEXT,
+                        translation TEXT,
+                        tags TEXT,
+                        local_file TEXT,
+                        raw_json TEXT NOT NULL
+                    );
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_year_month ON messages(member_dir, year, month);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_updated_at ON messages(updated_at DESC);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_pub_desc ON messages(published_at DESC);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_type_pub ON messages(type, published_at DESC);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_pub ON messages(member_dir, type, published_at DESC);")
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sent_ids (
-                group_type TEXT NOT NULL,
-                m_id TEXT NOT NULL,
-                msg_id TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                PRIMARY KEY (group_type, m_id, msg_id)
-            );
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS timeline_watermarks (
-                group_type TEXT NOT NULL,
-                m_id TEXT NOT NULL,
-                last_time TEXT NOT NULL,
-                updated_at REAL NOT NULL,
-                PRIMARY KEY (group_type, m_id)
-            );
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS letters (
-                id INTEGER PRIMARY KEY,
-                group_id INTEGER,
-                member_name TEXT NOT NULL,
-                member_dir TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT,
-                text TEXT,
-                file_url TEXT,
-                local_file TEXT,
-                thumbnail_url TEXT,
-                is_favorite INTEGER DEFAULT 0,
-                raw_json TEXT NOT NULL
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_letters_member ON letters(member_dir, created_at DESC);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_letters_created ON letters(created_at DESC);")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS sent_ids (
+                        group_type TEXT NOT NULL,
+                        m_id TEXT NOT NULL,
+                        msg_id TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY (group_type, m_id, msg_id)
+                    );
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS timeline_watermarks (
+                        group_type TEXT NOT NULL,
+                        m_id TEXT NOT NULL,
+                        last_time TEXT NOT NULL,
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY (group_type, m_id)
+                    );
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS letters (
+                        id INTEGER PRIMARY KEY,
+                        group_id INTEGER,
+                        member_name TEXT NOT NULL,
+                        member_dir TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT,
+                        text TEXT,
+                        file_url TEXT,
+                        local_file TEXT,
+                        thumbnail_url TEXT,
+                        is_favorite INTEGER DEFAULT 0,
+                        raw_json TEXT NOT NULL
+                    );
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_letters_member ON letters(member_dir, created_at DESC);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_letters_created ON letters(created_at DESC);")
 
-        try:
-            conn.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                    id UNINDEXED,
-                    member_dir UNINDEXED,
-                    member_name,
-                    text,
-                    translation,
-                    tags,
-                    tokenize='unicode61'
-                );
-            """)
-            _has_fts5 = True
-        except sqlite3.OperationalError:
-            _has_fts5 = False
+                try:
+                    conn.execute("""
+                        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                            id UNINDEXED,
+                            member_dir UNINDEXED,
+                            member_name,
+                            text,
+                            translation,
+                            tags,
+                            tokenize='unicode61'
+                        );
+                    """)
+                    _has_fts5 = True
+                except sqlite3.OperationalError:
+                    _has_fts5 = False
 
-        conn.commit()
+                conn.commit()
 
-        # 自动无缝平滑迁移旧版 data/time_records/*.txt 到 timeline_watermarks
-        time_dir = _BASE_DIR / "data" / "time_records"
-        if time_dir.exists() and time_dir.is_dir():
-            try:
-                import time as _t
-                for f in list(time_dir.glob("time_*.txt")):
-                    parts = f.stem.split("_")
-                    if len(parts) >= 3:
-                        g_type = parts[1]
-                        m_id = "_".join(parts[2:])
-                        with open(f, "r", encoding="utf-8") as tf:
-                            val = tf.read().strip()
-                        if val:
-                            conn.execute(
-                                "INSERT INTO timeline_watermarks (group_type, m_id, last_time, updated_at) VALUES (?, ?, ?, ?) "
-                                "ON CONFLICT(group_type, m_id) DO UPDATE SET last_time = excluded.last_time, updated_at = excluded.updated_at;",
-                                (g_type, m_id, val, _t.time())
-                            )
+                # 自动无缝平滑迁移旧版 data/time_records/*.txt 到 timeline_watermarks
+                time_dir = _BASE_DIR / "data" / "time_records"
+                if time_dir.exists() and time_dir.is_dir():
+                    try:
+                        import time as _t
+                        for f in list(time_dir.glob("time_*.txt")):
+                            parts = f.stem.split("_")
+                            if len(parts) >= 3:
+                                g_type = parts[1]
+                                m_id = "_".join(parts[2:])
+                                with open(f, "r", encoding="utf-8") as tf:
+                                    val = tf.read().strip()
+                                if val:
+                                    conn.execute(
+                                        "INSERT INTO timeline_watermarks (group_type, m_id, last_time, updated_at) VALUES (?, ?, ?, ?) "
+                                        "ON CONFLICT(group_type, m_id) DO UPDATE SET last_time = excluded.last_time, updated_at = excluded.updated_at;",
+                                        (g_type, m_id, val, _t.time())
+                                    )
+                                try:
+                                    f.unlink()
+                                except OSError:
+                                    pass
+                        conn.commit()
                         try:
-                            f.unlink()
+                            if not any(time_dir.iterdir()):
+                                time_dir.rmdir()
                         except OSError:
                             pass
-                conn.commit()
-                try:
-                    if not any(time_dir.iterdir()):
-                        time_dir.rmdir()
-                except OSError:
-                    pass
-            except Exception:
-                pass
+                    except Exception:
+                        pass
 
+                _schema_initialized = True
+
+        _local_storage.conn = conn
         _sqlite_conn = conn
-        return _sqlite_conn
+        return conn
     except Exception as e:
         log_all(f"⚠️ SQLite 数据库初始化失败: {e}", is_error=True)
         return None
+
+
+def close_db() -> None:
+    """关闭当前线程与全局数据库连接。"""
+    global _sqlite_conn, _schema_initialized
+    conn = getattr(_local_storage, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _local_storage.conn = None
+    if _sqlite_conn is not None:
+        try:
+            _sqlite_conn.close()
+        except Exception:
+            pass
+        _sqlite_conn = None
+    _schema_initialized = False
 
 
 def get_timeline_watermark(group_type: str, m_id: str) -> str | None:

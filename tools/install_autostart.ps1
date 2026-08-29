@@ -14,7 +14,7 @@
 #   - 登录时自动启动 python main.py（工作目录 = 仓库根目录）
 #   - 进程异常退出（非零退出码/崩溃）时 1 分钟后自动重启，最多连续重试 10 次
 #   - 以 S4U 方式在后台运行：不弹出控制台窗口，日志照常写 logs/ 目录
-#   - 网页管理端照常可用（http://127.0.0.1:8787/），要停程序用页面重启旁的方式
+#   - 网页管理端照常可用（http://127.0.0.1:46046/），要停程序用页面重启旁的方式
 #     或在此脚本 -Uninstall 后用任务管理器结束 python 进程
 # ============================================================
 param(
@@ -48,10 +48,16 @@ if ($Stop) {
     Set-Content -Path (Join-Path $logDir "service.stop") -Value "stop" -Encoding utf8
     Write-Host "已发送停止信号，等待主程序退出…"
 
+    $port = 46046
+    try {
+        $cfgText = Get-Content (Join-Path $RepoDir "config\config.json") -Raw -ErrorAction Stop
+        if ($cfgText -match '"port"\s*:\s*(\d+)') { $port = [int]$Matches[1] }
+    } catch { }
+
     $stopped = $false
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 1500
-        if (-not (Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue)) {
+        if (-not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
             $stopped = $true
             break
         }
@@ -130,10 +136,16 @@ foreach ($logon in @("S4U", "Interactive")) {
 }
 if (-not $registered) { exit 1 }
 
+$port = 46046
+try {
+    $cfgText = Get-Content (Join-Path $RepoDir "config\config.json") -Raw -ErrorAction Stop
+    if ($cfgText -match '"port"\s*:\s*(\d+)') { $port = [int]$Matches[1] }
+} catch { }
+
 Write-Host "✅ 已注册计划任务 $TaskName"
 Write-Host "   - 登录时自动启动，崩溃后 60s 自动拉起（由 tools\run_service.ps1 守护）"
 Write-Host "   - 后台运行无窗口；守护日志: logs\service.log"
-Write-Host "   - 管理入口: http://127.0.0.1:8787/"
+Write-Host "   - 管理入口: http://127.0.0.1:$port/"
 Write-Host ""
 
 # 非交互环境（管道 / 自动化）下不询问，避免卡住
@@ -148,11 +160,11 @@ if ($Start) {
 }
 
 if ($reply -eq "y") {
-    $inUse = Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue
+    $inUse = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     if ($inUse) {
-        Write-Warning "8787 端口已被占用（可能已有一个实例在跑）。请先结束它，再执行：Start-ScheduledTask -TaskName $TaskName"
+        Write-Warning "$port 端口已被占用（可能已有一个实例在跑）。请先结束它，再执行：Start-ScheduledTask -TaskName $TaskName"
     } else {
         Start-ScheduledTask -TaskName $TaskName
-        Write-Host "已启动。稍候可访问 http://127.0.0.1:8787/ 查看状态"
+        Write-Host "已启动。稍候可访问 http://127.0.0.1:$port/ 查看状态"
     }
 }

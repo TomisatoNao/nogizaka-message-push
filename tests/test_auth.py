@@ -386,5 +386,9 @@ def main() -> None:
     print("🎉 全部测试通过！账号系统工作正常")
 
 
+def test_auth() -> None:
+    main()
+
+
 if __name__ == "__main__":
     main()
