@@ -278,9 +278,36 @@ header.app-header {
 }
 
 @media (max-width: 768px) {
-  header.app-header { padding: 0 12px; height: auto; min-height: 54px; flex-wrap: wrap; gap: 8px; padding-top: 6px; padding-bottom: 6px; }
-  .header-nav { order: 3; width: 100%; justify-content: flex-start; flex-wrap: wrap; padding-bottom: 4px; overflow: visible !important; }
-  .header-actions { gap: 6px; }
+  header.app-header {
+    padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+    height: auto;
+    min-height: 54px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .header-nav {
+    order: 3;
+    width: 100%;
+    justify-content: flex-start;
+    padding-bottom: 4px;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .header-nav::-webkit-scrollbar { display: none; }
+  .header-nav .nav-tabs {
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-shrink: 0;
+  }
+  .header-nav .nav-tabs::-webkit-scrollbar { display: none; }
+  .header-actions {
+    gap: 6px;
+    margin-left: auto;
+  }
   .header-actions .user-badge { font-size: 12px; }
 }
 
