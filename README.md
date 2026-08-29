@@ -11,7 +11,7 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=flat-square)](https://github.com/astral-sh/ruff)
 [![Tests: Pytest](https://img.shields.io/badge/tests-pytest%20passing-success.svg?style=flat-square)](tests/)
 
-[🚀 快速开始](#-快速开始--quick-start) • [✨ 核心特性](#-核心特性--features) • [🧩 系统架构](#-系统核心架构--architecture) • [📖 操作指南](#️-web-管理端与日常运维) • [⚙️ 配置手册](#️-配置手册与环境变量) • [❓ 常见问题](#-常见故障排查--faq)
+[🚀 快速开始](#-快速开始--quick-start) • [✨ 核心特性](#-核心特性--features) • [🧩 系统架构](#-系统核心架构--architecture) • [📖 WebUI 指南](#️-web-管理端与日常运维) • [🛠️ 运维与工具](#️-命令行辅助工具与进阶配置) • [❓ 常见问题](#-常见故障排查--faq)
 
 </div>
 
@@ -23,7 +23,7 @@
 - 🤖 **AI 双引擎智能翻译**：Google Gemini 与 智谱清言（GLM-4-Flash 永久免费且国内免翻直连）**智能轮流调度与自动容灾**，偶像口吻地道中文呈现；
 - 📢 **全通道解耦分发**：支持 **QQ 群（NapCat OneBot11）**、**Telegram 频道（HTML 富文本）** 及 **QQ 官方开放平台机器人（个人/群聊/交互指令）**，支持独立备注与精细过滤；
 - 💾 **本地永久归档与全文检索**：全量多媒体（原图/语音/视频/粉丝信件）本地落盘；内置 **SQLite WAL + FTS5 全文索引** 与 **Gemini Vision 图片智能打标**；
-- 🖥️ **现代化开箱即用 WebUI**：响应式双语博客阅读器、Message 时间线画廊、在线凭证智能抓取与一键托管，无需手动修改 JSON 配置文件。
+- 🖥️ **全流程 Web 可视化配置**：响应式双语博客阅读器、Message 时间线画廊、在线凭证智能抓取与一键托管，**全过程浏览器界面点选，无需手动修改任何 JSON 文件**。
 
 ```mermaid
 flowchart TD
@@ -69,7 +69,8 @@ flowchart TD
   - [🚀 快速开始 / Quick Start](#-快速开始--quick-start)
     - [方式 A：Docker Compose 部署 (强烈推荐)](#方式-adocker-compose-部署-强烈推荐)
     - [方式 B：原生 Python 环境运行](#方式-b原生-python-环境运行)
-    - [🔑 初始管理员账号与重置说明](#-初始管理员账号与重置说明)
+    - [🖥️ 首次登录与 Web 界面极简配置 (4 步搞定)](#️-首次登录与-web-界面极简配置-4-步搞定)
+    - [🔑 初始管理员账号与密码重置](#-初始管理员账号与密码重置)
   - [✨ 核心特性 / Features](#-核心特性--features)
     - [1. Message 私密消息与粉丝信件归档](#1-message-私密消息与粉丝信件归档)
     - [2. 官方博客智能解析与双语阅读器](#2-官方博客智能解析与双语阅读器)
@@ -83,13 +84,10 @@ flowchart TD
   - [🖥️ Web 管理端与日常运维](#️-web-管理端与日常运维)
     - [1. 七大管理页签一览](#1-七大管理页签一览)
     - [2. QQ 官方机器人私聊指令矩阵](#2-qq-官方机器人私聊指令矩阵)
-  - [⚙️ 配置手册与环境变量](#️-配置手册与环境变量)
-    - [1. `config.json` 核心配置参考](#1-configjson-核心配置参考)
-    - [2. `.env` 环境变量清单](#2-env-环境变量清单)
-    - [3. `tools/` 命令行工具矩阵](#3-tools-命令行工具矩阵)
-  - [🛠️ 服务化守护部署](#️-服务化守护部署)
-    - [1. Windows 计划任务后台守护](#1-windows-计划任务后台守护)
-    - [2. Linux Systemd 守护服务](#2-linux-systemd-守护服务)
+  - [🛠️ 命令行辅助工具与进阶配置](#️-命令行辅助工具与进阶配置)
+    - [1. `tools/` 运维管理工具矩阵](#1-tools-运维管理工具矩阵)
+    - [2. 服务化后台守护 (Windows / Linux)](#2-服务化后台守护-windows--linux)
+    - [3. 进阶底层配置结构参考](#3-进阶底层配置结构参考)
   - [❓ 常见故障排查 / FAQ](#-常见故障排查--faq)
   - [📄 开源协议与免责声明 / License](#-开源协议与免责声明--license)
 
@@ -124,11 +122,11 @@ flowchart TD
    docker compose up -d
    ```
 
-3. **查看初始密码并登录**：
+3. **查看初始密码**：
    ```bash
    docker logs sakamichi-push
    ```
-   浏览器访问 `http://<你的服务器IP>:46046/`，输入终端提示的初始 `admin` 账号和密码即可进入后台！
+   打开浏览器访问 **`http://<你的服务器IP>:46046/`** 登录！
 
 ---
 
@@ -142,16 +140,13 @@ flowchart TD
    cd nogizaka-message-push
 
    pip install -r requirements.txt
-   cp .env.example .env        # Windows: copy .env.example .env
    ```
 
 2. **启动主程序**：
    ```bash
    python main.py
    ```
-
-3. **登录控制台**：
-   首次启动时控制台将高亮输出初始账号及密码：
+   控制台将高亮输出初始账号及密码：
    ```text
    ======================================================================
    🔑 系统首次运行：已为您自动创建初始管理员账号！
@@ -160,13 +155,26 @@ flowchart TD
       • Web 管理端: http://127.0.0.1:46046/
    ======================================================================
    ```
-   打开浏览器访问 **`http://127.0.0.1:46046/`** 开始可视化配置。
+
+3. **打开浏览器**：访问 **`http://127.0.0.1:46046/`** 即可直接登录。
 
 ---
 
-### 🔑 初始管理员账号与重置说明
+### 🖥️ 首次登录与 Web 界面极简配置 (4 步搞定)
 
-若未留意或遗忘了密码，无需重装系统，可在终端直接重设：
+> [!TIP]
+> **全流程图形化配置**：登录后台后，所有设置均可直接在网页端点选完成，**无需手动打开或编辑任何配置文件**！
+
+1. **配置 AI 翻译**：进入「⚙️ 系统设置」，录入 Google Gemini API Key（[免费获取](https://aistudio.google.com/apikey)）或智谱开放平台 API Key（[免费获取](https://open.bigmodel.cn/)，国内免翻直连）；
+2. **开启推送渠道**：进入「📢 推送通道」，开启 Telegram 频道、NapCat QQ 群 或 QQ 官方机器人，设置「备注名」（如 `乃木坂主群`），并点击「📨 发送测试」验证连通性；
+3. **添加账号与监控成员**：进入「👥 账号与成员」，点击「填凭证」直接粘贴 Message 抓包 cURL，然后点击「📋 从账号拉取成员列表」一键勾选要监控的成员；
+4. **即时生效**：点击右上角「⟳ 重新载入」，系统即刻进入全自动抓取、翻译、推送与持久化归档状态！
+
+---
+
+### 🔑 初始管理员账号与密码重置
+
+若未留意或遗忘了密码，可在终端直接重设：
 
 ```bash
 # 方式 1：直接修改/重设 admin 密码（需 ≥ 8 位）
@@ -295,84 +303,12 @@ flowchart LR
 
 ---
 
-## ⚙️ 配置手册与环境变量
+## 🛠️ 命令行辅助工具与进阶配置
 
-### 1. `config.json` 核心配置参考
+> [!NOTE]
+> 系统日常运行所需的全部配置与凭证更新均可在 Web 管理端完成。以下工具主要面向服务器自动化运维、数据补全与离线分析场景。
 
-```jsonc
-{
-  // ── 推送通道总控 ──
-  "channels": {
-    "napcat": true,
-    "tg": false,
-    "qq_official": false
-  },
-  "napcat_api": "http://127.0.0.1:3000/send_group_msg",
-  "napcat_routes": [
-    {
-      "group_id": 533072575,
-      "remark": "乃木坂主群",
-      "push_message": true,
-      "push_blog": true,
-      "push_x": true,
-      "push_instagram": true,
-      "push_tiktok": true,
-      "push_live": true,
-      "member_filter": ["冨里 奈央"],
-      "blog_filter": ["nogizaka"]
-    }
-  ],
-
-  // ── 网页管理端 ──
-  "web_admin": {
-    "enabled": true,
-    "host": "0.0.0.0",
-    "port": 46046
-  },
-
-  // ── 本地归档 ──
-  "archive": {
-    "enabled": true,
-    "dir": "data/archive",
-    "media": true
-  },
-
-  // ── AI 双引擎翻译 ──
-  "translate": true,
-  "gemini_models": [
-    "gemini-3.7-flash",
-    "glm-4-flash"
-  ],
-
-  // ── 轮询节奏配置 ──
-  "day_interval": [120, 180],
-  "night_interval": [1500, 1800],
-  "sleep_hours": [2, 7]
-}
-```
-
-### 2. `.env` 环境变量清单
-
-```bash
-# Google Gemini API Key（可在 Google AI Studio 免费获取）
-GEMINI_API_KEY=AIzaSy...
-
-# 智谱开放平台 API Key（GLM-4-Flash 永久免费，国内直连）
-ZHIPU_API_KEY=df488cc9484f46488045...
-
-# Telegram Bot Token
-TG_BOT_TOKEN=123456:ABC-DEF...
-
-# 网页管理端外部 API 调用凭证 (可选)
-WEB_ADMIN_TOKEN=your_secure_token
-
-# 社交媒体凭证（可选，用于突破风控或抓取 24h 快拍 Story）
-INSTAGRAM_SESSIONID=123456789%3Axxx
-X_AUTH_TOKEN=
-TIKTOK_SESSIONID=
-```
-
-### 3. `tools/` 命令行工具矩阵
+### 1. `tools/` 运维管理工具矩阵
 
 | 工具脚本 | 运行命令 | 核心功能 |
 |---|---|---|
@@ -385,13 +321,10 @@ TIKTOK_SESSIONID=
 | `get_qq_openid.py` | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 快速捕获 QQ 官方 Bot 私聊用户的 `target_openid` |
 | `get_qq_group_openid.py` | `python tools/get_qq_group_openid.py [APP_ID] [SECRET]` | 快速捕获 QQ 官方 Bot 所在群的 `group_openid` |
 
----
+### 2. 服务化后台守护 (Windows / Linux)
 
-## 🛠️ 服务化守护部署
-
-### 1. Windows 计划任务后台守护
-
-内置崩溃 60s 自动拉起、防多开孤儿进程的 PowerShell 守护套件：
+<details>
+<summary><b>Windows 计划任务后台守护（防多开孤儿进程，点击展开）</b></summary>
 
 ```powershell
 # 以管理员权限打开 PowerShell 执行：
@@ -400,8 +333,10 @@ powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Status    
 powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Stop      # 优雅停机
 powershell -ExecutionPolicy Bypass -File tools\install_autostart.ps1 -Uninstall # 卸载任务
 ```
+</details>
 
-### 2. Linux Systemd 守护服务
+<details>
+<summary><b>Linux Systemd 守护服务（点击展开）</b></summary>
 
 ```bash
 # 用户级服务化（无需 root，自动开启 linger 开机拉起）
@@ -410,6 +345,50 @@ bash tools/install_systemd.sh --status
 bash tools/install_systemd.sh --logs       # 查看实时日志
 bash tools/install_systemd.sh --stop       # 停止服务
 ```
+</details>
+
+### 3. 进阶底层配置结构参考
+
+<details>
+<summary><b>底层配置文件结构参考（仅供自动化脚本与开发者查阅，点击展开）</b></summary>
+
+Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env` 文件。其核心结构如下：
+
+#### `config/config.json` 结构示例
+```jsonc
+{
+  "channels": { "napcat": true, "tg": false, "qq_official": false },
+  "napcat_api": "http://127.0.0.1:3000/send_group_msg",
+  "napcat_routes": [
+    {
+      "group_id": 533072575,
+      "remark": "乃木坂主群",
+      "push_message": true,
+      "push_blog": true,
+      "member_filter": ["冨里 奈央"],
+      "blog_filter": ["nogizaka"]
+    }
+  ],
+  "web_admin": { "enabled": true, "host": "0.0.0.0", "port": 46046 },
+  "archive": { "enabled": true, "dir": "data/archive", "media": true },
+  "translate": true,
+  "gemini_models": ["gemini-3.7-flash", "glm-4-flash"],
+  "day_interval": [120, 180],
+  "night_interval": [1500, 1800],
+  "sleep_hours": [2, 7]
+}
+```
+
+#### `.env` 环境变量列表
+```bash
+GEMINI_API_KEY=AIzaSy...               # Google Gemini API Key
+ZHIPU_API_KEY=df488cc9...              # 智谱开放平台 API Key
+TG_BOT_TOKEN=123456:ABC...             # Telegram Bot Token
+WEB_ADMIN_TOKEN=your_token             # Web 管理端外部 API 调用 Token (可选)
+INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
+```
+
+</details>
 
 ---
 
