@@ -28,6 +28,7 @@ let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲
 let curMode = "msg";     // "msg" 或 "blog"
 let curBlogAuthor = "";  // 当前选中的博客作者
 let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
+let curActiveDay = "";   // 当前选中的消息日期 (YYYY-MM-DD)
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function mediaUrl(u) {
   if (!u) return "";
@@ -327,7 +328,7 @@ function renderCalendar() {
     const cell = document.createElement(n > 0 ? "button" : "div");
     let cls = "cal-day" + (n > 0 ? " has" : "") +
       (n >= 6 ? " h3" : n >= 3 ? " h2" : n >= 1 ? " h1" : "");
-    if (curMode === "blog" && curBlogDate === key) {
+    if ((curMode === "blog" && curBlogDate === key) || (curMode === "msg" && curActiveDay === key)) {
       cls += " active-day";
     }
     cell.className = cls;
@@ -362,6 +363,8 @@ async function jumpToDay(dateKey) {
   const [y, m] = dateKey.split("-").map(Number);
   searchQuery = "";
   syncSearchInput();
+  curActiveDay = dateKey;
+  renderCalendar();
 
   if (curMode === "blog") {
     // 博客模式下的日期跳转：重置页码为 1，清空关键词，切换/锁定指定日期
@@ -376,7 +379,7 @@ async function jumpToDay(dateKey) {
     return;
   }
 
-  await selectMonth(y, m);
+  await selectMonth(y, m, false);
   let jumpVersion = contentVersion;
   // 加载全月（最多几页），保证目标日期的分隔条已渲染
   while (jumpVersion === contentVersion && page < totalPages) { page++; await loadPage(); }
@@ -388,7 +391,7 @@ async function jumpToDay(dateKey) {
     $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
       c.classList.toggle("active", TYPES[i][0] === ""));
     loadCalendar();
-    await selectMonth(y, m);
+    await selectMonth(y, m, false);
     jumpVersion = contentVersion;
     while (jumpVersion === contentVersion && page < totalPages) { page++; await loadPage(); }
     if (jumpVersion !== contentVersion) return;
@@ -427,6 +430,59 @@ async function jumpToDay(dateKey) {
   }, 2200);
 
   // 清理监听器（最多保留 5 秒）
+  setTimeout(() => {
+    window.removeEventListener("wheel", cancel);
+    window.removeEventListener("touchstart", cancel);
+    window.removeEventListener("keydown", cancel);
+  }, 5000);
+}
+
+async function scrollToLatestDay() {
+  if (curMode !== "msg" || targetMsgId || searchQuery) return;
+  const v = contentVersion;
+
+  // 1. 若当前月有多页，全量加载当月消息，确保末尾日期在 DOM 中
+  while (v === contentVersion && page < totalPages) {
+    page++;
+    await loadPage();
+  }
+  if (v !== contentVersion) return;
+  $("loadMore").hidden = true;
+
+  // 2. 找到当月最后一个日期分隔条
+  const seps = document.querySelectorAll("#timeline .day-sep");
+  if (!seps.length) return;
+  const lastSep = seps[seps.length - 1];
+  const dateKey = lastSep.dataset.date;
+  if (dateKey) {
+    curActiveDay = dateKey;
+    renderCalendar();
+  }
+
+  // 3. 智能滚动定位 + 防懒加载抖动校正
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
+  window.addEventListener("wheel", cancel, { once: true, passive: true });
+  window.addEventListener("touchstart", cancel, { once: true, passive: true });
+  window.addEventListener("keydown", cancel, { once: true, passive: true });
+
+  const pin = () => {
+    if (cancelled) return false;
+    if (!lastSep || !lastSep.isConnected) return false;
+    lastSep.scrollIntoView({ block: "start", behavior: "instant" });
+    return true;
+  };
+
+  pin();
+  setTimeout(pin, 300);
+  setTimeout(pin, 800);
+  setTimeout(() => {
+    if (pin()) {
+      lastSep.classList.add("flash");
+      setTimeout(() => lastSep.classList.remove("flash"), 2500);
+    }
+  }, 1600);
+
   setTimeout(() => {
     window.removeEventListener("wheel", cancel);
     window.removeEventListener("touchstart", cancel);
@@ -1535,7 +1591,8 @@ async function selectMember(name, keepHash) {
   loadCalendar();   // 后台拉全档按天计数，不阻塞时间线
   const wanted = keepHash ? readHashYM() : null;
   const pick = (wanted && months.find((m) => m.year === wanted.year && m.month === wanted.month)) || months[0];
-  await selectMonth(pick.year, pick.month);
+  const isLatestMonth = (!wanted || (wanted.year === months[0]?.year && wanted.month === months[0]?.month));
+  await selectMonth(pick.year, pick.month, isLatestMonth);
   if (searchQuery) startSearch(searchQuery, false);
 }
 
@@ -1558,9 +1615,10 @@ function syncHash() {
 }
 
 
-async function selectMonth(year, month) {
+async function selectMonth(year, month, autoScrollLatest = false) {
   curYM = { year, month };
   calYM = { year, month };
+  curActiveDay = "";
   renderCalendar();
   $("monthSelect").value = year + "-" + month;
   const idx = months.findIndex((m) => m.year === year && m.month === month);
@@ -1569,6 +1627,9 @@ async function selectMonth(year, month) {
   resetContent();
   if (!curBlogGroup) syncHash();
   await loadPage();
+  if (autoScrollLatest && !targetMsgId && !searchQuery) {
+    await scrollToLatestDay();
+  }
 }
 
 async function loadPage() {
@@ -2232,15 +2293,16 @@ function initTypeChips() {
 }
 $("monthSelect").addEventListener("change", () => {
   const [y, m] = $("monthSelect").value.split("-").map(Number);
-  selectMonth(y, m);
+  const isLatest = (months.length > 0 && months[0].year === y && months[0].month === m);
+  selectMonth(y, m, isLatest);
 });
 $("prevMonth").addEventListener("click", () => {
   const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
-  if (idx < months.length - 1) selectMonth(months[idx + 1].year, months[idx + 1].month);
+  if (idx < months.length - 1) selectMonth(months[idx + 1].year, months[idx + 1].month, false);
 });
 $("nextMonth").addEventListener("click", () => {
   const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
-  if (idx > 0) selectMonth(months[idx - 1].year, months[idx - 1].month);
+  if (idx > 0) selectMonth(months[idx - 1].year, months[idx - 1].month, (idx - 1) === 0);
 });
 $("loadMore").addEventListener("click", () => {
   if (pageLoading || page >= totalPages) return;

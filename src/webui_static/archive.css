@@ -44,11 +44,11 @@
   .cal-day.h2 { background: color-mix(in srgb, var(--accent) 22%, transparent); }
   .cal-day.h3 { background: color-mix(in srgb, var(--accent) 38%, transparent); }
   .cal-day.today { outline: 1px dashed var(--muted); }
-  .cal-day.active-day { outline: 2px solid var(--accent); outline-offset: 1px; font-weight: bold; }
+  .cal-day.active-day { outline: 2px solid var(--accent); outline-offset: 1px; font-weight: 700; background: color-mix(in srgb, var(--accent) 26%, transparent); color: var(--accent); }
   .cal-foot { margin-top: 8px; font-size: 11px; color: var(--muted); text-align: center; }
   /* scroll-margin-top = fixed header高度(~64px) + 顶部预留间距(16px) */
   .day-sep { scroll-margin-top: 88px; }
-  .day-sep.flash span { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .day-sep.flash span { border-color: var(--accent); color: var(--accent); font-weight: 600; box-shadow: 0 0 16px var(--accent-ring); }
   /* 今日跳转后的高亮脉冲动画 */
   @keyframes today-highlight {
     0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
