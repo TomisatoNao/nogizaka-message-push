@@ -35,8 +35,10 @@ DEFAULTS = {
     "max_requests_per_hour": 120,
     # 连续多少次鉴权/限流失败后熔断
     "failure_threshold": 3,
-    # 熔断后暂停多久（秒），默认 6 小时
-    "cooldown_seconds": 6 * 3600,
+    # 登录态失效熔断冷却（秒），默认 2 小时
+    "cooldown_seconds": 7200,
+    # 429 频率限流熔断冷却（秒），默认 30 分钟（1800 秒）
+    "rate_limit_cooldown_seconds": 1800,
     # 静默时段（本地时间小时，左闭右开）；期间完全不请求
     "quiet_hours": [1, 7],
     # 轮询间隔随机抖动比例
@@ -164,12 +166,16 @@ class IgSafety:
         s = settings(config)
         with self._lock:
             self._fail_streak += 1
-            if self._fail_streak < int(s.get("failure_threshold", 3)):
+            threshold = int(s.get("failure_threshold", 3))
+            if self._fail_streak < threshold:
                 log.warning("[instagram] 风控信号 %s（连续 %s 次，达到 %s 次将熔断）",
-                            status, self._fail_streak,
-                            s.get("failure_threshold", 3))
+                            status, self._fail_streak, threshold)
                 return False
-            cooldown = float(s.get("cooldown_seconds", 6 * 3600))
+            # 区分 401/403 (登录态失效) vs 429 (临时限流)
+            if status == 429:
+                cooldown = float(s.get("rate_limit_cooldown_seconds", 1800))
+            else:
+                cooldown = float(s.get("cooldown_seconds", 7200))
             self._blocked_until = time.time() + cooldown
             self._block_reason = f"连续 {self._fail_streak} 次 {status}{detail}"
             self._fail_streak = 0

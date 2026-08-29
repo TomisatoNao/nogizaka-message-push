@@ -514,10 +514,10 @@ async function loadMembers(skipSelect = false) {
   if (skipSelect || curMode !== "msg") return;
   let saved = null;
   try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
-  const wanted = (saved && members.some(m => m.name === saved))
-    ? saved
-    : (curMember && members.some(m => m.name === curMember))
-      ? curMember
+  const wanted = (curMember && members.some(m => m.name === curMember))
+    ? curMember
+    : (saved && members.some(m => m.name === saved))
+      ? saved
       : getDefaultNogiMember();
   await selectMember(wanted, true);
 }
@@ -2462,6 +2462,28 @@ async function openBlogReaderById(blogId) {
   }
 }
 
+function jumpToMessage(member, year, month, msgId) {
+  if (!member) return;
+  curMode = "msg";
+  switchMainTab("msg", true);
+  hideHome();
+  curMember = member;
+  try { localStorage.setItem("archive_last_msg_member", member); } catch (_) {}
+  curType = "";
+  searchQuery = "";
+  syncSearchInput();
+  targetMsgId = msgId ? String(msgId) : "";
+  selfHashUpdate = true;
+  const y = parseInt(year, 10), m = parseInt(month, 10);
+  if (y && m) {
+    location.hash = "member=" + encodeURIComponent(member) + "&y=" + y + "&m=" + m;
+  } else {
+    location.hash = "member=" + encodeURIComponent(member);
+  }
+  setTimeout(() => { selfHashUpdate = false; }, 100);
+  selectMember(member, true);
+}
+
 let _portalHomeCached = null;
 
 async function showHome() {
@@ -2617,22 +2639,12 @@ function renderHome(data) {
 
     strip.querySelectorAll('.photo-card').forEach(el => {
       el.addEventListener('click', () => {
+        if (dragMoved) return;
         const pType = el.dataset.type;
         if (pType === "blog") {
           openBlogReaderById(el.dataset.id);
         } else {
-          curMode = "msg";
-          switchMainTab("msg", true);
-          hideHome();
-          curMember = el.dataset.member;
-          curType = "";
-          searchQuery = "";
-          syncSearchInput();
-          targetMsgId = el.dataset.id;
-          selfHashUpdate = true;
-          location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
-          setTimeout(() => { selfHashUpdate = false; }, 100);
-          loadMembers();
+          jumpToMessage(el.dataset.member, el.dataset.year, el.dataset.month, el.dataset.id);
         }
       });
     });
@@ -2690,12 +2702,13 @@ function renderHome(data) {
     dragTrail = []; dragMoved = false;
     cancelInertia(); stopPhotoScroll();
     strip.style.cursor = "grabbing";
-    e.preventDefault();
   });
   window.addEventListener("mousemove", (e) => {
     if (!dragOn) return;
-    strip.scrollLeft = dragStartScroll + (dragStartX - e.clientX);
-    if (Math.abs(e.clientX - dragStartX) > 4) dragMoved = true;
+    if (Math.abs(e.clientX - dragStartX) > 5) {
+      dragMoved = true;
+      strip.scrollLeft = dragStartScroll + (dragStartX - e.clientX);
+    }
     dragTrail.push({ t: performance.now(), x: e.clientX });
     const cutoff = performance.now() - 100;
     dragTrail = dragTrail.filter(p => p.t > cutoff);
@@ -2711,6 +2724,7 @@ function renderHome(data) {
     }
     dragTrail = [];
     setTimeout(() => { if (!dragOn) startPhotoScroll(); }, 3000);
+    setTimeout(() => { dragMoved = false; }, 50);
   });
   strip.addEventListener("click", (e) => {
     if (dragMoved) { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); }
@@ -2820,10 +2834,7 @@ function renderHome(data) {
   secDiv.querySelectorAll('.member-bento-card').forEach(card => {
     card.addEventListener("click", () => {
       const mName = card.dataset.name;
-      curMode = "msg";
-      switchMainTab("msg", true);
-      hideHome();
-      selectMember(mName);
+      jumpToMessage(mName);
     });
   });
 
@@ -2867,16 +2878,7 @@ function renderHome(data) {
     feedDiv.innerHTML = cardsHTML;
     feedDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
-        hideHome();
-        curMember = el.dataset.member;
-        curType = "";
-        searchQuery = "";
-        syncSearchInput();
-        targetMsgId = el.dataset.id;
-        selfHashUpdate = true;
-        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
-        setTimeout(() => { selfHashUpdate = false; }, 100);
-        loadMembers();
+        jumpToMessage(el.dataset.member, el.dataset.year, el.dataset.month, el.dataset.id);
       });
     });
   } else {
@@ -2934,18 +2936,7 @@ function renderHome(data) {
     tunnelDiv.innerHTML = cardsHTML;
     tunnelDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
       el.addEventListener('click', () => {
-        curMode = "msg";
-        switchMainTab("msg", true);
-        hideHome();
-        curMember = el.dataset.member;
-        curType = "";
-        searchQuery = "";
-        syncSearchInput();
-        targetMsgId = el.dataset.id;
-        selfHashUpdate = true;
-        location.hash = "member=" + encodeURIComponent(el.dataset.member) + "&y=" + el.dataset.year + "&m=" + el.dataset.month;
-        setTimeout(() => { selfHashUpdate = false; }, 100);
-        loadMembers();
+        jumpToMessage(el.dataset.member, el.dataset.year, el.dataset.month, el.dataset.id);
       });
     });
   } else {

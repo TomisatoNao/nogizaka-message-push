@@ -116,6 +116,7 @@ _DEFAULTS: dict = {
     # 官方 Bot 指令（私聊 Bot 查状态/归档）；allow 为空则默认只允许各 Bot 的
     # target_openid，即"只有你自己能用"
     "qq_commands_enabled":      False,
+    "qq_commands_mode":         "configured",
     "qq_commands_allow":        [],
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
@@ -205,6 +206,8 @@ def _normalize_config(raw: dict) -> dict:
             qc = cfg.pop("qq_commands")
             if "enabled" in qc:
                 cfg["qq_commands_enabled"] = qc["enabled"]
+            if "mode" in qc:
+                cfg["qq_commands_mode"] = qc["mode"]
             if "allow_openids" in qc:
                 cfg["qq_commands_allow"] = qc["allow_openids"]
 
@@ -523,6 +526,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "daily_summary_enabled":        "DAILY_SUMMARY_ENABLED",
     "daily_summary_hour":           "DAILY_SUMMARY_HOUR",
     "qq_commands_enabled":          "QQ_COMMANDS_ENABLED",
+    "qq_commands_mode":             "QQ_COMMANDS_MODE",
     "qq_commands_allow":            "QQ_COMMANDS_ALLOW",
     "auth_enabled":                 "AUTH_ENABLED",
     "auth_archive_public":          "AUTH_ARCHIVE_PUBLIC",

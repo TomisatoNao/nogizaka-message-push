@@ -174,7 +174,8 @@ class SocialForwarder:
                                             log_all(f"⚠️ TG Bot 发送视频异常: {ex}", is_error=True)
                             return t_ok
                         except Exception as e:
-                            errors.append(f"Telegram 推送失败: {e}")
+                            bot_label = f"{target_bot.remark} ({target_bot.name})" if getattr(target_bot, "remark", None) else target_bot.name
+                            errors.append(f"Telegram 推送失败 [{bot_label}]: {e}")
                             return False
 
                     tasks.append(_send_tg_post())
@@ -211,11 +212,12 @@ class SocialForwarder:
                         if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
                             continue
 
-                    async def _send_napcat_post(target_gid=gid):
+                    async def _send_napcat_post(route=r, target_gid=gid):
                         try:
                             return await napcat.send_qq_message(target_gid, chain)
                         except Exception as e:
-                            errors.append(f"NapCat 推送失败 (群 {target_gid}): {e}")
+                            r_label = f"{route.get('remark')} ({target_gid})" if route.get("remark") else f"群 {target_gid}"
+                            errors.append(f"NapCat 推送失败 [{r_label}]: {e}")
                             return False
 
                     tasks.append(_send_napcat_post())
@@ -278,7 +280,8 @@ class SocialForwarder:
                                         log_all(f"⚠️ QQ 官方 Bot 发送媒体异常: {ex}", is_error=True)
                             return True
                         except Exception as e:
-                            errors.append(f"QQ 官方机器人推送失败 [{b.name}]: {e}")
+                            b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
+                            errors.append(f"QQ 官方机器人推送失败 [{b_label}]: {e}")
                             return False
 
                     tasks.append(_send_official_post())

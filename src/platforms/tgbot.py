@@ -131,7 +131,15 @@ class TGBot:
         }
 
         if media_type == "image":
-            action = lambda: self._bot.send_photo(photo=file_url, **kwargs)          # noqa: E731
+            async def action():
+                try:
+                    await self._bot.send_photo(photo=file_url, **kwargs)
+                except Exception as ex:
+                    if "invalid_dimensions" in str(ex).lower():
+                        log_all(f"ℹ️ TG Bot [{self.name}] 图片超出 Telegram 比例/尺寸限制，自动转为文档发送", is_debug=True)
+                        await self._bot.send_document(document=file_url, **kwargs)
+                    else:
+                        raise
         elif media_type == "video":
             action = lambda: self._bot.send_video(video=file_url, **kwargs)          # noqa: E731
         elif media_type == "record":
@@ -143,7 +151,7 @@ class TGBot:
         return await self._send_with_retry("媒体发送", action)
 
     async def send_photo_file(self, file_path_or_bytes: str | bytes, caption: str = "") -> bool:
-        """发送本地图片文件或二进制数据。"""
+        """发送本地图片文件或二进制数据。若遇到 Telegram 超长图片限制自动降级为 document 发送。"""
         if not self._bot or not self.target_chat or not file_path_or_bytes:
             return False
         from telegram.constants import ParseMode
@@ -159,8 +167,15 @@ class TGBot:
                     data = f.read()
             else:
                 data = file_path_or_bytes
-            def action():
-                return self._bot.send_photo(photo=data, **kwargs)
+            async def action():
+                try:
+                    await self._bot.send_photo(photo=data, **kwargs)
+                except Exception as ex:
+                    if "invalid_dimensions" in str(ex).lower():
+                        log_all(f"ℹ️ TG Bot [{self.name}] 博客长图超出 Telegram 比例/尺寸限制，自动转为无损文档格式发送", is_debug=True)
+                        await self._bot.send_document(document=data, filename="blog_card.jpg", **kwargs)
+                    else:
+                        raise
             return await self._send_with_retry("本地图片发送", action)
         except Exception as e:
             log_all(f"⚠️ TG Bot [{self.name}] 本地图片读取或发送失败: {e}", is_error=True)

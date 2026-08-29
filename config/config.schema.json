@@ -319,10 +319,26 @@
           "type": "boolean",
           "default": false
         },
+        "mode": {
+          "type": "string",
+          "enum": ["configured", "whitelist", "all"],
+          "default": "configured"
+        },
         "allow_openids": {
           "type": "array",
           "items": {
-            "type": "string"
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "properties": {
+                  "openid": { "type": "string" },
+                  "name": { "type": "string" },
+                  "type": { "type": "string" }
+                },
+                "required": ["openid"]
+              }
+            ]
           }
         }
       }

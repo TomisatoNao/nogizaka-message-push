@@ -45,13 +45,14 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
             if match_member_filter(m_name, filters, m_id):
                 gid = route.get("group_id")
                 if gid:
-                    async def _send_napcat(target_gid=gid):
+                    r_label = f"NapCat:{route['remark']}" if route.get("remark") else "NapCat"
+                    async def _send_napcat(target_gid=gid, label=r_label):
                         ok = await send_qq_message(target_gid, message_chain)
                         health.get_tracker().record_channel("napcat", ok, f"群 {target_gid} 发送失败")
                         if not ok:
-                            log_all(f"⚠️ [通道: NapCat | 目标群: {target_gid} | 成员: {m_name}] 消息推送失败", is_error=True)
+                            log_all(f"⚠️ [通道: {label} | 目标群: {target_gid} | 成员: {m_name}] 消息推送失败", is_error=True)
                         else:
-                            log_all(f"✅ [通道: NapCat | 目标群: {target_gid} | 成员: {m_name}] 消息推送成功", is_debug=True)
+                            log_all(f"✅ [通道: {label} | 目标群: {target_gid} | 成员: {m_name}] 消息推送成功", is_debug=True)
                         return ok
                     tasks.append(_send_napcat())
 
@@ -61,27 +62,28 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         if bots:
             media_payloads = await qq_official.download_media_payloads(member, message_chain)
             for bot in bots:
+                b_label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
                 # 单聊目标（target_openid）
                 if bot.target_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
-                    async def _send_bot_private(b=bot):
+                    async def _send_bot_private(b=bot, label=b_label):
                         ok = await b.send_message_chain(member, message_chain, media_payloads=media_payloads)
                         health.get_tracker().record_channel(f"official:{b.name}", ok)
                         if not ok:
-                            log_all(f"⚠️ [通道: 官方Bot:{b.name} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送失败", is_error=True)
+                            log_all(f"⚠️ [通道: {label} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送失败", is_error=True)
                         else:
-                            log_all(f"✅ [通道: 官方Bot:{b.name} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送成功", is_debug=True)
+                            log_all(f"✅ [通道: {label} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送成功", is_debug=True)
                         return ok
                     tasks.append(_send_bot_private())
 
                 # 群聊目标（group_openid）
                 if bot.group_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
-                    async def _send_bot_group(b=bot):
+                    async def _send_bot_group(b=bot, label=b_label):
                         ok = await b.send_message_chain_to_group(b.group_openid, member, message_chain, media_payloads=media_payloads)
                         health.get_tracker().record_channel(f"official:{b.name}:group", ok)
                         if not ok:
-                            log_all(f"⚠️ [通道: 官方Bot:{b.name} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送失败", is_error=True)
+                            log_all(f"⚠️ [通道: {label} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送失败", is_error=True)
                         else:
-                            log_all(f"✅ [通道: 官方Bot:{b.name} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送成功", is_debug=True)
+                            log_all(f"✅ [通道: {label} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送成功", is_debug=True)
                         return ok
                     tasks.append(_send_bot_group())
 
@@ -90,13 +92,14 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         tg_bots = tgbot.get_configured_bots()
         for bot in tg_bots:
             if bot.target_chat and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
-                async def _send_tg(b=bot):
+                tg_label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
+                async def _send_tg(b=bot, label=tg_label):
                     tg_ok = await b.send_member_message(message_chain)
                     health.get_tracker().record_channel(f"tg:{b.name}", tg_ok)
                     if not tg_ok:
-                        log_all(f"⚠️ [通道: TG:{b.name} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送失败", is_error=True)
+                        log_all(f"⚠️ [通道: {label} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送失败", is_error=True)
                     else:
-                        log_all(f"✅ [通道: TG:{b.name} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送成功", is_debug=True)
+                        log_all(f"✅ [通道: {label} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送成功", is_debug=True)
                     return tg_ok
                 tasks.append(_send_tg())
 
@@ -415,7 +418,8 @@ async def send_blog_post(post: dict) -> bool:
                             await b.send_translation_qq(scope, target, pairs)
                     return True
                 except Exception as e:
-                    log_all(f"⚠️ 博客推送失败 [{b.name}]: {e}", is_error=True)
+                    b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
+                    log_all(f"⚠️ 官方 QQ Bot 博客推送失败 [{b_label}]: {e}", is_error=True)
                     return False
 
             tasks.append(_send_official_blog())
@@ -486,7 +490,8 @@ async def send_blog_post(post: dict) -> bool:
                             await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
                     return True
                 except Exception as e:
-                    log_all(f"⚠️ NapCat 博客推送失败 (群 {target_gid}): {e}", is_error=True)
+                    r_label = f"{r.get('remark')} ({target_gid})" if r.get("remark") else f"群 {target_gid}"
+                    log_all(f"⚠️ NapCat 博客推送失败 [{r_label}]: {e}", is_error=True)
                     return False
 
             tasks.append(_send_napcat_blog())
@@ -541,7 +546,8 @@ async def send_blog_post(post: dict) -> bool:
                             await b.send_translation_tg(pairs)
                     return True
                 except Exception as e:
-                    log_all(f"⚠️ TG 博客推送失败 [{b.name}]: {e}", is_error=True)
+                    b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
+                    log_all(f"⚠️ TG 博客推送失败 [{b_label}]: {e}", is_error=True)
                     return False
 
             tasks.append(_send_tg_blog())

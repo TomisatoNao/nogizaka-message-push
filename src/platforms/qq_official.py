@@ -180,14 +180,13 @@ class QQOfficialBot:
             curr_loop = None
 
         if self._client is not None and not getattr(self._client, "is_closed", False) and curr_loop is not None and curr_loop.is_running():
-            transport = getattr(self._client, "_transport", None)
-            t_loop = getattr(transport, "_loop", None)
-            if t_loop is None or t_loop is curr_loop:
-                try:
-                    return await self._client.post(url, json=json_body, headers=headers, timeout=t)
-                except RuntimeError as ex:
-                    if "Event loop" not in str(ex):
-                        raise
+            try:
+                return await self._client.post(url, json=json_body, headers=headers, timeout=t)
+            except RuntimeError as ex:
+                if "different event loop" not in str(ex).lower() and "event loop" not in str(ex).lower():
+                    raise
+            except Exception:
+                pass
 
         async with httpx.AsyncClient(timeout=t) as client:
             return await client.post(url, json=json_body, headers=headers)
@@ -701,12 +700,35 @@ _client: httpx.AsyncClient | None = None   # 媒体下载用（与各 Bot 共享
 async def _download_media(file_url: str, source_headers: dict[str, str]) -> bytes | None:
     """下载 message 私有媒体资源。用独立的媒体超时 —— 25MB 视频跑不进 API 的 15s。"""
     try:
-        resp = await _client.get(
-            file_url,
-            headers=source_headers,
-            follow_redirects=True,
-            timeout=cfg.QQ_OFFICIAL_MEDIA_TIMEOUT,
-        )
+        curr_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        curr_loop = None
+
+    client_to_use = None
+    if _client is not None and not getattr(_client, "is_closed", False) and curr_loop is not None and curr_loop.is_running():
+        client_to_use = _client
+
+    try:
+        if client_to_use is not None:
+            try:
+                resp = await client_to_use.get(
+                    file_url,
+                    headers=source_headers,
+                    follow_redirects=True,
+                    timeout=cfg.QQ_OFFICIAL_MEDIA_TIMEOUT,
+                )
+            except RuntimeError as ex:
+                if "different event loop" not in str(ex).lower() and "event loop" not in str(ex).lower():
+                    raise
+                client_to_use = None
+
+        if client_to_use is None:
+            async with httpx.AsyncClient(timeout=cfg.QQ_OFFICIAL_MEDIA_TIMEOUT) as fresh_client:
+                resp = await fresh_client.get(
+                    file_url,
+                    headers=source_headers,
+                    follow_redirects=True,
+                )
     except Exception as e:
         log_all(f"🔥 官方 QQ Bot 下载媒体异常: {type(e).__name__}: {e}", is_error=True)
         return None

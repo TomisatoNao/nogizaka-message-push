@@ -29,6 +29,7 @@ downloader 通过「扫描目录差集」把它们全部收集为 MediaItem。
 
 import logging
 import os
+import random
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -185,6 +186,54 @@ class InstagramFetcher(SocialFetcher):
             "X 与 TikTok 完全免登录，不受此限制。")
 
     # ── 主流程 ───────────────────────────────────────────
+
+    def fetch(self) -> list[Post]:
+        """Instagram 严格串行遍历所有账号，并在账号之间加入礼貌间隔，避免并发风暴触发 WAF 429。"""
+        from src.social.ig_safety import Blocked, get_guard
+        posts: list[Post] = []
+        accounts = self.accounts
+        if not accounts:
+            log.debug("[%s] 未配置监控账号，跳过", self.platform_name)
+            return posts
+
+        guard = get_guard()
+        for idx, account in enumerate(accounts):
+            # 1. 检查是否处于熔断、静默时段或达到每小时上限；若是则直接中断整轮，不再继续请求后续账号
+            try:
+                guard.peek_blocked(self._config)
+            except Blocked as e:
+                now = time.time()
+                if now - self._last_blocked_log > 60:
+                    self._last_blocked_log = now
+                    log.info("[instagram] ⏸ %s（本轮巡查已安全暂停）", e)
+                else:
+                    log.debug("[instagram] ⏸ %s", e)
+                break
+
+            log.debug("[%s] 🔎 开始检查账号 @%s (%d/%d)", self.platform_name, account, idx + 1, len(accounts))
+            try:
+                got = self._fetch_account(account)
+            except Exception as e:
+                log.warning("[%s] @%s 检查失败: %s", self.platform_name, account,
+                            str(e).replace("\n", " ")[:200])
+                got = []
+
+            if got:
+                m_name = self.member_name(account)
+                for p in got:
+                    if m_name:
+                        p.extra["member_name"] = m_name
+                    p.extra["account"] = account
+                log.info("[%s] 🆕 @%s 发现 %s 条新内容", self.platform_name, account, len(got))
+                posts.extend(got)
+            else:
+                log.debug("[%s] ✅ @%s 无新内容", self.platform_name, account)
+
+            # 2. 若不是最后一个账号，在账号间增加 2.0 ~ 4.5 秒的随机休眠，模拟真人浏览节奏
+            if idx < len(accounts) - 1:
+                time.sleep(random.uniform(2.0, 4.5))
+
+        return posts
 
     def _fetch_account(self, account: str) -> list[Post]:
         """抓取单个账号。所有网络行为都先经过风控闸门。"""

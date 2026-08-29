@@ -984,6 +984,9 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    pointer-events: none;
+    -webkit-user-drag: none;
+    user-select: none;
     transition: transform .3s ease, opacity .25s ease;
     background: color-mix(in srgb, var(--card) 60%, transparent);
   }

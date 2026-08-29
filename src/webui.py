@@ -850,19 +850,21 @@ class _Handler(BaseHTTPRequestHandler):
             if enable_qq:
                 for b in raw.get("qq_official_bots") or []:
                     bname = b.get("name") or b.get("app_id") or "official_bot"
+                    remark = (b.get("remark") or "").strip()
+                    display_base = f"{remark} ({bname})" if remark else bname
                     t_openid = (b.get("target_openid") or "").strip()
                     g_openid = (b.get("group_openid") or "").strip()
                     if t_openid:
                         targets.append({
                             "id": f"official:{bname}:private",
-                            "name": f"🤖 {bname} · 私聊 ({t_openid[:6]}...{t_openid[-4:] if len(t_openid) > 10 else ''})",
+                            "name": f"🤖 {display_base} · 私聊 ({t_openid[:6]}...{t_openid[-4:] if len(t_openid) > 10 else ''})",
                             "channel": "qq_official",
                             "type": "private",
                         })
                     if g_openid:
                         targets.append({
                             "id": f"official:{bname}:group",
-                            "name": f"👥 {bname} · 群聊 ({g_openid[:6]}...{g_openid[-4:] if len(g_openid) > 10 else ''})",
+                            "name": f"👥 {display_base} · 群聊 ({g_openid[:6]}...{g_openid[-4:] if len(g_openid) > 10 else ''})",
                             "channel": "qq_official",
                             "type": "group",
                         })
@@ -872,10 +874,12 @@ class _Handler(BaseHTTPRequestHandler):
                 routes = raw.get("napcat_routes") or []
                 for r in routes:
                     gid = str(r.get("group_id", "")).strip()
+                    remark = (r.get("remark") or "").strip()
                     if gid:
+                        display = f"{remark} ({gid})" if remark else f"QQ群 {gid}"
                         targets.append({
                             "id": f"napcat:{gid}",
-                            "name": f"🐾 NapCat · QQ群 {gid}",
+                            "name": f"🐾 NapCat · {display}",
                             "channel": "napcat",
                             "type": "group",
                         })
@@ -892,10 +896,15 @@ class _Handler(BaseHTTPRequestHandler):
                 tg_bots = raw.get("tg_bots") or []
                 for b in tg_bots:
                     bname = b.get("name") or b.get("target_chat") or "tg_bot"
+                    remark = (b.get("remark") or "").strip()
                     tchat = str(b.get("target_chat") or "").strip()
+                    if remark:
+                        display = f"{remark} ({bname} · {tchat})" if tchat else f"{remark} ({bname})"
+                    else:
+                        display = f"{bname}" + (f" ({tchat})" if tchat and tchat != bname else "")
                     targets.append({
                         "id": f"tg:{tchat or bname}",
-                        "name": f"✈️ Telegram · {bname}" + (f" ({tchat})" if tchat and tchat != bname else ""),
+                        "name": f"✈️ Telegram · {display}",
                         "channel": "tg",
                         "type": "chat",
                     })
@@ -1901,11 +1910,12 @@ class _Handler(BaseHTTPRequestHandler):
                         pub = row[4] or row[5] or ""
                         norm_m = row[1].replace(" ", "").replace("　", "").replace("_", "")
                         disp = monitor_names.get(norm_m) or row[1].replace("_", " ")
+                        canonical_m = _archive.member_dir_name(row[1])
                         msg_pics.append({
                             "type": "msg",
-                            "member": row[1], "member_display": disp,
+                            "member": canonical_m, "member_display": disp,
                             "id": row[0], "text": row[2] or "",
-                            "url": f"/api/archive/media/{row[1]}/{row[3]}",
+                            "url": f"/api/archive/media/{canonical_m}/{row[3]}",
                             "w": rj.get("thumbnail_width"), "h": rj.get("thumbnail_height"),
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
@@ -1965,9 +1975,10 @@ class _Handler(BaseHTTPRequestHandler):
                         pub = r[4] or r[5] or ""
                         norm_r = r[1].replace(" ", "").replace("　", "").replace("_", "")
                         disp_r = monitor_names.get(norm_r) or r[1].replace("_", " ")
+                        canonical_r = _archive.member_dir_name(r[1])
                         rand_msgs.append({
                             "type": "msg",
-                            "member": r[1], "member_display": disp_r,
+                            "member": canonical_r, "member_display": disp_r,
                             "id": r[0], "text": r[2] or "", "translation": r[3] or "",
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],

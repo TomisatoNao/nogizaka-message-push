@@ -497,15 +497,55 @@
       </div>
     </details>
 
-    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-soft);">
-      <h3 style="margin: 0 0 12px; font-size: 14.5px;">🤖 Bot 智能指令响应（私聊 / 群聊 @机器人）</h3>
-      <div class="grid">
+    <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h3 style="margin: 0; font-size: 14.5px; display: flex; align-items: center; gap: 6px;">
+            🤖 Bot 智能指令响应与社媒自动解析
+          </h3>
+          <div style="font-size: 12px; color: var(--muted); margin-top: 3px;">
+            支持在 QQ 私聊或群聊 @机器人 触发 /help, /status, /latest 等指令，及发送社媒链接自动解析并 AI 双语翻译
+          </div>
+        </div>
         <label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许 Bot 响应指令与社媒解析</label>
-        <label class="field">授权 OpenID（逗号分隔）
-          <input id="cmdAllow" placeholder="留空＝仅上表已填的个人与群 OpenID" type="text"/>
-        </label>
       </div>
-      <details class="help-box" style="margin-top: 8px;">
+
+      <div id="cmdOptionsBlock" style="transition: all var(--tr);">
+        <div class="grid" style="margin-bottom: 12px;">
+          <label class="field" style="margin: 0;">响应权限范围
+            <select id="cmdMode">
+              <option value="configured">🎯 自动授权上方已配置的 Bot 目标（群聊 / 私聊，推荐）</option>
+              <option value="whitelist">🔒 自定义授权白名单（仅允许下方列表登记的 OpenID）</option>
+              <option value="all">🌐 全开放响应（允许任何群聊 @机器人 或私聊）</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="cmdWhitelistWrap" style="background: color-mix(in srgb, var(--card-solid) 95%, transparent); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 14px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 13.5px; font-weight: 600; color: var(--text);">📋 授权 OpenID 白名单</span>
+              <span id="cmdWhitelistCountBadge" style="font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);">0 个授权</span>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn small" id="btnSyncBotOpenids" type="button" title="从上方 QQ 官方 Bot 列表中快速导入所有已配置的 OpenID">
+                ⚡ 一键导入上方 Bot 目标
+              </button>
+              <button class="btn small primary" id="btnAddCmdOpenid" type="button">
+                ＋ 添加授权 OpenID
+              </button>
+            </div>
+          </div>
+
+          <div id="cmdModeHintBanner" style="font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.6; padding: 8px 12px; border-radius: 6px; background: color-mix(in srgb, var(--card) 90%, transparent); border: 1px dashed var(--border);">
+          </div>
+
+          <div id="cmdOpenidList" style="display: flex; flex-direction: column; gap: 8px;">
+          </div>
+        </div>
+      </div>
+
+      <details class="help-box" style="margin-top: 10px;">
         <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">
           ℹ️ 指令与权限说明
         </summary>
@@ -1142,6 +1182,44 @@
 <div class="actions">
 <button class="btn primary" id="botSubClose">完成</button>
 </div>
+</dialog>
+<!-- 授权 OpenID 添加/编辑对话框 -->
+<dialog id="cmdOpenidDialog" style="max-width: 500px; width: 95%;">
+  <h3 id="cmdOpenidDlgTitle">添加授权 OpenID</h3>
+  <div class="dialog-note">
+    用于 QQ 官方 Bot 的私聊指令与群聊 @机器人 授权。
+  </div>
+  <div class="secret-field">
+    <div class="flabel"><span class="fname">授权类型</span></div>
+    <div style="display:flex; gap:18px; margin-bottom:8px">
+      <label style="display:flex; align-items:center; gap:5px; font-size:13px; cursor:pointer;">
+        <input checked name="cmdOpenidType" type="radio" value="group"/> 👥 群聊 (Group OpenID)
+      </label>
+      <label style="display:flex; align-items:center; gap:5px; font-size:13px; cursor:pointer;">
+        <input name="cmdOpenidType" type="radio" value="user"/> 👤 个人私聊 (User OpenID)
+      </label>
+    </div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel">
+      <span class="fname">OpenID<span class="req">*</span></span>
+      <span class="fenv">32 位大写 Hash</span>
+    </div>
+    <div class="input-group">
+      <input autocomplete="off" id="cmdOpenidInput" placeholder="例如: 5CADF347E2C67F2CF0B207F8" type="text"/>
+    </div>
+  </div>
+  <div class="secret-field">
+    <div class="flabel">
+      <span class="fname">备注名称</span>
+      <span class="fenv">选填，如：乃木坂讨论群 / 管理员小明</span>
+    </div>
+    <input autocomplete="off" id="cmdOpenidName" placeholder="例如: 乃木坂粉丝交流群 / 管理员小明" type="text"/>
+  </div>
+  <div class="actions">
+    <button class="btn" id="cmdOpenidCancel" type="button">取消</button>
+    <button class="btn primary" id="cmdOpenidSave" type="button">确定</button>
+  </div>
 </dialog>
 <!-- 成员选择对话框 -->
 <dialog id="memberPickDialog" style="max-width: 580px; width: 95%;">
@@ -1829,7 +1907,8 @@ function testPushPrefill(channel) {
     for (const b of bots) {
       const opt = document.createElement("option");
       opt.value = b.name;
-      opt.textContent = `${b.name} (目标: ${b.target_chat || "未填"})`;
+      const label = b.remark ? `${b.remark} (${b.name} · ${b.target_chat || "未填"})` : `${b.name} (目标: ${b.target_chat || "未填"})`;
+      opt.textContent = label;
       opt.style.color = "#000"; // 强制黑字，防止 Windows 默认白底导致的白字白底
       sel.appendChild(opt);
     }
@@ -1837,17 +1916,18 @@ function testPushPrefill(channel) {
     $("testPushTargetHint").textContent = "QQ 官方 Bot";
     const bots = config.qq_official_bots || [];
     for (const b of bots) {
+      const prefix = b.remark ? `${b.remark} (${b.name})` : b.name;
       if (b.group_openid) {
         const opt = document.createElement("option");
         opt.value = `${b.name}|group`;
-        opt.textContent = `${b.name} - 群聊 (${b.group_openid.slice(0, 10)}...)`;
+        opt.textContent = `${prefix} - 群聊 (${b.group_openid.slice(0, 10)}...)`;
         opt.style.color = "#000";
         sel.appendChild(opt);
       }
       if (b.target_openid) {
         const opt = document.createElement("option");
         opt.value = `${b.name}|private`;
-        opt.textContent = `${b.name} - 私聊 (${b.target_openid.slice(0, 10)}...)`;
+        opt.textContent = `${prefix} - 私聊 (${b.target_openid.slice(0, 10)}...)`;
         opt.style.color = "#000";
         sel.appendChild(opt);
       }
@@ -1858,7 +1938,8 @@ function testPushPrefill(channel) {
     for (const r of routes) {
       const opt = document.createElement("option");
       opt.value = String(r.group_id);
-      opt.textContent = `群组: ${r.group_id}`;
+      const label = r.remark ? `${r.remark} (${r.group_id})` : `群组: ${r.group_id}`;
+      opt.textContent = label;
       opt.style.color = "#000";
       sel.appendChild(opt);
     }
@@ -2009,7 +2090,20 @@ function renderGeneral() {
   $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
   const qc = config.qq_commands || {};
   $("cmdOn").checked = !!qc.enabled;
-  $("cmdAllow").value = (qc.allow_openids || []).join(", ");
+  if ($("cmdMode")) $("cmdMode").value = qc.mode || "configured";
+  window._cmdOpenids = (qc.allow_openids || []).map((x) => {
+    if (typeof x === "string") {
+      return { openid: x.trim().toUpperCase(), name: "", type: "group" };
+    } else if (x && typeof x === "object") {
+      return {
+        openid: (x.openid || x.id || "").trim().toUpperCase(),
+        name: (x.name || x.remark || "").trim(),
+        type: x.type || "group",
+      };
+    }
+    return null;
+  }).filter((x) => x && x.openid);
+  renderCmdOpenids();
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
@@ -2019,6 +2113,7 @@ function renderGeneral() {
   if ($("btnClearZhipuKey")) $("btnClearZhipuKey").style.display = envStatus.ZHIPU_API_KEY ? "inline-block" : "none";
   if ($("sysProxy")) $("sysProxy").value = config.proxy || "";
   renderQqBots();
+  renderSocialPushTargets();
 }
 
 let canCaptureOpenid = false;   // 独立模式下没有事件循环跑 WebSocket 监听
@@ -2055,6 +2150,7 @@ function renderQqBots() {
         const t = v.trim();
         if (t) bot.remark = t; else delete bot.remark;
         markDirty();
+        renderSocialPushTargets();
       }, "例如：5期生群", "width:125px"));
       const tdApp = document.createElement("td");
       tdApp.appendChild(mkInput(bot.app_id || "", (v) => {
@@ -2349,7 +2445,12 @@ function collectGeneral() {
   };
   config.qq_commands = {
     enabled: $("cmdOn").checked,
-    allow_openids: $("cmdAllow").value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
+    mode: $("cmdMode") ? $("cmdMode").value : "configured",
+    allow_openids: (window._cmdOpenids || []).map(item => ({
+      openid: (item.openid || "").trim().toUpperCase(),
+      name: item.name ? item.name.trim() : "",
+      type: item.type || "group"
+    })),
   };
   const proxyVal = $("sysProxy") ? $("sysProxy").value.trim() : "";
   if (proxyVal) {
@@ -3361,6 +3462,7 @@ function renderNapcat() {
       const t = v.trim();
       if (t) r.remark = t; else delete r.remark;
       markDirty();
+      renderSocialPushTargets();
     }, "例如：乃木坂主群", "width:130px"));
     
     const tdSub = document.createElement("td");
@@ -3406,6 +3508,7 @@ function renderTGBots() {
       const t = v.trim();
       if (t) b.remark = t; else delete b.remark;
       markDirty();
+      renderSocialPushTargets();
     }, "例如：频道A", "width:120px"));
     
     const tdChat = document.createElement("td");
@@ -4246,6 +4349,210 @@ function stopOpenidPolling() {
   if (openidTimer !== null) { clearInterval(openidTimer); openidTimer = null; }
 }
 
+// ── Bot 智能指令授权 OpenID 管理 ───────────────────────────
+window._cmdOpenids = [];
+let _editingCmdOpenidIdx = -1;
+
+function renderCmdOpenids() {
+  const container = $("cmdOpenidList");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const mode = ($("cmdMode") && $("cmdMode").value) || "configured";
+  const countBadge = $("cmdWhitelistCountBadge");
+  if (countBadge) countBadge.textContent = `${(window._cmdOpenids || []).length} 个授权`;
+
+  const banner = $("cmdModeHintBanner");
+  if (banner) {
+    if (mode === "configured") {
+      banner.innerHTML = "🎯 <b>自动授权模式（推荐）</b>：系统会自动允许上方【QQ 官方 Bot】列表中所有已配置的群聊与私聊对象使用指令，无需在此手动添加。下方白名单将作为额外补充授权。";
+      banner.style.borderColor = "var(--ok)";
+    } else if (mode === "whitelist") {
+      banner.innerHTML = "🔒 <b>严格白名单模式</b>：仅允许下方列表中明确登记的 OpenID 响应指令与社媒解析，其他未登记的群聊或私聊将静默忽略。";
+      banner.style.borderColor = "var(--accent)";
+    } else if (mode === "all") {
+      banner.innerHTML = "🌐 <b>全开放模式</b>：任何人在任意群聊 @机器人 或私聊 Bot 时均可使用指令与社媒自动解析。";
+      banner.style.borderColor = "var(--border)";
+    }
+  }
+
+  const list = window._cmdOpenids || [];
+  if (list.length === 0) {
+    const emptyDiv = document.createElement("div");
+    emptyDiv.style.cssText = "padding: 16px; text-align: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 8px;";
+    emptyDiv.innerHTML = mode === "configured"
+      ? "暂无额外白名单（当前为自动模式，上方 Bot 列表中的所有群/用户已自动授权）。点击右上角「＋ 添加授权 OpenID」可补充额外授权。"
+      : "暂无授权 OpenID。点击右上角「＋ 添加授权 OpenID」或「⚡ 一键导入上方 Bot 目标」添加。";
+    container.appendChild(emptyDiv);
+    return;
+  }
+
+  list.forEach((item, idx) => {
+    const card = document.createElement("div");
+    card.className = "cmd-openid-card";
+    card.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--card-solid); border: 1px solid var(--border-soft); border-radius: 8px; gap: 10px; flex-wrap: wrap;";
+
+    const left = document.createElement("div");
+    left.style.cssText = "display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;";
+
+    const typeTag = document.createElement("span");
+    const isGroup = item.type === "group";
+    typeTag.className = "sub-filter-tag " + (isGroup ? "" : "all");
+    typeTag.style.cssText = "font-size: 11px; flex-shrink: 0; padding: 2px 7px;";
+    typeTag.textContent = isGroup ? "👥 群聊" : "👤 私聊";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.style.cssText = "font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;";
+    nameSpan.textContent = item.name || (isGroup ? "未命名群聊" : "未命名用户");
+    nameSpan.title = item.name || "";
+
+    const code = document.createElement("code");
+    code.style.cssText = "font-family: Consolas, monospace; font-size: 12px; color: var(--muted); background: var(--bg); padding: 2.5px 8px; border-radius: 4px; border: 1px solid var(--border-soft); letter-spacing: 0.5px; user-select: all; cursor: pointer;";
+    code.textContent = item.openid;
+    code.title = "点击复制 OpenID";
+    code.onclick = () => {
+      copyText(item.openid);
+      msg("已复制 OpenID: " + item.openid, "ok");
+    };
+
+    left.append(typeTag, nameSpan, code);
+
+    const right = document.createElement("div");
+    right.style.cssText = "display: flex; align-items: center; gap: 6px; flex-shrink: 0;";
+
+    const btnCopy = document.createElement("button");
+    btnCopy.className = "btn small";
+    btnCopy.type = "button";
+    btnCopy.textContent = "📋 复制";
+    btnCopy.onclick = () => {
+      copyText(item.openid);
+      msg("已复制 OpenID: " + item.openid, "ok");
+    };
+
+    const btnEdit = document.createElement("button");
+    btnEdit.className = "btn small";
+    btnEdit.type = "button";
+    btnEdit.textContent = "✏️ 编辑";
+    btnEdit.onclick = () => openCmdOpenidDialog(idx);
+
+    const btnDel = document.createElement("button");
+    btnDel.className = "btn small danger";
+    btnDel.type = "button";
+    btnDel.textContent = "🗑️";
+    btnDel.title = "删除此授权";
+    btnDel.onclick = () => {
+      window._cmdOpenids.splice(idx, 1);
+      markDirty();
+      renderCmdOpenids();
+    };
+
+    right.append(btnCopy, btnEdit, btnDel);
+    card.append(left, right);
+    container.appendChild(card);
+  });
+}
+
+function openCmdOpenidDialog(idx = -1) {
+  _editingCmdOpenidIdx = idx;
+  const isEdit = idx >= 0;
+  const item = isEdit ? window._cmdOpenids[idx] : { openid: "", name: "", type: "group" };
+
+  $("cmdOpenidDlgTitle").textContent = isEdit ? "编辑授权 OpenID" : "添加授权 OpenID";
+  $("cmdOpenidInput").value = item.openid || "";
+  $("cmdOpenidName").value = item.name || "";
+
+  const radios = document.getElementsByName("cmdOpenidType");
+  for (const r of radios) {
+    r.checked = r.value === (item.type || "group");
+  }
+
+  $("cmdOpenidDialog").showModal();
+}
+
+function initCmdOpenidEvents() {
+  $("cmdMode")?.addEventListener("change", () => {
+    markDirty();
+    renderCmdOpenids();
+  });
+
+  $("btnAddCmdOpenid")?.addEventListener("click", () => {
+    openCmdOpenidDialog(-1);
+  });
+
+  $("cmdOpenidCancel")?.addEventListener("click", () => {
+    $("cmdOpenidDialog").close();
+  });
+
+  $("cmdOpenidSave")?.addEventListener("click", () => {
+    const rawOpenid = ($("cmdOpenidInput").value || "").trim().toUpperCase();
+    if (!rawOpenid) {
+      uiAlert("请输入有效的 OpenID");
+      return;
+    }
+    const name = ($("cmdOpenidName").value || "").trim();
+    let type = "group";
+    const radios = document.getElementsByName("cmdOpenidType");
+    for (const r of radios) {
+      if (r.checked) type = r.value;
+    }
+
+    const newItem = { openid: rawOpenid, name: name, type: type };
+    if (_editingCmdOpenidIdx >= 0) {
+      window._cmdOpenids[_editingCmdOpenidIdx] = newItem;
+    } else {
+      const exists = window._cmdOpenids.some(x => x.openid === rawOpenid);
+      if (exists) {
+        msg("该 OpenID 已在列表中，已更新其信息", "ok");
+        const i = window._cmdOpenids.findIndex(x => x.openid === rawOpenid);
+        window._cmdOpenids[i] = newItem;
+      } else {
+        window._cmdOpenids.push(newItem);
+      }
+    }
+    $("cmdOpenidDialog").close();
+    markDirty();
+    renderCmdOpenids();
+    msg("已保存授权 OpenID", "ok");
+  });
+
+  $("btnSyncBotOpenids")?.addEventListener("click", () => {
+    const bots = config.qq_official_bots || [];
+    let count = 0;
+    bots.forEach(bot => {
+      const bName = bot.remark || bot.name || "Bot";
+      if (bot.target_openid && bot.target_openid.trim()) {
+        const oid = bot.target_openid.trim().toUpperCase();
+        if (!window._cmdOpenids.some(x => x.openid === oid)) {
+          window._cmdOpenids.push({
+            openid: oid,
+            name: `${bName}-私聊`,
+            type: "user"
+          });
+          count++;
+        }
+      }
+      if (bot.group_openid && bot.group_openid.trim()) {
+        const gid = bot.group_openid.trim().toUpperCase();
+        if (!window._cmdOpenids.some(x => x.openid === gid)) {
+          window._cmdOpenids.push({
+            openid: gid,
+            name: `${bName}-群聊`,
+            type: "group"
+          });
+          count++;
+        }
+      }
+    });
+    if (count > 0) {
+      markDirty();
+      renderCmdOpenids();
+      msg(`✅ 已从上方 Bot 列表成功导入 ${count} 个目标 OpenID`, "ok");
+    } else {
+      msg("上方 Bot 列表中的 OpenID 已全部存在于白名单中", "ok");
+    }
+  });
+}
+
 // ── 用户管理 ─────────────────────────────────────
 let minPwLen = 8;
 
@@ -4594,24 +4901,111 @@ $("btnToolSocialParse").addEventListener("click", async () => {
   }
 });
 
-async function loadPushTargets() {
+function renderSocialPushTargets() {
   const container = $("toolSocialChannelList");
   if (!container) return;
-  try {
-    const res = await api("/api/social/push_targets");
-    if (!res || !res.ok || !res.targets || res.targets.length === 0) {
-      container.innerHTML = `<span style="font-size:12px; color:var(--muted);">⚠️ 当前未配置或未启用任何推送通道，可在下方通道设置中开启</span>`;
-      return;
-    }
-    container.innerHTML = res.targets.map(t => `
-      <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text); background:var(--card); padding:5px 10px; border-radius:6px; border:1px solid var(--border-soft);">
-        <input type="checkbox" name="toolSocialChannel" value="${t.id}" checked />
-        <span>${t.name}</span>
-      </label>
-    `).join("");
-  } catch (e) {
-    /* 忽略 */
+
+  const ch = (config.channels || {});
+  const enable_qq = ch.qq_official !== false;
+  const enable_nap = ch.napcat === true;
+  const enable_tg = ch.tg === true;
+
+  const targets = [];
+
+  // 1. QQ 官方 Bot
+  if (enable_qq) {
+    const bots = config.qq_official_bots || [];
+    bots.forEach(b => {
+      const bname = b.name || b.app_id || "official_bot";
+      const remark = (b.remark || "").trim();
+      const displayBase = remark ? `${remark} (${bname})` : bname;
+      const t_openid = (b.target_openid || "").trim();
+      const g_openid = (b.group_openid || "").trim();
+
+      if (t_openid) {
+        const shortOid = t_openid.length > 10 ? `${t_openid.slice(0, 6)}...${t_openid.slice(-4)}` : t_openid;
+        targets.push({
+          id: `official:${bname}:private`,
+          name: `🤖 ${displayBase} · 私聊 (${shortOid})`,
+        });
+      }
+      if (g_openid) {
+        const shortGid = g_openid.length > 10 ? `${g_openid.slice(0, 6)}...${g_openid.slice(-4)}` : g_openid;
+        targets.push({
+          id: `official:${bname}:group`,
+          name: `👥 ${displayBase} · 群聊 (${shortGid})`,
+        });
+      }
+    });
   }
+
+  // 2. NapCat QQ
+  if (enable_nap) {
+    const routes = config.napcat_routes || [];
+    routes.forEach(r => {
+      const gid = String(r.group_id || "").trim();
+      const remark = (r.remark || "").trim();
+      if (gid) {
+        const display = remark ? `${remark} (${gid})` : `QQ群 ${gid}`;
+        targets.push({
+          id: `napcat:${gid}`,
+          name: `🐾 NapCat · ${display}`,
+        });
+      }
+    });
+    if (routes.length === 0) {
+      targets.push({
+        id: "napcat",
+        name: "🐾 NapCat QQ 群广播",
+      });
+    }
+  }
+
+  // 3. Telegram
+  if (enable_tg) {
+    const tg_bots = config.tg_bots || [];
+    tg_bots.forEach(b => {
+      const bname = b.name || b.target_chat || "tg_bot";
+      const remark = (b.remark || "").trim();
+      const tchat = String(b.target_chat || "").trim();
+      const display = remark ? `${remark} (${bname} · ${tchat})` : (tchat && tchat !== bname ? `${bname} (${tchat})` : bname);
+      targets.push({
+        id: `tg:${tchat || bname}`,
+        name: `✈️ Telegram · ${display}`,
+      });
+    });
+    if (tg_bots.length === 0) {
+      targets.push({
+        id: "tg",
+        name: "✈️ Telegram 广播",
+      });
+    }
+  }
+
+  if (targets.length === 0) {
+    container.innerHTML = `<span style="font-size:12px; color:var(--muted);">⚠️ 当前未配置或未启用任何推送通道，可在下方通道设置中开启</span>`;
+    return;
+  }
+
+  // 保持之前选中的状态，若首次加载则默认全选
+  const previouslySelected = new Set(
+    Array.from(document.querySelectorAll('input[name="toolSocialChannel"]:checked')).map(cb => cb.value)
+  );
+  const isFirstRender = document.querySelectorAll('input[name="toolSocialChannel"]').length === 0;
+
+  container.innerHTML = targets.map(t => {
+    const isChecked = isFirstRender || previouslySelected.has(t.id);
+    return `
+      <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text); background:var(--card); padding:5px 10px; border-radius:6px; border:1px solid var(--border-soft);">
+        <input type="checkbox" name="toolSocialChannel" value="${t.id}" ${isChecked ? 'checked' : ''} />
+        <span>${esc(t.name)}</span>
+      </label>
+    `;
+  }).join("");
+}
+
+async function loadPushTargets() {
+  renderSocialPushTargets();
 }
 
 $("btnToolSocialToggleAllChannels").addEventListener("click", () => {
@@ -4704,6 +5098,7 @@ function renderSocialToolResult(data) {
   }
 }
 
+initCmdOpenidEvents();
 loadConfig();
 startStatusPolling();   // 状态页是默认标签页
 

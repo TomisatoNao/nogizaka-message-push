@@ -268,10 +268,24 @@ _COMMANDS = {
 
 def allowed_senders() -> set[str]:
     """允许使用指令的 openid 白名单（统一转大写以便大小写无关匹配）。"""
+    mode = getattr(cfg, "QQ_COMMANDS_MODE", "configured")
+    if mode == "all":
+        return {"*"}
+
     explicit = getattr(cfg, "QQ_COMMANDS_ALLOW", None) or []
-    if explicit:
-        return {str(x).strip().upper() for x in explicit if str(x).strip()}
     res = set()
+    for x in explicit:
+        if isinstance(x, dict):
+            val = x.get("openid") or x.get("id") or ""
+        else:
+            val = str(x)
+        if val.strip():
+            res.add(val.strip().upper())
+
+    if mode == "whitelist":
+        return res
+
+    # 默认模式 (configured)：自动合并上方已配置的所有 Bot 目标群与私聊 OpenID
     for b in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
         if b.get("target_openid"):
             res.add(b["target_openid"].strip().upper())
@@ -449,7 +463,7 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
     sender_norm = (sender_openid or "").strip().upper()
     group_norm = (group_openid or "").strip().upper()
 
-    if sender_norm not in allow and (not group_norm or group_norm not in allow):
+    if "*" not in allow and sender_norm not in allow and (not group_norm or group_norm not in allow):
         return None
 
     target_id = group_openid if group_openid else sender_openid

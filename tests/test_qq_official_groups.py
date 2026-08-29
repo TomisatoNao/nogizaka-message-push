@@ -129,11 +129,44 @@ async def test_send_to_group():
           f"last URL: {client.calls[-1][0]}")
 
 
+# ── Test 5: allowed_senders 模式与字典格式兼容性 ──
+def test_allowed_senders():
+    print("\n── Test 5: allowed_senders() 模式与结构测试 ──")
+    import src.qq_commands as qc
+    import config.config as cfg
+
+    # 1. 默认 configured 模式：自动聚合 QQ_OFFICIAL_BOTS 中的 target_openid 与 group_openid
+    cfg.QQ_COMMANDS_MODE = "configured"
+    cfg.QQ_OFFICIAL_BOTS = [
+        {"target_openid": "U_BOT_1", "group_openid": "GRP_BOT_1"},
+        {"target_openid": "", "group_openid": "GRP_BOT_2"},
+    ]
+    cfg.QQ_COMMANDS_ALLOW = [{"openid": "EXTRA_USER_1", "name": "管理员", "type": "user"}]
+    senders = qc.allowed_senders()
+    check("configured 模式包含 Bot 目标与额外白名单",
+          {"U_BOT_1", "GRP_BOT_1", "GRP_BOT_2", "EXTRA_USER_1"}.issubset(senders))
+
+    # 2. whitelist 严格白名单模式：仅允许 QQ_COMMANDS_ALLOW
+    cfg.QQ_COMMANDS_MODE = "whitelist"
+    cfg.QQ_COMMANDS_ALLOW = [
+        {"openid": "ALLOW_GRP", "name": "特权群", "type": "group"},
+        "LEGACY_STRING_OPENID",
+    ]
+    senders2 = qc.allowed_senders()
+    check("whitelist 严格模式仅包含显式白名单", senders2 == {"ALLOW_GRP", "LEGACY_STRING_OPENID"})
+
+    # 3. all 全开放模式：返回 wildcard {"*"}
+    cfg.QQ_COMMANDS_MODE = "all"
+    senders3 = qc.allowed_senders()
+    check("all 模式返回通配符", senders3 == {"*"})
+
+
 # ── 入口 ──
 def main():
     test_is_configured()
     test_target_base()
     test_member_filter()
+    test_allowed_senders()
     asyncio.run(test_send_to_group())
     print(f"\n{'='*40}")
     print(f"  通过: {passed}  失败: {failed}")

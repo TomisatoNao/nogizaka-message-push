@@ -71,11 +71,12 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
         # 风控防护（详见 social/ig_safety.py）
         "safety": {
             "enabled": True,
-            "min_request_gap": 15,
-            "max_requests_per_hour": 40,
+            "min_request_gap": 5,
+            "max_requests_per_hour": 120,
             "failure_threshold": 3,
-            "cooldown_seconds": 21600,    # 触发熔断后暂停 6 小时
-            "quiet_hours": [1, 7],        # 凌晨 1-7 点完全不访问
+            "cooldown_seconds": 7200,             # 登录态失效熔断 2 小时
+            "rate_limit_cooldown_seconds": 1800,  # 429 限流熔断 30 分钟
+            "quiet_hours": [1, 7],                # 凌晨 1-7 点完全不访问
             "jitter": 0.25,
         },
     },
