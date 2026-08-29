@@ -1,6 +1,33 @@
 /* archive.css */
 :root { --bubble: var(--card); --trans-bg: var(--ok-soft); --trans-text: var(--ok); }
 [hidden] { display: none !important; }
+
+/* 首屏预路由隔离：防止初始渲染时 Tab 和 Toolbar 闪烁 */
+html.view-blog #tabHome,
+html.view-msg #tabHome,
+html.view-letter #tabHome { background: transparent !important; color: var(--muted) !important; font-weight: 500 !important; box-shadow: none !important; }
+
+html.view-blog #archiveHome,
+html.view-msg #archiveHome,
+html.view-letter #archiveHome { display: none !important; }
+
+html.view-blog .layout,
+html.view-msg .layout,
+html.view-letter .layout { display: flex !important; }
+@media (max-width: 900px) {
+  html.view-blog .layout,
+  html.view-msg .layout,
+  html.view-letter .layout { display: block !important; }
+}
+
+html.view-blog #tabBlog { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
+html.view-msg #tabMsg { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
+html.view-letter #tabLetter { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
+
+html.view-blog .msg-toolbar { display: none !important; }
+html.view-blog #timeline { display: none !important; }
+html.view-blog #blogGrid { display: block !important; }
+
   header { display: flex; align-items: center; gap: 12px; padding: 11px 20px;
            background: color-mix(in srgb, var(--card) 82%, transparent);
            backdrop-filter: blur(14px) saturate(1.3);

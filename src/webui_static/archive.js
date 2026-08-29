@@ -3115,7 +3115,6 @@ async function handleRoute(isInitial = false) {
 
 // ── 启动入口 ─────────────────────────────────────
 async function boot() {
-  // 如果通过 query string 参数（如 /archive?blog=sakurazaka&id=123）访问，自动规范化为 hash 路由
   const searchParams = new URLSearchParams(location.search);
   if (searchParams.has("id") || searchParams.has("blog") || searchParams.has("member") || searchParams.has("letter")) {
     const targetHash = searchParams.toString();
@@ -3123,6 +3122,27 @@ async function boot() {
   }
 
   const p = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+  // 极速预处理：如果 URL 包含博客 ID，0ms 同步打开阅读器容器与骨架，彻底消除任何闪烁
+  const earlyBlogId = p.get("id") || p.get("blog_id") || p.get("post");
+  if (earlyBlogId) {
+    if ($("tabHome")) $("tabHome").classList.remove("active");
+    if ($("tabBlog")) $("tabBlog").classList.add("active");
+    if ($("archiveHome")) $("archiveHome").classList.remove("active");
+    const layout = document.querySelector('.layout');
+    if (layout) layout.style.display = '';
+    if ($("blogGrid")) $("blogGrid").style.display = "";
+    if ($("timeline")) $("timeline").style.display = "none";
+    const msgTb = document.querySelector(".msg-toolbar");
+    if (msgTb) msgTb.style.display = "none";
+    const reader = $("blogReader");
+    if (reader) {
+      reader.style.display = "";
+      $("brTitle").textContent = "正在打开博客...";
+      $("brContent").innerHTML = '<div class="home-skeleton" style="padding:32px 16px;"><div class="sk-hero" style="height:40px;width:65%;margin-bottom:20px;"></div><div class="sk-strip"><div></div><div></div><div></div></div><div class="sk-msg" style="margin-top:20px;"><div></div><div></div><div></div></div></div>';
+      document.body.style.overflow = "hidden";
+    }
+  }
+
   curType = p.get("t") || "";
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();

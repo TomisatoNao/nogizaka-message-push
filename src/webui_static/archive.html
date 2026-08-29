@@ -7,7 +7,19 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script src="/static/theme.js"></script>
-<link rel="stylesheet" href="/static/archive.css?v=4.9">
+<link rel="stylesheet" href="/static/archive.css?v=5.0">
+<script>
+  // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
+  (function() {
+    var h = location.hash || "", s = location.search || "";
+    var isBlog = h.includes("blog") || h.includes("id=") || s.includes("blog") || s.includes("id=");
+    var isMsg = h.includes("member=") || h.includes("msg") || s.includes("member=");
+    var isLetter = h.includes("letter") || s.includes("letter");
+    if (isBlog || isMsg || isLetter) {
+      document.documentElement.className += " view-" + (isBlog ? "blog" : isLetter ? "letter" : "msg");
+    }
+  })();
+</script>
 
 </head>
 <body>
@@ -104,7 +116,7 @@
   </div>
 </div>
 
-<div class="layout">
+<div class="layout" style="display:none;">
 <aside class="side" id="archiveSide">
   <button class="nav calendar-toggle" id="calendarToggle" type="button" aria-expanded="false">▦ 按日期跳转</button>
   <div class="cal">
@@ -288,6 +300,6 @@
 <!-- Toast Container -->
 <div id="toastContainer" class="toast-container"></div>
 
-<script src="/static/archive.js?v=4.9"></script>
+<script src="/static/archive.js?v=5.0"></script>
 </body>
 </html>
