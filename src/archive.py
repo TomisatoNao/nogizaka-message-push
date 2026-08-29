@@ -579,7 +579,23 @@ def find_media_bytes_by_url(m_name: str, file_url: str) -> bytes | None:
         id_match = re.search(r'/(\d{4,})', file_url)
         msg_id = id_match.group(1) if id_match else ""
 
-    # 按 URL 中的日期定位年月目录（如 20260827 -> 2026/08）
+    # 优先从 SQLite 索引中直接根据 msg_id 查询本地已落盘文件相对路径（O(1) 秒级定位）
+    if msg_id:
+        conn = init_db()
+        if conn:
+            try:
+                m_dir = member_dir_name(m_name)
+                cur = conn.cursor()
+                cur.execute("SELECT local_file FROM messages WHERE member_dir = ? AND id = ?;", (m_dir, msg_id))
+                row = cur.fetchone()
+                if row and row[0]:
+                    p = root / row[0]
+                    if p.exists() and p.stat().st_size > 0:
+                        return p.read_bytes()
+            except Exception:
+                pass
+
+    # 降级：按 URL 中的日期定位年月目录（如 20260827 -> 2026/08）
     d_match = re.search(r'[-_](\d{4})(\d{2})\d{2}', file_url)
     target_dirs = []
     if d_match:
@@ -817,6 +833,111 @@ async def archive_message(member: dict, msg: dict, translated: str = "") -> None
     except Exception:
         import traceback
         log_all(f"⚠️ 归档失败 [{m_name}] id={msg.get('id')}:\n{traceback.format_exc()}", is_error=True)
+
+
+async def archive_messages_batch(
+    member: dict,
+    msgs: list[dict],
+    archived_ids: set[str] | None = None,
+    failed_ids: set[str] | None = None,
+    max_concurrency: int = 6,
+) -> int:
+    """高性能批量归档消息列表：
+    1. 快速秒级过滤已归档/跳过类型
+    2. 多媒体受控并发（默认 6 并发）并行下载
+    3. 按 (year, month) 聚合批量写入 JSON（每个月仅写一次磁盘）
+    4. 单事务批量 executemany 写入 SQLite / FTS 索引
+    5. 自动调度图片打标
+    返回本次新归档或更新的消息条数。
+    """
+    m_name = member.get("m_name", "") or member.get("name", "")
+    if not m_name or not msgs:
+        return 0
+
+    from config.credentials import get_source_headers_for_account
+    headers = get_source_headers_for_account(
+        member.get("account_id", "") or (msgs[0].get("account_id", "") if msgs else ""),
+        member.get("group_type", "") or (msgs[0].get("group_type", "") if msgs else "")
+    )
+
+    # 1. 过滤与时间戳解析
+    to_process: list[tuple[datetime, dict]] = []
+    for msg in msgs:
+        if msg.get("publish_type") in cfg.SKIP_PUBLISH_TYPES:
+            continue
+        mid = str(msg.get("id", ""))
+        if not mid:
+            continue
+        if archived_ids is not None and failed_ids is not None:
+            if mid in archived_ids and mid not in failed_ids:
+                continue
+        ts_str = msg.get("published_at") or msg.get("updated_at", "")
+        if not ts_str:
+            continue
+        try:
+            dt = parse_jst_datetime(ts_str)
+            to_process.append((dt, dict(msg)))
+        except (ValueError, TypeError):
+            continue
+
+    if not to_process:
+        return 0
+
+    # 2. 受控并发下载媒体
+    sem = asyncio.Semaphore(max_concurrency)
+
+    async def _dl_worker(dt: datetime, msg: dict) -> tuple[dict, str]:
+        if cfg.ARCHIVE_MEDIA and msg.get("file") and msg.get("type") in _MEDIA_TYPES:
+            async with sem:
+                delta = await _download_media(m_name, dt, msg, headers=headers)
+                msg.update(delta)
+                return msg, delta.get("_local_file", "")
+        return msg, msg.get("_local_file", "")
+
+    tasks = [_dl_worker(dt, msg) for dt, msg in to_process]
+    results = await asyncio.gather(*tasks)
+
+    # 3. 按 (year, month) 聚合批量写入 JSON 与 SQLite
+    month_groups: dict[tuple[int, int], list[dict]] = {}
+    for (dt, _), (updated_msg, local_f) in zip(to_process, results):
+        ym = (dt.year, dt.month)
+        month_groups.setdefault(ym, []).append(updated_msg)
+
+    for (year, month), batch in month_groups.items():
+        key = f"{member_dir_name(m_name)}/{year:04d}/{month:02d}"
+        lock = _write_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            month_path = _member_root(m_name) / f"{year:04d}" / f"{month:02d}"
+            month_path.mkdir(parents=True, exist_ok=True)
+            existing_msgs = load_month(m_name, year, month)
+            by_id = {str(m.get("id", "")): m for m in existing_msgs}
+            for rec in batch:
+                rid = str(rec.get("id", ""))
+                merged = {**by_id.get(rid, {}), **rec}
+                merged.pop("_download_failed", None)
+                if rec.get("_download_failed"):
+                    merged["_download_failed"] = True
+                by_id[rid] = merged
+            out = sorted(by_id.values(), key=lambda m: m.get("updated_at", ""))
+            json_path = month_path / "messages.json"
+            tmp = json_path.with_suffix(".json.tmp")
+            await asyncio.to_thread(_sync_write_json, tmp, json_path, out)
+            _save_msgs_to_sqlite(m_name, year, month, batch)
+
+    # 4. 触发打标与更新缓存集合
+    new_count = 0
+    for (dt, _), (updated_msg, local_f) in zip(to_process, results):
+        mid = str(updated_msg.get("id", ""))
+        if updated_msg.get("type") in ("picture", "image") and updated_msg.get("file") and local_f:
+            from src.tagger import schedule_tag as _schedule_tag
+            _schedule_tag(member_dir_name(m_name), dict(updated_msg, _local_file=local_f))
+        if archived_ids is not None:
+            archived_ids.add(mid)
+        if failed_ids is not None:
+            failed_ids.discard(mid)
+        new_count += 1
+
+    return new_count
 
 
 def schedule_archive(member: dict, msg: dict, translated: str = "") -> None:

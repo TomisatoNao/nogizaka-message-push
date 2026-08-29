@@ -140,20 +140,13 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         past_resp = await client.get(past_url, headers=build_headers(account_id, acc_cfg))
         if past_resp.status_code == 200:
             past_msgs = past_resp.json().get("messages", [])
-            past_new = 0
-            for msg in sorted(past_msgs, key=lambda m: m.get("updated_at", "")):
-                if msg.get("publish_type") in cfg.SKIP_PUBLISH_TYPES:
-                    continue
-                mid = str(msg.get("id", ""))
-                if mid in archived_ids and mid not in failed_ids:
-                    continue
-                await archive.archive_message(member, msg)
-                archived_ids.add(mid)
-                failed_ids.discard(mid)
-                past_new += 1
-            if past_new:
-                print(f"  📥 [past_messages] 成功归档 {past_new} 条过去 24h 消息")
-                total_new += past_new
+            if past_msgs:
+                past_new = await archive.archive_messages_batch(
+                    member, past_msgs, archived_ids=archived_ids, failed_ids=failed_ids
+                )
+                if past_new:
+                    print(f"  📥 [past_messages] 成功归档 {past_new} 条过去 24h 消息")
+                    total_new += past_new
     except Exception as e:
         print(f"  ⚠️ 抓取 past_messages 失败: {e}")
 
@@ -196,18 +189,10 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             continue
         empty_pages = 0
 
-        page_new = 0
-        for msg in sorted(msgs, key=lambda m: m.get("updated_at", "")):
-            if msg.get("publish_type") in cfg.SKIP_PUBLISH_TYPES:
-                continue
-            mid = str(msg.get("id", ""))
-            if mid in archived_ids and mid not in failed_ids:
-                continue
-            await archive.archive_message(member, msg)
-            archived_ids.add(mid)
-            failed_ids.discard(mid)
-            page_new += 1
-
+        # 高性能批量归档：多媒体并发下载 + 月度 JSON 单次合并 + SQLite 批量提交
+        page_new = await archive.archive_messages_batch(
+            member, msgs, archived_ids=archived_ids, failed_ids=failed_ids
+        )
         total_new += page_new
         new_cursor = msgs[-1].get("updated_at", cursor)
         if new_cursor == cursor:
@@ -277,7 +262,8 @@ async def main() -> None:
 
     print(f"═══ 历史回填（{len(targets)} 个成员，起始 {start_from}"
           + ("，--reset 强制从头扫描" if reset else "") + "）═══")
-    client = httpx.AsyncClient(timeout=30)
+    limits = httpx.Limits(max_keepalive_connections=20, max_connections=30)
+    client = httpx.AsyncClient(timeout=30, limits=limits)
     archive.initialize(client)
     tagger.initialize(client)
     progress = _load_progress()
