@@ -1809,7 +1809,176 @@ html.view-blog #blogGrid { display: block !important; }
     background: rgba(255,255,255,0.25);
     color: #fff;
   }
-  .br-title { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-strong); }
+  /* ── 全新博客阅读器顶栏 (Consistent with App-Header) ────────── */
+  .br-header {
+    position: sticky;
+    top: 0;
+    height: 60px;
+    padding: 0 24px;
+    background: color-mix(in srgb, var(--card-solid) 85%, transparent);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    z-index: 100;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  }
+  .br-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+  }
+  .br-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--card) 70%, var(--bg) 30%);
+    border: 1px solid var(--border-soft);
+    color: var(--text-strong);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--tr-fast);
+    flex-shrink: 0;
+  }
+  .br-back-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateX(-2px);
+    box-shadow: var(--shadow-sm);
+  }
+  .br-back-btn .br-back-icon {
+    font-size: 14px;
+    line-height: 1;
+  }
+  .br-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border-soft);
+    flex-shrink: 0;
+  }
+  .br-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .br-title-wrap .portal-pill-brand {
+    flex-shrink: 0;
+    font-size: 12px;
+    padding: 3px 9px;
+    border-radius: 999px;
+  }
+  .br-title {
+    font-weight: 700;
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
+  }
+  .br-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  /* 博客双语对照分段选择器 (Matching .nav-tabs) */
+  .br-mode-selector {
+    display: inline-flex;
+    align-items: center;
+    background: color-mix(in srgb, var(--card) 60%, var(--bg) 40%);
+    padding: 3px;
+    border-radius: 999px;
+    gap: 2px;
+    border: 1px solid var(--border-soft);
+  }
+  .brm-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 550;
+    transition: all var(--tr-fast);
+    white-space: nowrap;
+  }
+  .brm-btn:hover { color: var(--text); }
+  .brm-btn.active {
+    background: var(--card-solid);
+    color: var(--text-strong);
+    font-weight: 650;
+    box-shadow: var(--shadow-sm);
+  }
+  /* 统一 Action 胶囊按钮 */
+  .br-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid var(--border-soft);
+    background: var(--card-solid, var(--card));
+    color: var(--text);
+    cursor: pointer;
+    transition: all var(--tr-fast);
+    white-space: nowrap;
+    box-shadow: var(--shadow-xs);
+  }
+  .br-action-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--card));
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+  }
+  .br-action-btn.danger {
+    color: var(--err);
+    border-color: color-mix(in srgb, var(--err) 30%, transparent);
+    background: color-mix(in srgb, var(--err) 8%, var(--card));
+  }
+  .br-action-btn.danger:hover {
+    background: color-mix(in srgb, var(--err) 16%, var(--card));
+    border-color: var(--err);
+  }
+  .br-action-btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .br-action-btn.primary:hover {
+    opacity: 0.92;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .br-action-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+  @media (max-width: 768px) {
+    .br-header { padding: 0 14px; gap: 8px; }
+    .br-divider { display: none; }
+    .br-title { max-width: 140px; font-size: 14px; }
+    .br-back-btn span:not(.br-back-icon) { display: none; }
+    .br-action-btn span:not(.btn-icon) { display: none; }
+    .br-action-btn { padding: 6px 9px; }
+  }
+
   .br-content { padding: 30px 20px 80px; max-width: 760px; margin: 0 auto; width: 100%; line-height: 1.8; font-size: 16px; background: var(--card); min-height: 100vh; border-left: 1px solid var(--border); border-right: 1px solid var(--border); box-shadow: var(--shadow-sm); }
   .br-content a { color: var(--accent); text-decoration: none; word-break: break-all; transition: opacity var(--tr); }
   .br-content a:hover { opacity: 0.8; text-decoration: underline; }
@@ -1822,12 +1991,6 @@ html.view-blog #blogGrid { display: block !important; }
   .br-link { text-decoration: none; color: var(--accent); font-size: 13px; }
   /* 翻译模型标记：次级灰字，右对齐，视觉上不干扰正文 */
   .br-model-tag { text-align: right; font-size: 12px; color: var(--muted); opacity: 0.7; margin: -14px 0 16px; }
-  
-  /* Mode Selector */
-  .br-mode-selector { display: inline-flex; align-items: center; background: color-mix(in srgb, var(--card) 90%, transparent); border: 1px solid var(--border); border-radius: 20px; padding: 2px; gap: 2px; flex-shrink: 0; }
-  .brm-btn { background: transparent; border: none; color: var(--muted); font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 16px; cursor: pointer; transition: all var(--tr); white-space: nowrap; }
-  .brm-btn:hover { color: var(--text-strong); background: var(--bg-hover); }
-  .brm-btn.active { background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 2px 6px var(--accent-ring); }
   
   /* Custom Confirm Modal */
   .custom-modal-backdrop {

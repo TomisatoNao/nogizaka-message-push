@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script src="/static/theme.js"></script>
-<link rel="stylesheet" href="/static/archive.css?v=5.1">
+<link rel="stylesheet" href="/static/archive.css?v=5.2">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -248,17 +248,35 @@
 
 <div id="blogReader" class="blog-reader" style="display:none;" role="dialog" aria-modal="true">
   <div class="br-header">
-    <button id="brClose" class="nav-btn">← 返回</button>
-    <div class="br-title" id="brTitle"></div>
-    <div class="br-header-actions" style="margin-left:auto; display:flex; align-items:center; gap:8px;">
-      <button id="brShare" class="nav-btn" title="复制分享链接" style="white-space:nowrap;">🔗 分享</button>
+    <div class="br-header-left">
+      <button id="brClose" class="br-back-btn" title="返回博客列表 (Esc)">
+        <span class="br-back-icon">←</span>
+        <span>返回</span>
+      </button>
+      <div class="br-divider"></div>
+      <div class="br-title-wrap">
+        <span id="brAuthorBadge" class="portal-pill-brand" style="display:none;"></span>
+        <div class="br-title" id="brTitle"></div>
+      </div>
+    </div>
+    <div class="br-header-actions">
+      <button id="brShare" class="br-action-btn" title="复制分享链接">
+        <span class="btn-icon">🔗</span>
+        <span>分享</span>
+      </button>
       <div id="brModeSelector" class="br-mode-selector" style="display:none;">
         <button type="button" class="brm-btn" data-mode="ja-zh">日中对照</button>
         <button type="button" class="brm-btn" data-mode="ja-only">日文</button>
         <button type="button" class="brm-btn" data-mode="zh-only">中文</button>
       </div>
-      <button id="brDeleteTranslate" class="nav-btn" style="display:none; white-space:nowrap; background:rgba(255,59,48,0.15); color:#ff453a; border-color:rgba(255,59,48,0.3);">🗑️ 删除翻译</button>
-      <button id="brTranslate" class="nav-btn" style="white-space:nowrap;">🌐 翻译</button>
+      <button id="brDeleteTranslate" class="br-action-btn danger" style="display:none;" title="删除当前中文译文">
+        <span class="btn-icon">🗑️</span>
+        <span>删除翻译</span>
+      </button>
+      <button id="brTranslate" class="br-action-btn primary" title="触发智能模型翻译">
+        <span class="btn-icon">🌐</span>
+        <span>翻译</span>
+      </button>
     </div>
   </div>
   <div class="br-content" id="brContent"></div>
@@ -300,6 +318,6 @@
 <!-- Toast Container -->
 <div id="toastContainer" class="toast-container"></div>
 
-<script src="/static/archive.js?v=5.1"></script>
+<script src="/static/archive.js?v=5.2"></script>
 </body>
 </html>

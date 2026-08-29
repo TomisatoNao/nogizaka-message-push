@@ -1178,7 +1178,7 @@ function updateModeSelectorUI() {
 
   if (delBtn) {
     if (window._isArchiveAdmin && hasTrans) {
-      delBtn.style.display = "inline-block";
+      delBtn.style.display = "inline-flex";
     } else {
       delBtn.style.display = "none";
     }
@@ -1241,18 +1241,27 @@ function openBlogReader(post, bodyHtml) {
     currentTransMode = "ja-zh";
   }
   $("brTitle").textContent = post.title || "无题";
+  const authorBadge = $("brAuthorBadge");
+  if (authorBadge) {
+    const gKey = post.group_key || curBlogGroup || "nogizaka";
+    const gIcon = gKey === "sakurazaka" ? "🌸" : gKey === "hinatazaka" ? "🩵" : "💜";
+    const gClass = gKey === "sakurazaka" ? "sakura" : gKey === "hinatazaka" ? "hinata" : "nogi";
+    authorBadge.className = "portal-pill-brand " + gClass;
+    authorBadge.textContent = gIcon + " " + (post.author || "成员博客");
+    authorBadge.style.display = "";
+  }
   
   const transBtn = $("brTranslate");
   if (transBtn) {
     if (!window._isArchiveAdmin) {
       transBtn.style.display = "none";
     } else {
-      transBtn.style.display = "";
+      transBtn.style.display = "inline-flex";
       if (hasTranslation(post)) {
-        transBtn.textContent = "✓ 已翻译";
+        transBtn.innerHTML = '<span class="btn-icon">✓</span><span>已翻译</span>';
         transBtn.disabled = true;
       } else {
-        transBtn.textContent = "🌐 翻译";
+        transBtn.innerHTML = '<span class="btn-icon">🌐</span><span>翻译</span>';
         transBtn.disabled = false;
       }
     }
@@ -1458,7 +1467,7 @@ if (brDeleteTranslateBtn) {
         currentBlogReaderPost.content_json = null;
         const transBtn = $("brTranslate");
         if (transBtn) {
-          transBtn.textContent = "🌐 翻译";
+          transBtn.innerHTML = '<span class="btn-icon">🌐</span><span>翻译</span>';
           transBtn.disabled = false;
         }
         renderCurrentBlogContent();
@@ -1480,7 +1489,7 @@ if (brTranslateBtn) {
     const targetPost = currentBlogReaderPost;
     const reqBlogId = targetPost.id;
     
-    brTranslateBtn.textContent = "⏳ 翻译中 (需10~30秒)...";
+    brTranslateBtn.innerHTML = '<span class="btn-icon">⏳</span><span>翻译中 (需10~30秒)...</span>';
     brTranslateBtn.disabled = true;
     
     try {
@@ -1499,20 +1508,20 @@ if (brTranslateBtn) {
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId && $("blogReader").style.display !== "none") {
           currentTransMode = "ja-zh";
           renderCurrentBlogContent();
-          brTranslateBtn.textContent = "✓ 已翻译";
+          brTranslateBtn.innerHTML = '<span class="btn-icon">✓</span><span>已翻译</span>';
           brTranslateBtn.disabled = true;
         }
       } else {
         showToast(data.msg || "翻译失败，请检查 API Key 配置与网络连接", "error");
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
-          brTranslateBtn.textContent = "🌐 重试翻译";
+          brTranslateBtn.innerHTML = '<span class="btn-icon">🌐</span><span>重试翻译</span>';
           brTranslateBtn.disabled = false;
         }
       }
     } catch(err) {
       showToast("网络异常: " + err, "error");
       if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
-        brTranslateBtn.textContent = "🌐 重试翻译";
+        brTranslateBtn.innerHTML = '<span class="btn-icon">🌐</span><span>重试翻译</span>';
         brTranslateBtn.disabled = false;
       }
     }
