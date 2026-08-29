@@ -1732,13 +1732,20 @@ document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((btn)
 
 function handleAdminRoute() {
   const rawHash = (location.hash || "").replace(/^#/, "");
+  if (!rawHash) {
+    switchAdminTab("status", false);
+    return;
+  }
   const p = new URLSearchParams(rawHash);
   const tabFromQuery = new URLSearchParams(location.search).get("tab");
-  const tab = p.get("tab") || rawHash.replace(/^tab=/, "") || tabFromQuery || "status";
+  const tab = p.get("tab") || rawHash.replace(/^tab=/, "") || tabFromQuery;
   const validTabs = ["status", "monitors", "channels", "social", "system", "users", "advanced"];
   if (validTabs.includes(tab)) {
     switchAdminTab(tab, false);
+    return;
   }
+  // 未知管理端 Tab 路由，跳转至 404
+  location.replace("/404?from=" + encodeURIComponent(location.pathname + location.search + location.hash));
 }
 
 window.addEventListener("hashchange", () => {

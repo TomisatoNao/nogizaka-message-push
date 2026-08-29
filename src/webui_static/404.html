@@ -301,8 +301,9 @@
 "use strict";
 const targetPathEl = document.getElementById("targetPath");
 if (targetPathEl) {
-  const p = location.pathname + location.search + location.hash;
-  targetPathEl.textContent = p || "/404-not-found";
+  const p = new URLSearchParams(location.search);
+  const fromUrl = p.get("from");
+  targetPathEl.textContent = fromUrl || (location.pathname + location.search + location.hash) || "/404-not-found";
 }
 
 let timeLeft = 10;

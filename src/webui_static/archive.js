@@ -3121,7 +3121,13 @@ async function handleRoute(isInitial = false) {
   }
 
   // 3. 首页模式（默认无 hash 或 #home）
-  showHome();
+  if (!rawHash || rawHash === "home") {
+    showHome();
+    return;
+  }
+
+  // 4. 未知非法 Hash 路由：严格跳转至 404 页面
+  location.replace("/404?from=" + encodeURIComponent(location.pathname + location.search + location.hash));
 }
 
 // ── 启动入口 ─────────────────────────────────────
