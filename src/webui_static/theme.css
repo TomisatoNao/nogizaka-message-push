@@ -172,11 +172,17 @@ header.app-header {
 
 .header-brand { display: flex; align-items: center; gap: 10px; flex: none; }
 .header-brand .brand-logo {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 9px;
   text-decoration: none; color: var(--text-strong);
   font-weight: 750; font-size: 16px; letter-spacing: -0.01em;
 }
 .header-brand .brand-logo:hover { opacity: 0.9; }
+.header-brand .brand-icon-img {
+  width: 26px; height: 26px; border-radius: 7px; flex: none;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: transform var(--tr-fast);
+}
+.header-brand .brand-logo:hover .brand-icon-img { transform: scale(1.06); }
 .header-brand .brand-icon { font-size: 18px; }
 
 .header-nav { display: flex; align-items: center; gap: 12px; overflow: visible !important; }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🔐</text></svg>">
+<link rel="icon" href="/static/admin_icon.svg" type="image/svg+xml">
 <title>登录 · 坂道监控</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script src="/static/theme.js"></script>
@@ -24,15 +24,13 @@
   }
   @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
 
-  .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 6px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
   .brand .logo {
-    width: 40px; height: 40px; border-radius: 12px; flex: none;
-    display: flex; align-items: center; justify-content: center; font-size: 20px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    width: 42px; height: 42px; border-radius: 12px; flex: none;
     box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 38%, transparent);
   }
   h1 { font-size: 19px; margin: 0; font-weight: 650; letter-spacing: .01em; }
-  .sub { color: var(--muted); font-size: 13px; margin: 0 0 26px 51px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 26px 54px; }
 
   .field { position: relative; margin-bottom: 16px; }
   .field input {
@@ -104,7 +102,7 @@
 <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
 <div class="card">
   <div class="brand">
-    <div class="logo">⛩️</div>
+    <img src="/static/admin_icon.svg" alt="Logo" class="logo">
     <div>
       <h1>坂道监控</h1>
     </div>

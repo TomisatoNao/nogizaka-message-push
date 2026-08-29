@@ -687,9 +687,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── 路由 ─────────────────────────────────────────────
     def _send_static(self, name: str) -> None:
-        """主题 CSS / JS —— 白名单文件名，不接受任意路径。"""
-        allowed = {"theme.css": "text/css", "theme.js": "application/javascript",
-                   "archive.css": "text/css", "archive.js": "application/javascript"}
+        """主题 CSS / JS / 图标 —— 白名单文件名，不接受任意路径。"""
+        allowed = {
+            "theme.css": "text/css", "theme.js": "application/javascript",
+            "archive.css": "text/css", "archive.js": "application/javascript",
+            "admin_icon.svg": "image/svg+xml", "archive_icon.svg": "image/svg+xml",
+        }
         ctype = allowed.get(name)
         if ctype is None:
             self._send_json({"ok": False, "errors": ["未知静态资源"]}, 404)
@@ -733,9 +736,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
-        # 共享静态资源（主题 token / 切换脚本）：登录页也要用，故不设鉴权
+        # 共享静态资源（主题 token / 切换脚本 / 样式 / 图标）：登录页也要用，故不设鉴权
         if path in ("/static/theme.css", "/static/theme.js",
-                    "/static/archive.css", "/static/archive.js"):
+                    "/static/archive.css", "/static/archive.js",
+                    "/static/admin_icon.svg", "/static/archive_icon.svg"):
             self._send_static(path.rsplit("/", 1)[1])
             return
         if path == "/login":

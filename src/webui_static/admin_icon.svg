@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="100%" height="100%">
+  <defs>
+    <linearGradient id="adminBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="45%" stop-color="#6355df"/>
+      <stop offset="100%" stop-color="#9333ea"/>
+    </linearGradient>
+    <linearGradient id="petalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f472b6"/>
+      <stop offset="100%" stop-color="#fb7185"/>
+    </linearGradient>
+    <linearGradient id="gearGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <filter id="adminGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <!-- Background Squircle with Glass Border -->
+  <rect x="6" y="6" width="116" height="116" rx="28" fill="url(#adminBgGrad)"/>
+  <rect x="7" y="7" width="114" height="114" rx="27" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+
+  <!-- Telemetry Sonar Rings -->
+  <circle cx="64" cy="64" r="44" fill="none" stroke="rgba(255,255,255,0.15)" stroke-dasharray="3 3"/>
+  <circle cx="64" cy="64" r="30" fill="none" stroke="rgba(255,255,255,0.2)"/>
+  <line x1="20" y1="64" x2="108" y2="64" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+  <line x1="64" y1="20" x2="64" y2="108" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+  <path d="M64 64 L95 33 A44 44 0 0 1 108 64 Z" fill="rgba(255,255,255,0.12)"/>
+
+  <!-- Left Precision Gear -->
+  <path d="M64 36 A28 28 0 0 0 36 64 A28 28 0 0 0 64 92 L64 80 A16 16 0 0 1 48 64 A16 16 0 0 1 64 48 Z" fill="url(#gearGrad)"/>
+  <rect x="30" y="59" width="10" height="10" rx="2.5" fill="url(#gearGrad)"/>
+  <rect x="39" y="38" width="9" height="9" rx="2.5" transform="rotate(-45 43.5 42.5)" fill="url(#gearGrad)"/>
+  <rect x="39" y="80" width="9" height="9" rx="2.5" transform="rotate(45 43.5 84.5)" fill="url(#gearGrad)"/>
+
+  <!-- Right Glowing Sakura Blossom -->
+  <path d="M64 64 C64 48 80 34 90 42 C94 46 92 52 86 56 C80 60 70 63 64 64 Z" fill="url(#petalGrad)" filter="url(#adminGlow)"/>
+  <path d="M64 64 C80 64 94 72 90 82 C86 88 80 88 74 82 C70 78 65 70 64 64 Z" fill="url(#petalGrad)" filter="url(#adminGlow)"/>
+  <path d="M64 64 C74 50 88 50 94 62 C96 68 90 72 84 70 C76 68 68 65 64 64 Z" fill="#fbcfe8" opacity="0.9"/>
+
+  <!-- Core Pulsing Nucleus -->
+  <circle cx="64" cy="64" r="8" fill="#ffffff" filter="url(#adminGlow)"/>
+  <circle cx="64" cy="64" r="4.5" fill="#6355df"/>
+</svg>
