@@ -485,18 +485,21 @@
     gap: 16px;
   }
   .portal-hero-icon {
-    width: 52px;
-    height: 52px;
+    width: 56px;
+    height: 56px;
     border-radius: 16px;
-    background: var(--accent-soft);
-    border: 1px solid var(--accent-ring);
-    color: var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 26px;
-    box-shadow: 0 4px 14px var(--accent-soft);
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 32%, transparent);
     flex-shrink: 0;
+    overflow: hidden;
+  }
+  .portal-hero-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
   .portal-hero-title-box {
     display: flex;
