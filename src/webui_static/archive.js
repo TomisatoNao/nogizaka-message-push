@@ -1263,6 +1263,15 @@ function openBlogReader(post, bodyHtml) {
   document.body.style.overflow = "hidden";
   if (typeof handleBackTopScroll === "function") handleBackTopScroll();
 
+  // 同步 URL Hash 路由，便于直接分享定位单篇博客
+  selfHashUpdate = true;
+  const p = new URLSearchParams();
+  p.set("blog", post.group_key || curBlogGroup || "nogizaka");
+  if (post.author) p.set("author", post.author);
+  p.set("id", post.id);
+  location.hash = p.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+
   if (searchQuery) {
     setTimeout(() => {
       const contentDiv = $("brContent");
@@ -1310,15 +1319,59 @@ function openBlogReader(post, bodyHtml) {
   }
 }
 
+function closeBlogReader() {
+  $("blogReader").style.display = "none";
+  document.body.style.overflow = "";
+  $("brContent").innerHTML = "";
+  currentBlogReaderPost = null;
+  if (typeof handleBackTopScroll === "function") handleBackTopScroll();
+
+  // 恢复博客列表的 hash 路由
+  selfHashUpdate = true;
+  const p = new URLSearchParams();
+  p.set("blog", curBlogGroup || "nogizaka");
+  if (curBlogAuthor) p.set("author", curBlogAuthor);
+  if (curBlogDate) p.set("date", curBlogDate);
+  if (searchQuery) p.set("q", searchQuery);
+  location.hash = p.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+}
+
 const brCloseBtn = $("brClose");
 if (brCloseBtn) {
-  brCloseBtn.addEventListener("click", () => {
-    $("blogReader").style.display = "none";
-    document.body.style.overflow = "";
-    $("brContent").innerHTML = "";
-    if (typeof handleBackTopScroll === "function") handleBackTopScroll();
+  brCloseBtn.addEventListener("click", closeBlogReader);
+}
+
+const brShareBtn = $("brShare");
+if (brShareBtn) {
+  brShareBtn.addEventListener("click", () => {
+    if (!currentBlogReaderPost) return;
+    const p = new URLSearchParams();
+    p.set("blog", currentBlogReaderPost.group_key || curBlogGroup || "nogizaka");
+    if (currentBlogReaderPost.author) p.set("author", currentBlogReaderPost.author);
+    p.set("id", currentBlogReaderPost.id);
+    const url = location.origin + location.pathname + "#" + p.toString();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        showToast("已复制博客分享链接！", "success");
+      }).catch(() => {
+        customPrompt({ title: "博客分享链接", message: "请复制下方链接直接分享：", defaultValue: url, confirmText: "完成", icon: "🔗" });
+      });
+    } else {
+      customPrompt({ title: "博客分享链接", message: "请复制下方链接直接分享：", defaultValue: url, confirmText: "完成", icon: "🔗" });
+    }
   });
 }
+
+// 绑定全局 Esc 键退出博客阅读器
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("blogReader") && $("blogReader").style.display !== "none") {
+    const lb = $("lightbox");
+    if (!lb || lb.getAttribute("aria-hidden") === "true") {
+      closeBlogReader();
+    }
+  }
+});
 
 const brModeSelector = $("brModeSelector");
 if (brModeSelector) {
@@ -2967,17 +3020,58 @@ async function handleRoute(isInitial = false) {
   const rawHash = (location.hash || "").replace(/^#/, "");
   const p = new URLSearchParams(rawHash);
 
-  // 1. 博客模式：#blog, #blog=nogizaka, #blog=...
-  // 1. 博客模式：#blog, #blog=nogizaka, #blog=...
-  if (p.has("blog") || rawHash === "blog") {
+  // 1. 博客模式：#blog, #blog=nogizaka, #id=..., #blog_id=...
+  const blogId = p.get("id") || p.get("blog_id") || p.get("post");
+  if (p.has("blog") || rawHash === "blog" || blogId) {
     let savedGroup = null;
     let savedAuthor = "";
     try {
       savedGroup = localStorage.getItem("archive_last_blog_group");
       savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
     } catch (_) {}
-    const group = p.get("blog") || (savedGroup && blogGroups.some(g => g.key === savedGroup) ? savedGroup : curBlogGroup) || "nogizaka";
-    const author = p.get("author") || savedAuthor || "";
+    let group = p.get("blog") || (savedGroup && blogGroups.some(g => g.key === savedGroup) ? savedGroup : curBlogGroup) || "nogizaka";
+    if (group === "true" || group === "1" || group === "") group = "nogizaka";
+    const author = p.get("author") || (blogId ? "" : savedAuthor) || "";
+    const date = p.get("date") || "";
+    const q = normalizedQuery(p.get("q"));
+
+    if (date) curBlogDate = date;
+    if (q) {
+      searchQuery = q;
+      syncSearchInput();
+    }
+
+    if (blogId) {
+      // 若当前已经打开了同一篇博客且阅读器处于显示状态，无需重复拉取
+      if (currentBlogReaderPost && String(currentBlogReaderPost.id) === String(blogId) && $("blogReader").style.display !== "none") {
+        return;
+      }
+      try {
+        const res = await api("/api/archive/blogs?id=" + encodeURIComponent(blogId));
+        if (res.ok && res.post) {
+          const post = res.post;
+          const targetGroup = post.group_key || group || "nogizaka";
+          const targetAuthor = post.author || author || "";
+          await selectBlogGroup(targetGroup, targetAuthor);
+          openBlogReader(post);
+        } else {
+          showToast("未找到该博客或已被移除", "error");
+          await selectBlogGroup(group, author);
+        }
+      } catch (err) {
+        showToast("加载博客失败: " + err.message, "error");
+        await selectBlogGroup(group, author);
+      }
+      return;
+    }
+
+    // 未指定博客 ID：若阅读器正开着，关闭它并回到列表
+    if ($("blogReader").style.display !== "none") {
+      $("blogReader").style.display = "none";
+      document.body.style.overflow = "";
+      $("brContent").innerHTML = "";
+      currentBlogReaderPost = null;
+    }
     await selectBlogGroup(group, author);
     return;
   }
@@ -3019,6 +3113,13 @@ async function handleRoute(isInitial = false) {
 
 // ── 启动入口 ─────────────────────────────────────
 async function boot() {
+  // 如果通过 query string 参数（如 /archive?blog=sakurazaka&id=123）访问，自动规范化为 hash 路由
+  const searchParams = new URLSearchParams(location.search);
+  if (searchParams.has("id") || searchParams.has("blog") || searchParams.has("member") || searchParams.has("letter")) {
+    const targetHash = searchParams.toString();
+    history.replaceState(null, "", location.pathname + "#" + targetHash);
+  }
+
   const p = new URLSearchParams((location.hash || "").replace(/^#/, ""));
   curType = p.get("t") || "";
   searchQuery = normalizedQuery(p.get("q"));
