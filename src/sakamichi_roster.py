@@ -239,6 +239,7 @@ HINATAZAKA_ROSTER = {
     "下田衣珠季": (5, "しもだ いずき"),
     "高井俐香": (5, "たかい りか"),
     "鶴崎仁香": (5, "つるさき にか"),
+    "松尾桜": (5, "まつお さくら"),
 }
 
 YODEL_ROSTER = {
@@ -258,9 +259,9 @@ ALL_ROSTERS = {
 # 增加异体字 / 别名支持
 ALL_ROSTERS["nogizaka"]["川崎桜"] = (5, "かわさき さくら")
 ALL_ROSTERS["nogizaka"]["川﨑桜"] = (5, "かわさき さくら")
-ALL_ROSTERS["sakurazaka"]["松尾桜"] = (4, "まつお さくら")
 ALL_ROSTERS["sakurazaka"]["櫻坂46"] = (99, "さくらざか")
 ALL_ROSTERS["sakurazaka"]["桜坂46"] = (99, "さくらざか")
+ALL_ROSTERS["hinatazaka"]["松尾桜"] = (5, "まつお さくら")
 ALL_ROSTERS["hinatazaka"]["新参者四期生"] = (4, "しんざんもの")
 ALL_ROSTERS["hinatazaka"]["新参者"] = (4, "しんざんもの")
 
@@ -295,7 +296,7 @@ def infer_group(name: str, explicit_group: str = "") -> str:
         return "sakurazaka"
 
     # 日向坂匹配
-    if norm in ALL_ROSTERS["hinatazaka"] or any(k in norm for k in ("日向坂", "金村", "小坂菜", "大野愛", "佐藤優", "片山紗", "森平", "海邉", "清水理", "矢田萌", "正源司", "藤嶌", "宮地", "平尾", "山下葉", "新参者")):
+    if norm in ALL_ROSTERS["hinatazaka"] or any(k in norm for k in ("日向坂", "金村", "小坂菜", "大野愛", "佐藤優", "片山紗", "森平", "海邉", "清水理", "矢田萌", "正源司", "藤嶌", "宮地", "平尾", "山下葉", "松尾桜", "新参者")):
         return "hinatazaka"
 
     for g_key in ("nogizaka", "sakurazaka", "hinatazaka", "yodel"):
