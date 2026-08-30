@@ -2,7 +2,7 @@
 
 <div align="center">
 
-> **乃木坂46 / 櫻坂46 / 日向坂46 Message 私密消息 · 官方博客 · 社交媒体（𝕏 / Instagram / TikTok / Live 直播录制）全自动智能监控、Google Gemini & 智谱清言 AI 多引擎双语翻译、多通道格式化广播与本地永久持久化归档系统。**
+> **乃木坂46 / 櫻坂46 / 日向坂46 / yodel Message 私密消息 · 官方博客 · 社交媒体（𝕏 / Instagram / TikTok / Live 直播录制）全自动智能监控、Google Gemini & 智谱清言 AI 多引擎双语翻译、多通道格式化广播与本地永久持久化归档系统。**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
@@ -11,7 +11,7 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=flat-square)](https://github.com/astral-sh/ruff)
 [![Tests: Pytest](https://img.shields.io/badge/tests-pytest%20passing-success.svg?style=flat-square)](tests/)
 
-[🚀 快速开始](#-快速开始--quick-start) • [✨ 核心特性](#-核心特性--features) • [🧩 系统架构](#-系统核心架构--architecture) • [📖 WebUI 指南](#️-web-管理端与日常运维) • [🛠️ 运维与工具](#️-命令行辅助工具与进阶配置) • [❓ 常见问题](#-常见故障排查--faq)
+[🚀 快速开始](#-快速开始--quick-start) • [✨ 核心特性](#-核心特性--features) • [🧩 系统架构](#-系统核心架构--architecture) • [🖥️ WebUI 指南](#️-web-管理端与日常运维) • [🛠️ 运维与工具](#️-命令行辅助工具与进阶配置) • [❓ 常见问题](#-常见故障排查--faq)
 
 </div>
 
@@ -19,11 +19,11 @@
 
 ## 💡 为什么选择本项目？
 
-- 🔄 **全平台聚合监控**：三坂 Message 消息、官方博客、𝕏 (Twitter)、Instagram (Feed/Story/Reels)、TikTok 视频及 **TikTok Live 直播开播秒级探测与 ffmpeg 无损录制**；
-- 🤖 **AI 双引擎智能翻译**：Google Gemini 与 智谱清言（GLM-4-Flash 永久免费且国内免翻直连）**智能轮流调度与自动容灾**，偶像口吻地道中文呈现；
+- 🔄 **全平台聚合监控**：支持乃木坂46、櫻坂46、日向坂46及 yodel（毕业成员/官方）Message 消息、官方博客、𝕏 (Twitter)、Instagram (Feed/Story/Reels)、TikTok 视频及 **TikTok Live 直播开播秒级探测与 ffmpeg 无损录制**；
+- 🤖 **AI 双引擎智能翻译**：Google Gemini 与 智谱清言（GLM-4-Flash 永久免费且国内免翻直连）**智能轮流调度与自动容灾**，呈现偶像口吻的地道中文；
 - 📢 **全通道解耦分发**：支持 **QQ 群（NapCat OneBot11）**、**Telegram 频道（HTML 富文本）** 及 **QQ 官方开放平台机器人（个人/群聊/交互指令）**，支持独立备注与精细过滤；
 - 💾 **本地永久归档与全文检索**：全量多媒体（原图/语音/视频/粉丝信件）本地落盘；内置 **SQLite WAL + FTS5 全文索引** 与 **Gemini Vision 图片智能打标**；
-- 🖥️ **全流程 Web 可视化配置**：响应式双语博客阅读器、Message 时间线画廊、在线凭证智能抓取与一键托管，**全过程浏览器界面点选，无需手动修改任何 JSON 文件**。
+- 📱 **现代化响应式 Web 门户**：三坂便当卡大盘、时光隧道、三态双语博客阅读器、Message 时间线画廊，移动端原生 Action Sheet 深度适配，**全过程界面点选，无需修改任何代码或配置**。
 
 ```mermaid
 flowchart TD
@@ -32,7 +32,7 @@ flowchart TD
     end
 
     subgraph S2["📡 多源数据采集 (Producers)"]
-        P1["💬 Message 消息<br/>乃木坂46 · 樱坂46 · 日向坂46"]
+        P1["💬 Message 消息<br/>乃木坂46 · 樱坂46 · 日向坂46 · yodel"]
         P2["📝 官方博客<br/>三大团体独立增量抓取与水印推进"]
         P3["🌐 社交动态与直播<br/>𝕏 · Instagram · TikTok · Live 无损录制"]
     end
@@ -72,7 +72,7 @@ flowchart TD
     - [🖥️ 首次登录与 Web 界面极简配置 (4 步搞定)](#️-首次登录与-web-界面极简配置-4-步搞定)
     - [🔑 初始管理员账号与密码重置](#-初始管理员账号与密码重置)
   - [✨ 核心特性 / Features](#-核心特性--features)
-    - [1. Message 私密消息与粉丝信件归档](#1-message-私密消息与粉丝信件归档)
+    - [1. Message 私密消息、yodel 与粉丝信件归档](#1-message-私密消息yodel-与粉丝信件归档)
     - [2. 官方博客智能解析与双语阅读器](#2-官方博客智能解析与双语阅读器)
     - [3. 全平台社交媒体监控与直播录制](#3-全平台社交媒体监控与直播录制)
     - [4. AI 双引擎翻译与全渠道格式化排版](#4-ai-双引擎翻译与全渠道格式化排版)
@@ -188,17 +188,17 @@ python tools/manage_users.py reset
 
 ## ✨ 核心特性 / Features
 
-### 1. Message 私密消息与粉丝信件归档
-- **三团 Message 原生解析**：支持乃木坂46、櫻坂46、日向坂46及 Yodel 平台的多媒体消息（文本、原图、音频语音、高清视频）；
+### 1. Message 私密消息、yodel 与粉丝信件归档
+- **四团 Message 原生解析**：支持乃木坂46、櫻坂46、日向坂46及 yodel 平台的多媒体消息（文本、原图、音频语音、高清视频）；
 - **粉丝信件 (Fan Letters) 归档**：从 CloudFront 私有 CDN 完整保存你发给成员的高清信纸长图原图、正文、发送时间与收藏标记；
-- **极速冷启动与全文搜索**：基于 SQLite WAL 模式与 FTS5 引擎，万级历史记录毫秒级中日双语搜索，冷启动就绪时间 **<1 秒**；
+- **极速冷启动与全文搜索**：基于 SQLite WAL 模式与 FTS5 引擎，万级历史记录毫秒级中日双语搜索，Gzip 极速传输，冷启动就绪时间 **<1 秒**；
 - **Gemini Vision 智能打标**：自动对消息图片进行 10 种类目（自拍/合照/舞台/外出/美食等）语义打标。
 
 ### 2. 官方博客智能解析与双语阅读器
 - **DOM 分段合并与大段落还原**：兼容三团官网差异化 DOM，保留段内留白与换行，还原官方博客视效节奏；
 - **图片节点原位保护**：翻译前抽离并标记正文 `<img>`，翻译完成后无损插回原位，杜绝漏图、跳段与长文截断；
-- **三态语言视图自由切换**：双语阅读器支持「日中对照（日文斜体 + 中文粗体）」、「仅日文」及「仅中文」；
-- **五十音规范排序与 Popover 检索**：作者列表严格按官方五十音（あいうえお順）规范分层，支持拼音/日文实时过滤卡片与横向微胶囊滚动条。
+- **三态语言视图自由切换**：双语阅读器支持「日中对照（日文斜体 + 中文常规体）」、「仅日文」及「仅中文」；
+- **四维黄金排序**：作者列表与消息列表严格按「乃木坂 → 櫻坂 → 日向坂 → yodel → 1..6期 → 五十音」统一规范分层排列。
 
 ### 3. 全平台社交媒体监控与直播录制
 - **多平台免登录抓取**：
@@ -206,7 +206,7 @@ python tools/manage_users.py reset
   - **Instagram**：支持 Feed 轮播多图、Reels 短视频及 24h 快拍（Story），内置安全频控限流熔断；
   - **TikTok**：短视频、图文幻灯片及原声音频无水印提取；
 - **TikTok Live 直播开播守护**：8 秒超轻量探测（单次约 120 字节），开播瞬间毫秒级捕获 HLS/FLV 流并拉起 ffmpeg 无损切片录制，优雅停机保护 Moov Atom；
-- **成员与账号彻底解耦**：支持监控未开通 Message 的毕业成员、其他偶像团体（=LOVE / 48系等）的纯社媒与博客动态。
+- **成员与账号解耦**：支持监控未开通 Message 的毕业成员、其他偶像团体（=LOVE / 48系等）的纯社媒与博客动态。
 
 ### 4. AI 双引擎翻译与全渠道格式化排版
 - **Gemini + 智谱清言 双引擎轮流调度**：支持两家大模型均匀交替轮询（Round-Robin），并在遇到额度超限或网络故障时秒级自动容灾切换；
@@ -215,7 +215,7 @@ python tools/manage_users.py reset
 
 ### 5. 安全架构与双角色权限体系
 - **RBAC 双角色模型**：`admin` 拥有完整管理权限；`viewer` 仅可查阅归档与阅读器；支持一键开启 `auth.archive_public` 供同好免登录公开查阅归档；
-- **银行级密码哈希与防锁死保护**：`scrypt` 强加盐哈希，`hmac.compare_digest` 常时比对，IP 连续输错临时锁定，系统严格禁止删除最后一个管理员账号。
+- **密码哈希与防锁死保护**：`scrypt` 强加盐哈希，`hmac.compare_digest` 常时比对，IP 连续输错临时锁定，系统严格禁止删除最后一个管理员账号。
 
 ---
 
