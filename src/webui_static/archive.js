@@ -507,8 +507,15 @@ function getDefaultNogiMember() {
   return nogi ? nogi.name : members[0].name;
 }
 
+function setHtmlViewClass(mode) {
+  const root = document.documentElement;
+  root.classList.remove("view-home", "view-msg", "view-blog", "view-letter");
+  if (mode) root.classList.add("view-" + mode);
+}
+
 function switchMainTab(mode, keepHash) {
   curMode = mode;
+  setHtmlViewClass(mode);
   try { localStorage.setItem("archive_last_main_tab", mode); } catch (_) {}
   const tabHome = $("tabHome");
   if (tabHome) tabHome.classList.toggle("active", mode === "home");
@@ -721,6 +728,7 @@ async function loadBlogGroupChips() {
 
 function _enterMemberMode() {
   curMode = "msg";
+  setHtmlViewClass("msg");
   curBlogGroup = "";
   if ($("tabHome")) $("tabHome").classList.remove("active");
   if ($("tabMsg")) $("tabMsg").classList.add("active");
@@ -762,6 +770,7 @@ let curGroupAuthors = [];
 
 async function selectBlogGroup(key, author = "", updateHash = true) {
   curMode = "blog";
+  setHtmlViewClass("blog");
   curMember = "";
   curBlogGroup = key;
   curBlogAuthor = author || "";
@@ -2681,6 +2690,7 @@ let _portalHomeCached = null;
 
 async function showHome() {
   curMode = "home";
+  setHtmlViewClass("home");
   if ($("tabHome")) $("tabHome").classList.add("active");
   if ($("tabMsg")) $("tabMsg").classList.remove("active");
   if ($("tabBlog")) $("tabBlog").classList.remove("active");
@@ -3448,6 +3458,7 @@ function openLetterLightbox(idx) {
 
 async function selectLetterMember(mName) {
   curMode = "letter";
+  setHtmlViewClass("letter");
   curLetterMember = mName;
   try { localStorage.setItem("archive_last_letter_member", mName); } catch (_) {}
   const mObj = members.find(m => m.name === mName) || { name: mName, display: mName };

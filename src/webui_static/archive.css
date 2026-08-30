@@ -24,7 +24,9 @@ html.view-blog #tabBlog { background: var(--card-solid) !important; color: var(-
 html.view-msg #tabMsg { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 html.view-letter #tabLetter { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 
-html.view-blog .msg-toolbar { display: none !important; }
+html.view-blog .msg-toolbar,
+html.view-letter .msg-toolbar,
+html.view-home .msg-toolbar { display: none !important; }
 html.view-blog #timeline { display: none !important; }
 html.view-blog #blogGrid { display: block !important; }
 
@@ -2440,12 +2442,23 @@ html.view-blog #blogGrid { display: block !important; }
       margin-left: auto !important;
       font-size: 12.5px !important;
     }
-    .msg-toolbar,
+    .msg-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
     .blog-toolbar {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: stretch !important;
-      gap: 8px !important;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    html.view-blog .msg-toolbar,
+    html.view-letter .msg-toolbar,
+    html.view-home .msg-toolbar,
+    .msg-toolbar[style*="display: none"],
+    .msg-toolbar[style*="display:none"] {
+      display: none !important;
     }
     .msg-toolbar #typeChips {
       width: 100% !important;
