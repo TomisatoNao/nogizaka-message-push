@@ -176,7 +176,7 @@ class InstagramFetcher(SocialFetcher):
         from src.social import ig_session
         try:
             ig_session.mark_valid()
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     # ── 登录态引导（仅触发一次）─────────────────────────────

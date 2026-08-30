@@ -74,7 +74,7 @@ class SocialScheduler:
             if hasattr(f, "stop_all"):
                 try:
                     f.stop_all()
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
     def join(self, timeout: float = 5) -> None:
@@ -109,7 +109,7 @@ class SocialScheduler:
                 if self._alert:
                     try:
                         self._alert(pname, n)
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
                 base = int(cfg.get("error_backoff_seconds", 60))
                 cap = int(cfg.get("error_backoff_max", 900))

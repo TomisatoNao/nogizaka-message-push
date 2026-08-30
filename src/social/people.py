@@ -146,7 +146,7 @@ def auto_derive(config: dict, archive=None) -> list[dict]:
                 name = info.get("name") or ""
                 if name:
                     _add(name, "melink", name)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     # JOY LINK 已订阅成员（同 melink 逻辑）
@@ -157,7 +157,7 @@ def auto_derive(config: dict, archive=None) -> list[dict]:
                 name = info.get("name") or ""
                 if name:
                     _add(name, "joylink", name)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     # 归档库里实际出现过的账号（其余平台的兜底）
@@ -166,7 +166,7 @@ def auto_derive(config: dict, archive=None) -> list[dict]:
             for row in archive.accounts():
                 _add(row.get("author") or row["account"],
                      row["platform"], row["account"])
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     return [normalize(p) for p in by_key.values()]

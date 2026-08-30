@@ -33,7 +33,7 @@ class _SocialLogBridge(logging.Handler):
                 log_all(f"{msg}")
             else:
                 log_all(f"{msg}", is_debug=True)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 

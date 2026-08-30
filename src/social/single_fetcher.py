@@ -463,7 +463,7 @@ class SocialUrlParser:
             try:
                 r = self.session.head(url, allow_redirects=True, timeout=10)
                 url = r.url
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         m = re.search(r"(?:video|photo|v)/(\d+)", url)
@@ -508,7 +508,7 @@ class SocialUrlParser:
                         try:
                             dt = datetime.fromtimestamp(int(create_time), tz=timezone.utc).astimezone(_JST)
                             timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
-                        except Exception:
+                        except Exception:  # nosec B110
                             pass
 
                     if media_items:

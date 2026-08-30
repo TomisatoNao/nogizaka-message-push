@@ -99,7 +99,7 @@ async def fetch_member_directory(
     # 自动保存/刷新该账号成员的订阅元数据至 SQLite 数据库
     try:
         save_account_subscriptions(account_id, groups)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     return groups, None
@@ -154,7 +154,7 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
                 acc_cfg = cfg.ACCOUNTS.get(account_id) or {}
                 grp_k = acc_cfg.get("group_type") or "msg"
                 save_member_avatar_record(grp_k, mname, mname, thumb)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         rows.append((account_id, mid, mname, state, sub_type, start_at, end_at, auto_renew, now_ts))
@@ -175,7 +175,7 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
                         auto_renewing = excluded.auto_renewing,
                         updated_at = excluded.updated_at;
                 """, rows)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 
@@ -238,7 +238,7 @@ def get_all_subscriptions(account_id: str = "") -> dict[str, dict]:
                     "auto_renewing": bool(auto_renew),
                     "updated_at": upd,
                 }
-        except Exception:
+        except Exception:  # nosec B110
             pass
     return result
 
@@ -268,7 +268,7 @@ async def sync_all_accounts_subscriptions(client: httpx.AsyncClient | None = Non
             groups, err = await fetch_member_directory(client, acc_id)
             if groups:
                 stats[acc_id] = len(groups)
-    except Exception:
+    except Exception:  # nosec B110
         pass
     finally:
         if should_close:

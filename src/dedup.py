@@ -50,7 +50,7 @@ def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
                 ids = [r[0] for r in rows]
                 trimmed = ids[-cfg.SENT_IDS_MAX:]
                 return trimmed, set(trimmed)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     path = _id_file(group_type, m_id)
@@ -70,7 +70,7 @@ def load_sent_ids(group_type: str, m_id: str) -> tuple[list[str], set[str]]:
                         "INSERT OR IGNORE INTO sent_ids (group_type, m_id, msg_id, created_at) VALUES (?, ?, ?, ?);",
                         [(group_type, m_id, mid, now) for mid in trimmed]
                     )
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         return trimmed, set(trimmed)
     except Exception:

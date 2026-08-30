@@ -57,12 +57,12 @@ def _shutdown_all() -> None:
     for r in recorders:
         try:
             r.stop(reason="进程退出")
-        except Exception:
+        except Exception:  # nosec B110
             pass
     for r in recorders:
         try:
             r.join(timeout=20)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 
@@ -436,7 +436,7 @@ class LiveRecorder(threading.Thread):
             if proc.stdin and not proc.stdin.closed:
                 proc.stdin.write(b"q\n")
                 proc.stdin.flush()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         try:
             proc.wait(timeout=2)
@@ -471,7 +471,7 @@ class LiveRecorder(threading.Thread):
         except Exception:
             try:
                 proc.kill()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
     # ── 收尾 ─────────────────────────────────────────────

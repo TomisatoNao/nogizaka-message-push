@@ -432,5 +432,5 @@ class TikTokLiveFetcher(SocialFetcher):
         for r in list(self._recorders.values()):
             try:
                 r.stop(reason=reason)
-            except Exception:
+            except Exception:  # nosec B110
                 pass

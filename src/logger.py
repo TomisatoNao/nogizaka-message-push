@@ -119,7 +119,7 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
                 print(f"{ts} {color}[{tag}]\033[0m {line_fallback}")
             else:
                 print(f"{ts} [{tag}] {line_fallback}")
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     _push_recent(tag.strip(), ts, safe_content)

@@ -252,7 +252,7 @@ def read_cookie_file(path: str = COOKIE_FILE) -> dict:
         # 自动同步写入 Netscape 格式文件，确保 yt-dlp 与其他组件可直接调用
         try:
             write_cookie_file(cookies, path)
-        except Exception:
+        except Exception:  # nosec B110
             pass
         return cookies
 

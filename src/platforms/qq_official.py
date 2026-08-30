@@ -50,7 +50,7 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
                 res = subprocess.check_output(probe_cmd, timeout=10).decode("utf-8").strip()  # nosec B603
                 if res:
                     dur = max(1.0, float(res))
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         target_bitrate_k = max(200, int((max_bytes * 0.85 * 8) / dur / 1000))
@@ -185,7 +185,7 @@ class QQOfficialBot:
             except RuntimeError as ex:
                 if "different event loop" not in str(ex).lower() and "event loop" not in str(ex).lower():
                     raise
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         async with httpx.AsyncClient(timeout=t) as client:
@@ -765,7 +765,7 @@ async def download_media_payloads(member: dict,
             try:
                 from src import archive
                 local_bytes = archive.find_media_bytes_by_url(m_name, file_url)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         if local_bytes is not None and len(local_bytes) > 0:

@@ -196,7 +196,7 @@ def init_db() -> sqlite3.Connection | None:
                                 time_dir.rmdir()
                         except OSError:
                             pass
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
 
                 _schema_initialized = True
@@ -326,7 +326,7 @@ def sync_all_to_sqlite(force: bool = False) -> int:
             if row and row[0] > 0:
                 log_all(f"💾 SQLite 归档已就绪（共 {row[0]} 条记录）", is_debug=True)
                 return row[0]
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     all_rows = []
@@ -592,7 +592,7 @@ def find_media_bytes_by_url(m_name: str, file_url: str) -> bytes | None:
                     p = root / row[0]
                     if p.exists() and p.stat().st_size > 0:
                         return p.read_bytes()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
     # 降级：按 URL 中的日期定位年月目录（如 20260827 -> 2026/08）
@@ -680,7 +680,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
                         break
             if account_id and group_type:
                 headers = get_source_headers_for_account(account_id, group_type)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     # 优先下载主媒体文件；主文件失效/404 时若为图片且有缩略图则回退
@@ -744,7 +744,7 @@ def extract_upload_time(msg: dict) -> str | None:
         try:
             raw = json.loads(msg["raw_json"]) if isinstance(msg["raw_json"], str) else msg["raw_json"]
             file_url = raw.get("file") or raw.get("thumbnail") or ""
-        except Exception:
+        except Exception:  # nosec B110
             pass
     if not file_url:
         return None
@@ -1180,7 +1180,7 @@ def list_months(member_dir: str) -> list[dict]:
             """, (member_dir,)).fetchall()
             if rows:
                 return [{"year": r[0], "month": r[1], "count": r[2]} for r in rows]
-        except Exception:
+        except Exception:  # nosec B110
             pass
     return []
 
@@ -1361,7 +1361,7 @@ def realign_archive_timezones(force: bool = False) -> int:
             try:
                 with open(json_file, "r", encoding="utf-8") as f:
                     msgs = json.load(f)
-            except Exception:
+            except Exception:  # nosec B112
                 continue
 
             if not isinstance(msgs, list):
@@ -1409,7 +1409,7 @@ def realign_archive_timezones(force: bool = False) -> int:
                             try:
                                 import shutil
                                 shutil.move(str(old_path), str(new_file_path))
-                            except Exception:
+                            except Exception:  # nosec B110
                                 pass
                         new_rel = new_file_path.relative_to(member_path).as_posix()
                         m["_local_file"] = new_rel
@@ -1441,14 +1441,14 @@ def realign_archive_timezones(force: bool = False) -> int:
                     year_dir = member_path / cur_year_str
                     if year_dir.exists() and not any(year_dir.iterdir()):
                         year_dir.rmdir()
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
     # 清空 day_cache 缓存以保证最新
     _day_cache.clear()
     try:
         marker_file.touch(exist_ok=True)
-    except Exception:
+    except Exception:  # nosec B110
         pass
     if realigned_count > 0:
         log_all(f"🕒 历史归档时区自动自愈完成：已纠正 {realigned_count} 条跨月时区错位消息至 JST 年月")

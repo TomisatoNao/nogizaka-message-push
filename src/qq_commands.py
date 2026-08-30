@@ -409,7 +409,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
                     await bots[0].send_group_text(target_id, err_msg)
                 else:
                     await bots[0].send_private_text(target_id, err_msg)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 

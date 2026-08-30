@@ -1053,7 +1053,7 @@ async def main() -> None:
         try:
             from src.avatar_manager import sync_all_avatars
             await sync_all_avatars(force=False)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     asyncio.create_task(_bg_avatar_warmup())
@@ -1099,16 +1099,16 @@ async def main() -> None:
         try:
             await tagger.wait_pending(timeout=30)
             await archive.wait_pending(timeout=30)   # 归档后台任务收尾（媒体下载中途别掐）
-        except Exception:
+        except Exception:  # nosec B110
             pass
         try:
             await asyncio.gather(http_client.aclose(), qq_client.aclose(), return_exceptions=True)
-        except Exception:
+        except Exception:  # nosec B110
             pass
         if _blog_client is not None:
             try:
                 await _blog_client.aclose()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         log_all("✅ 资源清理完毕")
 

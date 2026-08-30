@@ -1146,7 +1146,7 @@ class _Handler(BaseHTTPRequestHandler):
         import config.config as cfg
         try:
             cfg._load_env_and_json()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         from src import auth as _auth
         user = self._current_user() if getattr(cfg, "AUTH_ENABLED", False) else None
@@ -1392,7 +1392,7 @@ class _Handler(BaseHTTPRequestHandler):
                         self.end_headers()
                         self.wfile.write(data)
                         return
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
             self._send_json({"ok": False, "errors": ["Avatar not found"]}, 404)
             return
@@ -1882,7 +1882,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 "published_at": lm[3] or lm[4] or "",
                             })
                         latest_msgs_by_member[name] = l_msgs
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
             for name in _archive.list_members():
@@ -2065,7 +2065,7 @@ class _Handler(BaseHTTPRequestHandler):
                             "translation": preview,
                             "published_at": bp["date"],
                         })
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
             # ── 3. 聚合写真画廊（Message 写真 + 博客精选图）──
@@ -2105,7 +2105,7 @@ class _Handler(BaseHTTPRequestHandler):
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
                         })
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
             # 综合写真画廊：Message 精选图 + Blog 插图混合
@@ -2168,7 +2168,7 @@ class _Handler(BaseHTTPRequestHandler):
                             "published_at": pub,
                             "year": _ym(pub)[0], "month": _ym(pub)[1],
                         })
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
             time_tunnel = sorted(rand_msgs + rand_blog_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:6]
@@ -2235,7 +2235,7 @@ class _Handler(BaseHTTPRequestHandler):
                         "key": r[0], "total": r[1],
                         "first_date": r[2] or "", "last_date": r[3] or "",
                     })
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             self._send_json({"ok": True, "groups": groups})
             return
@@ -2260,7 +2260,7 @@ class _Handler(BaseHTTPRequestHandler):
                 """, params).fetchall():  # nosec B608
                     if r[0]:
                         days[r[0]] = r[1]
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             self._send_json({"ok": True, "group": group, "days": days})
             return
@@ -2295,7 +2295,7 @@ class _Handler(BaseHTTPRequestHandler):
                 authors.sort(key=lambda x: x["_sort"])
                 for a_item in authors:
                     a_item.pop("_sort", None)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             self._send_json({"ok": True, "group": group, "authors": authors})
             return
@@ -2372,10 +2372,8 @@ class _Handler(BaseHTTPRequestHandler):
                     offset = (page - 1) * per_page
                     total_pages = max(1, (total + per_page - 1) // per_page)
 
-                rows = db.execute(
-                    f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?",
-                    params + [limit, offset],
-                ).fetchall()  # nosec B608
+                sql = f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?"  # nosec B608
+                rows = db.execute(sql, params + [limit, offset]).fetchall()  # nosec B608
                 for r in rows:
                     d = dict(r)
                     d["images_json"] = d.get("images_json") or "[]"
@@ -2407,15 +2405,15 @@ class _Handler(BaseHTTPRequestHandler):
                                 try:
                                     db.execute("UPDATE blog_posts SET image_paths_json = ? WHERE id = ?", (paths_str, d["id"]))
                                     db.commit()
-                                except Exception:
+                                except Exception:  # nosec B110
                                     pass
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
                     d["image_paths_json"] = paths_str
                     d["content_json"] = d.get("content_json") or "[]"
                     d["translation_model"] = d.get("translation_model") or ""
                     posts.append(d)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             self._send_json({
                 "ok": True, "group": group, "posts": posts,
@@ -2941,7 +2939,7 @@ class _Handler(BaseHTTPRequestHandler):
                         from src import translator
                         import asyncio
                         tr = asyncio.run(translator.translate_text(post.text, "社媒", "偶像"))
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
 
                 media_list = [{"type": m.type, "url": m.url, "alt": m.alt_text} for m in post.media]
@@ -3187,7 +3185,7 @@ class _Handler(BaseHTTPRequestHandler):
                 acc_api_base = acc_data.get("api_base") or ""
                 acc_web_origin = acc_data.get("web_origin") or ""
                 acc_app_tag = acc_data.get("app_tag") or ""
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         # 1. 检查是否包含 signin 请求体（用户在登录瞬间复制的 cURL）

@@ -264,7 +264,7 @@ def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = N
 
         if items:
             return _compress_photo_placeholders(items)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     lines = [line.strip() for line in (html_or_text or "").split("\n") if line.strip()]

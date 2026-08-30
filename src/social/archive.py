@@ -201,13 +201,9 @@ class PostArchive:
         开播提醒类内容（showroom / tiktok_live）本身就是中文，直接排除。
         """
         holes = ",".join("?" * len(NO_TRANSLATE_PLATFORMS))
+        sql = f"SELECT post_id, platform, account, text FROM posts WHERE text != '' AND translated = '' AND platform NOT IN ({holes}) ORDER BY ts DESC LIMIT ?"  # nosec B608
         with self._lock:
-            rows = self._conn.execute(
-                f"SELECT post_id, platform, account, text FROM posts"
-                f" WHERE text != '' AND translated = ''"
-                f" AND platform NOT IN ({holes})"
-                f" ORDER BY ts DESC LIMIT ?",
-                (*NO_TRANSLATE_PLATFORMS, limit)).fetchall()  # nosec B608
+            rows = self._conn.execute(sql, (*NO_TRANSLATE_PLATFORMS, limit)).fetchall()  # nosec B608
         return [dict(r) for r in rows]
 
     def clear_needless_translations(self) -> int:

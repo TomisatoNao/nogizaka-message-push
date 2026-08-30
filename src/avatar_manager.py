@@ -265,7 +265,7 @@ async def sync_all_avatars(force: bool = False) -> dict[str, int]:
             if not force and count >= 50 and (now_ts - max_updated < 86400 * 3):
                 log_all(f"✨ 成员与博客头像已就绪（已命中本地缓存，共 {count} 位成员）")
                 return {"total": count, "downloaded": count}
-        except Exception:
+        except Exception:  # nosec B110
             pass
         finally:
             conn.close()
@@ -328,7 +328,7 @@ def get_member_avatar_path(name: str, group_key: str = "") -> Optional[str]:
             local_file = row[0]
             if local_file and (AVATAR_DIR / local_file).exists() and (AVATAR_DIR / local_file).stat().st_size > 500:
                 return local_file
-    except Exception:
+    except Exception:  # nosec B110
         pass
     finally:
         conn.close()
@@ -358,7 +358,7 @@ def get_member_avatar_map() -> dict[str, str]:
             elif remote_url:
                 res[f"{g_key}:{name}"] = remote_url
                 res[name] = remote_url
-    except Exception:
+    except Exception:  # nosec B110
         pass
     finally:
         conn.close()

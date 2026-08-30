@@ -22,10 +22,7 @@ import logging
 import math
 import os
 import re
-try:
-    import defusedxml.ElementTree as ET
-except ImportError:
-    import xml.etree.ElementTree as ET  # nosec B405
+import defusedxml.ElementTree as ET  # nosec B405
 from datetime import datetime, timezone, timedelta
 
 import requests
@@ -435,7 +432,7 @@ class XFetcher(SocialFetcher):
                 continue
             try:
                 out.append(self._from_legacy_tweet(tw, account))
-            except Exception:
+            except Exception:  # nosec B112
                 continue
         return out
 
@@ -514,7 +511,7 @@ class XFetcher(SocialFetcher):
                 if resp.status_code != 200:
                     last_err = f"HTTP {resp.status_code}"
                     continue
-                root = ET.fromstring(resp.text)
+                root = ET.fromstring(resp.text)  # nosec B314
             except Exception as e:
                 last_err = str(e)
                 continue

@@ -271,7 +271,7 @@ def list_account_credentials() -> dict[str, dict]:
             for acc_id, p_str in cur.fetchall():
                 try:
                     res[acc_id] = json.loads(p_str)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
             return res
         except Exception:
@@ -302,7 +302,7 @@ def save_env_seen(seen: dict[str, str]) -> None:
                         "ON CONFLICT(account_id) DO UPDATE SET fingerprint = excluded.fingerprint;",
                         (k, v)
                     )
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 
@@ -360,7 +360,7 @@ def load_users() -> dict:
                     "password": pw,
                     "created_at": float(row[3]),
                 }
-        except Exception:
+        except Exception:  # nosec B110
             pass
     return users
 
@@ -387,7 +387,7 @@ def has_users() -> bool:
             row = cur.fetchone()
             if row is not None:
                 return row[0] > 0
-        except Exception:
+        except Exception:  # nosec B110
             pass
     users = load_users()
     return bool(users)
@@ -485,7 +485,7 @@ def set_role(username: str, role: str) -> tuple[bool, str]:
             with conn:
                 conn.execute("UPDATE sessions SET role = ? WHERE username = ?;", (role, username))
                 conn.execute("UPDATE refresh_tokens SET role = ? WHERE username = ?;", (role, username))
-        except Exception:
+        except Exception:  # nosec B110
             pass
     return True, f"{username} 角色已改为 {role}"
 

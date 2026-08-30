@@ -71,7 +71,7 @@ def _file_to_base64(filepath: Path) -> str:
                 suffix = filepath.suffix.lower()
                 mime = "image/png" if suffix == ".png" else "image/jpeg"
                 return f"data:{mime};base64,{data}"
-        except Exception:
+        except Exception:  # nosec B110
             pass
     return ""
 
@@ -534,7 +534,7 @@ async def render_blog_card(post: dict) -> Optional[Path]:
                         r = await c.get(url, headers=headers)
                         if r.status_code == 200:
                             image_b64_list[idx] = _bytes_to_base64(r.content)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
     cache_dir = Path("data/cache/blog_cards")

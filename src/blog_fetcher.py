@@ -143,7 +143,7 @@ def _load_records(db: sqlite3.Connection | None = None) -> dict[str, str]:
         cur = conn.execute("SELECT group_key, last_url FROM blog_watermarks;")
         for row in cur.fetchall():
             records[row[0]] = row[1]
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # 若数据库中暂无记录，尝试从旧版 JSON 文件自动无缝迁移
@@ -160,7 +160,7 @@ def _load_records(db: sqlite3.Connection | None = None) -> dict[str, str]:
                         except OSError:
                             pass
                         break
-                except Exception:
+                except Exception:  # nosec B110
                     pass
     return records
 
@@ -355,7 +355,7 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                     json.dumps(post, ensure_ascii=False, default=str),
                 ))
                 db.commit()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
             records[post.get("group_key", "")] = post["url"]

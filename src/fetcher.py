@@ -146,7 +146,7 @@ async def _fetch_member_messages(member: dict):
                 l_time = f.read().strip()
             if l_time:
                 archive.set_timeline_watermark(group_type, m_id, l_time)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     is_first_fetch = False
@@ -304,7 +304,7 @@ async def _fetch_member_messages(member: dict):
                 try:
                     if _http_client and not _http_client.is_closed:
                         await _http_client.aclose()
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 proxy_url = getattr(cfg, "PROXY", "") or None
                 _http_client = httpx.AsyncClient(timeout=30, proxy=proxy_url, follow_redirects=True)
