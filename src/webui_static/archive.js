@@ -3258,9 +3258,8 @@ async function boot() {
   syncSearchInput();
   initTypeChips();
 
-  // 确保认证信息与成员列表加载完成后再分发路由，杜绝鉴权竞争
-  await initAuth();
-  await loadMembers(true);
+  // 并行预加载认证信息与成员列表，大幅削减首屏往返等待时间
+  await Promise.all([initAuth(), loadMembers(true)]);
   await handleRoute(true);
 }
 

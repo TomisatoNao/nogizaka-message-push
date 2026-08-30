@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hmac
 import json
 import os
@@ -539,13 +540,28 @@ class _Handler(BaseHTTPRequestHandler):
     timeout = 30  # 单个 Socket 连接最大超时 30s，免疫 Slowloris 慢速挂起 DoS 攻击
 
     # ── 工具 ─────────────────────────────────────────────
+    def _compress_if_supported(self, data: bytes) -> tuple[bytes, dict[str, str]]:
+        """若客户端支持 gzip 且数据大于 512 字节，进行 gzip 压缩并添加 Content-Encoding 头。"""
+        accept_encoding = self.headers.get("Accept-Encoding", "") if hasattr(self, "headers") and self.headers else ""
+        if "gzip" in accept_encoding and len(data) > 512:
+            try:
+                compressed = gzip.compress(data, compresslevel=6)
+                if len(compressed) < len(data):
+                    return compressed, {"Content-Encoding": "gzip"}
+            except Exception:
+                pass
+        return data, {}
+
     def _send_json(self, obj: dict, code: int = 200) -> None:
         try:
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            body, enc_headers = self._compress_if_supported(body)
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for k, v in enc_headers.items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -755,14 +771,17 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "public, no-cache")
+            self.send_header("Cache-Control", "public, max-age=3600")
             self.end_headers()
             return
+        body, enc_headers = self._compress_if_supported(body)
         self.send_response(200)
         self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "public, max-age=3600")
+        for k, v in enc_headers.items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -773,10 +792,13 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send_json({"ok": False, "errors": ["页面文件缺失"]}, 500)
             return
+        body, enc_headers = self._compress_if_supported(body)
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in enc_headers.items():
+            self.send_header(k, v)
         for sc in getattr(self, "_pending_set_cookies", []):
             self.send_header("Set-Cookie", sc)
         self.end_headers()
@@ -1799,11 +1821,15 @@ class _Handler(BaseHTTPRequestHandler):
             from src import avatar_manager
             avatar_map = avatar_manager.get_member_avatar_map()
 
-            # ── 1. Message 归档成员统计（纯 SQL 极速查询，不解析多余 JSON）──
+            # ── 1. Message 归档成员统计（纯 SQL 批量聚合极速查询）──
             members = []
             today_msg_cnt = 0
             this_week_msgs = 0
             last_week_msgs = 0
+
+            months_by_member: dict[str, list[dict]] = {}
+            types_by_member: dict[str, dict[str, int]] = {}
+            latest_msgs_by_member: dict[str, list[dict]] = {}
 
             if db:
                 try:
@@ -1817,37 +1843,54 @@ class _Handler(BaseHTTPRequestHandler):
                     this_week_msgs = r_this[0] if r_this else 0
                     r_last = db.execute("SELECT COUNT(*) FROM messages WHERE published_at >= ? AND published_at < ?", (w1, w0)).fetchone()
                     last_week_msgs = r_last[0] if r_last else 0
-                except Exception:
-                    pass
 
-            for name in _archive.list_members():
-                months = _archive.list_months(name)
-                total = sum(m["count"] for m in months)
-                latest_msgs: list[dict] = []
-                type_counts: dict[str, int] = {}
+                    # 批量获取全部成员的月度计数 (1.3ms 极速索引)
+                    for r_m in db.execute("""
+                        SELECT member_dir, year, month, COUNT(*)
+                        FROM messages
+                        GROUP BY member_dir, year, month
+                        ORDER BY member_dir, year DESC, month DESC
+                    """).fetchall():
+                        md, y, mo, cnt = r_m[0], r_m[1], r_m[2], r_m[3]
+                        if md not in months_by_member:
+                            months_by_member[md] = []
+                        months_by_member[md].append({"year": y, "month": mo, "count": cnt})
 
-                if db:
-                    try:
-                        # 极速 SQL 聚合分类计数 (0.1ms)
-                        for r_tc in db.execute("SELECT type, COUNT(*) FROM messages WHERE member_dir = ? GROUP BY type", (name,)).fetchall():
-                            mtype = r_tc[0] or "text"
-                            type_counts[mtype] = r_tc[1]
-                        
-                        # 极速 SQL 获取最新 8 条文本消息 (0.1ms)
+                    # 批量获取全部成员的消息类型分布 (1.0ms 极速索引)
+                    for r_tc in db.execute("""
+                        SELECT member_dir, type, COUNT(*)
+                        FROM messages
+                        GROUP BY member_dir, type
+                    """).fetchall():
+                        md, mtype, cnt = r_tc[0], r_tc[1] or "text", r_tc[2]
+                        if md not in types_by_member:
+                            types_by_member[md] = {}
+                        types_by_member[md][mtype] = cnt
+
+                    # 获取每个成员最新的 8 条文本消息
+                    for name in _archive.list_members():
+                        l_msgs = []
                         for lm in db.execute("""
                             SELECT id, text, translation, published_at, updated_at
                             FROM messages
                             WHERE member_dir = ? AND type = 'text' AND text IS NOT NULL AND trim(text) != ''
                             ORDER BY published_at DESC LIMIT 8
                         """, (name,)).fetchall():
-                            latest_msgs.append({
+                            l_msgs.append({
                                 "id": lm[0],
                                 "text": lm[1] or "",
                                 "translation": lm[2] or "",
                                 "published_at": lm[3] or lm[4] or "",
                             })
-                    except Exception:
-                        pass
+                        latest_msgs_by_member[name] = l_msgs
+                except Exception:
+                    pass
+
+            for name in _archive.list_members():
+                months = months_by_member.get(name) or _archive.list_months(name)
+                total = sum(m["count"] for m in months)
+                type_counts = types_by_member.get(name, {})
+                latest_msgs = latest_msgs_by_member.get(name, [])
 
                 monthly = [{"year": mo["year"], "month": mo["month"], "count": mo["count"]} for mo in months[:24]]
 
@@ -1997,12 +2040,13 @@ class _Handler(BaseHTTPRequestHandler):
                     r_b_wk = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date >= ?", (week_ago_str,)).fetchone()
                     blog_this_week = r_b_wk[0] if r_b_wk else 0
 
-                    # 博客时光隧道：随机抽取 3 篇经典博文
-                    rand_blog_rows = blog_db.execute("""
+                    # 博客时光隧道：从最近 40 篇博文中随机抽取 3 篇（避免全表 ORDER BY RANDOM 扫描）
+                    all_recent_blogs = blog_db.execute("""
                         SELECT id, group_key, author, title, date, body_text
                         FROM blog_posts
-                        ORDER BY RANDOM() LIMIT 3
+                        ORDER BY date DESC LIMIT 40
                     """).fetchall()
+                    rand_blog_rows = random.sample(all_recent_blogs, min(3, len(all_recent_blogs))) if all_recent_blogs else []
                     for r in rand_blog_rows:
                         bp = dict(r)
                         gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
@@ -2032,18 +2076,14 @@ class _Handler(BaseHTTPRequestHandler):
             msg_pics = []
             if db:
                 try:
-                    recent_pic_rows = db.execute("""
+                    all_recent_pics = db.execute("""
                         SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
                         FROM messages
                         WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
-                        ORDER BY published_at DESC LIMIT 8
+                        ORDER BY published_at DESC LIMIT 30
                     """).fetchall()
-                    rand_pic_rows = db.execute("""
-                        SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
-                        FROM messages
-                        WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
-                        ORDER BY RANDOM() LIMIT 4
-                    """).fetchall()
+                    recent_pic_rows = all_recent_pics[:8]
+                    rand_pic_rows = random.sample(all_recent_pics[8:], min(4, len(all_recent_pics[8:]))) if len(all_recent_pics) > 8 else []
                     seen_p_ids = set()
                     for row in (recent_pic_rows + rand_pic_rows):
                         if row[0] in seen_p_ids:
