@@ -27,6 +27,7 @@ let memberVersion = 0;
 let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲掉）
 let curMode = "msg";     // "msg" 或 "blog"
 let curBlogAuthor = "";  // 当前选中的博客作者
+let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function sanitizeHtml(htmlStr) {
   if (!htmlStr) return "";
