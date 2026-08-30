@@ -88,13 +88,37 @@ def _shortcode_to_media_id(shortcode: str) -> int:
     return media_id
 
 
+def _get_proxy(config: dict | None = None) -> str:
+    """提取代理配置：优先 config 显式设置，其次全局 cfg.PROXY / SOCIAL_CONFIG，最后环境变量。"""
+    cfg_dict = config or {}
+    try:
+        import config.config as cfg
+    except Exception:
+        cfg = None
+
+    candidate = (
+        cfg_dict.get("proxy")
+        or cfg_dict.get("social", {}).get("proxy")
+        or (getattr(cfg, "PROXY", "") if cfg else "")
+        or (getattr(cfg, "SOCIAL_CONFIG", {}).get("proxy", "") if cfg else "")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("ALL_PROXY")
+        or ""
+    )
+    return str(candidate).strip()
+
+
 class SocialUrlParser:
     """解析单条社媒链接为统一 Post 对象。"""
 
     def __init__(self, config: dict | None = None):
         self.config = config or {}
+        self.proxy = _get_proxy(self.config)
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": _UA})
+        if self.proxy:
+            self.session.proxies.update({"http": self.proxy, "https": self.proxy})
 
     def parse(self, url: str) -> Post:
         url = (url or "").strip()
@@ -199,6 +223,8 @@ class SocialUrlParser:
         media_id = _shortcode_to_media_id(shortcode)
         cookies = ig_session.read_cookie_file()
         session = requests.Session()
+        if self.proxy:
+            session.proxies.update({"http": self.proxy, "https": self.proxy})
         if cookies:
             session.cookies.update(cookies)
         session.headers.update({
@@ -400,6 +426,8 @@ class SocialUrlParser:
             "extract_flat": False,
             "skip_download": True,
         }
+        if self.proxy:
+            ydl_opts["proxy"] = self.proxy
 
         # Instagram 需要登录态 cookies，否则大部分帖子会被拒绝
         if platform == "instagram":

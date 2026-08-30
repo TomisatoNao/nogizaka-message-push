@@ -235,7 +235,21 @@ class MediaDownloader:
 
     @property
     def proxy(self) -> str:
-        return self._config.get("proxy") or ""
+        try:
+            import config.config as cfg
+        except Exception:
+            cfg = None
+        candidate = (
+            self._config.get("proxy")
+            or self._config.get("social", {}).get("proxy")
+            or (getattr(cfg, "PROXY", "") if cfg else "")
+            or (getattr(cfg, "SOCIAL_CONFIG", {}).get("proxy", "") if cfg else "")
+            or os.environ.get("HTTP_PROXY")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("ALL_PROXY")
+            or ""
+        )
+        return str(candidate).strip()
 
     def ffmpeg_path(self) -> str | None:
         """ffmpeg 可执行文件路径（配置优先，其次 PATH）。"""
@@ -360,6 +374,7 @@ class MediaDownloader:
         tmp = dest_path + ".part"
         backoff = max(1, int(self._cfg.get("retry_backoff_seconds", 2)))
         cur_url = url
+        proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
         # 修正 Twitter 视频封面错误嵌套的 /media/ 路径
         for pfx in ("amplify_video_thumb/", "tweet_video_thumb/", "ext_tw_video_thumb/"):
             if f"pbs.twimg.com/media/{pfx}" in cur_url:
@@ -368,7 +383,7 @@ class MediaDownloader:
         for attempt in range(1, self.retry_times + 1):
             try:
                 with requests.get(cur_url, headers=hdrs, timeout=self.timeout,
-                                  stream=True) as r:
+                                  proxies=proxies, stream=True) as r:
                     if r.status_code == 404 and "pbs.twimg.com" in cur_url:
                         if "name=orig" in cur_url:
                             log.debug("[download] Twitter 图片 name=orig 404，自动降级为 name=large")
@@ -379,7 +394,8 @@ class MediaDownloader:
                         else:
                             r.raise_for_status()
 
-                        with requests.get(cur_url, headers=hdrs, timeout=self.timeout, stream=True) as r2:
+                        with requests.get(cur_url, headers=hdrs, timeout=self.timeout,
+                                          proxies=proxies, stream=True) as r2:
                             r2.raise_for_status()
                             with open(tmp, "wb") as f:
                                 for chunk in r2.iter_content(chunk_size=256 * 1024):
