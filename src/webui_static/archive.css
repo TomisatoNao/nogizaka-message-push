@@ -926,6 +926,8 @@ html.view-blog #blogGrid { display: block !important; }
   .mbc-pill.nogi { background: rgba(167, 139, 250, 0.1); color: #c4b5fd; }
   .mbc-pill.sakura { background: rgba(244, 114, 182, 0.1); color: #f472b6; }
   .mbc-pill.hinata { background: rgba(56, 189, 248, 0.1); color: #38bdf8; }
+  .mbc-pill.yodel { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+  .mbc-pill.other { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
   .mbc-meta {
     font-size: 11px;
     color: var(--muted);
@@ -1666,6 +1668,8 @@ html.view-blog #blogGrid { display: block !important; }
   .popover-group-header.nogi { color: #a78bfa; }
   .popover-group-header.sakura { color: #fb7185; }
   .popover-group-header.hinata { color: #38bdf8; }
+  .popover-group-header.yodel { color: #fb923c; }
+  .popover-group-header.other { color: #94a3b8; }
   .popover-group-header .pgh-cnt {
     font-size: 10px;
     font-weight: normal;
@@ -1728,6 +1732,8 @@ html.view-blog #blogGrid { display: block !important; }
   .mpi-avatar.nogi { background: #3b2d54; color: #d8b4fe; }
   .mpi-avatar.sakura { background: #4c2838; color: #fbcfe8; }
   .mpi-avatar.hinata { background: #1e3a5f; color: #bae6fd; }
+  .mpi-avatar.yodel { background: #45241c; color: #fdba74; }
+  .mpi-avatar.other { background: #334155; color: #cbd5e1; }
   .mpi-name {
     font-size: 13px;
     font-weight: 650;

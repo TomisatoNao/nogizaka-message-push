@@ -284,12 +284,14 @@ function inferMemberGroup(m) {
   const grp = ((typeof m === "object" ? m.group : "") || "").toLowerCase();
   if (grp.includes("nogi")) return "nogizaka";
   if (grp.includes("sakura")) return "sakurazaka";
-  if (grp.includes("hinata") || grp.includes("yodel")) return "hinatazaka";
+  if (grp.includes("yodel")) return "yodel";
+  if (grp.includes("hinata")) return "hinatazaka";
 
   const nm = ((typeof m === "object" ? (m.name || m.display || "") : m) || "").replace(/[\s_　]/g, "");
-  if (/^(松尾桜|金村|大野|佐藤|片山|坂井|下田|山下葉|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水|宮地|石塚|マネダコ)/.test(nm)) return "hinatazaka";
-  if (/^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test(nm)) return "sakurazaka";
-  if (/^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津|松尾美)/.test(nm)) return "nogizaka";
+  if (/^(マネダコ|松田好|丹生|yodel)/i.test(nm)) return "yodel";
+  if (/^(冨里|賀喜|一ノ瀬|井上和|川崎|川﨑|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|橋本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津|松尾美|黒見)/.test(nm)) return "nogizaka";
+  if (/^(石森|小池|小林|田村保|森田|藤吉|山崎|山﨑|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|遠藤理|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井|松尾桜|櫻坂|桜坂)/.test(nm)) return "sakurazaka";
+  if (/^(金村|大野|佐藤|片山|坂井|下田|山下葉|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|齊藤|佐佐木|佐々木|東村|河田|濱岸|富田|高本|高瀬|上村ひ|高橋|髙橋|森本|山口|平尾|平岡|竹内|岸|小西|清水|宮地|石塚|海邉|森平|矢田|新参者)/.test(nm)) return "hinatazaka";
   return "";
 }
 
@@ -603,15 +605,20 @@ function renderMemberPopover(filterKeyword = "") {
     return;
   }
 
-  // 按坂道分组
+  // 按坂道与 yodel 分组（全量遍历，绝不遗漏任何成员）
   const groups = [
     { key: "nogizaka", name: "乃木坂46", icon: "💜", cls: "nogi" },
     { key: "sakurazaka", name: "樱坂46", icon: "🌸", cls: "sakura" },
-    { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" }
+    { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" },
+    { key: "yodel", name: "yodel", icon: "🐙", cls: "yodel" },
+    { key: "other", name: "其他成员", icon: "👤", cls: "other" },
   ];
 
   groups.forEach(g => {
-    const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
+    const grpMems = filtered.filter(m => {
+      const gK = inferMemberGroup(m);
+      return g.key === "other" ? (!gK || !["nogizaka", "sakurazaka", "hinatazaka", "yodel"].includes(gK)) : gK === g.key;
+    });
 
     if (!grpMems.length) return;
 
@@ -2921,7 +2928,7 @@ function renderHome(data) {
 
   // 日向坂46
   const hinataBlog = blogGroups.find(g => g.key === "hinatazaka") || {};
-  const hinataMsgCount = members.filter(m => (m.group || '').includes('hinata') || (m.group || '').includes('yodel') || ['松田好', 'マネダコ'].some(k => (m.name||'').includes(k))).reduce((acc, x) => acc + (x.stats?.total || 0), 0);
+  const hinataMsgCount = members.filter(m => inferMemberGroup(m) === "hinatazaka").reduce((acc, x) => acc + (x.stats?.total || 0), 0);
   secHTML += '<div class="channel-bento-card hinata" data-group="hinatazaka">';
   secHTML += '<div class="cbc-header"><div class="cbc-brand"><span class="cbc-icon">🩵</span><div><div class="cbc-name">日向坂46 频道</div><div class="cbc-meta">Message & 官方博客总库</div></div></div><span class="cbc-jump">进入频道 →</span></div>';
   secHTML += '<div class="cbc-stats"><div class="cbc-stat"><span class="cs-label">💬 Message</span><span class="cs-val">' + hinataMsgCount.toLocaleString() + ' <small>条</small></span></div><div class="cbc-stat"><span class="cs-label">📝 官方博客</span><span class="cs-val">' + (hinataBlog.total || 0).toLocaleString() + ' <small>篇</small></span></div></div>';
@@ -2936,14 +2943,17 @@ function renderHome(data) {
   secHTML += '<div class="portal-members-grid">';
   members.forEach(m => {
     const gKey = inferMemberGroup(m);
-    let grpClass = "hinata";
-    let grpName = "日向坂";
+    let grpClass = "other";
+    let grpName = "其他";
     if (gKey === "nogizaka") { grpClass = "nogi"; grpName = "乃木坂"; }
     else if (gKey === "sakurazaka") { grpClass = "sakura"; grpName = "樱坂"; }
+    else if (gKey === "hinatazaka") { grpClass = "hinata"; grpName = "日向坂"; }
+    else if (gKey === "yodel") { grpClass = "yodel"; grpName = "yodel"; }
     
     let avatarText = (m.display || "").replace(/[\s_　]/g, "");
     if (avatarText.length > 2) avatarText = avatarText.slice(-2);
     if (!avatarText) avatarText = "💬";
+    if (m.name.includes("マネダコ")) avatarText = "🐙";
     let avHTML = '';
     if (m.avatar) {
       avHTML = '<img class="mbc-avatar-img" src="' + esc(m.avatar) + '" loading="lazy" decoding="async" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';" /><div class="mbc-avatar ' + grpClass + '" style="display:none;">' + esc(avatarText) + '</div>';

@@ -1412,8 +1412,9 @@ class _Handler(BaseHTTPRequestHandler):
             from src import avatar_manager
             avatar_map = avatar_manager.get_member_avatar_map()
 
+            from src.sakamichi_roster import get_member_sort_tuple
+
             raw_members = _archive.list_members()
-            group_priority = {"nogizaka": 0, "sakurazaka": 1, "hinatazaka": 2}
 
             for name in raw_members:
                 months = _archive.list_months(name)
@@ -1429,14 +1430,9 @@ class _Handler(BaseHTTPRequestHandler):
                     "avatar": avatar,
                     "months": len(months),
                     "total": sum(m["count"] for m in months),
-                    "_g_pri": group_priority.get(group, 9),
-                    "_m_order": monitor_order.get(norm, 999),
                 })
 
-            members.sort(key=lambda x: (x["_g_pri"], x["_m_order"], x["display"]))
-            for m_item in members:
-                m_item.pop("_g_pri", None)
-                m_item.pop("_m_order", None)
+            members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
 
             self._send_json({"ok": True, "members": members})
             return
@@ -1928,6 +1924,9 @@ class _Handler(BaseHTTPRequestHandler):
                     "days": {},
                     "latest_msgs": latest_msgs,
                 })
+
+            from src.sakamichi_roster import get_member_sort_tuple
+            members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
 
             # ── 2. Blog 博客全量统计 ──
             GROUP_INFO = {

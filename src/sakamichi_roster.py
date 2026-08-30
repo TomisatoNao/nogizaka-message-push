@@ -239,7 +239,12 @@ HINATAZAKA_ROSTER = {
     "下田衣珠季": (5, "しもだ いずき"),
     "高井俐香": (5, "たかい りか"),
     "鶴崎仁香": (5, "つるさき にか"),
-    "松尾桜": (5, "まつお さくら"),
+}
+
+YODEL_ROSTER = {
+    "松田好花": (2, "まつだ このか"),
+    "丹生明里": (2, "にぶ あかり"),
+    "マネダコ": (99, "まねだこ"),
 }
 
 # 合并全量查找字典（norm_name -> (gen, kana)）
@@ -247,7 +252,56 @@ ALL_ROSTERS = {
     "nogizaka": {_norm(k): v for k, v in NOGIZAKA_ROSTER.items()},
     "sakurazaka": {_norm(k): v for k, v in SAKURAZAKA_ROSTER.items()},
     "hinatazaka": {_norm(k): v for k, v in HINATAZAKA_ROSTER.items()},
+    "yodel": {_norm(k): v for k, v in YODEL_ROSTER.items()},
 }
+
+# 增加异体字 / 别名支持
+ALL_ROSTERS["nogizaka"]["川崎桜"] = (5, "かわさき さくら")
+ALL_ROSTERS["nogizaka"]["川﨑桜"] = (5, "かわさき さくら")
+ALL_ROSTERS["sakurazaka"]["松尾桜"] = (4, "まつお さくら")
+ALL_ROSTERS["sakurazaka"]["櫻坂46"] = (99, "さくらざか")
+ALL_ROSTERS["sakurazaka"]["桜坂46"] = (99, "さくらざか")
+ALL_ROSTERS["hinatazaka"]["新参者四期生"] = (4, "しんざんもの")
+ALL_ROSTERS["hinatazaka"]["新参者"] = (4, "しんざんもの")
+
+GROUP_PRIORITY = {
+    "nogizaka": 0,
+    "sakurazaka": 1,
+    "hinatazaka": 2,
+    "yodel": 3,
+}
+
+
+def infer_group(name: str, explicit_group: str = "") -> str:
+    """根据姓名或显式组名推断团体：'nogizaka' | 'sakurazaka' | 'hinatazaka' | 'yodel' | ''"""
+    norm = _norm(name)
+    if explicit_group:
+        eg = explicit_group.lower()
+        if "nogi" in eg: return "nogizaka"
+        if "sakura" in eg: return "sakurazaka"
+        if "hinata" in eg: return "hinatazaka"
+        if "yodel" in eg: return "yodel"
+
+    # yodel 优先级匹配（已毕业成员或官方吉祥物）
+    if norm in ALL_ROSTERS["yodel"] or any(k in norm for k in ("マネダコ", "manedako", "yodel", "松田好花", "丹生明里")):
+        return "yodel"
+
+    # 乃木坂匹配
+    if norm in ALL_ROSTERS["nogizaka"] or any(k in norm for k in ("乃木坂", "冨里", "賀喜", "池田", "川﨑", "川崎", "黒見", "井上和", "一ノ瀬", "五百城", "中西", "菅原", "小川彩", "奥田", "岡本姫")):
+        return "nogizaka"
+
+    # 樱坂匹配
+    if norm in ALL_ROSTERS["sakurazaka"] or any(k in norm for k in ("櫻坂", "桜坂", "森田ひ", "的野", "石森璃", "中嶋優", "谷口愛", "遠藤理", "増本", "幸阪", "小池", "藤吉", "武元", "山﨑天", "山崎天", "守屋麗", "松田里")):
+        return "sakurazaka"
+
+    # 日向坂匹配
+    if norm in ALL_ROSTERS["hinatazaka"] or any(k in norm for k in ("日向坂", "金村", "小坂菜", "大野愛", "佐藤優", "片山紗", "森平", "海邉", "清水理", "矢田萌", "正源司", "藤嶌", "宮地", "平尾", "山下葉", "新参者")):
+        return "hinatazaka"
+
+    for g_key in ("nogizaka", "sakurazaka", "hinatazaka", "yodel"):
+        if norm in ALL_ROSTERS[g_key]:
+            return g_key
+    return ""
 
 
 def get_author_sort_tuple(group_key: str, author_name: str) -> tuple[int, int, str, str]:
@@ -261,16 +315,16 @@ def get_author_sort_tuple(group_key: str, author_name: str) -> tuple[int, int, s
     3. Tier 2: Staff / 运营事务局 / 吉祥物（按五十音读音升序）
     """
     norm = _norm(author_name)
-    grp = (group_key or "").lower()
+    grp = infer_group(author_name, group_key)
 
     # 1. Staff / 运营 / 吉祥物判别 (Tier 2)
-    staff_keywords = ["スタッフ", "運営", "事務局", "staff", "ポカ", "poka"]
-    if any(k in norm.lower() for k in staff_keywords):
-        kana = "ぽか" if "ポカ" in norm or "poka" in norm.lower() else "うんえい"
+    staff_keywords = ["スタッフ", "運営", "事務局", "staff", "ポカ", "poka", "マネダコ", "manedako"]
+    if any(k in norm.lower() for k in staff_keywords) or norm in ("櫻坂46", "桜坂46", "乃木坂46", "日向坂46"):
+        kana = "まねだこ" if "マネダコ" in norm else ("ぽか" if "ポカ" in norm or "poka" in norm.lower() else "うんえい")
         return (TIER_STAFF, 99, kana, norm)
 
     # 2. 期别整体账号 / リレー接力判别 (Tier 1)
-    relay_keywords = ["リレー", "期生", "研究生", "新4期", "新3期", "新2期"]
+    relay_keywords = ["リレー", "期生", "研究生", "新4期", "新3期", "新2期", "新参者"]
     if any(k in norm for k in relay_keywords):
         gen = 99
         m_num = re.search(r"(\d+)", norm)
@@ -305,3 +359,20 @@ def get_author_sort_tuple(group_key: str, author_name: str) -> tuple[int, int, s
 
     # 未知普通作者，降级处理为个人成员末尾
     return (TIER_MEMBER, 90, norm, norm)
+
+
+def get_member_sort_tuple(group_key: str, member_name: str) -> tuple[int, int, int, str, str]:
+    """
+    返回用于全站成员列表排序的标准五元组：
+    (团体优先级, Tier, 期别, 五十音读音, 规范化姓名)
+    
+    团体优先级：0:乃木坂46, 1:櫻坂46, 2:日向坂46, 3:yodel, 9:其他
+    Tier：0:个人成员, 1:期别接力/集体账号, 2:Staff/吉祥物
+    期别：1..6 期升序
+    五十音：Kana 升序
+    """
+    grp = infer_group(member_name, group_key)
+    g_pri = GROUP_PRIORITY.get(grp, 9)
+    tier, gen, kana, norm = get_author_sort_tuple(grp, member_name)
+    return (g_pri, tier, gen, kana, norm)
+
