@@ -382,8 +382,9 @@ class SocialUrlParser:
             session.proxies.update({"http": self.proxy, "https": self.proxy})
         if cookies:
             session.cookies.update(cookies)
+        app_ua = "Instagram 278.0.0.19.115 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458212170)"
         session.headers.update({
-            "User-Agent": _UA,
+            "User-Agent": app_ua,
             "X-IG-App-ID": "936619743392459",
             "Accept": "*/*",
             "Accept-Language": "ja,en;q=0.8",
@@ -601,6 +602,9 @@ class SocialUrlParser:
             try:
                 info = ydl.extract_info(url, download=False)
             except Exception as e:
+                err_str = str(e)
+                if platform == "instagram" and "No video formats found" in err_str:
+                    raise RuntimeError("该 Instagram 帖子为纯图片/图集，由于登录态未配置或已失效被登出，无法提取媒体。请在后台重新配置完整 Instagram Cookies。")
                 raise RuntimeError(f"解析失败: {e}")
 
         if not info:
