@@ -28,15 +28,6 @@ html.view-blog .msg-toolbar { display: none !important; }
 html.view-blog #timeline { display: none !important; }
 html.view-blog #blogGrid { display: block !important; }
 
-  header { display: flex; align-items: center; gap: 12px; padding: 11px 20px;
-           background: color-mix(in srgb, var(--card) 82%, transparent);
-           backdrop-filter: blur(14px) saturate(1.3);
-           -webkit-backdrop-filter: blur(14px) saturate(1.3);
-           border-bottom: 1px solid var(--border);
-           flex-wrap: wrap; }
-  header h1 { font-size: 15.5px; margin: 0; font-weight: 650; color: var(--text-strong); }
-  header a { color: var(--muted); text-decoration: none; font-size: 13px; margin-left: 12px; }
-  header a:hover { color: var(--accent); }
   #memberSelect { max-width: 200px; padding: 5px 8px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--field); color: var(--text);
     font-size: 13px; font-family: inherit; }
@@ -400,16 +391,6 @@ html.view-blog #blogGrid { display: block !important; }
   .mobile-break { display: none; }
   
   @media (max-width: 640px) {
-    header { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
-    header h1 { font-size: 14px; }
-    header .header-spacer { display: none; }
-    header .mobile-break { display: block; flex-basis: 100%; height: 0; }
-    header #whoami { font-size: 11.5px; }
-    header .btn { padding: 6px 10px; font-size: 12.5px; }
-    
-    .nav-tabs { order: 10; width: 100%; gap: 5px; margin: 4px 0 0 0 !important; display: flex; justify-content: flex-start; }
-    .nav-tab { flex: 1; padding: 8px 12px; font-size: 13px; text-align: center; justify-content: center; }
-
     /* 布局留白收窄 */
     .layout { padding: 12px 12px 64px; }
 

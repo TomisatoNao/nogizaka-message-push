@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <link rel="icon" href="/static/admin_icon.svg" type="image/svg+xml">
 <title>登录 · 坂道监控</title>
 <link rel="stylesheet" href="/static/theme.css">
@@ -310,12 +310,15 @@
 
   /* 手机端适配 */
   @media (max-width: 640px) {
-    body { padding: 16px; }
-    .card { padding: 32px 24px 26px; border-radius: 22px; }
+    html, body { min-height: 100vh; min-height: 100dvh; }
+    body { padding: 16px; align-items: center; justify-content: center; }
+    .card { padding: 28px 22px 22px; border-radius: 22px; width: 100%; max-width: 360px; box-sizing: border-box; }
     .theme-toggle {
       top: max(14px, env(safe-area-inset-top));
       right: max(14px, env(safe-area-inset-right));
+      width: 36px; height: 36px; font-size: 15px;
     }
+    input[type=text], input[type=password] { font-size: 16px !important; }
     button.submit { padding: 13.5px; font-size: 15.5px; }
   }
 </style>
