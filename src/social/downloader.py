@@ -496,17 +496,18 @@ class MediaDownloader:
         if ff:
             opts["ffmpeg_location"] = ff
 
-        # cookies —— Instagram Story / TikTok Story 必需
+        # cookies —— Instagram Story / TikTok Story
         if platform_cfg:
             cf = platform_cfg.get("cookies_file") or ""
-            if not cf:
-                from src.social import ig_session
-                if os.path.exists(ig_session.COOKIE_FILE):
-                    cf = ig_session.COOKIE_FILE
             if cf and os.path.exists(cf):
                 opts["cookiefile"] = cf
+            else:
+                from src.social import ig_session
+                c_header = ig_session.get_cookie_header()
+                if c_header:
+                    opts.setdefault("http_headers", {})["Cookie"] = c_header
             browser = (platform_cfg.get("cookies_from_browser") or "").strip()
-            if browser and not opts.get("cookiefile"):
+            if browser and not opts.get("cookiefile") and not opts.get("http_headers", {}).get("Cookie"):
                 opts["cookiesfrombrowser"] = (browser,)
         return opts
 

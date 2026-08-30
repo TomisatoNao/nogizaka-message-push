@@ -585,17 +585,16 @@ class SocialUrlParser:
         if self.proxy:
             ydl_opts["proxy"] = self.proxy
 
-        # Instagram 需要登录态 cookies，否则大部分帖子会被拒绝
+        # Instagram 需要登录态 cookies，自动从 SQLite 数据库提取注入
         if platform == "instagram":
-            cf = ig_session.COOKIE_FILE
-            if os.path.exists(cf):
-                ydl_opts["cookiefile"] = cf
-                log.debug("[single_fetcher] Instagram 使用 cookie 文件: %s", cf)
+            c_header = ig_session.get_cookie_header()
+            if c_header:
+                ydl_opts.setdefault("http_headers", {})["Cookie"] = c_header
+                log.debug("[single_fetcher] Instagram 已从 SQLite 数据库注入 Cookies Header")
             else:
                 log.warning(
-                    "[single_fetcher] Instagram cookie 文件不存在 (%s)，"
-                    "抓取可能因需要登录而失败。请在后台「Instagram 监控」页配置账号 cookies。",
-                    cf,
+                    "[single_fetcher] Instagram 尚未配置登录态 Cookies，"
+                    "抓取可能因需要登录而失败。请在后台「社媒监控」页配置账号 Cookies。"
                 )
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
