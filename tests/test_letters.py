@@ -209,6 +209,10 @@ def main():
     test_webui_letters_sync_api_routing()
     print("✅ Test 3 通过")
 
+    print("=== Test 4: 信件多页分页拉取测试 ===")
+    asyncio.run(test_fetch_member_letters_pagination())
+    print("✅ Test 4 通过")
+
     print("==================================================")
     print("🎉 全部信件归档测试通过！")
 

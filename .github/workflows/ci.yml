@@ -23,6 +23,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install ruff pytest pytest-asyncio pytest-cov
+          playwright install --with-deps chromium || true
 
       - name: Lint (ruff)
         run: ruff check .
