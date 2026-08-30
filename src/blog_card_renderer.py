@@ -114,10 +114,10 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     group_key = post.get("group_key", "").lower()
     theme = GROUP_THEMES.get(group_key, DEFAULT_THEME)
 
-    author = post.get("author", "成员")
-    title = post.get("title", "无标题")
-    date_str = post.get("date", "")
-    trans_model = post.get("translation_model") or "AI 双语翻译引擎"
+    author = html_lib.escape(str(post.get("author", "成员")))
+    title = html_lib.escape(str(post.get("title", "无标题")))
+    date_str = html_lib.escape(str(post.get("date", "")))
+    trans_model = html_lib.escape(str(post.get("translation_model") or "AI 双语翻译引擎"))
 
     content_json_raw = post.get("content_json") or ""
     structured_blocks = []
@@ -556,21 +556,25 @@ async def render_blog_card(post: dict) -> Optional[Path]:
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-            )
-            page = await browser.new_page(
-                viewport={"width": 900, "height": 1000},
-                device_scale_factor=1.5
-            )
-            await page.goto(f"file:///{tmp_html.resolve().as_posix()}")
-            await page.wait_for_load_state("networkidle")
-            card_el = await page.query_selector("#cardContainer")
-            if card_el:
-                await card_el.screenshot(path=str(tmp_png), type="png")
-            else:
-                await page.screenshot(path=str(tmp_png), full_page=True, type="png")
-            await browser.close()
+            browser = None
+            try:
+                browser = await p.chromium.launch(
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                )
+                page = await browser.new_page(
+                    viewport={"width": 900, "height": 1000},
+                    device_scale_factor=1.5
+                )
+                await page.goto(f"file:///{tmp_html.resolve().as_posix()}")
+                await page.wait_for_load_state("networkidle")
+                card_el = await page.query_selector("#cardContainer")
+                if card_el:
+                    await card_el.screenshot(path=str(tmp_png), type="png")
+                else:
+                    await page.screenshot(path=str(tmp_png), full_page=True, type="png")
+            finally:
+                if browser is not None:
+                    await browser.close()
 
         if tmp_png.exists():
             img = Image.open(tmp_png)

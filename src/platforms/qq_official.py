@@ -27,14 +27,10 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
     import subprocess  # nosec B404
     import tempfile
     ffmpeg = shutil.which("ffmpeg") or ""
-    if not ffmpeg and os.path.exists(r"D:\Scoop\User\apps\ffmpeg\current\bin\ffmpeg.EXE"):
-        ffmpeg = r"D:\Scoop\User\apps\ffmpeg\current\bin\ffmpeg.EXE"
     if not ffmpeg:
         return content
 
     ffprobe = shutil.which("ffprobe") or ""
-    if not ffprobe and os.path.exists(r"D:\Scoop\User\apps\ffmpeg\current\bin\ffprobe.EXE"):
-        ffprobe = r"D:\Scoop\User\apps\ffmpeg\current\bin\ffprobe.EXE"
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as in_f:
         in_f.write(content)

@@ -22,7 +22,10 @@ import logging
 import math
 import os
 import re
-import defusedxml.ElementTree as ET  # nosec B405
+try:
+    import defusedxml.ElementTree as ET  # nosec B405
+except ImportError:
+    import xml.etree.ElementTree as ET  # nosec B405
 from datetime import datetime, timezone, timedelta
 
 import requests

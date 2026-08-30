@@ -27,8 +27,29 @@ let memberVersion = 0;
 let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲掉）
 let curMode = "msg";     // "msg" 或 "blog"
 let curBlogAuthor = "";  // 当前选中的博客作者
-let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
+function sanitizeHtml(htmlStr) {
+  if (!htmlStr) return "";
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlStr, "text/html");
+    const dangerousTags = doc.querySelectorAll("script, iframe, object, embed, base, link, form, meta");
+    dangerousTags.forEach(el => el.remove());
+    const allElements = doc.querySelectorAll("*");
+    allElements.forEach(el => {
+      for (let i = el.attributes.length - 1; i >= 0; i--) {
+        const attr = el.attributes[i];
+        const attrName = attr.name.toLowerCase();
+        if (attrName.startsWith("on") || (attr.value && attr.value.trim().toLowerCase().startsWith("javascript:"))) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+    return doc.body.innerHTML;
+  } catch (e) {
+    return esc(htmlStr);
+  }
+}
 function mediaUrl(u) {
   if (!u) return "";
   if (!authToken) return u;
@@ -1245,8 +1266,8 @@ function renderCurrentBlogContent() {
     // 中文 / 日中对照：从解耦的结构化数据渲染（日中对照按 jp/zh 插值）
     bodyHtml = _replaceImgUrls(renderBlocks(blocks, currentTransMode), images, paths);
   } else {
-    // 日文（或暂无结构化译文）：直接渲染原始日文 body_html，100% 完整不丢任何段落/图片
-    bodyHtml = _replaceImgUrls(currentBlogReaderPost.body_html || "", images, paths);
+    // 日文（或暂无结构化译文）：直接渲染原始日文 body_html，经过 DOM 净化确保安全
+    bodyHtml = sanitizeHtml(_replaceImgUrls(currentBlogReaderPost.body_html || "", images, paths));
   }
 
   // 翻译模型标记：仅在「日中对照/中文」视图且存在译文时展示，右对齐次级灰字

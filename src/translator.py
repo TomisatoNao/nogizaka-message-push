@@ -236,12 +236,15 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
             log_all(f"⚠️ 智谱模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
             return ""
     else:
-        url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+        url = model["url"]
+        headers = {}
+        if "key=" not in url and getattr(cfg, "GEMINI_API_KEY", ""):
+            headers["x-goog-api-key"] = cfg.GEMINI_API_KEY
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
         }
-        resp = await _post_json(url, payload, custom_client=custom_client, timeout=text_timeout)
+        resp = await _post_json(url, payload, headers=headers if headers else None, custom_client=custom_client, timeout=text_timeout)
         if resp.status_code == 200:
             return _extract_text_gemini(resp.json(), model["name"])
         elif resp.status_code == 429:
@@ -275,12 +278,15 @@ async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncC
         else:
             log_all(f"⚠️ 智谱模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
     else:
-        url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+        url = model["url"]
+        headers = {}
+        if "key=" not in url and getattr(cfg, "GEMINI_API_KEY", ""):
+            headers["x-goog-api-key"] = cfg.GEMINI_API_KEY
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
         }
-        resp = await _post_json(url, payload, custom_client=custom_client)
+        resp = await _post_json(url, payload, headers=headers if headers else None, custom_client=custom_client)
         if resp.status_code == 200:
             raw_text = _extract_text_gemini(resp.json(), model["name"])
             if raw_text:

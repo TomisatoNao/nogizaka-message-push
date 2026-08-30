@@ -796,6 +796,37 @@ def _is_pid_running(pid: int) -> bool:
             return False
 
 
+def _is_python_process(pid: int) -> bool:
+    """确认目标 PID 是否确属 Python 运行进程，避免机器重启后 PID 循环重用误杀其他无关系统进程。"""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h_proc:
+                return False
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size))
+            ctypes.windll.kernel32.CloseHandle(h_proc)
+            if ok:
+                exe_name = buf.value.lower()
+                return "python" in exe_name
+            return False
+        except Exception:  # nosec B110
+            return False
+    else:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmd = f.read().decode("utf-8", "replace").lower()
+                return "python" in cmd or "main.py" in cmd
+        except Exception:  # nosec B110
+            return True
+
+
 def _kill_pid(pid: int) -> None:
     try:
         if sys.platform == "win32":
@@ -816,9 +847,12 @@ def _acquire_instance_lock() -> None:
         try:
             old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
             if old_pid != my_pid and _is_pid_running(old_pid):
-                log_all(f"⚠️ 检测到已存在运行中的主程序旧实例 (PID: {old_pid})，正在接管并终止旧实例...")
-                _kill_pid(old_pid)
-                time.sleep(1.0)
+                if _is_python_process(old_pid):
+                    log_all(f"⚠️ 检测到已存在运行中的主程序旧实例 (PID: {old_pid})，正在接管并终止旧实例...")
+                    _kill_pid(old_pid)
+                    time.sleep(1.0)
+                else:
+                    log_all(f"ℹ️ 检测到历史 PID 文件记录 ({old_pid}) 已失效（非 Python 进程），自动接管覆盖。")
         except (OSError, ValueError) as ex:
             log_all(f"⚠️ 读取旧 PID 文件异常: {ex}", is_debug=True)
     try:

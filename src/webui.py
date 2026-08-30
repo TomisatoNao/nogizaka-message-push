@@ -632,8 +632,12 @@ class _Handler(BaseHTTPRequestHandler):
         if not origin:
             return True
         from urllib.parse import urlparse
-        host = (urlparse(origin).hostname or "")
-        if host in _LOOPBACK_HOSTS or host == (self.headers.get("Host", "").rsplit(":", 1)[0]):
+        host = (urlparse(origin).hostname or "").lower()
+        if host in _LOOPBACK_HOSTS:
+            return True
+        raw_host = self.headers.get("Host", "")
+        req_host = (urlparse(f"//{raw_host}").hostname or "").lower()
+        if host == req_host:
             return True
         self._send_json({"ok": False, "errors": [f"拒绝跨站请求 Origin: {origin!r}"]}, 403)
         return False
@@ -3481,22 +3485,28 @@ def start_webui(host: str | None = None, port: int | None = None,
     thread.start()
 
     import config.config as cfg
+    has_auth = False
     if getattr(cfg, "AUTH_ENABLED", False):
         from src import auth as _auth
         if _auth.has_users():
             users = _auth.load_users()
             admins = sum(1 for u in users.values() if u.get("role") == "admin")
             hint = f"账号登录（{len(users)} 个用户 / {admins} 个管理员）"
+            has_auth = True
         else:
             hint = "⚠️ 账号系统已启用但无用户，请执行 python tools/manage_users.py add <用户名>"
     elif os.getenv("WEB_ADMIN_TOKEN"):
         hint = "已启用 token 鉴权"
+        has_auth = True
     else:
         hint = "无鉴权（仅限本机访问时可接受）"
     from src.logger import log_all
+    if host not in _LOOPBACK_HOSTS and not has_auth:
+        log_all(f"⚠️ [安全警告] 网页管理端监听非回环地址 ({host}) 且未启用密码或 Token 鉴权！强烈建议在 config.json 开启 auth.enabled 或配置 WEB_ADMIN_TOKEN 防范未授权访问。", is_error=True)
+
     try:
         log_all(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
-    except Exception:
+    except Exception:  # nosec B110
         log_all(f"WebUI started: http://{host}:{server.server_address[1]}/")
     return server
 

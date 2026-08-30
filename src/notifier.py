@@ -513,7 +513,7 @@ async def send_blog_post(post: dict) -> bool:
             async def _send_tg_blog(b=bot):
                 try:
                     mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
-                    await b._send_html(b.target_chat, header_text)
+                    await b._post_message(b.target_chat, header_text)
                     await asyncio.sleep(0.3)
 
                     if mode == "card_only":

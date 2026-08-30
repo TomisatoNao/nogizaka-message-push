@@ -1256,7 +1256,7 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
         conn = init_db()
         if conn and _has_fts5:
             try:
-                match_expr = " ".join(f'"{t}"' for t in terms)
+                match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
                 sql = """
                     SELECT m.raw_json, m.year, m.month
                     FROM messages_fts f
