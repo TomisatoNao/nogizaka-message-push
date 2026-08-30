@@ -30,7 +30,7 @@ from src.member_directory import api_base
 
 
 async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[dict]:
-    """通过官方 API 获取指定成员的信件列表。"""
+    """通过官方 API 分页获取指定成员的全部信件列表（支持 count=100、时间游标及多页遍历）。"""
     m_name = member.get("m_name") or member.get("name", "")
     m_id = str(member.get("m_id") or member.get("id", ""))
     account_id = member.get("account_id") or member.get("account", "")
@@ -67,22 +67,112 @@ async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[
     base = api_base(account_id, acc_cfg).rstrip('/')
     headers = get_source_headers_for_account(account_id, group_type)
 
-    url = f"{base}/v2/groups/{m_id}/letters"
+    all_letters_map: dict[int, dict] = {}
+    base_url = f"{base}/v2/groups/{m_id}/letters"
+    PAGE_SIZE = 100
+
+    # ── 1. 首先尝试以 count=100 拉取信件首页 ──
     try:
-        resp = await client.get(url, headers=headers, timeout=20.0)
-        if resp.status_code == 200:
-            data = resp.json()
-            letters = data.get("letters", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            return letters
-        elif resp.status_code == 404:
+        resp = await client.get(f"{base_url}?count={PAGE_SIZE}", headers=headers, timeout=20.0)
+        if resp.status_code == 404:
             log_all(f"ℹ️ [{m_name}] 该成员无信件历史或接口不支持 (404)", is_debug=True)
             return []
+        elif resp.status_code == 200:
+            data = resp.json()
+            raw_list = data.get("letters", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for item in raw_list:
+                if isinstance(item, dict) and item.get("id"):
+                    all_letters_map[int(item["id"])] = item
         else:
             log_all(f"⚠️ [{m_name}] 获取信件失败: HTTP {resp.status_code} {resp.text[:100]}", is_error=True)
             return []
     except Exception as e:
         log_all(f"⚠️ [{m_name}] 请求信件异常: {e}", is_error=True)
         return []
+
+    if not all_letters_map:
+        return []
+
+    # ── 2. 若返回数量较多，使用时间游标向更早历史分页遍历（支持跨年全量历史信件） ──
+    from urllib.parse import quote
+    for _ in range(50):
+        # 寻找当前已拉取信件中最旧的一封的时间
+        sorted_by_date = sorted(
+            all_letters_map.values(),
+            key=lambda x: x.get("created_at") or x.get("updated_at") or ""
+        )
+        oldest_letter = sorted_by_date[0] if sorted_by_date else None
+        if not oldest_letter:
+            break
+
+        oldest_created = oldest_letter.get("created_at") or ""
+        oldest_updated = oldest_letter.get("updated_at") or oldest_created
+        oldest_id = oldest_letter.get("id")
+
+        params_to_try = []
+        if oldest_created:
+            params_to_try.append(f"?count={PAGE_SIZE}&created_to={quote(oldest_created)}")
+            params_to_try.append(f"?count={PAGE_SIZE}&updated_to={quote(oldest_updated)}")
+            params_to_try.append(f"?count={PAGE_SIZE}&until={quote(oldest_created)}")
+        if oldest_id:
+            params_to_try.append(f"?count={PAGE_SIZE}&before_id={oldest_id}")
+        params_to_try.append(f"?count={PAGE_SIZE}&offset={len(all_letters_map)}")
+
+        new_found_in_page = 0
+        for p_query in params_to_try:
+            try:
+                p_resp = await client.get(f"{base_url}{p_query}", headers=headers, timeout=20.0)
+                if p_resp.status_code == 200:
+                    p_data = p_resp.json()
+                    p_list = p_data.get("letters", []) if isinstance(p_data, dict) else (p_data if isinstance(p_data, list) else [])
+                    for item in p_list:
+                        if isinstance(item, dict) and item.get("id"):
+                            lid = int(item["id"])
+                            if lid not in all_letters_map:
+                                all_letters_map[lid] = item
+                                new_found_in_page += 1
+                    if new_found_in_page > 0:
+                        break
+            except Exception:
+                pass
+
+        if new_found_in_page == 0:
+            break
+
+        await asyncio.sleep(0.3)
+
+    # ── 3. 尝试正序扫描（order=asc + created_from / updated_from）作为双向补漏 ──
+    asc_cursor = "2013-01-01T00:00:00Z"
+    for _ in range(50):
+        asc_url = f"{base_url}?count={PAGE_SIZE}&order=asc&created_from={quote(asc_cursor)}"
+        try:
+            asc_resp = await client.get(asc_url, headers=headers, timeout=20.0)
+            if asc_resp.status_code == 200:
+                asc_data = asc_resp.json()
+                asc_list = asc_data.get("letters", []) if isinstance(asc_data, dict) else (asc_data if isinstance(asc_data, list) else [])
+                if not asc_list:
+                    break
+                last_created = asc_cursor
+                for item in asc_list:
+                    if isinstance(item, dict) and item.get("id"):
+                        lid = int(item["id"])
+                        all_letters_map[lid] = item
+                        last_created = item.get("created_at") or item.get("updated_at") or last_created
+                if last_created == asc_cursor or len(asc_list) < 10:
+                    break
+                asc_cursor = last_created
+            else:
+                break
+        except Exception:
+            break
+        await asyncio.sleep(0.3)
+
+    # 按时间倒序输出
+    return sorted(
+        all_letters_map.values(),
+        key=lambda x: x.get("created_at") or x.get("updated_at") or "",
+        reverse=True
+    )
 
 
 async def sync_letters_for_member(member: dict, client: httpx.AsyncClient) -> tuple[int, int]:

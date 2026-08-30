@@ -93,6 +93,43 @@ async def test_letter_archiving_and_queries(tmp_path):
         archive.close_db()
 
 
+@pytest.mark.asyncio
+async def test_fetch_member_letters_pagination():
+    import tools.archive_letters as al
+    from unittest.mock import AsyncMock, MagicMock
+
+    member = {"name": "冨里 奈央", "m_name": "冨里 奈央", "m_id": "55", "account_id": "test_acc"}
+    al.ACCOUNT_CREDS["test_acc"] = {"access_token": "fake_token"}
+    cfg.ACCOUNTS["test_acc"] = {"group_type": "nogizaka46"}
+
+    # 模拟 API 分页返回 25 封信件（第一页 10 封，第二页 10 封，第三页 5 封）
+    page1 = [{"id": 100 + i, "created_at": f"2026-05-{25-i:02d}T10:00:00Z"} for i in range(10)]
+    page2 = [{"id": 200 + i, "created_at": f"2026-04-{25-i:02d}T10:00:00Z"} for i in range(10)]
+    page3 = [{"id": 300 + i, "created_at": f"2026-03-{25-i:02d}T10:00:00Z"} for i in range(5)]
+
+    client = AsyncMock()
+
+    def mock_get(url, *args, **kwargs):
+        resp = MagicMock()
+        resp.status_code = 200
+        if "created_to=2026-04" in url or "offset=20" in url:
+            resp.json.return_value = {"letters": page3}
+        elif "created_to=2026-05" in url or "offset=10" in url:
+            resp.json.return_value = {"letters": page2}
+        elif "count=100" in url and "order=asc" not in url:
+            resp.json.return_value = {"letters": page1}
+        else:
+            resp.json.return_value = {"letters": []}
+        return resp
+
+    client.get.side_effect = mock_get
+
+    res = await al.fetch_member_letters(member, client)
+    assert len(res) == 25
+    assert res[0]["id"] == 100
+    assert res[-1]["id"] == 304
+
+
 def test_webui_letters_api_routing():
     from src.webui import _Handler
     from unittest.mock import MagicMock

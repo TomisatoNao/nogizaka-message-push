@@ -1038,24 +1038,30 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
 
 
 async def archive_letters_batch(member_name: str, letters: list[dict], headers: dict | None = None) -> list[dict]:
-    """批量归档信件列表，并更新本地 letters.json 汇总。"""
+    """批量归档信件列表，并发下载信纸原图并更新本地 letters.json 汇总与 SQLite。"""
     if not member_name or not letters:
         return []
-    results = []
-    for l_item in letters:
-        r = await archive_single_letter(member_name, l_item, headers=headers)
-        results.append(r)
+
+    tasks = [archive_single_letter(member_name, l_item, headers=headers) for l_item in letters]
+    results = await asyncio.gather(*tasks)
+
+    # 按照 created_at DESC 排序整理
+    sorted_results = sorted(
+        results,
+        key=lambda x: x.get("created_at") or x.get("updated_at") or "",
+        reverse=True
+    )
 
     # 同步写入/更新本地 letters/letters.json
     try:
         letters_dir = _member_letters_dir(member_name)
         json_path = letters_dir / "letters.json"
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+            json.dump(sorted_results, f, ensure_ascii=False, indent=2)
     except Exception as ex:
         log_all(f"⚠️ 保存 letters.json 失败 ({member_name}): {ex}", is_debug=True)
 
-    return results
+    return sorted_results
 
 
 def get_existing_letter_ids(member_dir: str) -> set[int]:
