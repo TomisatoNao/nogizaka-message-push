@@ -10,3 +10,4 @@ watchdog>=4.0,<7.0         # config.json 自动文件变动热重载
 yt-dlp>=2024.1.0           # 社媒监控媒体下载与直播录制
 curl-cffi>=0.7.0           # Instagram/TikTok 请求增强（可选）
 pillow>=10.0.0             # 博客卡片渲染与图片处理
+playwright>=1.40.0,<2.0.0   # 博客长图无头 Chromium 渲染引擎

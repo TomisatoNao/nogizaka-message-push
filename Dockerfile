@@ -14,17 +14,20 @@ ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     WEB_ADMIN_HOST=0.0.0.0
 
-# 安装运行时系统依赖：ffmpeg (视频压制/转码/直播录制)、ca-certificates (HTTPS)、tzdata (时区)、curl (健康检查)
+# 安装运行时系统依赖：ffmpeg (视频压制/转码/直播录制)、ca-certificates (HTTPS)、tzdata (时区)、curl (健康检查)、中日文字体 (博客长图渲染)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
     tzdata \
     curl \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Python 依赖（利用 Docker 缓存层加速构建）
+# 安装 Python 依赖与 Playwright Chromium 无头浏览器（利用 Docker 缓存层加速构建）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    playwright install --with-deps chromium
 
 # 复制应用源码、配置模板与启动脚本
 COPY main.py .

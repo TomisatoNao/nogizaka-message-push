@@ -903,6 +903,16 @@ async def main() -> None:
     global _blog_client
     _blog_client = httpx.AsyncClient(timeout=30, proxy=proxy_url, follow_redirects=True)
 
+    # 博客长图渲染引擎检测
+    try:
+        from src.blog_card_renderer import is_playwright_available
+        if is_playwright_available():
+            log_all("🎨 博客长图卡片渲染引擎已就绪 (Playwright Chromium)")
+        else:
+            log_all("💡 博客长图卡片渲染引擎未就绪（Playwright 未安装，博客将以标准图文模式推送）")
+    except Exception as e:
+        log_all(f"⚠️ 博客长图卡片环境检测异常: {e}", is_debug=True)
+
     # 4. 账号初始 Token 刷新与自动握手
     #    必须放在通道注入（步骤 3）之后：刷新失败时 refresh_token 会走
     #    send_alert_message，此时 napcat._client / tgbot._bot 必须已就绪，否则告警静默丢失。

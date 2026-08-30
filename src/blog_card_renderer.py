@@ -479,14 +479,23 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     return html_code
 
 
+_WARNED_PLAYWRIGHT_MISSING = False
+
+
 async def render_blog_card(post: dict) -> Optional[Path]:
     """渲染指定博客的长图卡片，返回生成的高清 JPG 图片绝对路径。
 
     若 Playwright 不可用或渲染异常，返回 None 实现优雅降级。
     支持自动从本地磁盘或远程 URL 加载全量写真，确保卡片 100% 包含图片。
     """
+    global _WARNED_PLAYWRIGHT_MISSING
     if not is_playwright_available():
-        log_all("💡 Playwright 未安装或不可用，跳过长图卡片渲染并自动降级为标准推送", is_debug=True)
+        if not _WARNED_PLAYWRIGHT_MISSING:
+            _WARNED_PLAYWRIGHT_MISSING = True
+            log_all(
+                "💡 Playwright 未安装，博客长图卡片功能已自动降级为标准图文推送。"
+                "（如需开启长图卡片，请在环境内执行: pip install playwright && playwright install --with-deps chromium）"
+            )
         return None
 
     try:
@@ -586,7 +595,15 @@ async def render_blog_card(post: dict) -> Optional[Path]:
             return final_jpg
 
     except Exception as e:
-        log_all(f"⚠️ 博客长图渲染异常，自动优雅降级: {e}", is_error=True)
+        err_msg = str(e)
+        if "Executable doesn't exist" in err_msg or "playwright install" in err_msg:
+            log_all(
+                "⚠️ 博客长图渲染失败：未安装 Chromium 浏览器内核。"
+                "请在终端执行 `playwright install --with-deps chromium` 后重试，当前已自动降级为标准图文推送。",
+                is_error=True,
+            )
+        else:
+            log_all(f"⚠️ 博客长图渲染异常，已自动降级为标准图文推送: {e}", is_error=True)
         try:
             tmp_png.unlink(missing_ok=True)
             tmp_html.unlink(missing_ok=True)
