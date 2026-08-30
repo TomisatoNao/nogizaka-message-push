@@ -873,6 +873,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_archive(path[len("/api/archive/"):])
             return
 
+        if path == "/api/social/ig_session":
+            if not self._check_auth():
+                return
+            from src.social import ig_session
+            st = ig_session.status()
+            self._send_json({"ok": True, **st})
+            return
+
         if path == "/api/config":
             if not self._check_auth():
                 return
@@ -2921,6 +2929,92 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._handle_archive(path[len("/api/archive/"):])
             return
+        if path == "/api/social/ig_session":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            raw_cookies = str(body.get("cookies") or body.get("raw") or "").strip()
+            if not raw_cookies:
+                self._send_json({"ok": False, "errors": ["Cookie 内容不能为空"]}, 400)
+                return
+            from src.social import ig_session
+            cookies = ig_session.parse_cookies(raw_cookies)
+            if not cookies:
+                self._send_json({"ok": False, "errors": ["未能解析出任何有效 Cookie，请检查格式"]}, 400)
+                return
+            ig_session.write_cookie_file(cookies)
+            env_updates = {}
+            if cookies.get("sessionid"):
+                env_updates["INSTAGRAM_SESSIONID"] = cookies["sessionid"]
+            if cookies.get("ds_user_id"):
+                env_updates["INSTAGRAM_DS_USER_ID"] = cookies["ds_user_id"]
+            if env_updates:
+                with _mutation_lock:
+                    update_env_file(env_updates)
+                    for k, v in env_updates.items():
+                        os.environ[k] = v
+            assessment = ig_session.assess(cookies)
+            raw_cfg = _load_raw_config()
+            proxy = ""
+            if isinstance(raw_cfg, dict):
+                proxy = raw_cfg.get("proxy") or raw_cfg.get("social", {}).get("proxy") or ""
+            try:
+                import config.config as app_cfg
+                proxy = proxy or getattr(app_cfg, "PROXY", "")
+            except Exception:
+                pass
+            health = ig_session.check_session(cookies, proxy=str(proxy or ""))
+            reloaded = _trigger_reload()
+            self._send_json({
+                "ok": True,
+                "assessment": assessment,
+                "health": health,
+                "reloaded": reloaded,
+                "status": ig_session.status(),
+            })
+            return
+
+        if path == "/api/social/ig_session/check":
+            if not self._check_auth():
+                return
+            from src.social import ig_session
+            cookies = ig_session.read_cookie_file()
+            if not cookies:
+                self._send_json({"ok": False, "errors": ["尚未配置任何 Instagram Cookies"]}, 400)
+                return
+            raw_cfg = _load_raw_config()
+            proxy = ""
+            if isinstance(raw_cfg, dict):
+                proxy = raw_cfg.get("proxy") or raw_cfg.get("social", {}).get("proxy") or ""
+            try:
+                import config.config as app_cfg
+                proxy = proxy or getattr(app_cfg, "PROXY", "")
+            except Exception:
+                pass
+            health = ig_session.check_session(cookies, proxy=str(proxy or ""))
+            self._send_json({
+                "ok": True,
+                "health": health,
+                "assessment": ig_session.assess(cookies),
+                "status": ig_session.status(),
+            })
+            return
+
+        if path == "/api/social/ig_session/clear":
+            if not self._check_auth():
+                return
+            from src.social import ig_session
+            ig_session.clear()
+            with _mutation_lock:
+                update_env_file({}, remove=["INSTAGRAM_SESSIONID", "INSTAGRAM_DS_USER_ID"])
+                os.environ.pop("INSTAGRAM_SESSIONID", None)
+                os.environ.pop("INSTAGRAM_DS_USER_ID", None)
+                reloaded = _trigger_reload()
+            self._send_json({"ok": True, "reloaded": reloaded, "status": ig_session.status()})
+            return
+
         if path == "/api/social/parse_post":
             if not self._check_auth():
                 return

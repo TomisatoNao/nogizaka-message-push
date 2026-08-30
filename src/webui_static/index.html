@@ -680,11 +680,21 @@
         <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
       </label>
     </div>
-    <div style="margin-top:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Instagram Session ID (.env)</span>
-      <span id="igSessionStatus"></span>
-      <button class="btn small" id="btnFillIgSession" type="button">填写</button>
-      <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
+    <div style="margin-top:14px; padding:12px 14px; background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <div>
+        <div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;">
+          <span>🍪 Instagram 登录凭证 (Cookies)</span>
+          <span id="igSessionStatus"></span>
+        </div>
+        <div id="igSessionDetail" style="font-size:11.5px; color:var(--muted); margin-top:3px;">
+          支持 Netscape / JSON / 完整 Cookies 格式，保障 Story 与图集解析
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn small primary" id="btnFillIgSession" type="button">配置 Cookies</button>
+        <button class="btn small" id="btnCheckIgSession" type="button">检测连通性</button>
+        <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
+      </div>
     </div>
     <details class="help-box" style="margin-top: 10px;">
       <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">🛡️ Instagram 防风控安全机制说明</summary>
@@ -1317,6 +1327,27 @@
   <button class="btn primary" id="secretSave" type="button">🔐 保存并自动握手</button>
 </div>
 </div>
+</dialog>
+<!-- Instagram Cookies 专属配置对话框 -->
+<dialog id="igCookieDialog" style="max-width: 580px; width: 95%;">
+  <h3>🍪 配置 Instagram 会话凭证 (Cookies)</h3>
+  <div class="dialog-note">
+    用于突破 Instagram 匿名限制、拉取 24h 快拍 (Story) 及点播解析多图/视频。
+  </div>
+  <div style="margin-top: 10px;">
+    <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px; line-height: 1.5;">
+      💡 <b>推荐方式</b>：在浏览器打开并登录 Instagram，使用插件 <code>Get cookies.txt LOCALLY</code> 或 <code>EditThisCookie</code> 导出完整 Cookies 粘贴于此（自带设备指纹，最抗风控）。也支持粘贴 cURL 或裸 <code>sessionid</code>。
+    </div>
+    <textarea id="igCookieTextarea" rows="6" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; border-radius: 6px; padding: 8px; background: rgba(0,0,0,0.25); color: inherit; border: 1px solid var(--border, #444);" placeholder="# 直接粘贴 Netscape cookies.txt、JSON 数组或 sessionid=xxx..."></textarea>
+    <div id="igCookieFeedback" style="margin-top: 6px; font-size: 12px; min-height: 18px; color: var(--muted);"></div>
+  </div>
+  <div class="actions" style="display:flex; justify-content:space-between; align-items:center; margin-top: 14px;">
+    <button class="btn danger" id="btnIgCookieClear" type="button">🗑️ 清空凭证</button>
+    <div style="display:flex; gap:8px; margin-left:auto;">
+      <button class="btn" id="btnIgCookieCancel" type="button">取消</button>
+      <button class="btn primary" id="btnIgCookieSave" type="button">🔐 保存并检测有效性</button>
+    </div>
+  </div>
 </dialog>
 <!-- 账号编辑对话框 -->
 <dialog id="accountDialog">
@@ -2895,13 +2926,178 @@ if ($("btnFillZhipuKey")) {
 }
 if ($("btnClearZhipuKey")) $("btnClearZhipuKey").addEventListener("click", () => clearEnvSecret("ZHIPU_API_KEY", "智谱开放平台 Key"));
 
-if ($("btnFillIgSession")) {
-  $("btnFillIgSession").addEventListener("click", () => openSecretDialog(
-    "填写 Instagram Session ID", "保存并热重载后生效（用于突破未登录限制与抓取 24h 快拍 Story）。",
-    [{ env: "INSTAGRAM_SESSIONID", label: "sessionid Cookie", required: true, placeholder: "123456789%3A...",
-       help: "登录 Instagram 网页版后，在 F12 Application -> Cookies 中复制 sessionid 的值。" }], null));
+// ── Instagram Cookie 管理 ─────────────────────────
+async function fetchIgSessionStatus() {
+  try {
+    const data = await api("/api/social/ig_session");
+    if (!data.ok) return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
 }
-if ($("btnClearIgSession")) $("btnClearIgSession").addEventListener("click", () => clearEnvSecret("INSTAGRAM_SESSIONID", "Instagram Session ID"));
+
+async function renderIgSessionUI() {
+  const igStatusEl = $("igSessionStatus");
+  const igDetailEl = $("igSessionDetail");
+  const btnClear = $("btnClearIgSession");
+  const btnCheck = $("btnCheckIgSession");
+  if (!igStatusEl) return;
+
+  const data = await fetchIgSessionStatus();
+  if (data && data.configured) {
+    const isGood = data.assessment && data.assessment.safe_enough;
+    const levelStr = isGood ? "完整度: " + (data.assessment.level === "full" ? "满分完整" : "良好") : "仅基础会话";
+    const userStr = data.user_id ? " (UID: " + data.user_id + ")" : "";
+    igStatusEl.innerHTML = '<span class="cred ok">✓ 凭证已就绪</span>';
+    if (igDetailEl) {
+      igDetailEl.textContent = `已载入 ${data.cookie_names.length} 项 Cookie (${levelStr})${userStr}，Story 与图集已就绪`;
+    }
+    if (btnClear) btnClear.style.display = "inline-block";
+    if (btnCheck) btnCheck.style.display = "inline-block";
+  } else {
+    igStatusEl.innerHTML = '<span class="cred miss">✗ 未配置</span>';
+    if (igDetailEl) {
+      igDetailEl.textContent = "未配置 Cookies，Instagram 限制匿名访问，图集与 Story 可能受限";
+    }
+    if (btnClear) btnClear.style.display = "none";
+    if (btnCheck) btnCheck.style.display = "none";
+  }
+}
+
+function openIgCookieDialog() {
+  const dlg = $("igCookieDialog");
+  const ta = $("igCookieTextarea");
+  const fb = $("igCookieFeedback");
+  if (!dlg || !ta) return;
+  ta.value = "";
+  if (fb) fb.textContent = "";
+  try {
+    if (dlg.open) dlg.close();
+    dlg.showModal();
+    ta.focus();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+if ($("igCookieTextarea")) {
+  $("igCookieTextarea").addEventListener("input", () => {
+    const val = $("igCookieTextarea").value.trim();
+    const fb = $("igCookieFeedback");
+    if (!fb) return;
+    if (!val) {
+      fb.textContent = "";
+      return;
+    }
+    const hasSid = /sessionid/i.test(val) || /[0-9]{5,15}%3A/i.test(val);
+    const hasMid = /mid/i.test(val);
+    const hasDid = /ig_did/i.test(val);
+    if (hasSid && hasMid && hasDid) {
+      fb.textContent = "🛡️ 识别为完整 Netscape / JSON Cookies（含设备指纹与 CSRF，最佳抗风控）";
+      fb.style.color = "var(--ok, #10b981)";
+    } else if (hasSid) {
+      fb.textContent = "ℹ️ 已识别 sessionid。建议若有完整 Cookies 尽量整段粘贴";
+      fb.style.color = "var(--accent, #60a5fa)";
+    } else {
+      fb.textContent = "⚠️ 正在输入... 保存时将自动尝试智能解析";
+      fb.style.color = "var(--muted)";
+    }
+  });
+}
+
+if ($("btnFillIgSession")) {
+  $("btnFillIgSession").addEventListener("click", openIgCookieDialog);
+}
+
+if ($("btnIgCookieCancel")) {
+  $("btnIgCookieCancel").addEventListener("click", () => {
+    try { $("igCookieDialog").close(); } catch(e){}
+  });
+}
+
+if ($("btnIgCookieSave")) {
+  $("btnIgCookieSave").addEventListener("click", async () => {
+    const ta = $("igCookieTextarea");
+    const fb = $("igCookieFeedback");
+    const saveBtn = $("btnIgCookieSave");
+    const val = (ta ? ta.value : "").trim();
+    if (!val) {
+      if (fb) { fb.textContent = "❌ 请先粘贴 Cookie 内容"; fb.style.color = "var(--danger, #ef4444)"; }
+      return;
+    }
+    saveBtn.disabled = true;
+    const origText = saveBtn.textContent;
+    saveBtn.textContent = "正在验证与落盘…";
+    try {
+      const resp = await api("/api/social/ig_session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookies: val }),
+      });
+      if (!resp.ok) {
+        if (fb) { fb.textContent = "❌ " + (resp.errors || []).join("; "); fb.style.color = "var(--danger, #ef4444)"; }
+        return;
+      }
+      try { $("igCookieDialog").close(); } catch(e){}
+      renderIgSessionUI();
+      const healthMsg = (resp.health && resp.health.detail) ? resp.health.detail : "Cookie 已成功保存并热重载！";
+      uiAlert(healthMsg, { title: (resp.health && resp.health.valid) ? "✅ Instagram 凭证配置成功" : "ℹ️ 凭证已落盘" });
+      msg("✅ Instagram Cookies 已更新并生效", "ok");
+    } catch (e) {
+      if (fb) { fb.textContent = "❌ 保存异常: " + e.message; fb.style.color = "var(--danger, #ef4444)"; }
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = origText;
+    }
+  });
+}
+
+if ($("btnCheckIgSession")) {
+  $("btnCheckIgSession").addEventListener("click", async () => {
+    const btn = $("btnCheckIgSession");
+    btn.disabled = true;
+    const origText = btn.textContent;
+    btn.textContent = "检测中…";
+    try {
+      const resp = await api("/api/social/ig_session/check", { method: "POST" });
+      if (!resp.ok) {
+        uiAlert("❌ 检测失败：" + (resp.errors || []).join("; "), { danger: true });
+        return;
+      }
+      const h = resp.health || {};
+      const title = h.valid ? "✅ Instagram 连通正常" : (h.valid === false ? "⚠️ 登录态已失效" : "ℹ️ 接口反馈");
+      uiAlert(h.detail || "检测完成", { title: title, danger: !h.valid });
+      renderIgSessionUI();
+    } catch (e) {
+      uiAlert("网络检测异常: " + e.message, { danger: true });
+    } finally {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  });
+}
+
+if ($("btnClearIgSession") || $("btnIgCookieClear")) {
+  const doClear = async () => {
+    const ok = await uiConfirm("确定要清空 Instagram Cookies 吗？\n\n清空后将从系统磁盘和环境变量移除，快拍及部分受限图集将无法抓取。", {
+      title: "清空 Instagram Cookies 确认",
+      danger: true,
+      yesText: "确认清空",
+    });
+    if (!ok) return;
+    try {
+      await api("/api/social/ig_session/clear", { method: "POST" });
+      try { $("igCookieDialog").close(); } catch(e){}
+      renderIgSessionUI();
+      msg("✅ 已清空 Instagram Cookies", "ok");
+    } catch (e) {
+      msg("清空失败: " + e.message, "err");
+    }
+  };
+  if ($("btnClearIgSession")) $("btnClearIgSession").addEventListener("click", doClear);
+  if ($("btnIgCookieClear")) $("btnIgCookieClear").addEventListener("click", doClear);
+}
 
 // ── 社交媒体监控 ──────────────────────────────────
 function renderSocial() {
@@ -2930,9 +3126,7 @@ function renderSocial() {
   $("socialLiveInterval").value = pttl.interval_seconds || 8;
   $("socialLiveAccounts").value = (pttl.accounts || []).join("\n");
 
-  const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
-  if ($("igSessionStatus")) $("igSessionStatus").innerHTML = envBadge(envStatus.INSTAGRAM_SESSIONID);
-  if ($("btnClearIgSession")) $("btnClearIgSession").style.display = envStatus.INSTAGRAM_SESSIONID ? "inline-block" : "none";
+  renderIgSessionUI();
 }
 
 function collectSocial() {
