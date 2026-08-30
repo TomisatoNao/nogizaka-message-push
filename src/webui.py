@@ -2963,7 +2963,7 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 import config.config as app_cfg
                 proxy = proxy or getattr(app_cfg, "PROXY", "")
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             health = ig_session.check_session(cookies, proxy=str(proxy or ""))
             reloaded = _trigger_reload()
@@ -2991,7 +2991,7 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 import config.config as app_cfg
                 proxy = proxy or getattr(app_cfg, "PROXY", "")
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             health = ig_session.check_session(cookies, proxy=str(proxy or ""))
             self._send_json({
