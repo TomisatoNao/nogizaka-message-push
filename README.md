@@ -1,6 +1,8 @@
-# 🌸 Sakamichi Message Push (坂道消息推送与归档系统)
-
 <div align="center">
+
+<img src="src/webui_static/archive_icon.svg" width="84" height="84" alt="Sakamichi Message Push Logo" />
+
+# Sakamichi Message Push (坂道消息推送与归档系统)
 
 > **乃木坂46 / 櫻坂46 / 日向坂46 / yodel Message 私密消息 · 官方博客 · 社交媒体（𝕏 / Instagram / TikTok / Live 直播录制）全自动智能监控、Google Gemini & 智谱清言 AI 多引擎双语翻译、多通道格式化广播与本地永久持久化归档系统。**
 
@@ -63,7 +65,7 @@ flowchart TD
 
 ## 📑 目录
 
-- [🌸 Sakamichi Message Push (坂道消息推送与归档系统)](#-sakamichi-message-push-坂道消息推送与归档系统)
+- [Sakamichi Message Push (坂道消息推送与归档系统)](#sakamichi-message-push-坂道消息推送与归档系统)
   - [💡 为什么选择本项目？](#-为什么选择本项目)
   - [📑 目录](#-目录)
   - [🚀 快速开始 / Quick Start](#-快速开始--quick-start)
