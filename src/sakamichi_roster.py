@@ -278,10 +278,14 @@ def infer_group(name: str, explicit_group: str = "") -> str:
     norm = _norm(name)
     if explicit_group:
         eg = explicit_group.lower()
-        if "nogi" in eg: return "nogizaka"
-        if "sakura" in eg: return "sakurazaka"
-        if "hinata" in eg: return "hinatazaka"
-        if "yodel" in eg: return "yodel"
+        if "nogi" in eg:
+            return "nogizaka"
+        if "sakura" in eg:
+            return "sakurazaka"
+        if "hinata" in eg:
+            return "hinatazaka"
+        if "yodel" in eg:
+            return "yodel"
 
     # yodel 优先级匹配（已毕业成员或官方吉祥物）
     if norm in ALL_ROSTERS["yodel"] or any(k in norm for k in ("マネダコ", "manedako", "yodel", "松田好花", "丹生明里")):
