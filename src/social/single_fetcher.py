@@ -204,20 +204,175 @@ class SocialUrlParser:
         return self._extract_with_ytdlp(url, platform="x", post_id=tweet_id)
 
     def _parse_instagram(self, url: str) -> Post:
+        # 1. 优先判定 Story 链接（如 /stories/suzuno_mio/3974361302645425080/ 或 /stories/highlights/123/）
+        m_story = re.search(r"instagram\.com/stories/(?:highlights/(\d+)|([a-zA-Z0-9_.]+)(?:/(\d+))?)", url)
+        if m_story:
+            hl_id = m_story.group(1)
+            username = m_story.group(2)
+            story_id = m_story.group(3) or ""
+            try:
+                post = self._parse_instagram_story(username=username, story_id=story_id, highlight_id=hl_id, url=url)
+                if post and post.media:
+                    return post
+            except Exception as ex:
+                log.warning("[single_fetcher] Instagram Story 官方 API 解析失败 (@%s, %s)，回退 yt-dlp: %s", username or hl_id, story_id, ex)
+
+        # 2. 判定普通 Post/Reel 链接（如 /p/xxx/ 或 /reel/xxx/）
         m = re.search(r"instagram\.com/(?:p|reel|tv)/([^/?#\s]+)", url)
         shortcode = m.group(1) if m else ""
-        if not shortcode:
-            return self._extract_with_ytdlp(url, platform="instagram", post_id="ig_post")
-
-        # 优先使用 Instagram 官方 Media Info 接口（直接抓取完整多图 Carousel 与视频，杜绝 yt-dlp No video formats 报错）
-        try:
-            post = self._parse_instagram_api(shortcode, url)
-            if post and post.media:
-                return post
-        except Exception as ex:
-            log.warning("[single_fetcher] Instagram 官方 API 单帖解析失败 (%s)，回退 yt-dlp: %s", shortcode, ex)
+        if shortcode:
+            try:
+                post = self._parse_instagram_api(shortcode, url)
+                if post and post.media:
+                    return post
+            except Exception as ex:
+                log.warning("[single_fetcher] Instagram 官方 API 单帖解析失败 (%s)，回退 yt-dlp: %s", shortcode, ex)
 
         return self._extract_with_ytdlp(url, platform="instagram", post_id=shortcode or "ig_post")
+
+    def _parse_instagram_story(
+        self,
+        username: str | None = None,
+        story_id: str = "",
+        highlight_id: str | None = None,
+        url: str = "",
+    ) -> Post:
+        cookies = ig_session.read_cookie_file()
+        session = requests.Session()
+        if self.proxy:
+            session.proxies.update({"http": self.proxy, "https": self.proxy})
+        if cookies:
+            session.cookies.update(cookies)
+        session.headers.update({
+            "User-Agent": _UA,
+            "X-IG-App-ID": "936619743392459",
+            "Accept": "*/*",
+            "Accept-Language": "ja,en;q=0.8",
+        })
+        if cookies.get("csrftoken"):
+            session.headers["X-CSRFToken"] = cookies["csrftoken"]
+
+        items = []
+        author = username or "Instagram 用户"
+        avatar_url = ""
+        taken_at = 0
+
+        # 若为 Story Highlight
+        if highlight_id:
+            reel_id = f"highlight:{highlight_id}"
+            r_reel = session.get(
+                "https://i.instagram.com/api/v1/feed/reels_media/",
+                params={"reel_ids": reel_id},
+                timeout=15,
+            )
+            if r_reel.status_code == 200:
+                reel_data = r_reel.json()
+                reels = reel_data.get("reels") or {}
+                reel = reels.get(reel_id) or (list(reels.values())[0] if reels else {})
+                items = reel.get("items") or []
+                u = reel.get("user") or {}
+                author = u.get("full_name") or u.get("username") or author
+                avatar_url = u.get("profile_pic_url") or ""
+        elif username:
+            # 1. 尝试直接获取 reels_media (通过 username 解析 uid)
+            uid = ""
+            try:
+                r_user = session.get(
+                    f"https://i.instagram.com/api/v1/feed/user/{username}/username/",
+                    timeout=15,
+                )
+                if r_user.status_code == 200:
+                    u_data = r_user.json()
+                    u_obj = u_data.get("user") or {}
+                    uid = str(u_obj.get("pk") or u_obj.get("id") or "")
+                    author = u_obj.get("full_name") or u_obj.get("username") or username
+                    avatar_url = u_obj.get("profile_pic_url") or ""
+            except Exception as e:
+                log.debug("[single_fetcher] Story 用户 UID 解析异常: %s", e)
+
+            if uid:
+                r_reel = session.get(
+                    "https://i.instagram.com/api/v1/feed/reels_media/",
+                    params={"reel_ids": uid},
+                    timeout=15,
+                )
+                if r_reel.status_code == 200:
+                    reel_data = r_reel.json()
+                    reels = reel_data.get("reels") or {}
+                    reel = reels.get(uid) or (list(reels.values())[0] if reels else {})
+                    items = reel.get("items") or []
+
+            # 如果 reels_media 没拿到但有 story_id，尝试 media/{story_id}/info/
+            if not items and story_id:
+                try:
+                    resp = session.get(
+                        f"https://i.instagram.com/api/v1/media/{story_id}/info/",
+                        timeout=15,
+                    )
+                    if resp.status_code == 200:
+                        items = resp.json().get("items") or []
+                except Exception as e:
+                    log.debug("[single_fetcher] media/%s/info 尝试失败: %s", story_id, e)
+
+        if not items:
+            raise RuntimeError("未能从 Instagram Story 接口获取到媒体内容（可能已超过 24 小时过期或需要登录）")
+
+        media_items = []
+        for it in items:
+            u = it.get("user") or {}
+            if not avatar_url:
+                avatar_url = u.get("profile_pic_url") or ""
+            if author == username:
+                author = u.get("full_name") or u.get("username") or username
+            if not taken_at:
+                taken_at = int(it.get("taken_at") or 0)
+
+            mt = int(it.get("media_type") or 1)
+            # 视频
+            if mt == 2:
+                video_versions = it.get("video_versions") or []
+                if video_versions:
+                    video_versions.sort(key=lambda x: (x.get("width", 0) * x.get("height", 0)), reverse=True)
+                    best_video = video_versions[0].get("url")
+                    if best_video:
+                        media_items.append(MediaItem(type="video", url=best_video))
+                        continue
+            # 图片
+            image_candidates = (it.get("image_versions2") or {}).get("candidates") or []
+            if image_candidates:
+                image_candidates.sort(key=lambda x: (x.get("width", 0) * x.get("height", 0)), reverse=True)
+                best_img = image_candidates[0].get("url")
+                if best_img:
+                    media_items.append(MediaItem(type="image", url=best_img))
+
+        if not media_items:
+            raise RuntimeError("未在 Story 中提取到有效图片或视频")
+
+        timestamp = ""
+        if taken_at:
+            dt = datetime.fromtimestamp(taken_at, tz=timezone.utc).astimezone(_JST)
+            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        count_desc = f" (共 {len(media_items)} 条)" if len(media_items) > 1 else ""
+        text = f"Instagram Story by @{username or author}{count_desc}"
+        log.info("[single_fetcher] Instagram Story API 成功解析 @%s，获得 %d 条媒体", username or author, len(media_items))
+
+        return Post(
+            platform="instagram",
+            post_id=story_id or f"story_{username}_{taken_at}",
+            author=author,
+            text=text,
+            media=media_items,
+            timestamp=timestamp,
+            extra={
+                "url": url,
+                "username": username or "",
+                "author": author,
+                "avatar_url": avatar_url,
+                "kind": "story",
+                "story_count": len(media_items),
+            },
+        )
 
     def _parse_instagram_api(self, shortcode: str, url: str) -> Post:
         media_id = _shortcode_to_media_id(shortcode)
