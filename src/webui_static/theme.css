@@ -196,6 +196,7 @@ header.app-header {
   border: none; background: transparent; color: var(--muted);
   padding: 5px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
   font-weight: 500; transition: var(--tr); display: inline-flex; align-items: center; gap: 5px;
+  white-space: nowrap; flex-shrink: 0;
 }
 .header-nav .nav-tab:hover { color: var(--text); }
 .header-nav .nav-tab.active {
@@ -278,21 +279,70 @@ header.app-header {
 }
 
 @media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
+  }
   header.app-header {
-    padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+    padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
     height: auto;
-    min-height: 54px;
+    min-height: 52px;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 8px 10px;
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+  }
+  .header-brand {
+    flex: none;
+  }
+  .header-brand .brand-title {
+    font-size: 15px;
+  }
+  .header-actions {
+    gap: 5px;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: calc(100vw - 125px);
+  }
+  .header-actions::-webkit-scrollbar { display: none; }
+  .header-actions .btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .header-actions .user-badge {
+    font-size: 11px;
+    max-width: 75px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .header-actions .app-switch-btn {
+    padding: 4px 9px;
+    font-size: 11.5px;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .header-nav {
     order: 3;
     width: 100%;
+    max-width: 100%;
     justify-content: flex-start;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
+    margin-top: 2px;
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    box-sizing: border-box;
   }
   .header-nav::-webkit-scrollbar { display: none; }
   .header-nav .nav-tabs {
@@ -302,13 +352,17 @@ header.app-header {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-shrink: 0;
+    padding: 3px;
+    gap: 3px;
   }
   .header-nav .nav-tabs::-webkit-scrollbar { display: none; }
-  .header-actions {
-    gap: 6px;
-    margin-left: auto;
+  .header-nav .nav-tab {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    line-height: 1.4;
   }
-  .header-actions .user-badge { font-size: 12px; }
 }
 
 /* 主题切换时的整体柔和过渡（首帧不过渡，避免闪烁） */
@@ -347,8 +401,8 @@ header.app-header {
 }
 
 /* ════════════ 移动端全局（三页共用） ════════════ */
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-body { min-height: 100vh; min-height: 100dvh; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: hidden; width: 100%; max-width: 100vw; }
+body { min-height: 100vh; min-height: 100dvh; overflow-x: hidden; width: 100%; max-width: 100vw; }
 
 @media (hover: none) {
   * { -webkit-tap-highlight-color: transparent; }
@@ -361,7 +415,7 @@ body { min-height: 100vh; min-height: 100dvh; }
 
 /* 手机端共享 chrome */
 @media (max-width: 640px) {
-  .theme-toggle { width: 44px; height: 44px; font-size: 17px; }
+  .theme-toggle { width: 36px; height: 36px; font-size: 15px; flex-shrink: 0; }
   header {
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));

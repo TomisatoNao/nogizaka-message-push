@@ -10,27 +10,8 @@
 <script src="/static/theme.js"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
-  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px;
-           background: color-mix(in srgb, var(--card-solid) 75%, transparent);
-           backdrop-filter: blur(20px) saturate(1.4);
-           -webkit-backdrop-filter: blur(20px) saturate(1.4);
-           border-bottom: 1px solid var(--border-soft);
-           position: sticky; top: 0; z-index: 40; }
-  header h1 { font-size: 16px; margin: 0; font-weight: 700; color: var(--text-strong);
-              letter-spacing: .01em; }
-  header .spacer { flex: 1; }
   .dirty-dot { display: none !important; }
-  main { max-width: 1000px; margin: 0 auto; padding: 32px 24px 100px; }
-  nav.tabs { display: inline-flex; background: color-mix(in srgb, var(--card) 60%, var(--bg) 40%);
-             padding: 6px; border-radius: 999px; gap: 4px; margin-bottom: 24px;
-             box-shadow: inset 0 2px 4px rgba(0,0,0,.03); border: 1px solid var(--border-soft);
-             flex-wrap: wrap; }
-  nav.tabs button { border: none; background: transparent; color: var(--muted);
-    padding: 8px 18px; border-radius: 999px; cursor: pointer; font-size: 13.5px;
-    transition: color var(--tr), background var(--tr), transform var(--tr-fast); position: relative; }
-  nav.tabs button:hover { color: var(--text); }
-  nav.tabs button.active { background: var(--card-solid); color: var(--text-strong);
-    font-weight: 650; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 24px 100px; box-sizing: border-box; }
   section.tab { display: none; }
   section.tab.active { display: block; animation: fadeUp .3s cubic-bezier(.2,.8,.2,1) both; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } }
@@ -237,19 +218,8 @@
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
   @media (max-width: 640px) {
-    /* 顶栏换行，spacer 隐藏，按钮紧凑 */
-    header { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
-    header h1 { font-size: 14px; }
-    header .spacer { display: none; }
-    header .hint#whoami { font-size: 11.5px; }
-    header .btn { padding: 6px 10px; font-size: 12.5px; }
-
-    main { padding: 14px 12px 84px; }
-
-    nav.tabs { gap: 5px; margin-bottom: 14px; }
-    nav.tabs button { padding: 8px 12px; font-size: 13px; }
-
-    .card { padding: 18px 20px; margin-bottom: 16px; }
+    main { padding: 14px 12px 84px; max-width: 100vw; box-sizing: border-box; }
+    .card { padding: 18px 20px; margin-bottom: 16px; box-sizing: border-box; }
     .card h2 { font-size: 12px; margin-bottom: 14px; }
     .grid { grid-template-columns: 1fr; gap: 12px; }
 
