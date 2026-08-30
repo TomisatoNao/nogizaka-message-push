@@ -31,7 +31,7 @@ class RetryingConnection(sqlite3.Connection):
             except sqlite3.OperationalError as exc:
                 if not _is_busy(exc) or attempt >= MAX_BUSY_RETRIES:
                     raise
-                delay = min(1.5, 0.05 * (2 ** attempt)) * random.uniform(0.8, 1.2)
+                delay = min(1.5, 0.05 * (2 ** attempt)) * random.uniform(0.8, 1.2)  # nosec B311
                 log.warning("[sqlite] busy/locked; retry %s/%s in %.2fs",
                             attempt + 1, MAX_BUSY_RETRIES, delay)
                 time.sleep(delay)

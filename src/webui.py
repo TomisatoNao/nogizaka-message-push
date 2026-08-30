@@ -368,7 +368,7 @@ def _rotate_account_creds(account_id: str) -> None:
     try:
         from src import auth
         auth.delete_account_credential(account_id)
-    except Exception:
+    except (sqlite3.Error, OSError, AttributeError):
         pass
     import config.config as cfg
     if getattr(cfg, "CRED_DIR", None):
@@ -507,10 +507,10 @@ def _get_blog_db() -> sqlite3.Connection:
         try:
             conn.execute("SELECT 1;")
             return conn
-        except Exception:
+        except (sqlite3.Error, OSError):
             try:
                 conn.close()
-            except Exception:
+            except (sqlite3.Error, OSError):
                 pass
             _blog_db_local.conn = None
     conn = init_blog_db()
@@ -548,7 +548,7 @@ class _Handler(BaseHTTPRequestHandler):
                 compressed = gzip.compress(data, compresslevel=6)
                 if len(compressed) < len(data):
                     return compressed, {"Content-Encoding": "gzip"}
-            except Exception:
+            except (gzip.BadGzipFile, OSError, ValueError):
                 pass
         return data, {}
 
@@ -767,7 +767,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "errors": ["静态资源缺失"]}, 404)
             return
         import hashlib
-        etag = f'"{hashlib.md5(body).hexdigest()}"'
+        etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
@@ -1653,8 +1653,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if ok:
                     break
                 try:
+                    parsed_u = urllib.parse.urlparse(u)
+                    if parsed_u.scheme not in ("http", "https"):
+                        continue
                     req = urllib.request.Request(u, headers=headers)
-                    with urllib.request.urlopen(req, timeout=30) as resp, open(tmp_path, "wb") as f:
+                    with urllib.request.urlopen(req, timeout=30) as resp, open(tmp_path, "wb") as f:  # nosec B310
                         if resp.status == 200:
                             f.write(resp.read())
                             if tmp_path.exists() and tmp_path.stat().st_size > 0:
@@ -2045,7 +2048,7 @@ class _Handler(BaseHTTPRequestHandler):
                         FROM blog_posts
                         ORDER BY date DESC LIMIT 40
                     """).fetchall()
-                    rand_blog_rows = random.sample(all_recent_blogs, min(3, len(all_recent_blogs))) if all_recent_blogs else []
+                    rand_blog_rows = random.sample(all_recent_blogs, min(3, len(all_recent_blogs))) if all_recent_blogs else []  # nosec B311
                     for r in rand_blog_rows:
                         bp = dict(r)
                         gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
@@ -2082,7 +2085,7 @@ class _Handler(BaseHTTPRequestHandler):
                         ORDER BY published_at DESC LIMIT 30
                     """).fetchall()
                     recent_pic_rows = all_recent_pics[:8]
-                    rand_pic_rows = random.sample(all_recent_pics[8:], min(4, len(all_recent_pics[8:]))) if len(all_recent_pics) > 8 else []
+                    rand_pic_rows = random.sample(all_recent_pics[8:], min(4, len(all_recent_pics[8:]))) if len(all_recent_pics) > 8 else []  # nosec B311
                     seen_p_ids = set()
                     for row in (recent_pic_rows + rand_pic_rows):
                         if row[0] in seen_p_ids:
@@ -2254,7 +2257,7 @@ class _Handler(BaseHTTPRequestHandler):
                     SELECT substr(date,1,10) as d, COUNT(*)
                     FROM blog_posts {where}
                     GROUP BY d
-                """, params).fetchall():
+                """, params).fetchall():  # nosec B608
                     if r[0]:
                         days[r[0]] = r[1]
             except Exception:
@@ -2346,7 +2349,7 @@ class _Handler(BaseHTTPRequestHandler):
                     q_like = f"%{q}%"
                     params.extend([q_like, q_like, q_like])
                 total = db.execute(
-                    f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]
+                    f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]  # nosec B608
 
                 # 计算分页与偏移：
                 # 默认首页展示模式（无关键词搜索且无日期筛选）：第1页包含 1 张 Hero 顶置大卡片 + 24 张完整网格 (共 25 篇，满 6 行 × 4 列无缺口)
@@ -2372,7 +2375,7 @@ class _Handler(BaseHTTPRequestHandler):
                 rows = db.execute(
                     f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?",
                     params + [limit, offset],
-                ).fetchall()
+                ).fetchall()  # nosec B608
                 for r in rows:
                     d = dict(r)
                     d["images_json"] = d.get("images_json") or "[]"
@@ -2520,13 +2523,13 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "msg": "请输入有效的成员博客 URL"})
                 return
 
-            import subprocess
+            import subprocess  # nosec B404
             cmd = [sys.executable, str(_BASE_DIR / "tools" / "archive_member.py"), target_url]
             if translate:
                 cmd.append("--translate")
 
             try:
-                subprocess.Popen(cmd, cwd=str(_BASE_DIR))
+                subprocess.Popen(cmd, cwd=str(_BASE_DIR))  # nosec B603
                 self._send_json({"ok": True, "msg": "已成功启动后台博客归档任务！可在终端或日志中查看进度。"})
             except Exception as e:
                 self._send_json({"ok": False, "msg": f"启动归档任务失败: {e}"})
@@ -2556,7 +2559,7 @@ class _Handler(BaseHTTPRequestHandler):
             member_name = payload.get("member", "").strip()
             reset_flag = bool(payload.get("reset", False))
             
-            import subprocess
+            import subprocess  # nosec B404
             cmd = [sys.executable, str(_BASE_DIR / "tools" / "backfill_archive.py"), "--force"]
             if reset_flag:
                 cmd.append("--reset")
@@ -2564,7 +2567,7 @@ class _Handler(BaseHTTPRequestHandler):
                 cmd.append(member_name)
 
             try:
-                subprocess.Popen(cmd, cwd=str(_BASE_DIR))
+                subprocess.Popen(cmd, cwd=str(_BASE_DIR))  # nosec B603
                 msg_target = f"【{member_name}】" if member_name else "【全部监控成员】"
                 self._send_json({"ok": True, "msg": f"已成功启动 {msg_target} 的历史消息回填任务！"})
             except Exception as e:
@@ -3170,7 +3173,7 @@ class _Handler(BaseHTTPRequestHandler):
             .replace('^|', '|')
             .replace('^$', '$')
         )
-        result = {"token": "", "cookie": "", "refresh_token": "", "extracted": []}
+        result = {"token": "", "cookie": "", "refresh_token": "", "extracted": []}  # nosec B105
 
         group_type = "nogizaka"
         acc_api_base = ""

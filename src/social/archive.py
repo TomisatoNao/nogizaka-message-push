@@ -175,10 +175,10 @@ class PostArchive:
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         with self._lock:
             total = self._conn.execute(
-                f"SELECT COUNT(*) c FROM posts{clause}", vals).fetchone()["c"]
+                f"SELECT COUNT(*) c FROM posts{clause}", vals).fetchone()["c"]  # nosec B608
             rows = self._conn.execute(
                 f"SELECT * FROM posts{clause} ORDER BY ts DESC, archived_at DESC"
-                f" LIMIT ? OFFSET ?", vals + [limit, offset]).fetchall()
+                f" LIMIT ? OFFSET ?", vals + [limit, offset]).fetchall()  # nosec B608
         return {"total": total, "items": [_row_to_dict(r) for r in rows]}
 
     def get(self, post_id: str) -> dict | None:
@@ -207,7 +207,7 @@ class PostArchive:
                 f" WHERE text != '' AND translated = ''"
                 f" AND platform NOT IN ({holes})"
                 f" ORDER BY ts DESC LIMIT ?",
-                (*NO_TRANSLATE_PLATFORMS, limit)).fetchall()
+                (*NO_TRANSLATE_PLATFORMS, limit)).fetchall()  # nosec B608
         return [dict(r) for r in rows]
 
     def clear_needless_translations(self) -> int:
@@ -216,7 +216,7 @@ class PostArchive:
         with self._lock:
             n = self._conn.execute(
                 f"UPDATE posts SET translated='' WHERE translated != ''"
-                f" AND platform IN ({holes})", NO_TRANSLATE_PLATFORMS).rowcount
+                f" AND platform IN ({holes})", NO_TRANSLATE_PLATFORMS).rowcount  # nosec B608
             self._conn.commit()
         if n:
             log.info("[archive] 已清除 %s 条开播提醒的多余译文", n)
@@ -225,10 +225,11 @@ class PostArchive:
     def update_text(self, post_id: str, text: str = None,
                     translated: str = None, author: str = None,
                     url: str = None) -> bool:
+        ALLOWED_COLUMNS = {"text", "translated", "author", "url"}
         sets, vals = [], []
         for col, v in (("text", text), ("translated", translated),
                        ("author", author), ("url", url)):
-            if v is not None:
+            if v is not None and col in ALLOWED_COLUMNS:
                 sets.append(f"{col}=?")
                 vals.append(v)
         if not sets:
@@ -236,7 +237,7 @@ class PostArchive:
         vals.append(post_id)
         with self._lock:
             n = self._conn.execute(
-                f"UPDATE posts SET {', '.join(sets)} WHERE post_id=?", vals).rowcount
+                f"UPDATE posts SET {', '.join(sets)} WHERE post_id=?", vals).rowcount  # nosec B608
             self._conn.commit()
         return n > 0
 

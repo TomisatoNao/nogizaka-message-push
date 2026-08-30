@@ -72,10 +72,10 @@ def _pid_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         # Windows：用 tasklist 过滤 PID，避免引入额外依赖
-        import subprocess
+        import subprocess  # nosec B404
         try:
             out = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],  # nosec B607, B603
                 capture_output=True, text=True, timeout=15,
                 encoding="utf-8", errors="replace",
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -279,7 +279,7 @@ class SocialStore:
         vals.append(session_key)
         with self._lock:
             self._conn.execute(
-                f"UPDATE live_sessions SET {', '.join(sets)} WHERE session_key=?", vals,
+                f"UPDATE live_sessions SET {', '.join(sets)} WHERE session_key=?", vals,  # nosec B608
             )
             self._conn.commit()
 

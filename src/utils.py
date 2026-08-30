@@ -162,7 +162,7 @@ def get_storage_breakdown(force_refresh: bool = False) -> dict:
                             count += 1
                         except OSError:
                             pass
-            except Exception:
+            except OSError:
                 pass
             return size, count
 
@@ -291,7 +291,7 @@ def clean_storage_category(category: str) -> tuple[bool, str, int]:
                             except OSError:
                                 pass
                     shutil.rmtree(item, ignore_errors=True)
-            except Exception:
+            except OSError:
                 pass
         freed_bytes += b_count
         deleted_files += f_count
@@ -319,7 +319,7 @@ def clean_storage_category(category: str) -> tuple[bool, str, int]:
                             pass
                         freed_bytes += sz
                         deleted_files += 1
-                    except Exception:
+                    except OSError:
                         pass
         get_storage_breakdown(force_refresh=True)
         return True, f"已截断清空运行日志（释放 {format_bytes(freed_bytes)}）", freed_bytes

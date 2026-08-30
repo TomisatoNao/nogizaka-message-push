@@ -20,7 +20,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -305,7 +305,7 @@ class MediaDownloader:
     def _video_codec(path: str, ffprobe: str) -> str:
         """返回首个视频流的标准编码名；探测失败时返回空字符串。"""
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603
                 [ffprobe, "-v", "error", "-select_streams", "v:0",
                  "-show_entries", "stream=codec_name,codec_tag_string",
                  "-of", "json", path],
@@ -327,7 +327,7 @@ class MediaDownloader:
         try:
             if os.path.exists(temp):
                 os.unlink(temp)
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603
                 [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-threads", "1", "-i", path,
                  "-map", "0:v:0?", "-map", "0:a?", "-c:v", "libx264",
                  "-preset", "superfast", "-crf", "23", "-pix_fmt", "yuv420p",

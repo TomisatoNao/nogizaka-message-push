@@ -86,7 +86,7 @@ class SocialScheduler:
     def _worker(self, fetcher: BaseFetcher) -> None:
         pname = fetcher.platform_name
         # 各平台启动时间错开，避免同时打多个站点
-        if self._stop_evt.wait(random.uniform(0, 3)):
+        if self._stop_evt.wait(random.uniform(0, 3)):  # nosec B311
             return
 
         while not self._stop_evt.is_set():

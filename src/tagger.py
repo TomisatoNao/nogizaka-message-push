@@ -131,7 +131,7 @@ def _clean_tags_output(text: str) -> str:
                         raw = " ".join(str(t) for t in tags_val)
                     elif isinstance(tags_val, str):
                         raw = tags_val
-        except Exception:
+        except (json.JSONDecodeError, ValueError, KeyError):
             pass
 
     # 过滤掉 markdown 符号与常见无用修饰词

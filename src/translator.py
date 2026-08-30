@@ -75,7 +75,7 @@ _BLOG_JSON_PROMPT_TEMPLATE = (
 )
 
 def _get_text_hash(text: str) -> str:
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
+    return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 def initialize(client: httpx.AsyncClient | None = None) -> None:
     """在事件循环内调用，创建 RateLimiter 并注入共享 HTTP 客户端。"""

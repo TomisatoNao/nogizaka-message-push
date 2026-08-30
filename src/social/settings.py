@@ -36,7 +36,7 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
             "https://nitter.net",
             "https://nitter.privacydev.net",
         ],
-        "bearer_token": "",               # 可选：官方 API v2 Bearer Token
+        "bearer_token": "",               # nosec B105 -- 可选：官方 API v2 Bearer Token
         "fetch_alt_text": True,           # 抓取图片 alt 描述并一并翻译
         "download_dir": "data/social_media/x",
         "max_items_per_poll": 5,          # 单次轮询最多处理几条（防止首次刷屏）

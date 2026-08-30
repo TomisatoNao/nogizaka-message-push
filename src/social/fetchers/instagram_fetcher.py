@@ -243,7 +243,7 @@ class InstagramFetcher(SocialFetcher):
 
             # 2. 若不是最后一个账号，在账号间增加 2.0 ~ 4.5 秒的随机休眠，模拟真人浏览节奏
             if idx < len(accounts) - 1:
-                time.sleep(random.uniform(2.0, 4.5))
+                time.sleep(random.uniform(2.0, 4.5))  # nosec B311
 
         return posts
 
@@ -319,7 +319,7 @@ class InstagramFetcher(SocialFetcher):
                 if lo > hi:
                     lo, hi = hi, lo
                 if lo > 0:
-                    return random.randint(lo, hi)
+                    return random.randint(lo, hi)  # nosec B311
             except (TypeError, ValueError):
                 pass
         return int(self.cfg.get("story_interval_seconds", 3600) or 3600)

@@ -14,7 +14,7 @@ def _parse_jsonp(text: str) -> dict:
     """去掉 JSONP wrapper 后解析为 dict。"""
     try:
         text = re.sub(r"^\w+\(", "", text).rstrip(");")
-    except Exception:
+    except (TypeError, ValueError):
         pass
     return json.loads(text)
 

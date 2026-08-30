@@ -46,7 +46,7 @@ ACCOUNT_FIELDS = {
 
 
 def _color_for(pid: str) -> str:
-    h = int(hashlib.md5(pid.encode("utf-8")).hexdigest()[:8], 16)
+    h = int(hashlib.md5(pid.encode("utf-8"), usedforsecurity=False).hexdigest()[:8], 16)
     return _PALETTE[h % len(_PALETTE)]
 
 
@@ -69,7 +69,7 @@ def _slug(name: str) -> str:
     s = re.sub(r"[^A-Za-z0-9]+", "_", raw).strip("_").lower()
     lossy = bool(re.search(r"[^\x00-\x7f]", raw))    # 含非 ASCII = 有信息丢失
     if len(s) < 3 or lossy:
-        h = hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
+        h = hashlib.md5(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         s = f"{s}_{h}" if s else f"p_{h}"
     return s
 

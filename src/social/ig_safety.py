@@ -226,4 +226,4 @@ def get_guard() -> IgSafety:
 def jittered_interval(base: int, config: dict) -> int:
     """给轮询间隔加随机抖动，避免机器般精确的固定节律。"""
     j = float(settings(config).get("jitter", 0.25))
-    return max(60, int(base * random.uniform(1 - j, 1 + j)))
+    return max(60, int(base * random.uniform(1 - j, 1 + j)))  # nosec B311

@@ -144,7 +144,7 @@ class SocialFetcher(BaseFetcher):
                 if lo > hi:
                     lo, hi = hi, lo
                 if lo > 0:
-                    return max(5, random.randint(lo, hi))
+                    return max(5, random.randint(lo, hi))  # nosec B311
             except (TypeError, ValueError):
                 pass
 
@@ -157,7 +157,7 @@ class SocialFetcher(BaseFetcher):
         jmax = float(cfg.get("interval_jitter_max", 1.1) or 1.1)
         if jmax < jmin:
             jmin, jmax = jmax, jmin
-        return max(5, int(base * random.uniform(jmin, jmax)))
+        return max(5, int(base * random.uniform(jmin, jmax)))  # nosec B311
 
     # ── 去重 ─────────────────────────────────────────────
 

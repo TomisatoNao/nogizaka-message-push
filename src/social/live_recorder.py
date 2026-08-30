@@ -18,7 +18,7 @@ import atexit
 import logging
 import os
 import signal
-import subprocess
+import subprocess  # nosec B404
 import threading
 import time
 
@@ -395,7 +395,7 @@ class LiveRecorder(threading.Thread):
         log.debug("[live:rec] ffmpeg cmd: %s", " ".join(cmd))
         try:
             with self._proc_lock:
-                self._proc = subprocess.Popen(
+                self._proc = subprocess.Popen(  # nosec B603
                     cmd, stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     creationflags=_NO_WINDOW | _NEW_GROUP,
@@ -520,7 +520,7 @@ class LiveRecorder(threading.Thread):
                    "-bsf:a", "aac_adtstoasc",
                    "-movflags", "+faststart", dst]
             try:
-                r = subprocess.run(cmd, capture_output=True, timeout=3600,
+                r = subprocess.run(cmd, capture_output=True, timeout=3600,  # nosec B603
                                    creationflags=_NO_WINDOW)
             except Exception as e:
                 log.warning("[live:rec] remux 失败（保留 TS）: %s", e)
@@ -628,7 +628,7 @@ class LiveRecorder(threading.Thread):
         no_video: list[str] = []
         for p in parts:
             try:
-                out = subprocess.run(
+                out = subprocess.run(  # nosec B603
                     [ffprobe, "-v", "error",
                      "-show_entries", "format=duration:stream=codec_type",
                      "-of", "default=noprint_wrappers=1:nokey=1", p],

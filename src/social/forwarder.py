@@ -12,7 +12,7 @@ social/forwarder.py — 社交平台多通道推送分发中心
 import asyncio
 import logging
 import os
-import subprocess
+import subprocess  # nosec B404
 
 import config.config as cfg
 from src.logger import log_all

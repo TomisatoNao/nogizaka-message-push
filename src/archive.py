@@ -216,13 +216,13 @@ def close_db() -> None:
     if conn is not None:
         try:
             conn.close()
-        except Exception:
+        except (sqlite3.Error, OSError):
             pass
         _local_storage.conn = None
     if _sqlite_conn is not None:
         try:
             _sqlite_conn.close()
-        except Exception:
+        except (sqlite3.Error, OSError):
             pass
         _sqlite_conn = None
     _schema_initialized = False
@@ -662,7 +662,8 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
     tmp_path = dest_dir / f"{ts}_{msg_id}.tmp"
     ok = False
     used_url = file_url
-    assert _media_sem is not None, "archive.initialize() 未调用"
+    if _media_sem is None:
+        raise RuntimeError("archive.initialize() 未调用")
 
     # 自动解析账号凭据 headers（私有媒体资源需附带鉴权请求头）
     if not headers:
@@ -1049,8 +1050,8 @@ def get_existing_letter_ids(member_dir: str) -> set[int]:
         try:
             rows = conn.execute("SELECT id FROM letters WHERE member_dir = ?;", (member_dir,)).fetchall()
             return {int(r[0]) for r in rows}
-        except Exception:
-            pass
+        except (sqlite3.Error, ValueError) as ex:
+            log_all(f"⚠️ 查询信件 ID 集合异常: {ex}", is_debug=True)
     letters = get_archive_letters(member_dir)
     return {int(item.get("id")) for item in letters if item.get("id")}
 
@@ -1092,8 +1093,8 @@ def get_archive_letters(member_dir: str) -> list[dict]:
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError, ValueError) as ex:
+            log_all(f"⚠️ 读取 letters.json 异常 ({member_dir}): {ex}", is_debug=True)
     return []
 
 
@@ -1105,8 +1106,8 @@ def get_letters_count(member_dir: str) -> int:
             row = conn.execute("SELECT COUNT(*) FROM letters WHERE member_dir = ?;", (member_dir,)).fetchone()
             if row:
                 return row[0]
-        except Exception:
-            pass
+        except sqlite3.Error as ex:
+            log_all(f"⚠️ 查询信件数量异常: {ex}", is_debug=True)
     letters = get_archive_letters(member_dir)
     return len(letters)
 
@@ -1122,8 +1123,8 @@ def list_members() -> list[str]:
             rows = conn.execute("SELECT DISTINCT member_dir FROM messages ORDER BY member_dir ASC;").fetchall()
             if rows:
                 return [r[0] for r in rows]
-        except Exception:
-            pass
+        except sqlite3.Error as ex:
+            log_all(f"⚠️ 查询归档成员列表异常: {ex}", is_debug=True)
     root = archive_root()
     if not root.is_dir():
         return []

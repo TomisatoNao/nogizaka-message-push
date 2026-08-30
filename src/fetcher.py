@@ -101,7 +101,7 @@ async def _handle_message(member: dict, msg: dict,
 
     save_sent_id(group_type, m_id, msg_id, id_list, id_set)
     l_time_ref[0] = updated
-    delay = max(0, cfg.QQ_SEND_INTERVAL + random.uniform(-0.3, 0.5))  # 基于配置值随机微调
+    delay = max(0, cfg.QQ_SEND_INTERVAL + random.uniform(-0.3, 0.5))  # nosec B311 -- 基于配置值随机微调
     await asyncio.sleep(delay)
     return True
 
@@ -290,7 +290,7 @@ async def _fetch_member_messages(member: dict):
                 is_error=True,
             )
             if attempt < MAX_FETCH_ATTEMPTS:
-                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)  # nosec B311
                 log_all(f"⏳ {m_name} {delay:.1f}s 后重试...", is_debug=True)
                 await asyncio.sleep(delay)
             else:

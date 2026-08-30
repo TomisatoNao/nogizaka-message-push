@@ -205,8 +205,8 @@ def _build_daily_summary() -> str:
                 """, (today_str[:7], today_str[:7]))
                 month_total = (c.fetchone() or [0])[0]
                 conn.close()
-            except Exception:
-                pass
+            except (sqlite3.Error, OSError, ValueError) as ex:
+                log_all(f"⚠️ 今日汇总 SQLite 查询跳过: {ex}", is_debug=True)
 
         # 回退从 load_month 统计（兼容无 archive.db 的情况）
         if not member_map:
@@ -460,13 +460,13 @@ def _calc_sleep_seconds() -> int:
 def _next_interval() -> tuple[int, str]:
     jst = _get_jst_now()
     if in_hour_range(jst.hour, cfg.NIGHT_START_HOUR, cfg.DAY_START_HOUR):
-        base = random.randint(*cfg.NIGHT_INTERVAL)
+        base = random.randint(*cfg.NIGHT_INTERVAL)  # nosec B311
         tag = "🌙 深夜低速"
     else:
-        base = random.randint(*cfg.DAY_INTERVAL)
+        base = random.randint(*cfg.DAY_INTERVAL)  # nosec B311
         tag = "☀️ 日间巡查"
     # ±10% 抖动，最低不低于 1s
-    jitter = int(base * random.uniform(-0.1, 0.1))
+    jitter = int(base * random.uniform(-0.1, 0.1))  # nosec B311
     return max(1, base + jitter), tag
 
 
@@ -799,13 +799,13 @@ def _is_pid_running(pid: int) -> bool:
 def _kill_pid(pid: int) -> None:
     try:
         if sys.platform == "win32":
-            import subprocess
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            import subprocess  # nosec B404
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)  # nosec B607, B603
         else:
             import signal
             os.kill(pid, signal.SIGTERM)
-    except Exception:
-        pass
+    except (ProcessLookupError, PermissionError, OSError) as ex:
+        log_all(f"⚠️ 终止进程 {pid} 跳过: {ex}", is_debug=True)
 
 
 def _acquire_instance_lock() -> None:
@@ -819,12 +819,12 @@ def _acquire_instance_lock() -> None:
                 log_all(f"⚠️ 检测到已存在运行中的主程序旧实例 (PID: {old_pid})，正在接管并终止旧实例...")
                 _kill_pid(old_pid)
                 time.sleep(1.0)
-        except Exception:
-            pass
+        except (OSError, ValueError) as ex:
+            log_all(f"⚠️ 读取旧 PID 文件异常: {ex}", is_debug=True)
     try:
         PID_FILE.write_text(str(my_pid), encoding="utf-8")
-    except Exception:
-        pass
+    except OSError as ex:
+        log_all(f"⚠️ 写入当前 PID 文件异常: {ex}", is_debug=True)
 
 
 async def main() -> None:
@@ -1116,11 +1116,11 @@ async def main() -> None:
         # 进程自替换：拉起全新进程，.env / 模块状态全部重新加载
         log_all("🔁 正在重启主程序...")
         if sys.platform == "win32":
-            import subprocess
-            subprocess.Popen([sys.executable] + sys.argv, close_fds=True)
+            import subprocess  # nosec B404
+            subprocess.Popen([sys.executable] + sys.argv, close_fds=True)  # nosec B603
             os._exit(0)
         else:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            os.execv(sys.executable, [sys.executable] + sys.argv)  # nosec B606
 
 
 if __name__ == "__main__":

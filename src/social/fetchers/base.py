@@ -57,7 +57,7 @@ class BaseFetcher(ABC):
         activity = _activity_multiplier(hour)
         jitter_min = cfg.get("interval_jitter_min", 0.8)
         jitter_max = cfg.get("interval_jitter_max", 1.2)
-        return int(base * activity * random.uniform(jitter_min, jitter_max))
+        return int(base * activity * random.uniform(jitter_min, jitter_max))  # nosec B311
 
     @abstractmethod
     def fetch(self) -> list[Post]:

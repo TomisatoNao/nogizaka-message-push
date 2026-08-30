@@ -24,7 +24,7 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
         return content
     import os
     import shutil
-    import subprocess
+    import subprocess  # nosec B404
     import tempfile
     ffmpeg = shutil.which("ffmpeg") or ""
     if not ffmpeg and os.path.exists(r"D:\Scoop\User\apps\ffmpeg\current\bin\ffmpeg.EXE"):
@@ -47,7 +47,7 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
             try:
                 probe_cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration",
                              "-of", "default=noprint_wrappers=1:nokey=1", in_f_path]
-                res = subprocess.check_output(probe_cmd, timeout=10).decode("utf-8").strip()
+                res = subprocess.check_output(probe_cmd, timeout=10).decode("utf-8").strip()  # nosec B603
                 if res:
                     dur = max(1.0, float(res))
             except Exception:
@@ -64,7 +64,7 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
             "-preset", "veryfast", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "64k", out_f_path
         ]
-        subprocess.run(cmd, capture_output=True, timeout=60, check=False)
+        subprocess.run(cmd, capture_output=True, timeout=60, check=False)  # nosec B603
         if os.path.exists(out_f_path) and os.path.getsize(out_f_path) > 0:
             with open(out_f_path, "rb") as out_f:
                 compressed = out_f.read()
@@ -288,7 +288,7 @@ class QQOfficialBot:
                     is_error=True,
                 )
                 if resp.status_code == 401:
-                    self._access_token = ""
+                    self._access_token = ""  # nosec B105
                     if not await self.ensure_access_token():
                         return None
                 elif resp.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
@@ -339,9 +339,9 @@ class QQOfficialBot:
         size_bytes = len(content)
 
         import hashlib
-        f_md5 = hashlib.md5(content).hexdigest()
-        f_sha1 = hashlib.sha1(content).hexdigest()
-        f_md5_10m = hashlib.md5(content[:10002432]).hexdigest()
+        f_md5 = hashlib.md5(content, usedforsecurity=False).hexdigest()
+        f_sha1 = hashlib.sha1(content, usedforsecurity=False).hexdigest()
+        f_md5_10m = hashlib.md5(content[:10002432], usedforsecurity=False).hexdigest()
 
         prep_url = f"{self._target_base(scope, openid)}/upload_prepare"
         prep_payload = {
@@ -401,7 +401,7 @@ class QQOfficialBot:
                 "upload_id": upload_id,
                 "part_index": p_idx,
                 "block_size": str(len(chunk)),
-                "md5": hashlib.md5(chunk).hexdigest(),
+                "md5": hashlib.md5(chunk, usedforsecurity=False).hexdigest(),
             }
             finish_resp = await self._post_json(finish_url, finish_payload)
             if not finish_resp or finish_resp.status_code != 200:

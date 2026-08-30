@@ -152,7 +152,7 @@ def get_auth_db() -> sqlite3.Connection:
                                     "INSERT OR REPLACE INTO users (username, role, password_json, created_at) VALUES (?, ?, ?, ?);",
                                     (uname, info.get("role", "viewer"), json.dumps(info.get("password", {})), float(info.get("created_at", 0)))
                                 )
-            except Exception:
+            except (OSError, json.JSONDecodeError, sqlite3.Error):
                 pass
 
         # 自动无缝平滑迁移旧版 data/web_credentials/*.json（若存在）
@@ -183,7 +183,7 @@ def get_auth_db() -> sqlite3.Connection:
                         cred_dir.rmdir()
                 except OSError:
                     pass
-            except Exception:
+            except (OSError, json.JSONDecodeError, sqlite3.Error):
                 pass
 
         _auth_conn = conn
@@ -204,7 +204,7 @@ def get_account_credential(account_id: str) -> dict | None:
             row = cur.fetchone()
             if row and row[0]:
                 return json.loads(row[0])
-        except Exception:
+        except (sqlite3.Error, json.JSONDecodeError):
             pass
     return None
 
@@ -541,7 +541,7 @@ def _load_sessions_from_db() -> None:
                     "role": row[2],
                     "expires_at": float(row[3]),
                 }
-    except Exception:
+    except sqlite3.Error:
         pass
     _sessions_loaded_from_db = True
 
@@ -578,7 +578,7 @@ def create_session(username: str, role: str, ttl_seconds: int) -> str:
                     "INSERT OR REPLACE INTO sessions (token, username, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?);",
                     (token, username, role, expires_at, now),
                 )
-        except Exception:
+        except sqlite3.Error:
             pass
     return token
 
@@ -609,7 +609,7 @@ def get_session(token: str, ttl_seconds: int = 0) -> dict | None:
                         "expires_at": float(row[2]),
                     }
                     _sessions[token] = sess
-            except Exception:
+            except sqlite3.Error:
                 pass
         if sess is None:
             return None
@@ -620,7 +620,7 @@ def get_session(token: str, ttl_seconds: int = 0) -> dict | None:
             try:
                 with conn:
                     conn.execute("UPDATE sessions SET expires_at = ? WHERE token = ?;", (new_exp, token))
-            except Exception:
+            except sqlite3.Error:
                 pass
         return dict(sess)
 
@@ -636,7 +636,7 @@ def destroy_session(token: str) -> None:
         try:
             with conn:
                 conn.execute("DELETE FROM sessions WHERE token = ?;", (token,))
-        except Exception:
+        except sqlite3.Error:
             pass
 
 
@@ -650,7 +650,7 @@ def destroy_user_sessions(username: str) -> None:
         try:
             with conn:
                 conn.execute("DELETE FROM sessions WHERE username = ?;", (username,))
-        except Exception:
+        except sqlite3.Error:
             pass
 
 
@@ -750,7 +750,7 @@ def destroy_refresh_token(token: str) -> None:
         try:
             with conn:
                 conn.execute("DELETE FROM refresh_tokens WHERE token = ?;", (token,))
-        except Exception:
+        except sqlite3.Error:
             pass
 
 
@@ -763,7 +763,7 @@ def destroy_user_refresh_tokens(username: str) -> None:
         try:
             with conn:
                 conn.execute("DELETE FROM refresh_tokens WHERE username = ?;", (username,))
-        except Exception:
+        except sqlite3.Error:
             pass
 
 

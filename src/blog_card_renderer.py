@@ -585,7 +585,7 @@ async def render_blog_card(post: dict) -> Optional[Path]:
             try:
                 tmp_png.unlink(missing_ok=True)
                 tmp_html.unlink(missing_ok=True)
-            except Exception:
+            except OSError:
                 pass
 
             log_all(
@@ -607,7 +607,7 @@ async def render_blog_card(post: dict) -> Optional[Path]:
         try:
             tmp_png.unlink(missing_ok=True)
             tmp_html.unlink(missing_ok=True)
-        except Exception:
+        except OSError:
             pass
 
     return None
