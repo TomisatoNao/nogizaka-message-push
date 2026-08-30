@@ -98,6 +98,7 @@ html.view-blog #blogGrid { display: block !important; }
   .nav-tab.active { background: var(--card-solid); color: var(--text-strong); font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
 
   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .month-nav-group { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
   #searchBox {
     flex: 1; min-width: 220px; padding: 8px 12px;
     border: 1px solid var(--border); border-radius: 8px;
@@ -2398,22 +2399,54 @@ html.view-blog #blogGrid { display: block !important; }
       font-size: 9px !important;
       padding: 1px 3px !important;
     }
+    .member-dropdown-wrap,
     .author-dropdown-wrap {
       width: 100% !important;
     }
+    .member-select-btn,
     .author-select-btn {
       width: 100% !important;
       justify-content: center !important;
+    }
+    /* 月份导航三件套（上月、月份下拉框、下月）固定在同一水平线 */
+    .month-nav-group {
+      display: flex !important;
+      width: 100% !important;
+      gap: 6px !important;
+      align-items: center !important;
+      box-sizing: border-box !important;
+    }
+    .month-nav-group #prevMonth,
+    .month-nav-group #nextMonth {
+      flex: 0 0 auto !important;
+      white-space: nowrap !important;
+      padding: 7px 12px !important;
+      font-size: 13px !important;
+    }
+    .month-nav-group #monthSelect {
+      flex: 1 1 0 !important;
+      min-width: 0 !important;
+      text-align: center !important;
+      padding: 7px 26px 7px 10px !important;
+      font-size: 13.5px !important;
     }
     /* 搜索栏单行紧凑 Flex 布局 */
     .toolbar {
       gap: 8px !important;
       margin-bottom: 10px !important;
     }
+    .msg-toolbar,
     .blog-toolbar {
       display: flex !important;
       flex-direction: column !important;
+      align-items: stretch !important;
       gap: 8px !important;
+    }
+    .msg-toolbar #typeChips {
+      width: 100% !important;
+      display: flex !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
     }
     /* 移动端作者选择与成员选择弹出层升级为底部抽屉 */
     .author-popover, .member-popover {
