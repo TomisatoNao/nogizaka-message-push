@@ -313,8 +313,9 @@ html.view-blog #blogGrid { display: block !important; }
   .tag-input { font-size: 12px; padding: 2px 8px; border: 1px solid var(--accent);
                border-radius: 999px; background: var(--bg); color: var(--text);
                width: 120px; outline: none; }
-  .toggle-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-  .toggle-row input[type=checkbox] { accent-color: var(--accent); }
+  .toggle-row { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+  .toggle-row:hover { color: var(--text); }
+  .toggle-row input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
   body.hide-tags .tags { display: none !important; }
   /* 灯箱 */
   #backTop { position: fixed; bottom: 32px; right: 28px; z-index: 1100; display: none;
@@ -2434,6 +2435,10 @@ html.view-blog #blogGrid { display: block !important; }
     .toolbar {
       gap: 8px !important;
       margin-bottom: 10px !important;
+    }
+    .toggle-row {
+      margin-left: auto !important;
+      font-size: 12.5px !important;
     }
     .msg-toolbar,
     .blog-toolbar {
