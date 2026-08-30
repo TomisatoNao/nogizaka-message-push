@@ -2727,7 +2727,16 @@ if ($("btnSecretSmartParse")) {
     const inputs = $("secretFields").querySelectorAll("input");
     for (const input of inputs) {
       const env = input.dataset.env || "";
-      if (env.endsWith("_TOKEN") && !env.endsWith("_REFRESH_TOKEN") && tokenVal) {
+      if (env === "INSTAGRAM_SESSIONID") {
+        let sid = "";
+        const m = cleaned.match(/sessionid[\s=:\t]+([^\s;'"&]+)/i) || cleaned.match(/(?:^|[\s\t])([0-9]{5,15}%3A[a-zA-Z0-9_\-]+%3A[a-zA-Z0-9_\-]+)(?:$|[\s\t\r\n])/);
+        if (m) sid = m[1] || m[0];
+        if (sid || cleaned.includes("Netscape") || cleaned.includes("sessionid")) {
+          input.value = sid || cleaned;
+          found++;
+          extractedDetails.push("Instagram Session Cookie");
+        }
+      } else if (env.endsWith("_TOKEN") && !env.endsWith("_REFRESH_TOKEN") && tokenVal) {
         input.value = tokenVal;
         found++;
       } else if (env.endsWith("_COOKIE") && cookieVal) {

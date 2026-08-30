@@ -3380,6 +3380,23 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(values, dict):
             self._send_json({"ok": False, "errors": ["缺少 values 对象"]}, 400)
             return
+
+        # 智能支持：若用户在 INSTAGRAM_SESSIONID 填入了包含多行 Netscape / JSON / cURL 的完整 Cookie
+        if "INSTAGRAM_SESSIONID" in values:
+            raw_ig = str(values["INSTAGRAM_SESSIONID"]).strip()
+            if "\n" in raw_ig or "Netscape" in raw_ig or "sessionid" in raw_ig or "{" in raw_ig or "\t" in raw_ig:
+                try:
+                    from src.social import ig_session
+                    parsed_ig = ig_session.parse_cookies(raw_ig)
+                    if parsed_ig:
+                        ig_session.write_cookie_file(parsed_ig)
+                        if parsed_ig.get("sessionid"):
+                            values["INSTAGRAM_SESSIONID"] = parsed_ig["sessionid"]
+                        if parsed_ig.get("ds_user_id"):
+                            values["INSTAGRAM_DS_USER_ID"] = parsed_ig["ds_user_id"]
+                except Exception:  # nosec B110
+                    pass
+
         errors = validate_secret_values(values)
         account = body.get("account")
         if account is not None:
