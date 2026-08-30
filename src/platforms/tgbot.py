@@ -60,8 +60,22 @@ class TGBot:
         try:
             from telegram import Bot
             from telegram.request import HTTPXRequest
-            
-            self._request = HTTPXRequest(read_timeout=30, connect_timeout=10, write_timeout=15)
+
+            proxy_url = getattr(cfg, "PROXY", "") or None
+            try:
+                self._request = HTTPXRequest(
+                    read_timeout=30,
+                    connect_timeout=10,
+                    write_timeout=15,
+                    proxy=proxy_url,
+                )
+            except (TypeError, ValueError):
+                self._request = HTTPXRequest(
+                    read_timeout=30,
+                    connect_timeout=10,
+                    write_timeout=15,
+                    proxy_url=proxy_url,
+                )
             self._bot = Bot(token=self.token, request=self._request)
         except ImportError:
             log_all("⚠️ python-telegram-bot 未安装，Telegram 推送不可用", is_error=True)

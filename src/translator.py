@@ -112,7 +112,8 @@ async def _post_json(url: str, payload: dict, headers: dict | None = None, custo
                 else:
                     raise
 
-    async with httpx.AsyncClient(timeout=req_timeout) as client:
+    proxy_url = getattr(cfg, "PROXY", "") or None
+    async with httpx.AsyncClient(timeout=req_timeout, proxy=proxy_url) as client:
         return await client.post(url, json=payload, headers=req_headers)
 
 
