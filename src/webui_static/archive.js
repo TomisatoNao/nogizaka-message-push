@@ -2403,18 +2403,45 @@ function _updateAdminUI(isAdmin) {
   });
 }
 
-// ── 成员工具下拉菜单点击切换与点击外部自动关闭 ────────────────
+// ── 成员工具下拉菜单（桌面端下拉 / 移动端底部 Action Sheet 抽屉） ────────────────
 const archiveDropdownEl = $("archiveToolsDropdown");
 const archiveBtnEl = $("btnArchiveMenu");
-if (archiveBtnEl && archiveDropdownEl) {
+const archiveSheetEl = $("archiveToolsSheet");
+const closeArchiveSheet = () => {
+  if (archiveSheetEl) archiveSheetEl.style.display = "none";
+};
+
+if (archiveBtnEl) {
   archiveBtnEl.addEventListener("click", (e) => {
     e.stopPropagation();
-    archiveDropdownEl.classList.toggle("open");
+    if (window.innerWidth <= 768) {
+      if (archiveSheetEl) archiveSheetEl.style.display = "flex";
+    } else if (archiveDropdownEl) {
+      archiveDropdownEl.classList.toggle("open");
+    }
   });
+}
+
+if (archiveDropdownEl) {
   document.addEventListener("click", (e) => {
     if (!archiveDropdownEl.contains(e.target)) {
       archiveDropdownEl.classList.remove("open");
     }
+  });
+}
+
+if ($("archiveToolsBackdrop")) $("archiveToolsBackdrop").addEventListener("click", closeArchiveSheet);
+if ($("sheetBtnCancel")) $("sheetBtnCancel").addEventListener("click", closeArchiveSheet);
+if ($("sheetBtnArchiveMember")) {
+  $("sheetBtnArchiveMember").addEventListener("click", () => {
+    closeArchiveSheet();
+    promptArchiveMember();
+  });
+}
+if ($("sheetBtnArchiveMessage")) {
+  $("sheetBtnArchiveMessage").addEventListener("click", () => {
+    closeArchiveSheet();
+    promptArchiveMessage();
   });
 }
 

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>坂道监控 · 消息归档</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260830_3">
-<script src="/static/theme.js?v=20260830_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260830_3">
+<link rel="stylesheet" href="/static/theme.css?v=20260830_5">
+<script src="/static/theme.js?v=20260830_5"></script>
+<link rel="stylesheet" href="/static/archive.css?v=20260830_5">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -315,9 +315,24 @@
   </div>
 </div>
 
-<!-- Toast Container -->
-<div id="toastContainer" class="toast-container"></div>
+<!-- Mobile Action Sheet for Member Archive Tools -->
+<div id="archiveToolsSheet" class="mobile-action-sheet" style="display:none;">
+  <div class="sheet-backdrop" id="archiveToolsBackdrop"></div>
+  <div class="sheet-card">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">👥 成员归档工具</div>
+    <button class="sheet-item" id="sheetBtnArchiveMember" type="button">
+      <span class="icon">📄</span>
+      <span class="label">抓取成员全量博客</span>
+    </button>
+    <button class="sheet-item" id="sheetBtnArchiveMessage" type="button">
+      <span class="icon">💬</span>
+      <span class="label">回填成员历史消息</span>
+    </button>
+    <button class="sheet-cancel" id="sheetBtnCancel" type="button">取消</button>
+  </div>
+</div>
 
-<script src="/static/archive.js?v=20260830_3"></script>
+<script src="/static/archive.js?v=20260830_5"></script>
 </body>
 </html>

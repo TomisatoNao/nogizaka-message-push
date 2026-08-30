@@ -312,6 +312,7 @@ header.app-header {
     max-width: calc(100vw - 125px);
   }
   .header-actions::-webkit-scrollbar { display: none; }
+  #btnReloadFile, #btnRestart { display: none !important; }
   .header-actions .btn {
     padding: 4px 8px;
     font-size: 12px;

@@ -402,8 +402,10 @@ html.view-blog #blogGrid { display: block !important; }
     .cal-dow { font-size: 11.5px; }
     .cal-head button { padding: 6px 10px; min-height: 40px; font-size: 13px; }
 
-    /* 搜索栏满宽独占一行 */
-    #searchBox { flex-basis: 100%; min-width: 0; }
+    /* 搜索栏紧凑单行合并 */
+    #searchBox { flex: 1 1 auto; min-width: 0; }
+    #searchSubmit { flex: none; padding: 8px 16px; white-space: nowrap; }
+    #searchClear { flex: none; padding: 8px 10px; }
     .stats { flex-basis: 100%; margin-left: 0; font-size: 12px; }
     .toolbar { gap: 8px; }
     .chip { padding: 8px 12px; font-size: 13px; }
@@ -1952,12 +1954,48 @@ html.view-blog #blogGrid { display: block !important; }
     box-shadow: none;
   }
   @media (max-width: 768px) {
-    .br-header { padding: 0 14px; gap: 8px; }
-    .br-divider { display: none; }
-    .br-title { max-width: 140px; font-size: 14px; }
-    .br-back-btn span:not(.br-back-icon) { display: none; }
-    .br-action-btn span:not(.btn-icon) { display: none; }
-    .br-action-btn { padding: 6px 9px; }
+    .br-header {
+      padding: 0 10px;
+      gap: 6px;
+      height: 52px;
+    }
+    .br-header-left {
+      flex: none;
+    }
+    .br-divider,
+    .br-title-wrap {
+      display: none !important;
+    }
+    .br-back-btn {
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .br-back-btn span:not(.br-back-icon) {
+      display: none;
+    }
+    .br-header-actions {
+      flex: 1;
+      justify-content: flex-end;
+      gap: 5px;
+    }
+    .br-mode-selector {
+      padding: 2px;
+      gap: 1px;
+    }
+    .brm-btn {
+      padding: 4px 7px;
+      font-size: 11px;
+    }
+    .br-action-btn span:not(.btn-icon) {
+      display: none;
+    }
+    .br-action-btn {
+      padding: 5px 8px;
+      font-size: 13px;
+      min-width: 32px;
+      height: 32px;
+      justify-content: center;
+    }
   }
 
   .br-content { padding: 30px 20px 80px; max-width: 760px; margin: 0 auto; width: 100%; line-height: 1.8; font-size: 16px; background: var(--card); min-height: 100vh; border-left: 1px solid var(--border); border-right: 1px solid var(--border); box-shadow: var(--shadow-sm); }
@@ -2390,4 +2428,83 @@ html.view-blog #blogGrid { display: block !important; }
       z-index: 99999 !important;
       box-sizing: border-box !important;
     }
+  }
+
+  /* ── Mobile Action Sheet (通用移动端底部抽屉) ── */
+  .mobile-action-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .mobile-action-sheet .sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: fadeIn 0.2s ease-out;
+  }
+  .mobile-action-sheet .sheet-card {
+    position: relative;
+    z-index: 1;
+    background: var(--card-solid);
+    border-top: 1px solid var(--border);
+    border-radius: 24px 24px 0 0;
+    padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.35);
+    animation: sheetUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-sizing: border-box;
+  }
+  .mobile-action-sheet .sheet-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--border-soft);
+    border-radius: 999px;
+    margin: 0 auto 6px;
+  }
+  .mobile-action-sheet .sheet-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .mobile-action-sheet .sheet-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid var(--border-soft);
+    background: color-mix(in srgb, var(--card) 85%, var(--bg));
+    color: var(--text-strong);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    transition: all var(--tr-fast);
+  }
+  .mobile-action-sheet .sheet-item:active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    transform: scale(0.98);
+  }
+  .mobile-action-sheet .sheet-cancel {
+    margin-top: 4px;
+    padding: 12px;
+    border-radius: 14px;
+    border: none;
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
   }
