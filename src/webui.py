@@ -771,7 +771,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Cache-Control", "public, max-age=120, must-revalidate")
             self.end_headers()
             return
         body, enc_headers = self._compress_if_supported(body)
@@ -779,7 +779,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
-        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Cache-Control", "public, max-age=120, must-revalidate")
         for k, v in enc_headers.items():
             self.send_header(k, v)
         self.end_headers()
