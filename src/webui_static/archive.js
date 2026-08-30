@@ -2485,55 +2485,62 @@ if ($("btnBlogAuthorSearchClear")) {
 
 // ── 登录状态 ─────────────────────────────────────
 window._isLoggedIn = false;
-(async function initAuth() {
-  try {
-    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
-    const adminLink = $("adminLink");
-    if (!me.auth_enabled) { 
-      window._isLoggedIn = true; 
-      _updateAdminUI(true);
-      if (adminLink) {
-        adminLink.hidden = false;
-        adminLink.style.display = "inline-flex";
-        adminLink.href = "/";
-        adminLink.title = "进入系统管理后台";
-        adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+let _authInitPromise = null;
+
+async function initAuth() {
+  if (_authInitPromise) return _authInitPromise;
+  _authInitPromise = (async () => {
+    try {
+      const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+      const adminLink = $("adminLink");
+      if (!me.auth_enabled) { 
+        window._isLoggedIn = true; 
+        _updateAdminUI(true);
+        if (adminLink) {
+          adminLink.hidden = false;
+          adminLink.style.display = "inline-flex";
+          adminLink.href = "/";
+          adminLink.title = "进入系统管理后台";
+          adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+        }
+        $("logoutBtn").hidden = true;
+        $("logoutBtn").style.display = "none";
+        return; 
       }
-      $("logoutBtn").hidden = true;
-      $("logoutBtn").style.display = "none";
-      return; 
-    }
-    if (me.user) {
-      window._isLoggedIn = true;
-      $("whoami").textContent = "👤 " + me.user.username;
-      $("logoutBtn").hidden = false;
-      $("logoutBtn").style.display = "inline-flex";
-      const isAdmin = me.user.role === "admin";
-      _updateAdminUI(isAdmin);
-      if (adminLink) {
-        adminLink.hidden = !isAdmin;
-        adminLink.style.display = isAdmin ? "inline-flex" : "none";
-        adminLink.href = "/";
-        adminLink.title = "进入系统管理后台";
-        adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+      if (me.user) {
+        window._isLoggedIn = true;
+        $("whoami").textContent = "👤 " + me.user.username;
+        $("logoutBtn").hidden = false;
+        $("logoutBtn").style.display = "inline-flex";
+        const isAdmin = me.user.role === "admin";
+        _updateAdminUI(isAdmin);
+        if (adminLink) {
+          adminLink.hidden = !isAdmin;
+          adminLink.style.display = isAdmin ? "inline-flex" : "none";
+          adminLink.href = "/";
+          adminLink.title = "进入系统管理后台";
+          adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+        }
+      } else {
+        window._isLoggedIn = false;
+        $("whoami").textContent = "";
+        $("logoutBtn").hidden = true;
+        $("logoutBtn").style.display = "none";
+        _updateAdminUI(false);
+        // 未登录 / 游客免登录模式下：展示「管理后台」按钮，点击前往登录页 /login
+        if (adminLink) {
+          adminLink.hidden = false;
+          adminLink.style.display = "inline-flex";
+          adminLink.href = "/login?next=/";
+          adminLink.title = "登录管理员账号以进入后台";
+          adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
+        }
       }
-    } else {
-      window._isLoggedIn = false;
-      $("whoami").textContent = "";
-      $("logoutBtn").hidden = true;
-      $("logoutBtn").style.display = "none";
-      _updateAdminUI(false);
-      // 未登录 / 游客免登录模式下：展示「管理后台」按钮，点击前往登录页 /login
-      if (adminLink) {
-        adminLink.hidden = false;
-        adminLink.style.display = "inline-flex";
-        adminLink.href = "/login?next=/";
-        adminLink.title = "登录管理员账号以进入后台";
-        adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
-      }
-    }
-  } catch (e) { /* 忽略 */ }
-})();
+    } catch (e) { /* 忽略 */ }
+  })();
+  return _authInitPromise;
+}
+initAuth();
 const logoutBtn = $("logoutBtn");
 if (logoutBtn) {
   logoutBtn.addEventListener("click", async (e) => {
@@ -3155,7 +3162,7 @@ async function handleRoute(isInitial = false) {
 
   // 1.5 信件模式：#letter, #letter=...
   if (p.has("letter") || rawHash === "letter") {
-    if (!window._isArchiveAdmin) {
+    if (window._isArchiveAdmin === false) {
       switchMainTab("msg", true);
       return;
     }
@@ -3226,12 +3233,35 @@ async function boot() {
     }
   }
 
+  // 极速预处理：如果 URL 包含信件路由 #letter，0ms 同步切换至信件视图骨架，杜绝页面抖动
+  if (p.has("letter") || (location.hash || "").replace(/^#/, "") === "letter") {
+    if ($("tabHome")) $("tabHome").classList.remove("active");
+    if ($("tabMsg")) $("tabMsg").classList.remove("active");
+    if ($("tabBlog")) $("tabBlog").classList.remove("active");
+    if ($("tabLetter")) {
+      $("tabLetter").classList.add("active");
+      $("tabLetter").hidden = false;
+      $("tabLetter").style.display = "inline-flex";
+    }
+    if ($("archiveHome")) $("archiveHome").classList.remove("active");
+    const layout = document.querySelector('.layout');
+    if (layout) layout.style.display = '';
+    if ($("timeline")) $("timeline").style.display = "none";
+    if ($("blogGrid")) $("blogGrid").style.display = "none";
+    if ($("letterGrid")) $("letterGrid").style.display = "block";
+    const msgTb = document.querySelector(".msg-toolbar");
+    if (msgTb) msgTb.style.display = "none";
+  }
+
   curType = p.get("t") || "";
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();
   initTypeChips();
 
-  await Promise.all([loadMembers(true), handleRoute(true)]);
+  // 确保认证信息与成员列表加载完成后再分发路由，杜绝鉴权竞争
+  await initAuth();
+  await loadMembers(true);
+  await handleRoute(true);
 }
 
 boot();
