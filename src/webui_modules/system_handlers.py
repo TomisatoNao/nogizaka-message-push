@@ -150,7 +150,9 @@ def handle_proxy_test(handler, body: dict) -> None:
     """POST /api/proxy/test 测试网络代理连通性。"""
     proxy_url = str(body.get("proxy", "")).strip()
     targets = [
-        ("Google (Gemini)", "https://generativelanguage.googleapis.com"),
+        # 根路径固定返回 404；使用真实 API 路径。无 API Key 返回 4xx 仍代表
+        # 代理、DNS、TLS 与目标服务均可达。
+        ("Google (Gemini)", "https://generativelanguage.googleapis.com/v1beta/models"),
         ("Telegram Bot API", "https://api.telegram.org"),
         ("X (Twitter)", "https://x.com"),
         ("Instagram", "https://www.instagram.com"),
@@ -162,7 +164,17 @@ def handle_proxy_test(handler, body: dict) -> None:
             async with httpx.AsyncClient(proxy=proxy_url or None, timeout=8.0, follow_redirects=True) as client:
                 r = await client.head(url)
                 latency = round((time.time() - t0) * 1000)
-                return {"target": name, "ok": r.status_code < 500, "status": r.status_code, "latency_ms": latency}
+                reachable = r.status_code < 500
+                # name/status_code 是 WebUI 的规范字段；旧字段保留，避免已有
+                # 外部脚本或旧前端在升级期间断裂。
+                return {
+                    "name": name,
+                    "target": name,
+                    "ok": reachable,
+                    "status_code": r.status_code,
+                    "status": r.status_code,
+                    "latency_ms": latency,
+                }
         except Exception as e:
             return {"target": name, "ok": False, "error": str(e), "latency_ms": None}
 
@@ -171,7 +183,16 @@ def handle_proxy_test(handler, body: dict) -> None:
         return await asyncio.gather(*tasks)
 
     results = asyncio.run(_run_all())
-    send_json(handler, {"ok": True, "proxy": proxy_url or "(直连)", "results": results})
+    success_count = sum(1 for result in results if result["ok"])
+    send_json(handler, {
+        "ok": True,
+        "proxy": proxy_url or "(直连)",
+        "results": results,
+        "all_ok": success_count == len(results),
+        "any_ok": success_count > 0,
+        "success_count": success_count,
+        "total_count": len(results),
+    })
 
 
 def handle_members(handler, load_raw_config_fn) -> None:

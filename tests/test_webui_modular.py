@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import json
 from io import BytesIO
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -144,3 +145,42 @@ def test_social_handlers_restore_webui_routes():
     assert callable(social_handlers.handle_ig_session_save)
     assert callable(social_handlers.handle_ig_session_check)
     assert callable(social_handlers.handle_ig_session_clear)
+
+
+def test_proxy_test_response_matches_webui_contract(monkeypatch):
+    class FakeResponse:
+        status_code = 204
+
+    class FakeClient:
+        seen_urls = []
+
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def head(self, url):
+            self.seen_urls.append(url)
+            return FakeResponse()
+
+    monkeypatch.setattr(system_handlers.httpx, "AsyncClient", FakeClient)
+    handler = _ResponseHandler()
+    system_handlers.handle_proxy_test(handler, {"proxy": "http://proxy.example:7890"})
+    payload = json.loads(handler.wfile.getvalue())
+
+    assert payload["ok"] and payload["all_ok"] and payload["any_ok"]
+    assert payload["success_count"] == payload["total_count"] == 4
+    first = payload["results"][0]
+    assert first["name"] == first["target"] == "Google (Gemini)"
+    assert first["status_code"] == first["status"] == 204
+    assert "https://generativelanguage.googleapis.com/v1beta/models" in FakeClient.seen_urls
+
+
+def test_proxy_test_frontend_has_legacy_field_fallbacks():
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    assert "r.name ?? r.target" in html
+    assert "r.status_code ?? r.status" in html

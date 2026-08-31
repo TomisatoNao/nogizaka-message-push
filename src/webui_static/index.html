@@ -2570,11 +2570,14 @@ $("btnTestProxy")?.addEventListener("click", async () => {
       (res.all_ok ? '✅ 全部节点连通正常' : (res.any_ok ? '⚠️ 部分节点连通成功' : '❌ 节点全部连通失败')) +
       ` <span style="font-weight:normal; color:var(--muted); font-size:12px;">(${proxy ? '代理: ' + esc(proxy) : '当前直连'})</span></div>`;
     for (const r of (res.results || [])) {
+      // 兼容旧服务端的 target/status 字段，避免升级中出现 undefined。
+      const target = r.name ?? r.target ?? "未知节点";
+      const status = r.status_code ?? r.status ?? "—";
       html += `<div style="display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:2px 0;">
-        <span>${esc(r.name)}</span>
+        <span>${esc(target)}</span>
         <div style="display:flex; align-items:center; gap:8px;">
           <span style="color:var(--muted); font-size:11.5px;">${r.latency_ms}ms</span>
-          <span class="cred ${r.ok ? 'ok' : 'miss'}">${r.ok ? '✓ 连通 (' + r.status_code + ')' : '✗ 失败'}</span>
+          <span class="cred ${r.ok ? 'ok' : 'miss'}">${r.ok ? '✓ 连通 (' + status + ')' : '✗ 失败'}</span>
         </div>
       </div>`;
       if (r.error) {
