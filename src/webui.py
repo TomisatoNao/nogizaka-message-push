@@ -2,38 +2,19 @@
 # webui.py — 网页管理端：在浏览器里编辑 config.json 并热重载
 # ============================================================
 # 零新增依赖：用 stdlib http.server 跑在后台守护线程（与 watcher 同模式）。
-#
-# 端点：
-#   GET  /            → 管理页面（src/webui_static/index.html）
-#   GET  /api/config  → 读取 config.json（解析后的对象 + 凭证状态）
-#   PUT  /api/config  → 校验 → 原子写回 config.json → 热重载
-#   POST /api/reload  → 仅触发热重载
-#
-# 鉴权：.env 里设置 WEB_ADMIN_TOKEN 后，所有 /api 请求须带
-#       X-Auth-Token 头。默认只绑定 127.0.0.1，本机访问可不设 token。
-#
-# 保存说明：config.json 会按固定分区重新生成（含标准分区注释），
-#           手写的自定义注释会丢失。
 # ============================================================
 from __future__ import annotations
 
-import asyncio
-import gzip
-import hmac
 import json
 import os
-import random
+from pathlib import Path
 import re
 import socket
-import sqlite3
 import sys
 import threading
 import time as _time
-from datetime import datetime, timedelta
-from html import escape as html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, unquote
 
 from src.webui_modules.config_service import (
     _FORBIDDEN_ENV_KEYS,
@@ -57,6 +38,57 @@ from src.webui_modules.config_service import (
     update_env_file,
     validate_config,
     validate_secret_values,
+)
+from src.webui_modules.media_service import serve_file_range
+from src.webui_modules.static_handler import (
+    ARCHIVE_HTML_PATH,
+    INDEX_HTML_PATH,
+    LOGIN_HTML_PATH,
+    NOT_FOUND_HTML_PATH,
+    compress_if_supported,
+    send_404,
+    send_html,
+    send_html_text,
+    send_json,
+    send_static,
+)
+from src.webui_modules.auth_handlers import (
+    LOOPBACK_HOSTS,
+    REFRESH_COOKIE,
+    SESSION_COOKIE,
+    api_token_ok,
+    check_host,
+    check_origin,
+    cookie_refresh_token,
+    cookie_token,
+    current_user,
+    guard,
+    handle_auth_me,
+    handle_login,
+    handle_logout,
+    handle_refresh,
+    handle_users_get,
+    handle_users_write,
+)
+from src.webui_modules.system_handlers import (
+    env_status as _env_status,
+    handle_logs as _sys_handle_logs,
+    handle_members as _sys_handle_members,
+    handle_openid_action as _sys_handle_openid_action,
+    handle_openid_status as _sys_handle_openid_status,
+    handle_proxy_test as _sys_handle_proxy_test,
+    handle_status as _sys_handle_status,
+    handle_storage as _sys_handle_storage,
+    handle_storage_clean as _sys_handle_storage_clean,
+    handle_test_push as _sys_handle_test_push,
+    smart_parse_credentials_text as _sys_smart_parse,
+    tail_file as _tail_file,
+)
+from src.webui_modules.archive_handlers import (
+    ARCHIVE_TYPES,
+    BLOG_IMAGE_DIR,
+    get_blog_db as _get_blog_db,
+    handle_archive as _mod_handle_archive,
 )
 
 __all__ = [
@@ -93,47 +125,19 @@ PROJECT_ROOT = _BASE_DIR
 CONFIG_PATH = _BASE_DIR / "config" / "config.json"
 SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 ENV_PATH = _BASE_DIR / ".env"
-_STATIC_PATH = Path(__file__).resolve().parent / "webui_static" / "index.html"
-_ARCHIVE_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "archive.html"
-_LOGIN_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "login.html"
-_404_HTML_PATH = Path(__file__).resolve().parent / "webui_static" / "404.html"
 
-_SESSION_COOKIE = "sakamichi_session"
-_REFRESH_COOKIE = "sakamichi_refresh_token"
+_SESSION_COOKIE = SESSION_COOKIE
+_REFRESH_COOKIE = REFRESH_COOKIE
+_LOOPBACK_HOSTS = LOOPBACK_HOSTS
 
-# 首页 API 缓存（基于 archive.db 的 mtime + 日期，保证每天随机结果不同）
-_home_cache: dict | None = None
-_home_cache_key: tuple[float, str] | None = None
-
-# 热重载成功后的补偿回调（由 start_webui 注入，签名 on_reload(success: bool)）
 _on_reload_cb = None
-
-# 重启回调（由主程序注入；触发优雅停机 + 进程自替换。独立模式下为 None）
 _on_restart_cb = None
-
-# 立即巡查回调（由主程序注入；唤醒主循环跳过等待。独立模式下为 None）
 _on_poll_cb = None
-
-# 测试推送回调（由主程序注入；签名 (channel, target, text) -> (ok, err)）
 _on_test_push_cb = None
-
-# openid 监听回调（由主程序注入；把协程调度到主事件循环执行）
 _on_openid_cb = None
-
-# 串行化所有写操作（config.json / .env 都是 read-modify-write，
-# ThreadingHTTPServer 的并发请求不加锁会互相丢更新）
 _mutation_lock = threading.Lock()
-
-# 绑定回环地址时校验 Host 头，阻断 DNS rebinding（恶意网页把自己域名解析到
-# 127.0.0.1 就能绕过浏览器同源策略直接调本地 API）。绑定其他地址时不启用 ——
-# 局域网访问的合法 Host 无法穷举，此时安全性由 WEB_ADMIN_TOKEN 保证。
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _enforce_host_check = False
 
-
-# ================================================================
-# HTTP 服务
-# ================================================================
 
 def _load_raw_config() -> dict:
     """从磁盘读取 config.json（JSONC），返回新格式对象。"""
@@ -142,247 +146,98 @@ def _load_raw_config() -> dict:
         return json5.load(f)
 
 
-def _env_status() -> dict:
-    return {
-        "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
-        "ZHIPU_API_KEY": bool(os.getenv("ZHIPU_API_KEY")),
-        "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
-        "INSTAGRAM_SESSIONID": bool(os.getenv("INSTAGRAM_SESSIONID")),
-        "X_AUTH_TOKEN": bool(os.getenv("X_AUTH_TOKEN")),
-        "TIKTOK_SESSIONID": bool(os.getenv("TIKTOK_SESSIONID")),
-    }
-
-
-_TAIL_READ_BYTES = 262144   # 只读文件末尾 256KB，滚动日志单文件 10MB，够看不卡
-
-
-def _tail_file(path: Path, max_lines: int) -> list[str]:
-    """读取文件末尾 max_lines 行（长行截断到 2000 字符）。"""
-    if not path.exists():
-        return []
-    with open(path, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        size = f.tell()
-        f.seek(max(0, size - _TAIL_READ_BYTES))
-        data = f.read()
-    lines = data.decode("utf-8", errors="replace").splitlines()
-    if size > _TAIL_READ_BYTES and lines:
-        lines = lines[1:]   # 首行可能被截断，丢弃
-    return [ln[:2000] for ln in lines[-max_lines:]]
-
-
-BLOG_IMAGE_DIR = Path("data/blog_images")
-_blog_db_local = threading.local()
-
-
-def _get_blog_db() -> sqlite3.Connection:
-    """获取线程本地的博客 DB 连接（WAL 模式 + 并发隔离）。"""
-    from src.blog_fetcher import init_blog_db
-    conn = getattr(_blog_db_local, "conn", None)
-    if conn is not None:
-        try:
-            conn.execute("SELECT 1;")
-            return conn
-        except (sqlite3.Error, OSError):
-            try:
-                conn.close()
-            except (sqlite3.Error, OSError):
-                pass
-            _blog_db_local.conn = None
-    conn = init_blog_db()
-    _blog_db_local.conn = conn
-    return conn
-
-
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    server_version = "SakamichiWebUI/1.0"
+    timeout = 30
+    _ARCHIVE_TYPES = ARCHIVE_TYPES
 
     def handle(self) -> None:
-        """处理 HTTP 请求，静默忽略客户端主动断连或刷新等无害网络异常。"""
         try:
             super().handle()
+        except (socket.timeout, TimeoutError):
+            pass
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             pass
-
-    def _query_params(self) -> dict[str, str]:
-        """解析 URL 查询参数。"""
-        from urllib.parse import urlparse, parse_qs
-        qs = urlparse(self.path).query
-        result = {}
-        for k, v in parse_qs(qs).items():
-            result[k] = v[0] if v else ""
-        return result
-    server_version = "SakamichiWebUI/1.0"
-    timeout = 30  # 单个 Socket 连接最大超时 30s，免疫 Slowloris 慢速挂起 DoS 攻击
-
-    # ── 工具 ─────────────────────────────────────────────
-    def _compress_if_supported(self, data: bytes) -> tuple[bytes, dict[str, str]]:
-        """若客户端支持 gzip 且数据大于 512 字节，进行 gzip 压缩并添加 Content-Encoding 头。"""
-        accept_encoding = self.headers.get("Accept-Encoding", "") if hasattr(self, "headers") and self.headers else ""
-        if "gzip" in accept_encoding and len(data) > 512:
-            try:
-                compressed = gzip.compress(data, compresslevel=6)
-                if len(compressed) < len(data):
-                    return compressed, {"Content-Encoding": "gzip"}
-            except (gzip.BadGzipFile, OSError, ValueError):
-                pass
-        return data, {}
-
-    def _send_json(self, obj: dict, code: int = 200) -> None:
-        try:
-            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-            body, enc_headers = self._compress_if_supported(body)
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            for k, v in enc_headers.items():
-                self.send_header(k, v)
-            self.end_headers()
-            self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        except Exception:
             pass
 
+    # ── 兼容性代理方法 ─────────────────────────────────────
+    def _query_params(self) -> dict[str, str]:
+        qs = parse_qs(self.path.partition("?")[2])
+        return {k: v[0] for k, v in qs.items() if v}
+
+    def _compress_if_supported(self, data: bytes) -> tuple[bytes, dict[str, str]]:
+        return compress_if_supported(self, data)
+
+    def _send_json(self, obj: dict, code: int = 200) -> None:
+        send_json(self, obj, code)
+
     def _check_host(self) -> bool:
-        """绑定回环地址时校验 Host 头（防 DNS rebinding）。"""
-        if not _enforce_host_check:
-            return True
-        host = self.headers.get("Host", "")
-        if host.startswith("["):                    # IPv6: [::1]:46046
-            hostname = host[1:].split("]", 1)[0]
-        else:
-            hostname = host.rsplit(":", 1)[0] if ":" in host else host
-        if hostname in _LOOPBACK_HOSTS:
-            return True
-        self._send_json({"ok": False, "errors": [f"拒绝非本机 Host: {host!r}"]}, 403)
-        return False
-
-    # ── 认证与授权 ─────────────────────────────────
-    def _api_token_ok(self) -> bool:
-        token = os.getenv("WEB_ADMIN_TOKEN", "").strip()
-        if not token:
-            return False
-        supplied = self.headers.get("X-Auth-Token", "").strip()
-        if not supplied:
-            authz = self.headers.get("Authorization", "").strip()
-            if authz.startswith("Bearer "):
-                supplied = authz[7:].strip()
-        if not supplied:
-            # <img>/<video> 标签无法带自定义头，归档媒体通过 query 传 token
-            from urllib.parse import parse_qs
-            supplied = (parse_qs(self.path.partition("?")[2]).get("token") or [""])[0]
-        return bool(supplied) and hmac.compare_digest(supplied, token)
-
-    def _cookie_token(self) -> str:
-        raw = self.headers.get("Cookie", "")
-        for part in raw.split(";"):
-            name, _, value = part.strip().partition("=")
-            if name == _SESSION_COOKIE:
-                return value
-        return ""
-
-    def _cookie_refresh_token(self) -> str:
-        raw = self.headers.get("Cookie", "")
-        for part in raw.split(";"):
-            name, _, value = part.strip().partition("=")
-            if name == _REFRESH_COOKIE:
-                return value
-        return ""
-
-    def _current_user(self) -> dict | None:
-        """解析当前身份：会话 cookie 优先，其次 API token（视为 admin）。"""
-        import config.config as cfg
-        from src import auth as _auth
-        ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
-        sess = _auth.get_session(self._cookie_token(), ttl_seconds=ttl)
-        if sess:
-            return {"username": sess["username"], "role": sess["role"], "via": "session"}
-        if self._api_token_ok():
-            return {"username": "(api-token)", "role": "admin", "via": "token"}
-        return None
+        return check_host(self, _enforce_host_check)
 
     def _check_origin(self) -> bool:
-        """非 GET 请求校验 Origin（配合 SameSite=Strict cookie 防 CSRF）。
-        无 Origin 头的请求（curl / 脚本）放行——它们不携带浏览器 cookie 语义。"""
-        origin = self.headers.get("Origin", "")
-        if not origin:
-            return True
-        from urllib.parse import urlparse
-        host = (urlparse(origin).hostname or "").lower()
-        if host in _LOOPBACK_HOSTS:
-            return True
-        raw_host = self.headers.get("Host", "")
-        req_host = (urlparse(f"//{raw_host}").hostname or "").lower()
-        if host == req_host:
-            return True
-        self._send_json({"ok": False, "errors": [f"拒绝跨站请求 Origin: {origin!r}"]}, 403)
-        return False
+        return check_origin(self)
+
+    def _api_token_ok(self) -> bool:
+        return api_token_ok(self)
+
+    def _cookie_token(self) -> str:
+        return cookie_token(self)
+
+    def _cookie_refresh_token(self) -> str:
+        return cookie_refresh_token(self)
+
+    def _current_user(self) -> dict | None:
+        return current_user(self)
 
     def _guard(self, need_admin: bool = True, is_page: bool = False) -> bool:
-        """路由守卫。通过返回 True；否则已发送响应（页面 302 / API 401·403）返回 False。"""
-        import config.config as cfg
-        from src import auth as _auth
+        return guard(self, need_admin, is_page)
 
-        if not getattr(cfg, "AUTH_ENABLED", False):
-            # 账号系统未启用：沿用 WEB_ADMIN_TOKEN 语义（未设 token 则全放行）
-            if not os.getenv("WEB_ADMIN_TOKEN", ""):
-                return True
-            if self._api_token_ok():
-                return True
-            self._send_json({"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
-            return False
+    def _check_auth(self) -> bool:
+        return guard(self, need_admin=True)
 
-        # 归档在 archive_public 下免登录
-        if not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
-            return True
+    def _send_static(self, name: str) -> None:
+        send_static(self, name)
 
-        # 1. 优先校验已登录身份（已登录则直接根据角色放行）
-        user = self._current_user()
-        if user is None and is_page:
-            # 页面导航且短效 Session 过期时：尝试通过长效 Refresh Token 自动静默换票
-            refresh_token = self._cookie_refresh_token()
-            if refresh_token:
-                access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
-                refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
-                rot_user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
-                    refresh_token,
-                    access_ttl_seconds=access_ttl,
-                    refresh_ttl_days=refresh_days,
-                )
-                if rot_user:
-                    user = {"username": rot_user["username"], "role": rot_user["role"], "via": "refresh"}
-                    self._pending_set_cookies = [
-                        f"{_SESSION_COOKIE}={new_access}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
-                        f"{_REFRESH_COOKIE}={new_refresh}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
-                    ]
+    def _send_html(self, file_path: Path, code: int = 200) -> None:
+        send_html(self, file_path, code)
 
-        if user is not None:
-            if need_admin and user["role"] != "admin":
-                if is_page:
-                    self._send_html_text(
-                        "权限不足",
-                        f"当前账号 {user['username']}（{user['role']}）只能访问归档。",
-                        403, link=("/archive", "前往消息归档"))
-                else:
-                    self._send_json({"ok": False, "errors": ["需要管理员权限"]}, 403)
-                return False
-            return True
+    def _send_404(self, message: str = "未知路径") -> None:
+        send_404(self, message)
 
-        # 2. 未登录情况下：若用户库为空，提示初始化创建；否则重定向登录
-        if not _auth.has_users():
-            msg = ("账号系统已启用但还没有任何用户。请在服务器上执行："
-                   "python tools/manage_users.py add <用户名>")
-            if is_page:
-                self._send_html_text("尚未创建账号", msg, 503)
-            else:
-                self._send_json({"ok": False, "errors": [msg]}, 503)
-            return False
+    def _send_html_text(self, title: str, message: str, code: int = 200, link: tuple[str, str] | None = None) -> None:
+        send_html_text(self, title, message, code)
 
-        if is_page:
-            self._redirect("/login?next=" + quote(self.path, safe=""))
-        else:
-            self._send_json({"ok": False, "errors": ["未登录"]}, 401)
-        return False
+    def _handle_archive(self, sub: str) -> None:
+        _mod_handle_archive(self, sub, self._guard, self._read_body_json)
+
+    async def _smart_parse_credentials_text(self, raw: str, account: str = "") -> dict:
+        return await _sys_smart_parse(raw, account)
+
+    def _serve_file_range(self, path: Path) -> None:
+        serve_file_range(self, path)
+
+    def _read_body_json(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length <= 0:
+            return {}
+        if length > 5 * 1024 * 1024:
+            self._send_json({"ok": False, "errors": ["请求体过大（上限 5MB）"]}, 413)
+            return None
+        try:
+            body = self.rfile.read(length)
+        except (socket.timeout, TimeoutError):
+            self._send_json({"ok": False, "errors": ["读取请求体超时"]}, 408)
+            return None
+        except (ConnectionResetError, BrokenPipeError):
+            return None
+        import json5
+        try:
+            return json5.loads(body.decode("utf-8"))
+        except Exception as e:
+            self._send_json({"ok": False, "errors": [f"JSON 解析失败: {e}"]}, 400)
+            return None
 
     def _redirect(self, location: str) -> None:
         self.send_response(302)
@@ -390,175 +245,85 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def _send_html_text(self, title: str, message: str, code: int = 200,
-                        link: tuple[str, str] | None = None) -> None:
-        """极简提示页（未登录 / 权限不足 / 未初始化）。"""
-        extra = (f'<p><a href="{link[0]}">{html_escape(link[1])}</a></p>') if link else ""
-        body = (
-            "<style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#1c2333;"
-            "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
-            "div{background:#fff;padding:32px 38px;border-radius:14px;max-width:520px;"
-            "box-shadow:0 2px 12px rgba(0,0,0,.06);line-height:1.8}"
-            "code{background:#f0f1f4;padding:2px 6px;border-radius:4px}"
-            "a{color:#6d5bd0}</style>"
-            f"<div><h2>{html_escape(title)}</h2><p>{html_escape(message)}</p>{extra}</div>"
-        ).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _check_auth(self) -> bool:
-        """管理端 API 守卫（需要 admin）。"""
-        return self._guard(need_admin=True)
-
-    def _read_body_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > 5 * 1024 * 1024:
-            self._send_json({"ok": False, "errors": ["请求体为空或过大"]}, 400)
-            return None
-        data = self.rfile.read(length)
-        try:
-            obj = json.loads(data.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            self._send_json({"ok": False, "errors": [f"JSON 解析失败: {e}"]}, 400)
-            return None
-        if not isinstance(obj, dict):
-            self._send_json({"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
-            return None
-        return obj
-
-    # ── 路由 ─────────────────────────────────────────────
-    def _send_static(self, name: str) -> None:
-        """主题 CSS / JS / 图标 —— 白名单文件名，不接受任意路径。"""
-        allowed = {
-            "theme.css": "text/css", "theme.js": "application/javascript",
-            "archive.css": "text/css", "archive.js": "application/javascript",
-            "admin_icon.svg": "image/svg+xml", "archive_icon.svg": "image/svg+xml",
-        }
-        ctype = allowed.get(name)
-        if ctype is None:
-            self._send_json({"ok": False, "errors": ["未知静态资源"]}, 404)
-            return
-        try:
-            body = (_STATIC_PATH.parent / name).read_bytes()
-        except OSError:
-            self._send_json({"ok": False, "errors": ["静态资源缺失"]}, 404)
-            return
-        import hashlib
-        etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
-        if self.headers.get("If-None-Match") == etag:
-            self.send_response(304)
-            self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "public, max-age=120, must-revalidate")
-            self.end_headers()
-            return
-        body, enc_headers = self._compress_if_supported(body)
-        self.send_response(200)
-        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("ETag", etag)
-        self.send_header("Cache-Control", "public, max-age=120, must-revalidate")
-        for k, v in enc_headers.items():
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(body)
-
-
-    def _send_html(self, file_path: Path, code: int = 200) -> None:
-        try:
-            body = file_path.read_bytes()
-        except OSError:
-            self._send_json({"ok": False, "errors": ["页面文件缺失"]}, 500)
-            return
-        body, enc_headers = self._compress_if_supported(body)
-        self.send_response(code)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in enc_headers.items():
-            self.send_header(k, v)
-        for sc in getattr(self, "_pending_set_cookies", []):
-            self.send_header("Set-Cookie", sc)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_404(self, message: str = "未知路径") -> None:
-        """根据客户端 Accept 头智能返回精美 404 HTML 页面或 JSON 错误。"""
-        accept = self.headers.get("Accept", "")
-        path = self.path.split("?", 1)[0]
-        # 如果是浏览器访问页面（非 API 请求），渲染 404 错误页
-        if not path.startswith("/api/") and ("text/html" in accept or "*/*" in accept or not accept):
-            self._send_html(_404_HTML_PATH, code=404)
-            return
-        self._send_json({"ok": False, "errors": [message]}, 404)
-
-    def do_GET(self) -> None:  # noqa: N802 - http.server 约定命名
-        import config.config as cfg
+    # ── 路由派发 ──────────────────────────────────────────
+    def do_GET(self) -> None:  # noqa: N802
         if not self._check_host():
             return
         path = self.path.split("?", 1)[0]
-        # 健康检查探针（Docker / K8s / 负载均衡器监控）：无需鉴权
+
+        # 0. 健康探针（免鉴权放行）
         if path in ("/api/health", "/api/health/status"):
-            self._send_json({"ok": True, "status": "healthy", "service": "sakamichi-push"})
+            self._send_json({"ok": True, "status": "healthy"})
             return
-        # 共享静态资源（主题 token / 切换脚本 / 样式 / 图标）：登录页也要用，故不设鉴权
-        if path in ("/static/theme.css", "/static/theme.js",
-                    "/static/archive.css", "/static/archive.js",
-                    "/static/admin_icon.svg", "/static/archive_icon.svg"):
-            self._send_static(path.rsplit("/", 1)[1])
-            return
-        if path == "/login":
+
+        # 1. 静态页面与资产
+        if path in ("", "/", "/index.html"):
+            import config.config as cfg
             user = self._current_user()
-            if user is not None:
-                from urllib.parse import parse_qs, unquote
-                qs = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
-                next_raw = qs.get("next", [""])[0]
-                target = unquote(next_raw) if (next_raw.startswith("/") and not next_raw.startswith("//")) else ("/" if user.get("role") == "admin" else "/archive")
-                if user.get("role") != "admin" and not target.startswith("/archive"):
-                    target = "/archive"
-                self._redirect(target)
-                return
-            self._send_html(_LOGIN_HTML_PATH)
-            return
-        if path == "/404":
-            self._send_html(_404_HTML_PATH, code=404)
-            return
-        if path == "/api/auth/me":
-            self._handle_auth_me()
-            return
-        if path in ("/", "/index.html"):
-            user = self._current_user()
-            # 开启免登录公开归档时，未登录访客访问首页自动跳转至 /archive
             if user is None and getattr(cfg, "AUTH_ENABLED", False) and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
                 self._redirect("/archive")
                 return
             if not self._guard(need_admin=True, is_page=True):
                 return
-            self._send_html(_STATIC_PATH)
+            self._send_html(INDEX_HTML_PATH)
             return
-        if path == "/archive":
+
+        if path in ("/archive", "/archive.html"):
             if not self._guard(need_admin=False, is_page=True):
                 return
-            self._send_html(_ARCHIVE_HTML_PATH)
-            return
-        if path.startswith("/api/archive/"):
-            if not self._guard(need_admin=False):
-                return
-            self._handle_archive(path[len("/api/archive/"):])
+            self._send_html(ARCHIVE_HTML_PATH)
             return
 
-        if path == "/api/social/ig_session":
-            if not self._check_auth():
-                return
-            from src.social import ig_session
-            st = ig_session.status()
-            self._send_json({"ok": True, **st})
+        if path in ("/login", "/login.html"):
+            self._send_html(LOGIN_HTML_PATH)
             return
 
+        if path.startswith("/static/"):
+            self._send_static(path[len("/static/"):])
+            return
+
+        # 2. 鉴权与用户
+        if path == "/api/auth/me":
+            handle_auth_me(self)
+            return
+        if path in ("/api/auth/users", "/api/users"):
+            handle_users_get(self)
+            return
+
+        # 3. 系统监控与运维
+        if path in ("/api/status",):
+            if not self._guard(need_admin=True):
+                return
+            _sys_handle_status(self, _on_poll_cb)
+            return
+
+        if path == "/api/logs":
+            if not self._guard(need_admin=True):
+                return
+            _sys_handle_logs(self)
+            return
+
+        if path in ("/api/storage", "/api/system/storage"):
+            if not self._guard(need_admin=True):
+                return
+            _sys_handle_storage(self)
+            return
+
+        if path == "/api/members":
+            if not self._guard(need_admin=True):
+                return
+            _sys_handle_members(self, _load_raw_config)
+            return
+
+        if path == "/api/qq_openid/status":
+            if not self._guard(need_admin=True):
+                return
+            _sys_handle_openid_status(self, _on_openid_cb)
+            return
+
+        # 4. 配置中心
         if path == "/api/config":
-            if not self._check_auth():
+            if not self._guard(need_admin=True):
                 return
             try:
                 raw = _load_raw_config()
@@ -566,1934 +331,72 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {e}"]}, 500)
                 return
             self._send_json({
-                "ok": True,
-                "config": raw,
-                "cred_status": _cred_status(raw),
-                "qq_bot_status": _qq_bot_status(raw),
+                "ok": True, "config": raw,
+                "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
                 "env_status": _env_status(),
-                "config_path": str(CONFIG_PATH),
-                "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
                 "can_restart": _on_restart_cb is not None,
-                "can_poll": _on_poll_cb is not None,
-                "can_test_push": _on_test_push_cb is not None,
             })
             return
 
-        if path == "/api/logs":
-            if not self._check_auth():
+        if path == "/api/config/schema":
+            if not self._guard(need_admin=True):
                 return
-            self._handle_logs()
-            return
-
-        if path == "/api/status":
-            if not self._check_auth():
-                return
-            self._handle_status()
-            return
-
-        if path == "/api/members":
-            if not self._check_auth():
-                return
-            self._handle_members()
-            return
-
-        if path == "/api/users":
-            if not self._check_auth():
-                return
-            from src import auth as _auth
-            me = self._current_user() or {}
-            users = [{
-                "username": name,
-                "role": u.get("role", "viewer"),
-                "created_at": u.get("created_at", 0),
-                "is_me": name == me.get("username"),
-            } for name, u in sorted(_auth.load_users().items())]
-            self._send_json({"ok": True, "users": users,
-                             "min_password_len": _auth.MIN_PASSWORD_LEN})
-            return
-
-        if path == "/api/qq_openid/status":
-            if not self._check_auth():
-                return
-            from src import qq_openid
-            state = qq_openid.get_state()
-            state["ok"] = True
-            state["available"] = _on_openid_cb is not None
-            self._send_json(state)
-            return
-
-        if path == "/api/social/push_targets":
-            if not self._check_auth():
-                return
-            raw = _load_raw_config()
-            targets = []
-
-            ch = raw.get("channels") or {}
-            enable_qq = ch.get("qq_official", raw.get("enable_qq_official_bot", True))
-            enable_nap = ch.get("napcat", raw.get("enable_napcat_qq", False))
-            enable_tg = ch.get("tg", raw.get("enable_tg_bot", False))
-
-            # 1. QQ 官方机器人
-            if enable_qq:
-                for b in raw.get("qq_official_bots") or []:
-                    bname = b.get("name") or b.get("app_id") or "official_bot"
-                    remark = (b.get("remark") or "").strip()
-                    display_base = f"{remark} ({bname})" if remark else bname
-                    t_openid = (b.get("target_openid") or "").strip()
-                    g_openid = (b.get("group_openid") or "").strip()
-                    if t_openid:
-                        targets.append({
-                            "id": f"official:{bname}:private",
-                            "name": f"🤖 {display_base} · 私聊 ({t_openid[:6]}...{t_openid[-4:] if len(t_openid) > 10 else ''})",
-                            "channel": "qq_official",
-                            "type": "private",
-                        })
-                    if g_openid:
-                        targets.append({
-                            "id": f"official:{bname}:group",
-                            "name": f"👥 {display_base} · 群聊 ({g_openid[:6]}...{g_openid[-4:] if len(g_openid) > 10 else ''})",
-                            "channel": "qq_official",
-                            "type": "group",
-                        })
-
-            # 2. NapCat QQ
-            if enable_nap:
-                routes = raw.get("napcat_routes") or []
-                for r in routes:
-                    gid = str(r.get("group_id", "")).strip()
-                    remark = (r.get("remark") or "").strip()
-                    if gid:
-                        display = f"{remark} ({gid})" if remark else f"QQ群 {gid}"
-                        targets.append({
-                            "id": f"napcat:{gid}",
-                            "name": f"🐾 NapCat · {display}",
-                            "channel": "napcat",
-                            "type": "group",
-                        })
-                if not routes:
-                    targets.append({
-                        "id": "napcat",
-                        "name": "🐾 NapCat QQ 群广播",
-                        "channel": "napcat",
-                        "type": "group",
-                    })
-
-            # 3. Telegram
-            if enable_tg:
-                tg_bots = raw.get("tg_bots") or []
-                for b in tg_bots:
-                    bname = b.get("name") or b.get("target_chat") or "tg_bot"
-                    remark = (b.get("remark") or "").strip()
-                    tchat = str(b.get("target_chat") or "").strip()
-                    if remark:
-                        display = f"{remark} ({bname} · {tchat})" if tchat else f"{remark} ({bname})"
-                    else:
-                        display = f"{bname}" + (f" ({tchat})" if tchat and tchat != bname else "")
-                    targets.append({
-                        "id": f"tg:{tchat or bname}",
-                        "name": f"✈️ Telegram · {display}",
-                        "channel": "tg",
-                        "type": "chat",
-                    })
-                if not tg_bots:
-                    targets.append({
-                        "id": "tg",
-                        "name": "✈️ Telegram 广播",
-                        "channel": "tg",
-                        "type": "chat",
-                    })
-
-            self._send_json({"ok": True, "targets": targets})
+            try:
+                with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+                    self._send_json({"ok": True, "schema": json.load(f)})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"读取 schema 失败: {e}"]}, 500)
             return
 
         if path == "/api/config/history":
-            if not self._check_auth():
+            if not self._guard(need_admin=True):
                 return
-            from urllib.parse import parse_qs
-            name = (parse_qs(self.path.partition("?")[2]).get("name") or [""])[0]
+            name = self._query_params().get("name")
             if name:
-                # 查看单份快照内容
                 if not _HISTORY_NAME_RE.match(name):
-                    self._send_json({"ok": False, "errors": [f"非法历史版本名: {name!r}"]}, 400)
+                    self._send_json({"ok": False, "errors": [f"非法快照文件名: {name!r}"]}, 400)
                     return
-                f = _history_dir() / name
-                if not f.exists():
-                    self._send_json({"ok": False, "errors": [f"历史版本不存在: {name}"]}, 404)
+                src = _history_dir() / name
+                if not src.is_file():
+                    self._send_json({"ok": False, "errors": [f"快照文件不存在: {name!r}"]}, 404)
                     return
-                self._send_json({"ok": True, "name": name, "content": f.read_text(encoding="utf-8")})
+                try:
+                    content_str = src.read_text(encoding="utf-8")
+                    self._send_json({"ok": True, "name": name, "content": content_str})
+                except Exception as e:
+                    self._send_json({"ok": False, "errors": [f"读取快照失败: {e}"]}, 500)
                 return
             self._send_json({"ok": True, "history": list_config_history()})
             return
 
-        if path == "/api/system/storage":
-            if not self._check_auth():
+        # 5. 归档与媒体
+        if path.startswith("/api/archive/"):
+            if not self._guard(need_admin=False):
                 return
-            from src.utils import get_storage_breakdown
-            from urllib.parse import parse_qs
-            qs = parse_qs(self.path.partition("?")[2])
-            refresh = qs.get("refresh", ["0"])[0] in ("1", "true")
-            self._send_json({"ok": True, "storage": get_storage_breakdown(force_refresh=refresh)})
-        if path == "/api/subscriptions":
-            if not self._check_auth():
-                return
-            from src.member_directory import get_all_subscriptions
-            subs = get_all_subscriptions()
-            self._send_json({"ok": True, "subscriptions": subs})
+            sub = path[len("/api/archive/"):]
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
 
-        self._send_404("未知路径")
-
-    def _handle_members(self) -> None:
-        """拉取账号可见的成员目录（网页选择器用）。?account=<账号ID>"""
-        from urllib.parse import parse_qs
-        qs = parse_qs(self.path.partition("?")[2])
-        account = (qs.get("account") or [""])[0]
-
-        import config.config as cfg
-        if account not in cfg.ACCOUNTS:
-            self._send_json({"ok": False, "errors": [f"未知账号: {account!r}"]}, 400)
+        if path.startswith("/avatar/"):
+            sub = "avatar"
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
 
-        from config.credentials import load_all_accounts, validate_account_cred
-        load_all_accounts()   # 幂等；独立模式下补加载磁盘凭证
-        ok, reason = validate_account_cred(account)
-        if not ok:
-            self._send_json({"ok": False, "errors": [f"账号凭证不可用: {reason}"]}, 400)
+        if path.startswith("/media/"):
+            if not self._guard(need_admin=False):
+                return
+            sub = "media/" + path[len("/media/"):]
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
 
-
-        import httpx
-
-        from src.member_directory import fetch_member_directory
-
-        async def _run():
-            async with httpx.AsyncClient(timeout=20) as client:
-                return await fetch_member_directory(client, account)
-
-        try:
-            members, err = asyncio.run(_run())
-        except Exception as e:
-            self._send_json({"ok": False, "errors": [f"拉取失败: {type(e).__name__}: {e}"]}, 500)
-            return
-        if err:
-            self._send_json({"ok": False, "errors": [err]}, 502)
+        if path.startswith("/blog_media/"):
+            if not self._guard(need_admin=False):
+                return
+            sub = "blog_media/" + path[len("/blog_media/"):]
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
 
-        slim = []
-        for m in members:
-            sub = m.get("subscription")
-            is_sub = False
-            is_past_sub = False
-            sub_state = ""
-            sub_start = ""
-            sub_end = ""
-            sub_type = ""
-            auto_renew = False
-            if isinstance(sub, dict) and sub:
-                sub_state = str(sub.get("state") or "").lower()
-                is_sub = (sub_state == "active")
-                is_past_sub = (sub_state == "expired" or (not is_sub and bool(sub_state)))
-                sub_start = str(sub.get("start_at") or "")
-                sub_end = str(sub.get("end_at") or "")
-                sub_type = str(sub.get("type") or "")
-                auto_renew = bool(sub.get("auto_renewing", False))
-
-            slim.append({
-                "id": str(m.get("id", "")),
-                "name": m.get("name") or "(无名)",
-                "state": m.get("state", "?"),
-                "tags": [str(t) for t in (m.get("tags") or [])],
-                "is_subscribed": is_sub,
-                "is_past_subscribed": is_past_sub,
-                "sub_state": sub_state,
-                "sub_start": sub_start,
-                "sub_end": sub_end,
-                "sub_type": sub_type,
-                "auto_renewing": auto_renew,
-                "thumbnail": m.get("thumbnail") or "",
-            })
-
-        sub_count = sum(1 for x in slim if x["is_subscribed"])
-        past_count = sum(1 for x in slim if x["is_past_subscribed"])
-        open_count = sum(1 for x in slim if x["state"] == "open")
-        self._send_json({
-            "ok": True,
-            "account": account,
-            "total": len(slim),
-            "subscribed_count": sub_count,
-            "past_subscribed_count": past_count,
-            "open_count": open_count,
-            "members": slim,
-        })
-
-    # ── 消息归档查看器 ─────────────────────────────
-    _ARCHIVE_TYPES = ("text", "picture", "image", "video", "voice")
-
-    # ── 登录 / 登出 / 身份 ─────────────────────────
-    def _handle_auth_me(self) -> None:
-        import config.config as cfg
-        try:
-            cfg._load_env_and_json()
-        except Exception:  # nosec B110
-            pass
-        from src import auth as _auth
-        user = self._current_user() if getattr(cfg, "AUTH_ENABLED", False) else None
-        self._send_json({
-            "ok": True,
-            "auth_enabled": bool(getattr(cfg, "AUTH_ENABLED", False)),
-            "archive_public": bool(getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False)),
-            "has_users": _auth.has_users(),
-            "user": {"username": user["username"], "role": user["role"]} if user else None,
-        })
-
-    def _handle_login(self) -> None:
-        import config.config as cfg
-        from src import auth as _auth
-        from src.logger import log_all
-        if not getattr(cfg, "AUTH_ENABLED", False):
-            self._send_json({"ok": False, "errors": ["账号系统未启用"]}, 400)
-            return
-        body = self._read_body_json()
-        if body is None:
-            return
-        ip = self.client_address[0] if self.client_address else "?"
-        locked = _auth.is_locked_out(ip)
-        if locked > 0:
-            self._send_json({"ok": False, "errors": [
-                f"登录失败次数过多，请 {int(locked // 60) + 1} 分钟后再试"]}, 429)
-            return
-
-        username = str(body.get("username", ""))[:64]
-        password = str(body.get("password", ""))[:256]
-        user = _auth.authenticate(username, password)
-        if user is None:
-            _auth.record_failure(ip)
-            log_all(f"🔒 网页登录失败: {username!r} 来自 {ip}", is_error=True)
-            self._send_json({"ok": False, "errors": ["用户名或密码错误"]}, 401)
-            return
-
-        _auth.clear_failures(ip)
-        remember = bool(body.get("remember", True))
-        access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
-        refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30))) if remember else 1
-        token = _auth.create_session(user["username"], user["role"], access_ttl)
-        refresh_token = _auth.create_refresh_token(user["username"], user["role"], ttl_days=refresh_days)
-        log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
-
-        body_out = json.dumps({
-            "ok": True,
-            "user": user,
-            "token": token,
-            "refresh_token": refresh_token,
-        }, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body_out)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header(
-            "Set-Cookie",
-            f"{_SESSION_COOKIE}={token}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
-        )
-        self.send_header(
-            "Set-Cookie",
-            f"{_REFRESH_COOKIE}={refresh_token}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
-        )
-        self.end_headers()
-        self.wfile.write(body_out)
-
-    def _handle_refresh(self) -> None:
-        """处理 Refresh Token 静默续期换票请求 (Refresh Token Rotation - RTR)。"""
-        import config.config as cfg
-        from src import auth as _auth
-
-        body = self._read_body_json() or {}
-        refresh_token = self._cookie_refresh_token() or str(body.get("refresh_token", "")).strip()
-        if not refresh_token:
-            self._send_json({"ok": False, "errors": ["缺少 Refresh Token"]}, 401)
-            return
-
-        access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
-        refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
-        user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
-            refresh_token,
-            access_ttl_seconds=access_ttl,
-            refresh_ttl_days=refresh_days,
-        )
-        if not user:
-            # 刷新令牌失效，清空客户端 Cookie
-            self.send_response(401)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Set-Cookie", f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
-            self.send_header("Set-Cookie", f"{_REFRESH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
-            body_out = json.dumps({"ok": False, "errors": ["刷新令牌已失效，请重新登录"]}, ensure_ascii=False).encode("utf-8")
-            self.send_header("Content-Length", str(len(body_out)))
-            self.end_headers()
-            self.wfile.write(body_out)
-            return
-
-        body_out = json.dumps({
-            "ok": True,
-            "user": user,
-            "token": new_access,
-            "refresh_token": new_refresh,
-        }, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body_out)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header(
-            "Set-Cookie",
-            f"{_SESSION_COOKIE}={new_access}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
-        )
-        self.send_header(
-            "Set-Cookie",
-            f"{_REFRESH_COOKIE}={new_refresh}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
-        )
-        self.end_headers()
-        self.wfile.write(body_out)
-
-    def _handle_logout(self) -> None:
-        from src import auth as _auth
-        _auth.destroy_session(self._cookie_token())
-        _auth.destroy_refresh_token(self._cookie_refresh_token())
-        body_out = json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body_out)))
-        self.send_header("Set-Cookie",
-                         f"{_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
-        self.send_header("Set-Cookie",
-                         f"{_REFRESH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
-        # 让浏览器丢弃已缓存的归档媒体副本（localhost 视为安全上下文，该头生效）。
-        # 刻意不含 "storage"：那会把 localStorage 里的主题偏好一并清掉；
-        # 其中真正敏感的 webAdminToken 由前端登出逻辑单独删除。
-        self.send_header("Clear-Site-Data", '"cache", "cookies"')
-        self.end_headers()
-        self.wfile.write(body_out)
-
-    def _handle_openid(self, action: str) -> None:
-        """openid 捕获会话：start 需要 app_id + client_secret，
-        mode: 'user'（单聊）| 'group'（群聊）。
-        secret 只用于本次连接，不落盘、不回显。"""
-        if _on_openid_cb is None:
-            self._send_json({"ok": False, "errors": [
-                "独立模式下不可用（需要主程序的事件循环来跑 WebSocket 监听）"]}, 400)
-            return
-
-        def _call_openid(act: str, aid: str, sec: str, md: str = "user") -> tuple[bool, str]:
-            try:
-                return _on_openid_cb(act, aid, sec, md)
-            except TypeError:
-                return _on_openid_cb(act, aid, sec)
-
-        if action == "stop":
-            ok, msg = _call_openid("stop", "", "", "")
-            self._send_json({"ok": ok, "message": msg})
-            return
-
-        body = self._read_body_json()
-        if body is None:
-            return
-        app_id = str(body.get("app_id", "")).strip()
-        secret = str(body.get("client_secret", "")).strip()
-        mode = str(body.get("mode", "user")).strip() or "user"
-        if not app_id:
-            self._send_json({"ok": False, "errors": ["缺少 App ID"]}, 400)
-            return
-        if not secret:
-            bot_name = str(body.get("bot_name", "")).strip().upper()
-            secret = os.getenv(f"{bot_name}_CLIENT_SECRET", "") if bot_name else ""
-            if not secret:
-                self._send_json({"ok": False, "errors": [
-                    "缺少 Client Secret（.env 里也没有该 Bot 的密钥）"]}, 400)
-                return
-
-        ok, msg = _call_openid("start", app_id, secret, mode)
-        self._send_json({"ok": ok, "message": msg} if ok
-                        else {"ok": False, "errors": [msg]}, 200 if ok else 409)
-
-    def _handle_users_write(self) -> None:
-        """用户管理（仅 admin）：add / passwd / role / delete。
-        密码只接收不回显；关键防误锁规则在 auth 模块内统一保证。"""
-        from src import auth as _auth
-        from src.logger import log_all
-
-        body = self._read_body_json()
-        if body is None:
-            return
-        action = str(body.get("action", ""))
-        username = str(body.get("username", ""))[:64]
-        password = str(body.get("password", ""))[:256]
-        role = str(body.get("role", "viewer"))
-        me = (self._current_user() or {}).get("username", "?")
-
-        if action == "add":
-            ok, msg = _auth.add_user(username, password, role)
-        elif action == "passwd":
-            ok, msg = _auth.set_password(username, password)
-        elif action == "role":
-            ok, msg = _auth.set_role(username, role)
-        elif action == "delete":
-            if username == me:
-                ok, msg = False, "不能删除当前登录的账号"
-            else:
-                ok, msg = _auth.delete_user(username)
-        else:
-            self._send_json({"ok": False, "errors": [f"未知操作: {action!r}"]}, 400)
-            return
-
-        if ok:
-            log_all(f"👤 用户管理[{me}]: {action} {username} — {msg}")
-            self._send_json({"ok": True, "message": msg})
-        else:
-            self._send_json({"ok": False, "errors": [msg]}, 400)
-
-    def _handle_archive(self, sub: str) -> None:
-        from urllib.parse import parse_qs, unquote
-        import config.config as cfg
-        from src import archive as _archive
-        qs = parse_qs(self.path.partition("?")[2])
-
-        def qp(key: str, default: str = "") -> str:
-            return (qs.get(key) or [default])[0]
-
-        if sub == "avatar":
-            name = qp("name")
-            group = qp("group")
-            from src import avatar_manager
-            rel_path = avatar_manager.get_member_avatar_path(name, group)
-            if rel_path:
-                full_path = Path("data/avatars") / rel_path
-                if full_path.exists():
-                    ext = full_path.suffix.lower()
-                    ctype = "image/jpeg"
-                    if ext == ".png":
-                        ctype = "image/png"
-                    elif ext == ".webp":
-                        ctype = "image/webp"
-                    try:
-                        data = full_path.read_bytes()
-                        self.send_response(200)
-                        self.send_header("Content-Type", ctype)
-                        self.send_header("Content-Length", str(len(data)))
-                        self.send_header("Cache-Control", "public, max-age=2592000")
-                        self.end_headers()
-                        self.wfile.write(data)
-                        return
-                    except Exception:  # nosec B110
-                        pass
-            self._send_json({"ok": False, "errors": ["Avatar not found"]}, 404)
-            return
-
-        if sub == "members":
-            members = []
-            monitor_map = {}
-            monitor_order = {}
-            for idx, m in enumerate(getattr(cfg, "MONITOR_LIST", [])):
-                norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
-                monitor_map[norm] = {
-                    "display": m.get("m_name", ""),
-                    "group": m.get("group_type", "")
-                }
-                monitor_order[norm] = idx
-
-            from src import avatar_manager
-            avatar_map = avatar_manager.get_member_avatar_map()
-
-            from src.sakamichi_roster import get_member_sort_tuple
-
-            raw_members = _archive.list_members()
-
-            for name in raw_members:
-                months = _archive.list_months(name)
-                norm = name.replace(" ", "").replace("　", "").replace("_", "")
-                info = monitor_map.get(norm) or {}
-                display = info.get("display") or name.replace("_", " ")
-                group = info.get("group") or _archive.infer_member_group(name)
-                avatar = avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or ""
-                members.append({
-                    "name": name,
-                    "display": display,
-                    "group": group,
-                    "avatar": avatar,
-                    "months": len(months),
-                    "total": sum(m["count"] for m in months),
-                })
-
-            members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
-
-            self._send_json({"ok": True, "members": members})
-            return
-
-        if sub == "months":
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member or member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
-                return
-            self._send_json({"ok": True, "member": member, "months": _archive.list_months(member)})
-            return
-
-        if sub == "messages":
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member or member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
-                return
-            try:
-                year, month = int(qp("year")), int(qp("month"))
-                page = max(1, int(qp("page", "1")))
-                per_page = min(200, max(1, int(qp("per_page", "50"))))
-            except ValueError:
-                self._send_json({"ok": False, "errors": ["year/month/page 必须是数字"]}, 400)
-                return
-            type_filter = qp("type")
-            msgs = _archive.load_month(member, year, month)
-            if type_filter:
-                if type_filter not in self._ARCHIVE_TYPES:
-                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
-                    return
-                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
-                msgs = [m for m in msgs if m.get("type") in wanted]
-            import config.config as cfg
-            show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
-            total = len(msgs)
-            start = (page - 1) * per_page
-            grp = _archive.infer_member_group(member)
-            slim = [{
-                "id": m.get("id"),
-                "type": m.get("type"),
-                "text": m.get("text", ""),
-                "translation": m.get("_translation", ""),
-                "tags": m.get("_tags", "") if show_auto_tags else "",
-                "custom_tags": m.get("_custom_tags", ""),
-                "published_at": m.get("published_at") or m.get("updated_at", ""),
-                "upload_at": _archive.extract_upload_time(m),
-                "group": grp,
-                "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
-                              if m.get("_local_file") else None),
-                "download_failed": bool(m.get("_download_failed")),
-                "w": m.get("thumbnail_width"),
-                "h": m.get("thumbnail_height"),
-            } for m in msgs[start:start + per_page]]
-            self._send_json({
-                "ok": True, "member": member, "group": grp, "year": year, "month": month,
-                "total": total, "page": page,
-                "total_pages": max(1, -(-total // per_page)), "messages": slim,
-            })
-            return
-
-        if sub == "calendar":
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member or member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
-                return
-            type_filter = qp("type")
-            wanted = None
-            if type_filter:
-                if type_filter not in self._ARCHIVE_TYPES:
-                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
-                    return
-                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
-            self._send_json({"ok": True, "member": member,
-                             "days": _archive.day_counts(member, type_filter=wanted)})
-            return
-
-        if sub == "search":
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member or member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
-                return
-            query = qp("q").strip()
-            if not query:
-                self._send_json({"ok": False, "errors": ["缺少搜索关键词 q"]}, 400)
-                return
-            if len(query) > 100:
-                self._send_json({"ok": False, "errors": ["搜索关键词不能超过 100 个字符"]}, 400)
-                return
-            try:
-                page = max(1, int(qp("page", "1")))
-                per_page = min(200, max(1, int(qp("per_page", "50"))))
-            except ValueError:
-                self._send_json({"ok": False, "errors": ["page 必须是数字"]}, 400)
-                return
-            type_filter = qp("type")
-            wanted = None
-            if type_filter:
-                if type_filter not in self._ARCHIVE_TYPES:
-                    self._send_json({"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
-                    return
-                wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
-            hits = _archive.search(member, query, type_filter=wanted)
-            import config.config as cfg
-            show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
-            grp = _archive.infer_member_group(member)
-            total = len(hits)
-            start = (page - 1) * per_page
-            slim = [{
-                "id": m.get("id"),
-                "type": m.get("type"),
-                "text": m.get("text", ""),
-                "translation": m.get("_translation", ""),
-                "tags": m.get("_tags", "") if show_auto_tags else "",
-                "custom_tags": m.get("_custom_tags", ""),
-                "published_at": m.get("published_at") or m.get("updated_at", ""),
-                "upload_at": _archive.extract_upload_time(m),
-                "group": grp,
-                "media_url": (f"/api/archive/media/{member}/{m['_local_file']}"
-                              if m.get("_local_file") else None),
-                "download_failed": bool(m.get("_download_failed")),
-                "w": m.get("thumbnail_width"),
-                "h": m.get("thumbnail_height"),
-                "year": m.get("_year"),
-                "month": m.get("_month"),
-            } for m in hits[start:start + per_page]]
-            self._send_json({
-                "ok": True, "member": member, "group": grp, "q": query, "total": total,
-                "page": page, "total_pages": max(1, -(-total // per_page)),
-                "capped": total >= 500, "messages": slim,
-            })
-            return
-
-        if sub == "tags":
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member or member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            msg_id = str(body.get("id") or "")
-            tags = (body.get("custom_tags") or "").strip()
-            year = body.get("year")
-            month = body.get("month")
-            if not msg_id or not year or not month:
-                self._send_json({"ok": False, "errors": ["缺少 id/year/month"]}, 400)
-                return
-            # 只读合并 — 不碰其它字段
-            msgs = _archive.load_month(member, year, month)
-            found = None
-            for m in msgs:
-                if str(m.get("id", "")) == msg_id:
-                    m["_custom_tags"] = tags
-                    found = True
-                    break
-            if not found:
-                self._send_json({"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
-                return
-            # 写回 — 同步简化版（单字段修改可以同步，风险低）
-            json_path = (_archive.archive_root() / member / f"{year:04d}" / f"{month:02d}" / "messages.json")
-            tmp = json_path.with_suffix(".json.tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(msgs, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, json_path)
-            self._send_json({"ok": True, "id": int(msg_id), "custom_tags": tags})
-            return
-
-        if sub == "retry_download":
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member or member not in _archive.list_members():
-                self._send_json({"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
-                return
-            body = self._read_body_json() or {}
-            msg_id = str(body.get("id") or "")
-            year = body.get("year")
-            month = body.get("month")
-            if not msg_id or not year or not month:
-                self._send_json({"ok": False, "errors": ["缺少 id/year/month"]}, 400)
-                return
-            msgs = _archive.load_month(member, int(year), int(month))
-            target_msg = None
-            for m in msgs:
-                if str(m.get("id", "")) == msg_id:
-                    target_msg = m
-                    break
-            if not target_msg:
-                self._send_json({"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
-                return
-
-            file_url = target_msg.get("file") or target_msg.get("thumbnail") or ""
-            if not file_url:
-                self._send_json({"ok": False, "errors": ["该消息无媒体下载链接"]}, 400)
-                return
-
-            import urllib.request
-            ts_str = target_msg.get("published_at") or target_msg.get("updated_at", "")
-            try:
-                dt = _archive.parse_jst_datetime(ts_str)
-            except Exception:
-                dt = datetime.now()
-
-            dest_dir = _archive._month_dir(member, dt) / _archive._media_subdir(target_msg.get("type", ""))
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            ts = dt.strftime("%Y%m%d_%H%M%S")
-            tmp_path = dest_dir / f"{ts}_{msg_id}.tmp"
-
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            candidate_urls = [u for u in [target_msg.get("file"), target_msg.get("thumbnail")] if u]
-            ok = False
-            used_url = file_url
-            for u in candidate_urls:
-                if ok:
-                    break
-                try:
-                    parsed_u = urllib.parse.urlparse(u)
-                    if parsed_u.scheme not in ("http", "https"):
-                        continue
-                    req = urllib.request.Request(u, headers=headers)
-                    with urllib.request.urlopen(req, timeout=30) as resp, open(tmp_path, "wb") as f:  # nosec B310
-                        if resp.status == 200:
-                            f.write(resp.read())
-                            if tmp_path.exists() and tmp_path.stat().st_size > 0:
-                                ok = True
-                                used_url = u
-                                break
-                except Exception:
-                    try:
-                        tmp_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-
-            if not ok:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                self._send_json({"ok": False, "errors": ["下载失败，该媒体资源链接可能已过期，可使用 backfill_archive.py 工具带最新 Token 回填重试"]}, 400)
-                return
-
-            ext = _archive._guess_extension(used_url, _archive._sniff_content_type(tmp_path))
-            final_path = dest_dir / f"{ts}_{msg_id}{ext}"
-            os.replace(tmp_path, final_path)
-            rel = final_path.relative_to(_archive._member_root(member)).as_posix()
-
-            target_msg["_local_file"] = rel
-            target_msg.pop("_download_failed", None)
-
-            json_path = (_archive.archive_root() / member / f"{int(year):04d}" / f"{int(month):02d}" / "messages.json")
-            tmp = json_path.with_suffix(".json.tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(msgs, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, json_path)
-            _archive._save_msgs_to_sqlite(member, int(year), int(month), [target_msg])
-
-            self._send_json({"ok": True, "id": int(msg_id), "local_file": rel, "media_url": f"/api/archive/media/{member}/{rel}"})
-            return
-
-        if sub == "letters":
-            if not self._guard(need_admin=True):
-                return
-            raw_m = qp("member")
-            member = _archive.member_dir_name(raw_m) if raw_m else ""
-            if not member:
-                self._send_json({"ok": False, "errors": ["缺少成员参数 member"]}, 400)
-                return
-            letters = _archive.get_archive_letters(member)
-            grp = _archive.infer_member_group(member)
-            slim = []
-            for item in letters:
-                loc = item.get("local_file") or ""
-                if loc:
-                    if loc.startswith(member + "/"):
-                        rel_path = loc[len(member) + 1:]
-                    else:
-                        rel_path = loc
-                    media_url = f"/api/archive/media/{member}/{rel_path}"
-                else:
-                    media_url = None
-
-                slim.append({
-                    "id": item.get("id"),
-                    "group_id": item.get("group_id"),
-                    "member_name": item.get("member_name"),
-                    "member_dir": item.get("member_dir"),
-                    "created_at": item.get("created_at"),
-                    "updated_at": item.get("updated_at"),
-                    "text": item.get("text", ""),
-                    "file_url": item.get("file_url"),
-                    "media_url": media_url,
-                    "thumbnail_url": item.get("thumbnail_url"),
-                    "is_favorite": bool(item.get("is_favorite")),
-                })
-            self._send_json({
-                "ok": True,
-                "member": member,
-                "group": grp,
-                "total": len(slim),
-                "letters": slim
-            })
-            return
-
-        if sub == "letters_sync":
-            if not self._guard(need_admin=True):
-                return
-            raw_m = qp("member")
-            if not raw_m:
-                content_len = int(self.headers.get("Content-Length") or 0)
-                if content_len > 0:
-                    body = self._read_body_json()
-                    if body and isinstance(body, dict):
-                        raw_m = body.get("member")
-            if not raw_m:
-                self._send_json({"ok": False, "errors": ["缺少成员参数 member"]}, 400)
-                return
-            member = _archive.member_dir_name(raw_m)
-            target_mem = None
-            norm_raw = raw_m.replace(" ", "").replace("　", "").replace("_", "").lower()
-            for m in getattr(cfg, "MONITOR_LIST", []):
-                m_name = m.get("m_name") or m.get("name", "")
-                norm_m = m_name.replace(" ", "").replace("　", "").replace("_", "").lower()
-                if norm_m == norm_raw or _archive.member_dir_name(m_name) == member:
-                    target_mem = m
-                    break
-            if not target_mem:
-                target_mem = {"name": raw_m, "m_name": raw_m}
-
-            import tools.archive_letters as _al
-            import httpx
-
-            async def _do_sync():
-                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                    _archive.initialize(client)
-                    return await _al.sync_letters_for_member(target_mem, client)
-
-            try:
-                import asyncio
-                import concurrent.futures
-                try:
-                    _loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    _loop = None
-
-                if _loop and _loop.is_running():
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                        tot, nw = _pool.submit(asyncio.run, _do_sync()).result(timeout=60)
-                else:
-                    tot, nw = asyncio.run(_do_sync())
-                self._send_json({"ok": True, "member": member, "total": tot, "new": nw, "count": tot})
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"同步信件异常: {e}"]}, 500)
-            return
-
-        if sub == "home":
-            # ── 缓存：基于 archive.db 与 blogs.db 的 mtime + 日期，跨天自动失效 ──
-            global _home_cache, _home_cache_key
-            try:
-                db_mtime = _archive.get_db_path().stat().st_mtime
-            except OSError:
-                db_mtime = 0
-            try:
-                blog_mtime = Path("data/archive/blogs.db").stat().st_mtime
-            except OSError:
-                blog_mtime = 0
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            cache_key = (db_mtime, blog_mtime, today_str)
-            if _home_cache is not None and _home_cache_key == cache_key:
-                self._send_json(_home_cache)
-                return
-
-            random.seed(today_str)
-
-            monitor_names = {}
-            for m in getattr(cfg, "MONITOR_LIST", []):
-                norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
-                monitor_names[norm] = m.get("m_name", "")
-
-            db = _archive.init_db()
-
-            from src import avatar_manager
-            avatar_map = avatar_manager.get_member_avatar_map()
-
-            # ── 1. Message 归档成员统计（纯 SQL 批量聚合极速查询）──
-            members = []
-            today_msg_cnt = 0
-            this_week_msgs = 0
-            last_week_msgs = 0
-
-            months_by_member: dict[str, list[dict]] = {}
-            types_by_member: dict[str, dict[str, int]] = {}
-            latest_msgs_by_member: dict[str, list[dict]] = {}
-
-            if db:
-                try:
-                    r_td = db.execute("SELECT COUNT(*) FROM messages WHERE published_at LIKE ? OR updated_at LIKE ?", (f"{today_str}%", f"{today_str}%")).fetchone()
-                    today_msg_cnt = r_td[0] if r_td else 0
-
-                    now_dt = datetime.now()
-                    w0 = (now_dt - timedelta(days=7)).strftime("%Y-%m-%d")
-                    w1 = (now_dt - timedelta(days=14)).strftime("%Y-%m-%d")
-                    r_this = db.execute("SELECT COUNT(*) FROM messages WHERE published_at >= ?", (w0,)).fetchone()
-                    this_week_msgs = r_this[0] if r_this else 0
-                    r_last = db.execute("SELECT COUNT(*) FROM messages WHERE published_at >= ? AND published_at < ?", (w1, w0)).fetchone()
-                    last_week_msgs = r_last[0] if r_last else 0
-
-                    # 批量获取全部成员的月度计数 (1.3ms 极速索引)
-                    for r_m in db.execute("""
-                        SELECT member_dir, year, month, COUNT(*)
-                        FROM messages
-                        GROUP BY member_dir, year, month
-                        ORDER BY member_dir, year DESC, month DESC
-                    """).fetchall():
-                        md, y, mo, cnt = r_m[0], r_m[1], r_m[2], r_m[3]
-                        if md not in months_by_member:
-                            months_by_member[md] = []
-                        months_by_member[md].append({"year": y, "month": mo, "count": cnt})
-
-                    # 批量获取全部成员的消息类型分布 (1.0ms 极速索引)
-                    for r_tc in db.execute("""
-                        SELECT member_dir, type, COUNT(*)
-                        FROM messages
-                        GROUP BY member_dir, type
-                    """).fetchall():
-                        md, mtype, cnt = r_tc[0], r_tc[1] or "text", r_tc[2]
-                        if md not in types_by_member:
-                            types_by_member[md] = {}
-                        types_by_member[md][mtype] = cnt
-
-                    # 获取每个成员最新的 8 条文本消息
-                    for name in _archive.list_members():
-                        l_msgs = []
-                        for lm in db.execute("""
-                            SELECT id, text, translation, published_at, updated_at
-                            FROM messages
-                            WHERE member_dir = ? AND type = 'text' AND text IS NOT NULL AND trim(text) != ''
-                            ORDER BY published_at DESC LIMIT 8
-                        """, (name,)).fetchall():
-                            l_msgs.append({
-                                "id": lm[0],
-                                "text": lm[1] or "",
-                                "translation": lm[2] or "",
-                                "published_at": lm[3] or lm[4] or "",
-                            })
-                        latest_msgs_by_member[name] = l_msgs
-                except Exception:  # nosec B110
-                    pass
-
-            for name in _archive.list_members():
-                months = months_by_member.get(name) or _archive.list_months(name)
-                total = sum(m["count"] for m in months)
-                type_counts = types_by_member.get(name, {})
-                latest_msgs = latest_msgs_by_member.get(name, [])
-
-                monthly = [{"year": mo["year"], "month": mo["month"], "count": mo["count"]} for mo in months[:24]]
-
-                first_date, last_date = "", ""
-                if months:
-                    last = months[0]
-                    first = months[-1]
-                    first_date = f"{first['year']:04d}/{first['month']:02d}"
-                    last_date = f"{last['year']:04d}/{last['month']:02d}"
-
-                stats = {
-                    "total": total,
-                    "months": len(months),
-                    "pictures": type_counts.get("picture", 0) + type_counts.get("image", 0),
-                    "videos": type_counts.get("video", 0),
-                    "voices": type_counts.get("voice", 0),
-                    "texts": type_counts.get("text", 0),
-                    "first_date": first_date,
-                    "last_date": last_date,
-                }
-                if months:
-                    stats["this_month"] = months[0]["count"]
-
-                norm = name.replace(" ", "").replace("　", "").replace("_", "")
-                display = monitor_names.get(norm) or name.replace("_", " ")
-                group = _archive.infer_member_group(name)
-                avatar = avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or ""
-                members.append({
-                    "name": name,
-                    "display": display,
-                    "group": group,
-                    "avatar": avatar,
-                    "stats": stats,
-                    "monthly": monthly,
-                    "days": {},
-                    "latest_msgs": latest_msgs,
-                })
-
-            from src.sakamichi_roster import get_member_sort_tuple
-            members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
-
-            # ── 2. Blog 博客全量统计 ──
-            GROUP_INFO = {
-                "nogizaka": {"name": "乃木坂46", "icon": "💜", "color": "#8b5cf6"},
-                "sakurazaka": {"name": "樱坂46", "icon": "🌸", "color": "#ec4899"},
-                "hinatazaka": {"name": "日向坂46", "icon": "🩵", "color": "#06b6d4"},
-            }
-            blog_groups = []
-            total_blogs = 0
-            total_blog_authors = 0
-            recent_blogs = []
-            blog_pics = []
-            rand_blog_msgs = []
-            today_blog_cnt = 0
-            blog_this_week = 0
-
-            def _encode_blog_media_url(rel_path: str) -> str:
-                if not rel_path:
-                    return ""
-                from urllib.parse import quote
-                parts = rel_path.replace("\\", "/").strip("/").split("/")
-                encoded_parts = [quote(p) for p in parts]
-                return "/api/archive/blog_media/" + "/".join(encoded_parts)
-
-            blog_db = _get_blog_db()
-            if blog_db:
-                try:
-                    total_blogs = blog_db.execute("SELECT COUNT(*) FROM blog_posts").fetchone()[0]
-                    total_blog_authors = blog_db.execute("SELECT COUNT(DISTINCT author) FROM blog_posts").fetchone()[0]
-
-                    for gkey, gmeta in GROUP_INFO.items():
-                        row = blog_db.execute("""
-                            SELECT COUNT(*), COUNT(DISTINCT author), MIN(date), MAX(date)
-                            FROM blog_posts WHERE group_key=?
-                        """, (gkey,)).fetchone()
-                        count = row[0] if row else 0
-                        if count > 0:
-                            lp_row = blog_db.execute("""
-                                SELECT id, author, title, date, body_text, images_json, image_paths_json
-                                FROM blog_posts WHERE group_key=?
-                                ORDER BY date DESC LIMIT 1
-                            """, (gkey,)).fetchone()
-                            latest_post = None
-                            if lp_row:
-                                lp = dict(lp_row)
-                                imgs = json.loads(lp.get("image_paths_json") or "[]")
-                                first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
-                                cover = _encode_blog_media_url(first_img) if first_img else ""
-                                latest_post = {
-                                    "id": lp["id"],
-                                    "author": lp["author"],
-                                    "title": lp["title"],
-                                    "date": lp["date"],
-                                    "cover": cover,
-                                }
-                            blog_groups.append({
-                                "key": gkey,
-                                "name": gmeta["name"],
-                                "icon": gmeta["icon"],
-                                "color": gmeta["color"],
-                                "total": count,
-                                "author_count": row[1],
-                                "first_date": (row[2] or "")[:7].replace("-", "/"),
-                                "last_date": (row[3] or "")[:7].replace("-", "/"),
-                                "latest_post": latest_post,
-                            })
-
-                    # 最近博客列表
-                    for r in blog_db.execute("""
-                        SELECT id, group_key, author, title, date, body_text, images_json, image_paths_json
-                        FROM blog_posts
-                        ORDER BY date DESC LIMIT 6
-                    """).fetchall():
-                        bp = dict(r)
-                        imgs = json.loads(bp.get("image_paths_json") or "[]")
-                        first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
-                        cover = _encode_blog_media_url(first_img) if first_img else ""
-                        gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
-                        gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
-                        recent_blogs.append({
-                            "type": "blog",
-                            "id": bp["id"],
-                            "group_key": bp["group_key"],
-                            "group_name": gname,
-                            "group_icon": gicon,
-                            "author": bp["author"],
-                            "title": bp["title"],
-                            "date": bp["date"],
-                            "cover": cover,
-                            "has_images": len(imgs) > 0,
-                        })
-                        if cover:
-                            blog_pics.append({
-                                "type": "blog",
-                                "id": bp["id"],
-                                "group_key": bp["group_key"],
-                                "member": bp["author"],
-                                "member_display": f"{gicon} {gname} · {bp['author']}",
-                                "text": bp["title"],
-                                "url": cover,
-                                "published_at": bp["date"],
-                                "year": int(bp["date"][:4]) if len(bp["date"]) >= 4 and bp["date"][:4].isdigit() else 2026,
-                                "month": int(bp["date"][5:7]) if len(bp["date"]) >= 7 and bp["date"][5:7].isdigit() else 8,
-                            })
-
-                    # 今日与本周博客统计（极速 SQL 范围查询）
-                    r_b_td = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date LIKE ?", (f"{today_str}%",)).fetchone()
-                    today_blog_cnt = r_b_td[0] if r_b_td else 0
-                    week_ago_str = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-                    r_b_wk = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date >= ?", (week_ago_str,)).fetchone()
-                    blog_this_week = r_b_wk[0] if r_b_wk else 0
-
-                    # 博客时光隧道：从最近 40 篇博文中随机抽取 3 篇（避免全表 ORDER BY RANDOM 扫描）
-                    all_recent_blogs = blog_db.execute("""
-                        SELECT id, group_key, author, title, date, body_text
-                        FROM blog_posts
-                        ORDER BY date DESC LIMIT 40
-                    """).fetchall()
-                    rand_blog_rows = random.sample(all_recent_blogs, min(3, len(all_recent_blogs))) if all_recent_blogs else []  # nosec B311
-                    for r in rand_blog_rows:
-                        bp = dict(r)
-                        gname = GROUP_INFO.get(bp["group_key"], {}).get("name", bp["group_key"])
-                        gicon = GROUP_INFO.get(bp["group_key"], {}).get("icon", "📝")
-                        raw_body = bp.get("body_text") or ""
-                        clean_body = re.sub(r'[\r\n\s]+', ' ', raw_body).strip()
-                        preview = clean_body[:120] + ("..." if len(clean_body) > 120 else "")
-                        rand_blog_msgs.append({
-                            "type": "blog",
-                            "id": bp["id"],
-                            "group_key": bp["group_key"],
-                            "member_display": f"{gicon} {gname} · {bp['author']}",
-                            "text": bp["title"],
-                            "translation": preview,
-                            "published_at": bp["date"],
-                        })
-                except Exception:  # nosec B110
-                    pass
-
-            # ── 3. 聚合写真画廊（Message 写真 + 博客精选图）──
-            def _ym(utc_str: str) -> tuple[int, int]:
-                try:
-                    return (int(utc_str[:4]), int(utc_str[5:7]))
-                except (ValueError, IndexError):
-                    return (2026, 1)
-
-            msg_pics = []
-            if db:
-                try:
-                    all_recent_pics = db.execute("""
-                        SELECT id, member_name, text, local_file, published_at, updated_at, raw_json
-                        FROM messages
-                        WHERE type IN ('picture','image') AND local_file IS NOT NULL AND local_file != ''
-                        ORDER BY published_at DESC LIMIT 30
-                    """).fetchall()
-                    recent_pic_rows = all_recent_pics[:8]
-                    rand_pic_rows = random.sample(all_recent_pics[8:], min(4, len(all_recent_pics[8:]))) if len(all_recent_pics) > 8 else []  # nosec B311
-                    seen_p_ids = set()
-                    for row in (recent_pic_rows + rand_pic_rows):
-                        if row[0] in seen_p_ids:
-                            continue
-                        seen_p_ids.add(row[0])
-                        rj = json.loads(row[6]) if row[6] else {}
-                        pub = row[4] or row[5] or ""
-                        norm_m = row[1].replace(" ", "").replace("　", "").replace("_", "")
-                        disp = monitor_names.get(norm_m) or row[1].replace("_", " ")
-                        canonical_m = _archive.member_dir_name(row[1])
-                        msg_pics.append({
-                            "type": "msg",
-                            "member": canonical_m, "member_display": disp,
-                            "id": row[0], "text": row[2] or "",
-                            "url": f"/api/archive/media/{canonical_m}/{row[3]}",
-                            "w": rj.get("thumbnail_width"), "h": rj.get("thumbnail_height"),
-                            "published_at": pub,
-                            "year": _ym(pub)[0], "month": _ym(pub)[1],
-                        })
-                except Exception:  # nosec B110
-                    pass
-
-            # 综合写真画廊：Message 精选图 + Blog 插图混合
-            agg_pics = sorted(msg_pics + blog_pics[:6], key=lambda x: x.get("published_at", ""), reverse=True)
-
-            # ── 4. 全站最新动态流（Message 消息 + Blog 博文混合）──
-            agg_msgs = []
-            for m in members:
-                for msg in m["latest_msgs"][:4]:
-                    agg_msgs.append({
-                        "type": "msg",
-                        "member": m["name"],
-                        "member_display": m["display"],
-                        "id": msg["id"],
-                        "text": msg["text"],
-                        "translation": msg.get("translation", ""),
-                        "published_at": msg.get("published_at", ""),
-                        "year": _ym(msg.get("published_at", ""))[0],
-                        "month": _ym(msg.get("published_at", ""))[1],
-                    })
-
-            for b in recent_blogs[:4]:
-                agg_msgs.append({
-                    "type": "blog",
-                    "group_key": b["group_key"],
-                    "group_name": b["group_name"],
-                    "group_icon": b["group_icon"],
-                    "author": b["author"],
-                    "member_display": f"{b['group_icon']} {b['group_name']} · {b['author']}",
-                    "id": b["id"],
-                    "text": b["title"],
-                    "translation": "",
-                    "cover": b.get("cover", ""),
-                    "published_at": b["date"],
-                    "year": int(b["date"][:4]) if len(b["date"]) >= 4 and b["date"][:4].isdigit() else 2026,
-                    "month": int(b["date"][5:7]) if len(b["date"]) >= 7 and b["date"][5:7].isdigit() else 8,
-                })
-
-            recent_feed = sorted(agg_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:8]
-
-            # ── 5. 全站时光隧道（随机 Message 经典记录 + 随机 Blog 经典）──
-            rand_msgs = []
-            if db:
-                try:
-                    rand_txt_rows = db.execute("""
-                        SELECT id, member_name, text, translation, published_at, updated_at
-                        FROM messages
-                        WHERE type='text' AND text IS NOT NULL AND trim(text)!=''
-                        ORDER BY RANDOM() LIMIT 4
-                    """).fetchall()
-                    for r in rand_txt_rows:
-                        pub = r[4] or r[5] or ""
-                        norm_r = r[1].replace(" ", "").replace("　", "").replace("_", "")
-                        disp_r = monitor_names.get(norm_r) or r[1].replace("_", " ")
-                        canonical_r = _archive.member_dir_name(r[1])
-                        rand_msgs.append({
-                            "type": "msg",
-                            "member": canonical_r, "member_display": disp_r,
-                            "id": r[0], "text": r[2] or "", "translation": r[3] or "",
-                            "published_at": pub,
-                            "year": _ym(pub)[0], "month": _ym(pub)[1],
-                        })
-                except Exception:  # nosec B110
-                    pass
-
-            time_tunnel = sorted(rand_msgs + rand_blog_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:6]
-
-            # ── 6. 综合统计概览 ──
-            total_messages = sum(m["stats"]["total"] for m in members)
-            first_dates = [m["stats"]["first_date"] for m in members if m["stats"]["first_date"]] + [g["first_date"] for g in blog_groups if g["first_date"]]
-            last_dates = [m["stats"]["last_date"] for m in members if m["stats"]["last_date"]] + [g["last_date"] for g in blog_groups if g["last_date"]]
-
-            agg_first = min(first_dates) if first_dates else ""
-            agg_last = max(last_dates) if last_dates else ""
-
-            last_pub = max((p.get("published_at", "") for p in agg_pics), default="")
-            last_feed = max((f.get("published_at", "") for f in recent_feed), default="")
-            last_updated = max(last_pub, last_feed)
-
-            summary = {
-                "total_messages": total_messages,
-                "total_blogs": total_blogs,
-                "total_all": total_messages + total_blogs,
-                "member_count": len(members),
-                "blog_group_count": len(blog_groups),
-                "blog_author_count": total_blog_authors,
-                "first_date": agg_first,
-                "last_date": agg_last,
-                "last_updated": last_updated,
-                "today_stats": {
-                    "messages": today_msg_cnt,
-                    "blogs": today_blog_cnt,
-                    "total": today_msg_cnt + today_blog_cnt,
-                },
-                "week_stats": {
-                    "this_week": this_week_msgs + blog_this_week,
-                    "last_week": last_week_msgs,
-                    "messages_week": this_week_msgs,
-                    "blogs_week": blog_this_week,
-                },
-            }
-
-            result = {
-                "ok": True,
-                "summary": summary,
-                "members": members,
-                "blog_groups": blog_groups,
-                "recent_pics": agg_pics,
-                "recent_feed": recent_feed,
-                "time_tunnel": time_tunnel,
-            }
-            _home_cache = result
-            _home_cache_key = cache_key
-            self._send_json(result)
-            return
-
-        # ── 博客归档 API ──
-        if sub == "blog_groups":
-            groups = []
-            try:
-                db = _get_blog_db()
-                for r in db.execute("""
-                    SELECT group_key, COUNT(*), MIN(date), MAX(date)
-                    FROM blog_posts GROUP BY group_key ORDER BY group_key
-                """).fetchall():
-                    groups.append({
-                        "key": r[0], "total": r[1],
-                        "first_date": r[2] or "", "last_date": r[3] or "",
-                    })
-            except Exception:  # nosec B110
-                pass
-            self._send_json({"ok": True, "groups": groups})
-            return
-
-        if sub == "blog_calendar":
-            qs = self._query_params()
-            group = qs.get("group", "hinatazaka")
-            author = qs.get("author", "")
-            days = {}
-            try:
-                db = _get_blog_db()
-                where = "WHERE group_key=?"
-                params = [group]
-                if author:
-                    norm_author = author.replace(" ", "").replace("　", "").replace("_", "")
-                    where += " AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?"
-                    params.append(norm_author)
-                for r in db.execute(f"""
-                    SELECT substr(date,1,10) as d, COUNT(*)
-                    FROM blog_posts {where}
-                    GROUP BY d
-                """, params).fetchall():  # nosec B608
-                    if r[0]:
-                        days[r[0]] = r[1]
-            except Exception:  # nosec B110
-                pass
-            self._send_json({"ok": True, "group": group, "days": days})
-            return
-
-        if sub == "blog_authors":
-            qs = self._query_params()
-            group = qs.get("group", "hinatazaka")
-            authors = []
-            try:
-                db = _get_blog_db()
-                from src import avatar_manager
-                from src.sakamichi_roster import get_author_sort_tuple
-                avatar_map = avatar_manager.get_member_avatar_map()
-                raw_authors = db.execute("""
-                    SELECT author, COUNT(*)
-                    FROM blog_posts WHERE group_key=? AND author != '' AND author IS NOT NULL
-                    GROUP BY author
-                """, (group,)).fetchall()
-                for r in raw_authors:
-                    if r[0] and str(r[0]).strip():
-                        a_name = str(r[0]).strip()
-                        norm_a = a_name.replace(" ", "").replace("　", "").replace("_", "")
-                        avatar = avatar_map.get(f"{group}:{norm_a}") or avatar_map.get(norm_a) or ""
-                        sort_key = get_author_sort_tuple(group, a_name)
-                        authors.append({
-                            "name": a_name,
-                            "total": r[1],
-                            "avatar": avatar,
-                            "_sort": sort_key,
-                        })
-                # 按 期别 - 期别整体账号 - staff（整体按五十音）精准排序
-                authors.sort(key=lambda x: x["_sort"])
-                for a_item in authors:
-                    a_item.pop("_sort", None)
-            except Exception:  # nosec B110
-                pass
-            self._send_json({"ok": True, "group": group, "authors": authors})
-            return
-
-        if sub == "blogs":
-            qs = self._query_params()
-            blog_id = qs.get("id")
-            if blog_id:
-                try:
-                    db = _get_blog_db()
-                    r = db.execute("SELECT * FROM blog_posts WHERE id=?", (blog_id,)).fetchone()
-                    if r:
-                        d = dict(r)
-                        d["images_json"] = d.get("images_json") or "[]"
-                        d["image_paths_json"] = d.get("image_paths_json") or "[]"
-                        self._send_json({"ok": True, "post": d})
-                        return
-                    else:
-                        self._send_json({"ok": False, "errors": ["博客不存在"]}, 404)
-                        return
-                except Exception as e:
-                    self._send_json({"ok": False, "errors": [str(e)]}, 500)
-                    return
-
-            group = qs.get("group", "hinatazaka")
-            author = qs.get("author", "")
-            date_filter = qs.get("date", "")
-            year = int(qs.get("year", "0") or "0")
-            month = int(qs.get("month", "0") or "0")
-            page = max(1, int(qs.get("page", "1") or "1"))
-            per_page = min(100, max(1, int(qs.get("per_page", "30") or "30")))
-            q = qs.get("q", "")
-            posts = []
-            total = 0
-            try:
-                db = _get_blog_db()
-                where = "WHERE group_key=?"
-                params: list = [group]
-                if author:
-                    norm_author = author.replace(" ", "").replace("　", "").replace("_", "")
-                    where += " AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?"
-                    params.append(norm_author)
-                if date_filter:
-                    where += " AND substr(date,1,10)=?"
-                    params.append(date_filter)
-                elif year and month:
-                    where += " AND substr(date,1,7)=?"
-                    params.append(f"{year:04d}-{month:02d}")
-                if q:
-                    where += " AND (title LIKE ? OR body_text LIKE ? OR translation LIKE ?)"
-                    q_like = f"%{q}%"
-                    params.extend([q_like, q_like, q_like])
-                total = db.execute(
-                    f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]  # nosec B608
-
-                # 计算分页与偏移：
-                # 默认首页展示模式（无关键词搜索且无日期筛选）：第1页包含 1 张 Hero 顶置大卡片 + 24 张完整网格 (共 25 篇，满 6 行 × 4 列无缺口)
-                # 第 2 页及之后为标准的 24 篇网格 (6 行 × 4 列)
-                has_hero_mode = (not q and not date_filter and not (year and month))
-                if has_hero_mode:
-                    if page == 1:
-                        limit = 25
-                        offset = 0
-                    else:
-                        limit = 24
-                        offset = 25 + (page - 2) * 24
-                    
-                    if total <= 25:
-                        total_pages = 1
-                    else:
-                        total_pages = 1 + (total - 25 + 24 - 1) // 24
-                else:
-                    limit = per_page
-                    offset = (page - 1) * per_page
-                    total_pages = max(1, (total + per_page - 1) // per_page)
-
-                sql = f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?"  # nosec B608
-                rows = db.execute(sql, params + [limit, offset]).fetchall()  # nosec B608
-                for r in rows:
-                    d = dict(r)
-                    d["images_json"] = d.get("images_json") or "[]"
-                    paths_str = d.get("image_paths_json") or "[]"
-                    try:
-                        images = json.loads(d["images_json"])
-                        paths = json.loads(paths_str)
-                        if images:
-                            while len(paths) < len(images):
-                                paths.append("")
-                            dirty = False
-                            img_root = Path("data/blog_images")
-                            for i, img_url in enumerate(images):
-                                if not paths[i] or not (img_root / paths[i]).exists():
-                                    safe_title = re.sub(r'[\\/:*?"<>|]', '', d.get("title", ""))[:50].strip()
-                                    safe_author = re.sub(r'[\\/:*?"<>|]', '', d.get("author", ""))[:20].strip()
-                                    ts = (d.get("date") or "").replace("/", "").replace(" ", "_").replace(":", "")
-                                    safe_ts = re.sub(r'[^0-9_]', '', ts)[:15]
-                                    ext = img_url.rsplit(".", 1)[-1].split("?")[0].lower()
-                                    if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
-                                        ext = "jpg"
-                                    fname = f"{i+1:02d}.{ext}"
-                                    cand = img_root / d.get("group_key", "") / safe_author / f"{safe_title}-{safe_ts}" / fname
-                                    if cand.exists():
-                                        paths[i] = str(cand.relative_to(img_root))
-                                        dirty = True
-                            if dirty:
-                                paths_str = json.dumps(paths, ensure_ascii=False)
-                                try:
-                                    db.execute("UPDATE blog_posts SET image_paths_json = ? WHERE id = ?", (paths_str, d["id"]))
-                                    db.commit()
-                                except Exception:  # nosec B110
-                                    pass
-                    except Exception:  # nosec B110
-                        pass
-                    d["image_paths_json"] = paths_str
-                    d["content_json"] = d.get("content_json") or "[]"
-                    d["translation_model"] = d.get("translation_model") or ""
-                    posts.append(d)
-            except Exception:  # nosec B110
-                pass
-            self._send_json({
-                "ok": True, "group": group, "posts": posts,
-                "total": total, "page": page, "total_pages": total_pages,
-            })
-            return
-
-        if sub == "blogs/translate":
-            if getattr(cfg, "AUTH_ENABLED", False):
-                user = self._current_user()
-                if not user or user.get("role") != "admin":
-                    self._send_json({"ok": False, "msg": "需要管理员权限方可使用翻译功能"}, 401)
-                    return
-
-            if self.command != "POST":
-                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
-                return
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length <= 0 or content_length > 5 * 1024 * 1024:
-                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
-                return
-            body_data = self.rfile.read(content_length).decode("utf-8")
-            try:
-                data = json.loads(body_data)
-                blog_id = int(data.get("id", 0))
-            except json.JSONDecodeError:
-                self._send_json({"ok": False, "msg": "Invalid JSON"}, 400)
-                return
-                
-            if not blog_id:
-                self._send_json({"ok": False, "msg": "无效参数"})
-                return
-
-            try:
-                db = _get_blog_db()
-                row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (blog_id,)).fetchone()
-                if not row:
-                    self._send_json({"ok": False, "msg": "未找到该博客"})
-                    return
-                row = dict(row)
-
-                if row.get("content_json") and row["content_json"] != "[]":
-                    self._send_json({"ok": True, "html": row.get("translation", ""), "content_json": row["content_json"], "translation_model": row.get("translation_model") or ""})
-                    return
-
-                import asyncio
-                import httpx
-                from src import translator
-                from src.logger import log_all
-
-                log_all(f"🔄 网页端请求手动翻译博客: {row['author']} - {row.get('title', '')}")
-
-                async def _do_translate():
-                    async with httpx.AsyncClient(timeout=120) as temp_client:
-                        return await translator.translate_blog_structured(
-                            row["body_html"], row["author"], row["group_key"], custom_client=temp_client
-                        )
-
-                structured, model_name = asyncio.run(_do_translate())
-                if structured:
-                    translated = translator.blocks_to_html(structured)
-                    content_json = json.dumps(structured, ensure_ascii=False)
-                    translation_model = model_name or ""
-                    log_all(f"✅ 网页端手动翻译完成: {row['author']} - {row.get('title', '')}（模型: {translation_model}）")
-                    db.execute("UPDATE blog_posts SET translation = ?, content_json = ?, translation_model = ? WHERE id = ?", (translated, content_json, translation_model, blog_id))
-                    db.commit()
-                    self._send_json({"ok": True, "html": translated, "content_json": content_json, "translation_model": translation_model})
-                else:
-                    log_all(f"⚠️ 网页端手动翻译失败: {row['author']} - {row.get('title', '')}", is_error=True)
-                    self._send_json({"ok": False, "msg": "翻译失败，请稍后重试"})
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                pass
-            except Exception as e:
-                import traceback
-                with open("logs/ui_error.txt", "w", encoding="utf-8") as f:
-                    traceback.print_exc(file=f)
-                self._send_json({"ok": False, "msg": f"异常: {e}"})
-            return
-
-        if sub == "blogs/archive_member":
-            if getattr(cfg, "AUTH_ENABLED", False):
-                user = self._current_user()
-                if not user or user.get("role") != "admin":
-                    self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
-                    return
-
-            if self.command != "POST":
-                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
-                return
-
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length <= 0 or content_length > 5 * 1024 * 1024:
-                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
-                return
-            body = self.rfile.read(content_length)
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except Exception:
-                payload = {}
-
-            target_url = payload.get("url", "").strip()
-            translate = bool(payload.get("translate", False))
-            
-            if not target_url:
-                self._send_json({"ok": False, "msg": "请输入有效的成员博客 URL"})
-                return
-
-            import subprocess  # nosec B404
-            cmd = [sys.executable, str(_BASE_DIR / "tools" / "archive_member.py"), target_url]
-            if translate:
-                cmd.append("--translate")
-
-            try:
-                subprocess.Popen(cmd, cwd=str(_BASE_DIR))  # nosec B603
-                self._send_json({"ok": True, "msg": "已成功启动后台博客归档任务！可在终端或日志中查看进度。"})
-            except Exception as e:
-                self._send_json({"ok": False, "msg": f"启动归档任务失败: {e}"})
-            return
-
-        if sub == "messages/backfill":
-            if getattr(cfg, "AUTH_ENABLED", False):
-                user = self._current_user()
-                if not user or user.get("role") != "admin":
-                    self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
-                    return
-
-            if self.command != "POST":
-                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
-                return
-
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length <= 0 or content_length > 5 * 1024 * 1024:
-                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
-                return
-            body = self.rfile.read(content_length)
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except Exception:
-                payload = {}
-
-            member_name = payload.get("member", "").strip()
-            reset_flag = bool(payload.get("reset", False))
-            
-            import subprocess  # nosec B404
-            cmd = [sys.executable, str(_BASE_DIR / "tools" / "backfill_archive.py"), "--force"]
-            if reset_flag:
-                cmd.append("--reset")
-            if member_name:
-                cmd.append(member_name)
-
-            try:
-                subprocess.Popen(cmd, cwd=str(_BASE_DIR))  # nosec B603
-                msg_target = f"【{member_name}】" if member_name else "【全部监控成员】"
-                self._send_json({"ok": True, "msg": f"已成功启动 {msg_target} 的历史消息回填任务！"})
-            except Exception as e:
-                self._send_json({"ok": False, "msg": f"启动消息回填失败: {e}"})
-            return
-
-        if sub == "blogs/delete_translation":
-            if getattr(cfg, "AUTH_ENABLED", False):
-                user = self._current_user()
-                if not user or user.get("role") != "admin":
-                    self._send_json({"ok": False, "msg": "需要管理员权限方可操作"}, 401)
-                    return
-
-            if self.command != "POST":
-                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
-                return
-
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length <= 0 or content_length > 5 * 1024 * 1024:
-                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
-                return
-
-            body_data = self.rfile.read(content_length).decode("utf-8")
-            try:
-                data = json.loads(body_data)
-                blog_id = int(data.get("id", 0))
-            except json.JSONDecodeError:
-                self._send_json({"ok": False, "msg": "Invalid JSON"}, 400)
-                return
-
-            if not blog_id:
-                self._send_json({"ok": False, "msg": "无效参数"})
-                return
-
-            try:
-                db = _get_blog_db()
-                db.execute("UPDATE blog_posts SET translation = NULL, content_json = NULL, translation_model = NULL WHERE id = ?", (blog_id,))
-                db.commit()
-                from src.logger import log_all
-                log_all(f"🗑️ 管理员删除了博客 (ID: {blog_id}) 的翻译缓存")
-                self._send_json({"ok": True, "msg": "已清除该博客的翻译"})
-            except Exception as e:
-                self._send_json({"ok": False, "msg": f"异常: {e}"})
-            return
-
-        if sub == "blogs/furigana":
-            if self.command != "POST":
-                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
-                return
-
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length <= 0 or content_length > 5 * 1024 * 1024:
-                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
-                return
-
-            body_data = self.rfile.read(content_length).decode("utf-8")
-            try:
-                data = json.loads(body_data)
-            except json.JSONDecodeError:
-                self._send_json({"ok": False, "msg": "Invalid JSON"}, 400)
-                return
-
-            blog_id = data.get("id")
-            raw_html = data.get("html")
-            raw_title = data.get("title")
-
-            try:
-                from src import furigana
-
-                if blog_id:
-                    db = _get_blog_db()
-                    row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (int(blog_id),)).fetchone()
-                    if not row:
-                        self._send_json({"ok": False, "msg": "未找到该博客"}, 404)
-                        return
-                    row = dict(row)
-                    f_title = furigana.add_furigana_to_text(row.get("title") or "")
-                    f_html = furigana.add_furigana_to_html(row.get("body_html") or "")
-
-                    f_content_json = None
-                    if row.get("content_json") and row["content_json"] != "[]":
-                        try:
-                            blocks = json.loads(row["content_json"])
-                            f_blocks = furigana.add_furigana_to_blocks(blocks)
-                            f_content_json = json.dumps(f_blocks, ensure_ascii=False)
-                        except Exception:
-                            pass
-
-                    self._send_json({
-                        "ok": True,
-                        "id": blog_id,
-                        "title": f_title,
-                        "furigana_html": f_html,
-                        "furigana_content_json": f_content_json,
-                    })
-                    return
-
-                if raw_html:
-                    f_html = furigana.add_furigana_to_html(str(raw_html))
-                    f_title = furigana.add_furigana_to_text(str(raw_title)) if raw_title else ""
-                    self._send_json({
-                        "ok": True,
-                        "title": f_title,
-                        "furigana_html": f_html,
-                    })
-                    return
-
-                self._send_json({"ok": False, "msg": "缺少 id 或 html 参数"}, 400)
-            except Exception as e:
-                self._send_json({"ok": False, "msg": f"生成振假名异常: {e}"}, 500)
-            return
-
-        if sub.startswith("blog_media/"):
-            rel_str = unquote(sub[len("blog_media/"):].replace("\\", "/"))
-            rel = Path(rel_str)
-            full = (BLOG_IMAGE_DIR / rel).resolve()
-            if BLOG_IMAGE_DIR.resolve() not in full.parents and full != BLOG_IMAGE_DIR.resolve():
-                self._send_json({"ok": False, "errors": ["非法路径"]}, 403)
-                return
-            if not full.is_file():
-                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
-                return
-            self._serve_file_range(full)
-            return
-
-        if sub.startswith("media/"):
-            rest = unquote(sub[len("media/"):])
-            raw_member, _, rel = rest.partition("/")
-            member = _archive.member_dir_name(raw_member) if raw_member else ""
-            if not member or member not in _archive.list_members() or not rel:
-                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
-                return
-            member_root = (_archive.archive_root() / member).resolve()
-            full = (member_root / rel).resolve()
-            if member_root not in full.parents:
-                self._send_json({"ok": False, "errors": ["非法路径"]}, 403)
-                return
-            if not full.is_file():
-                self._send_json({"ok": False, "errors": ["媒体不存在"]}, 404)
-                return
-            self._serve_file_range(full)
-            return
-
-        self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
-
-    def _serve_file_range(self, path: Path) -> None:
-        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。"""
-        from src.webui_modules.media_service import serve_file_range
-        serve_file_range(self, path)
-
-    def _handle_status(self) -> None:
-        """运行状态快照：健康追踪数据 + 各账号实时 Token 剩余时间。"""
-        from src.health import get_tracker
-        snap = get_tracker().snapshot()
-
-        # Token 实时剩余：health 里的值只在续期时点更新，这里现算最新值。
-        # 仅在 credentials 模块已加载时计算（独立模式不引入副作用）。
-        creds_mod = sys.modules.get("config.credentials")
-        if creds_mod is not None:
-            import config.config as cfg
-            live = {}
-            for acc_id in cfg.ACCOUNTS:
-                remaining = creds_mod.get_token_remaining_seconds(acc_id)
-                if remaining is not None:
-                    live[acc_id] = {"remaining": max(0.0, remaining), "healthy": remaining > 0}
-            if live:
-                snap["tokens"] = live
-
-        snap["ok"] = True
-        snap["now_epoch"] = _time.time()
-        snap["embedded"] = _on_poll_cb is not None
-        self._send_json(snap)
-
-    def _handle_logs(self) -> None:
-        """查看日志。source=live（内存环，增量）| error | response（文件尾部）。
-           所有日志在写入时已经过 redact_sensitive 脱敏。"""
-        from urllib.parse import parse_qs
-        qs = parse_qs(self.path.partition("?")[2])
-
-        def qs_int(key: str, default: int) -> int:
-            try:
-                return int((qs.get(key) or [str(default)])[0])
-            except ValueError:
-                return default
-
-        source = (qs.get("source") or ["live"])[0]
-        if source == "live":
-            from src.logger import get_recent
-            entries, seq = get_recent(qs_int("after", 0))
-            self._send_json({"ok": True, "source": "live", "entries": entries, "seq": seq})
-            return
-        if source in ("error", "response", "system"):
-            import config.config as cfg
-            if source == "error":
-                fp = Path(cfg.ERROR_LOG_FILE)
-            elif source == "system":
-                fp = Path(getattr(cfg, "SYSTEM_LOG_FILE", "logs/system_info.log"))
-            else:
-                fp = Path(cfg.RESPONSE_LOG_FILE)
-            
-            tail = max(1, min(qs_int("tail", 200), 1000))
-            try:
-                lines = _tail_file(fp, tail)
-            except OSError as e:
-                self._send_json({"ok": False, "errors": [f"读取日志文件失败: {e}"]}, 500)
-                return
-            self._send_json({"ok": True, "source": source, "lines": lines, "file": str(fp)})
-            return
-        self._send_json({"ok": False, "errors": [f"未知日志源: {source!r}"]}, 400)
-
-    def do_PUT(self) -> None:  # noqa: N802
-        if not self._check_host():
-            return
-        if not self._check_origin():
-            return
-        if self.path.split("?", 1)[0] != "/api/config":
-            self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
-            return
-        if not self._check_auth():
-            return
-        raw = self._read_body_json()
-        if raw is None:
-            return
-        errors = validate_config(raw)
-        if errors:
-            self._send_json({"ok": False, "errors": errors}, 400)
-            return
-        with _mutation_lock:
-            try:
-                save_config(raw)
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
-                return
-            reloaded = _trigger_reload()
-            from src.logger import log_all
-            log_all("⚙️ 网页端更新 config.json 并成功触发热重载")
-        self._send_json({
-            "ok": True, "reloaded": reloaded,
-            "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
-        })
+        self._send_404()
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._check_host():
@@ -2501,25 +404,26 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_origin():
             return
         path = self.path.split("?", 1)[0]
+
+        # 1. 登录认证
         if path == "/api/auth/login":
-            self._handle_login()
+            body = self._read_body_json()
+            if body is not None:
+                handle_login(self, body)
             return
         if path == "/api/auth/refresh":
-            self._handle_refresh()
+            handle_refresh(self)
             return
         if path == "/api/auth/logout":
-            self._handle_logout()
+            handle_logout(self)
             return
-        if path == "/api/users":
-            if not self._check_auth():
-                return
-            self._handle_users_write()
+        if path in ("/api/users", "/api/auth/users"):
+            body = self._read_body_json()
+            if body is not None:
+                handle_users_write(self, body, "POST")
             return
-        if path in ("/api/qq_openid/start", "/api/qq_openid/stop"):
-            if not self._check_auth():
-                return
-            self._handle_openid(path.rsplit("/", 1)[1])
-            return
+
+        # 2. 配置与密钥管理
         if path == "/api/reload":
             if not self._check_auth():
                 return
@@ -2528,591 +432,162 @@ class _Handler(BaseHTTPRequestHandler):
             log_all("⟳ 网页端请求系统配置热重载")
             self._send_json({"ok": True, "reloaded": reloaded})
             return
+
         if path == "/api/secrets":
             self._handle_secrets()
             return
-        if path == "/api/accounts/rename":
-            if not self._check_auth():
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            old_id = str(body.get("old_id", "")).strip()
-            new_id = str(body.get("new_id", "")).strip()
-            if not old_id or not new_id:
-                self._send_json({"ok": False, "errors": ["缺少 old_id 或 new_id 参数"]}, 400)
-                return
-            try:
-                from config import credentials
-                credentials.rename_account(old_id, new_id)
-                from src.logger import log_all
-                log_all(f"🔄 账号凭证与状态已同步重命名: {old_id} -> {new_id}")
-                self._send_json({"ok": True, "old_id": old_id, "new_id": new_id})
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"重命名账号失败: {e}"]}, 500)
-            return
-        if path == "/api/accounts/verify":
-            if not self._check_auth():
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            account = str(body.get("account", "")).strip()
-            if not account:
-                self._send_json({"ok": False, "errors": ["缺少 account 参数"]}, 400)
-                return
-            try:
-                from config.credentials import verify_and_handshake_account
-                import asyncio
-                h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
-                self._send_json({"ok": h_ok, "msg": h_msg, "details": h_details})
-            except Exception as e:
-                self._send_json({"ok": False, "msg": f"验证异常: {e}"}, 500)
-            return
-        if path == "/api/accounts/smart_parse":
-            if not self._check_auth():
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            raw_text = str(body.get("raw", "")).strip()
-            account = str(body.get("account", "")).strip()
-            if not raw_text:
-                self._send_json({"ok": False, "errors": ["缺少 raw 文本"]}, 400)
-                return
-            try:
-                import asyncio
-                res = asyncio.run(self._smart_parse_credentials_text(raw_text, account))
-                self._send_json({"ok": True, **res})
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"智能解析异常: {e}"]}, 500)
-            return
-        if path == "/api/subscriptions/sync":
-            if not self._check_auth():
-                return
-            try:
-                import asyncio
-                from src.member_directory import sync_all_accounts_subscriptions, get_all_subscriptions
-                stats = asyncio.run(sync_all_accounts_subscriptions())
-                subs = get_all_subscriptions()
-                self._send_json({"ok": True, "stats": stats, "subscriptions": subs})
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"同步订阅状态失败: {e}"]}, 500)
-            return
-        if path.startswith("/api/archive/"):
-            if not self._guard(need_admin=False):
-                return
-            self._handle_archive(path[len("/api/archive/"):])
-            return
-        if path == "/api/social/ig_session":
-            if not self._check_auth():
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            raw_cookies = str(body.get("cookies") or body.get("raw") or "").strip()
-            if not raw_cookies:
-                self._send_json({"ok": False, "errors": ["Cookie 内容不能为空"]}, 400)
-                return
-            from src.social import ig_session
-            cookies = ig_session.parse_cookies(raw_cookies)
-            if not cookies:
-                self._send_json({"ok": False, "errors": ["未能解析出任何有效 Cookie，请检查格式"]}, 400)
-                return
-            ig_session.write_cookie_file(cookies)
-            env_updates = {}
-            if cookies.get("sessionid"):
-                env_updates["INSTAGRAM_SESSIONID"] = cookies["sessionid"]
-            if cookies.get("ds_user_id"):
-                env_updates["INSTAGRAM_DS_USER_ID"] = cookies["ds_user_id"]
-            if env_updates:
-                with _mutation_lock:
-                    update_env_file(env_updates)
-                    for k, v in env_updates.items():
-                        os.environ[k] = v
-            assessment = ig_session.assess(cookies)
-            raw_cfg = _load_raw_config()
-            proxy = ""
-            if isinstance(raw_cfg, dict):
-                proxy = raw_cfg.get("proxy") or raw_cfg.get("social", {}).get("proxy") or ""
-            try:
-                import config.config as app_cfg
-                proxy = proxy or getattr(app_cfg, "PROXY", "")
-            except Exception:  # nosec B110
-                pass
-            health = ig_session.check_session(cookies, proxy=str(proxy or ""))
-            reloaded = _trigger_reload()
-            self._send_json({
-                "ok": True,
-                "assessment": assessment,
-                "health": health,
-                "reloaded": reloaded,
-                "status": ig_session.status(),
-            })
-            return
 
-        if path == "/api/social/ig_session/check":
-            if not self._check_auth():
-                return
-            from src.social import ig_session
-            cookies = ig_session.read_cookie_file()
-            if not cookies:
-                self._send_json({"ok": False, "errors": ["尚未配置任何 Instagram Cookies"]}, 400)
-                return
-            raw_cfg = _load_raw_config()
-            proxy = ""
-            if isinstance(raw_cfg, dict):
-                proxy = raw_cfg.get("proxy") or raw_cfg.get("social", {}).get("proxy") or ""
-            try:
-                import config.config as app_cfg
-                proxy = proxy or getattr(app_cfg, "PROXY", "")
-            except Exception:  # nosec B110
-                pass
-            health = ig_session.check_session(cookies, proxy=str(proxy or ""))
-            self._send_json({
-                "ok": True,
-                "health": health,
-                "assessment": ig_session.assess(cookies),
-                "status": ig_session.status(),
-            })
-            return
-
-        if path == "/api/social/ig_session/clear":
-            if not self._check_auth():
-                return
-            from src.social import ig_session
-            ig_session.clear()
-            with _mutation_lock:
-                update_env_file({}, remove=["INSTAGRAM_SESSIONID", "INSTAGRAM_DS_USER_ID"])
-                os.environ.pop("INSTAGRAM_SESSIONID", None)
-                os.environ.pop("INSTAGRAM_DS_USER_ID", None)
-                reloaded = _trigger_reload()
-            self._send_json({"ok": True, "reloaded": reloaded, "status": ig_session.status()})
-            return
-
-        if path == "/api/social/parse_post":
+        if path in ("/api/config/rollback", "/api/config/restore"):
             if not self._check_auth():
                 return
             body = self._read_body_json()
             if body is None:
                 return
-            url = str(body.get("url", "")).strip()
-            if not url:
-                self._send_json({"ok": False, "errors": ["缺少 url 参数"]}, 400)
+            filename = str(body.get("name") or body.get("filename", "")).strip()
+            if not _HISTORY_NAME_RE.match(filename):
+                self._send_json({"ok": False, "errors": [f"非法快照文件名: {filename!r}"]}, 400)
                 return
+            src = _history_dir() / filename
+            if not src.is_file():
+                self._send_json({"ok": False, "errors": [f"快照文件不存在: {filename!r}"]}, 404)
+                return
+            import json5
             try:
-                from src.social.single_fetcher import SocialUrlParser
-                raw_cfg = _load_raw_config()
-                parser = SocialUrlParser(raw_cfg)
-                post = parser.parse(url)
-
-                tr = None
-                if body.get("translate", True) and post.text:
-                    try:
-                        from src import translator
-                        import asyncio
-                        tr = asyncio.run(translator.translate_text(post.text, "社媒", "偶像"))
-                    except Exception:  # nosec B110
-                        pass
-
-                media_list = [{"type": m.type, "url": m.url, "alt": m.alt_text} for m in post.media]
-                self._send_json({
-                    "ok": True,
-                    "platform": post.platform,
-                    "post_id": post.post_id,
-                    "author": post.author,
-                    "text": post.text,
-                    "translation": tr,
-                    "timestamp": post.timestamp,
-                    "media": media_list,
-                    "extra": post.extra,
-                })
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"解析失败: {e}"]}, 500)
-            return
-        if path == "/api/social/manual_push":
-            if not self._check_auth():
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            url = str(body.get("url", "")).strip()
-            if not url:
-                self._send_json({"ok": False, "errors": ["缺少 url 参数"]}, 400)
-                return
-            try:
-                from src.social.single_fetcher import manual_push_social_url
-                raw_cfg = _load_raw_config()
-                translate = bool(body.get("translate", True))
-                archive = bool(body.get("archive", True))
-                channels = body.get("channels")
-                if channels is not None and not isinstance(channels, list):
-                    channels = [str(channels)]
-                res = manual_push_social_url(url, raw_cfg, target_channels=channels, translate=translate, archive=archive)
-                self._send_json(res)
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"推送失败: {e}"]}, 500)
-            return
-        if path == "/api/test_push":
-            if not self._check_auth():
-                return
-            if _on_test_push_cb is None:
-                self._send_json({"ok": False, "errors": ["独立模式下无法测试推送（主程序未运行在本进程）"]}, 400)
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            channel = body.get("channel", "tg")
-            target = str(body.get("target", "")).strip()
-            text = str(body.get("text", "")).strip() or (
-                f"🧪 坂道监控 · 测试推送\n发送时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                "（来自网页管理端，收到即代表该通道配置正确）"
-            )
-            if channel not in ("tg", "napcat", "official"):
-                self._send_json({"ok": False, "errors": [f"不支持的通道: {channel!r}"]}, 400)
-                return
-            if not target:
-                self._send_json({"ok": False, "errors": ["缺少推送目标 target"]}, 400)
-                return
-            if channel == "napcat" and not target.lstrip("-").isdigit():
-                self._send_json({"ok": False, "errors": ["NapCat 目标必须是 QQ 群号"]}, 400)
-                return
-            from src.logger import log_all
-            log_all(f"📨 网页端发起测试推送 [通道: {channel} | 目标: {target}]")
-            ok, err = _on_test_push_cb(channel, target, text[:1000])
-            if ok:
-                self._send_json({"ok": True, "channel": channel, "target": target})
-            else:
-                self._send_json({"ok": False, "errors": [err or "发送失败"]}, 502)
-            return
-        if path == "/api/poll":
-            if not self._check_auth():
-                return
-            if _on_poll_cb is None:
-                self._send_json({"ok": False, "errors": ["独立模式下无法触发巡查（主程序未运行在本进程）"]}, 400)
-                return
-            try:
-                _on_poll_cb()
-            except Exception as e:
-                self._send_json({"ok": False, "errors": [f"触发巡查失败: {e}"]}, 500)
-                return
-            self._send_json({"ok": True})
-            return
-        if path == "/api/config/restore":
-            if not self._check_auth():
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            name = body.get("name", "")
-            if not isinstance(name, str) or not _HISTORY_NAME_RE.match(name):
-                self._send_json({"ok": False, "errors": [f"非法历史版本名: {name!r}"]}, 400)
-                return
-            src = _history_dir() / name
-            if not src.exists():
-                self._send_json({"ok": False, "errors": [f"历史版本不存在: {name}"]}, 404)
-                return
-            try:
-                import json5
                 with open(src, "r", encoding="utf-8") as f:
                     raw = json5.load(f)
             except Exception as e:
-                self._send_json({"ok": False, "errors": [f"历史版本解析失败: {e}"]}, 500)
-                return
-            errors = validate_config(raw)
-            if errors:
-                self._send_json({"ok": False, "errors": ["历史版本未通过当前校验:"] + errors}, 400)
+                self._send_json({"ok": False, "errors": [f"解析快照失败: {e}"]}, 500)
                 return
             with _mutation_lock:
                 try:
-                    save_config(raw)   # 会先把当前版本快照进 history，恢复也可再撤销
+                    save_config(raw)
                 except Exception as e:
-                    self._send_json({"ok": False, "errors": [f"写入失败: {e}"]}, 500)
+                    self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
                     return
                 reloaded = _trigger_reload()
-            self._send_json({"ok": True, "reloaded": reloaded, "restored": name})
+            self._send_json({
+                "ok": True, "reloaded": reloaded, "restored": filename, "restored_from": filename,
+                "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
+            })
             return
-        if path == "/api/restart":
+
+        # 3. 运维诊断与工具
+        if path in ("/api/proxy/test", "/api/system/proxy/test"):
             if not self._check_auth():
                 return
-            if _on_restart_cb is None:
-                self._send_json(
-                    {"ok": False, "errors": ["独立模式下无法重启主程序（主程序未运行在本进程）"]}, 400)
-                return
-            from src.logger import log_all
-            log_all("⟳ 网页端发起主程序进程重启")
-            try:
-                _on_restart_cb()
-            except Exception as e:
-                log_all(f"🚨 重启回调异常: {e}", is_error=True)
-            self._send_json({"ok": True, "restarting": True})
+            body = self._read_body_json() or {}
+            _sys_handle_proxy_test(self, body)
             return
-        if path == "/api/system/proxy/test":
+
+        if path in ("/api/storage/clean", "/api/system/storage/clean"):
             if not self._check_auth():
                 return
-            self._handle_proxy_test()
+            body = self._read_body_json() or {}
+            _sys_handle_storage_clean(self, body)
             return
-        if path == "/api/system/storage/clean":
+
+        if path in ("/api/restart", "/api/system/restart"):
             if not self._check_auth():
                 return
-            if not self._guard(need_admin=True):
-                return
-            body = self._read_body_json()
-            if body is None:
-                return
-            category = str(body.get("category", "")).strip()
-            from src.utils import clean_storage_category
-            ok, msg, freed = clean_storage_category(category)
-            if ok:
-                from src.logger import log_all
-                log_all(f"🧹 网页端清理存储分类 [{category}]: {msg}")
-                self._send_json({"ok": True, "msg": msg, "freed_bytes": freed})
+            if _on_restart_cb is not None:
+                threading.Thread(target=_on_restart_cb, name="restart_trigger", daemon=True).start()
+                self._send_json({"ok": True, "message": "已触发系统优雅重启"})
             else:
-                self._send_json({"ok": False, "errors": [msg]}, 400)
+                self._send_json({"ok": False, "errors": ["独立运行模式不支持通过网页重启"]}, 400)
             return
-        self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
-    def _handle_proxy_test(self) -> None:
-        """测试指定代理服务器的连通性与关键节点响应延迟。"""
-        body = self._read_body_json()
-        if body is None:
+        if path in ("/api/poll", "/api/system/poll"):
+            if not self._check_auth():
+                return
+            if _on_poll_cb is not None:
+                _on_poll_cb()
+                self._send_json({"ok": True, "message": "已触发立即巡查"})
+            else:
+                self._send_json({"ok": False, "errors": ["独立运行模式不支持立即巡查"]}, 400)
             return
-        proxy = str(body.get("proxy", "")).strip() or None
 
-        import time
-        import httpx
+        if path in ("/api/test_push", "/api/system/test_push"):
+            if not self._check_auth():
+                return
+            body = self._read_body_json() or {}
+            _sys_handle_test_push(self, body, _on_test_push_cb)
+            return
 
-        targets = [
-            {"name": "Google Gemini (AI 翻译)", "url": "https://generativelanguage.googleapis.com"},
-            {"name": "Telegram Bot API", "url": "https://api.telegram.org"},
-            {"name": "Instagram 官方", "url": "https://www.instagram.com"},
-            {"name": "乃木坂46 Message", "url": "https://api.message.nogizaka46.com"},
-        ]
+        if path in ("/api/qq_openid/start", "/api/qq_openid/stop"):
+            if not self._check_auth():
+                return
+            action = path.rsplit("/", 1)[1]
+            body = self._read_body_json() or {}
+            _sys_handle_openid_action(self, action, body, _on_openid_cb)
+            return
 
-        async def _probe(target):
-            t0 = time.monotonic()
-            try:
-                async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=True) as client:
-                    resp = await client.get(target["url"])
-                    latency_ms = int((time.monotonic() - t0) * 1000)
-                    return {
-                        "name": target["name"],
-                        "url": target["url"],
-                        "ok": resp.status_code < 500,
-                        "status_code": resp.status_code,
-                        "latency_ms": latency_ms,
-                        "error": None,
-                    }
-            except Exception as e:
-                latency_ms = int((time.monotonic() - t0) * 1000)
-                return {
-                    "name": target["name"],
-                    "url": target["url"],
-                    "ok": False,
-                    "status_code": 0,
-                    "latency_ms": latency_ms,
-                    "error": f"{type(e).__name__}: {str(e)[:80]}",
-                }
+        # 4. 归档子路由 POST
+        if path.startswith("/api/archive/"):
+            sub = path[len("/api/archive/"):]
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
+            return
 
-        async def _run_all():
-            return await asyncio.gather(*[_probe(t) for t in targets])
+        self._send_404()
 
-        try:
-            results = asyncio.run(_run_all())
-            all_ok = all(r["ok"] for r in results)
-            any_ok = any(r["ok"] for r in results)
-            self._send_json({"ok": True, "proxy": proxy, "all_ok": all_ok, "any_ok": any_ok, "results": results})
-        except Exception as e:
-            self._send_json({"ok": False, "errors": [f"代理测试执行失败: {e}"]}, 500)
+    def do_PUT(self) -> None:  # noqa: N802
+        if not self._check_host():
+            return
+        if not self._check_origin():
+            return
+        path = self.path.split("?", 1)[0]
 
-    async def _smart_parse_credentials_text(self, raw: str, account: str = "") -> dict:
-        """智能解析用户粘贴的 cURL / Headers / Signin Payload 文本。"""
-        import re
-        import json
-        import httpx
-
-        # 彻底清洗 Windows cmd 特有的所有转义模式 (如 ^\^", ^", ^{, ^}, ^&, ^|, ^$)
-        cleaned = (
-            raw.replace(r'^\^"', '"')
-            .replace(r'\^"', '"')
-            .replace(r'^\^', '')
-            .replace('^^', '^')
-            .replace('^"', '"')
-            .replace('^{', '{')
-            .replace('^}', '}')
-            .replace('^&', '&')
-            .replace('^|', '|')
-            .replace('^$', '$')
-        )
-        result = {"token": "", "cookie": "", "refresh_token": "", "extracted": []}  # nosec B105
-
-        group_type = "nogizaka"
-        acc_api_base = ""
-        acc_web_origin = ""
-        acc_app_tag = ""
-        if account:
-            try:
-                raw_cfg = _load_raw_config()
-                acc_data = raw_cfg.get("accounts", {}).get(account, {})
-                group_type = acc_data.get("group_type") or acc_data.get("group") or "nogizaka"
-                acc_api_base = acc_data.get("api_base") or ""
-                acc_web_origin = acc_data.get("web_origin") or ""
-                acc_app_tag = acc_data.get("app_tag") or ""
-            except Exception:  # nosec B110
-                pass
-
-        # 1. 检查是否包含 signin 请求体（用户在登录瞬间复制的 cURL）
-        signin_match = re.search(r'--data-raw\s+["\']?(\{.+?\})["\']?(?:\s+&|\s*$|\s+-)', cleaned, re.DOTALL) or \
-                       re.search(r'-d\s+["\']?(\{.+?\})["\']?(?:\s+&|\s*$|\s+-)', cleaned, re.DOTALL) or \
-                       re.search(r'--data-raw\s+["\'](\{.+?\})["\']', cleaned) or \
-                       re.search(r'-d\s+["\'](\{.+?\})["\']', cleaned)
-        if "signin" in cleaned and signin_match:
-            try:
-                json_str = signin_match.group(1).strip()
+        if path == "/api/config":
+            if not self._check_auth():
+                return
+            raw = self._read_body_json()
+            if raw is None:
+                return
+            errors = validate_config(raw)
+            if errors:
+                self._send_json({"ok": False, "errors": errors}, 400)
+                return
+            with _mutation_lock:
                 try:
-                    body_json = json.loads(json_str)
-                except Exception:
-                    body_json = json.loads(json_str.replace(r'\"', '"'))
-
-                # 从 cURL 中动态提取目标 URL
-                url = ""
-                url_m = re.search(r'(?:--url\s+["\']?|curl\s+["\']?)(https?://[^\s"\'>]+)', cleaned)
-                if url_m and "signin" in url_m.group(1).lower():
-                    url = url_m.group(1).strip().strip('"').strip("'")
-                if not url:
-                    if acc_api_base:
-                        url = f"{acc_api_base.rstrip('/')}/v2/signin"
-                    elif group_type.lower() == "yodel" or "yodel" in cleaned.lower():
-                        url = "https://api.service.yodel-app.com/v2/signin"
-                    else:
-                        domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
-                        url = f"https://api.message.{domain_part}.com/v2/signin"
-
-                # 提取 app-id
-                app_id = ""
-                app_id_m = re.search(r'x-talk-app-id:\s*([^\r\n"\']+)', cleaned, re.IGNORECASE)
-                if app_id_m:
-                    app_id = app_id_m.group(1).strip()
-                if not app_id:
-                    if acc_app_tag:
-                        app_id = f"jp.co.sonymusic.communication.{acc_app_tag} 2.5"
-                    elif group_type.lower() == "yodel" or "yodel" in url:
-                        app_id = "jp.co.sonymusic.communication.yodel 2.5"
-                    else:
-                        app_id = f"jp.co.sonymusic.communication.{group_type} 2.5"
-
-                # 提取 origin 与 referer
-                origin = ""
-                origin_m = re.search(r'origin:\s*([^\r\n"\']+)', cleaned, re.IGNORECASE)
-                if origin_m:
-                    origin = origin_m.group(1).strip()
-                if not origin:
-                    if acc_web_origin:
-                        origin = acc_web_origin.rstrip("/")
-                    elif group_type.lower() == "yodel" or "yodel" in url:
-                        origin = "https://service.yodel-app.com"
-                    else:
-                        domain_part = group_type if group_type.endswith("46") else f"{group_type}46"
-                        origin = f"https://message.{domain_part}.com"
-
-                headers = {
-                    "accept": "application/json",
-                    "content-type": "application/json",
-                    "origin": origin,
-                    "referer": origin + "/",
-                    "x-talk-app-id": app_id,
-                    "x-talk-app-platform": "web"
-                }
-
-                # 附带 cURL 中可能包含的前置 Cookie
-                req_cookie_m = re.search(r'(?:-b|--cookie)\s+["\']([^"\']+)["\']', cleaned, re.IGNORECASE)
-                if req_cookie_m:
-                    headers["cookie"] = req_cookie_m.group(1).strip()
-
-                async with httpx.AsyncClient(timeout=12) as client:
-                    r = await client.post(url, headers=headers, json=body_json)
-                    if r.status_code == 200:
-                        data = r.json()
-                        if data.get("access_token"):
-                            result["token"] = data["access_token"]
-                            result["extracted"].append("access_token (由登录接口自动换取)")
-                        cookies = []
-                        for sc in r.headers.get_list("set-cookie"):
-                            sc_part = sc.split(";")[0].strip()
-                            if sc_part and "=" in sc_part:
-                                cookies.append(sc_part)
-                        # 如果请求中带有前置 cookie（如 S5SI 等），一并合并
-                        if req_cookie_m:
-                            for part in req_cookie_m.group(1).split(";"):
-                                p_trim = part.strip()
-                                if p_trim and "=" in p_trim:
-                                    cookies.append(p_trim)
-                        if cookies:
-                            from config.credentials import _clean_cookie_string
-                            merged = {}
-                            for c_item in cookies:
-                                merged.update(_clean_cookie_string(c_item))
-                            if merged:
-                                result["cookie"] = "; ".join(f"{k}={v}" for k, v in merged.items())
-                                result["extracted"].append("session Cookie (由登录响应下发，可长期自动续期)")
-            except Exception as e:
+                    save_config(raw)
+                except Exception as e:
+                    self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
+                    return
+                reloaded = _trigger_reload()
                 from src.logger import log_all
-                log_all(f"⚠️ smart_parse 模拟登录请求失败: {e}")
+                log_all("⚙️ 网页端更新 config.json 并成功触发热重载")
+            self._send_json({
+                "ok": True, "reloaded": reloaded,
+                "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
+            })
+            return
 
-        # 2. 提取所有 Authorization Bearer 或 access_token，并自动优选最新未过期的 Token
-        if not result["token"]:
-            token_candidates = []
-            for m in re.finditer(r'(?:authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)', cleaned, re.IGNORECASE):
-                token_candidates.append(m.group(1).strip())
-            for m in re.finditer(r'["\']?access_token["\']?\s*[:=]\s*["\']([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-+/=]+)["\']', cleaned, re.IGNORECASE):
-                token_candidates.append(m.group(1).strip())
+        if path in ("/api/users", "/api/auth/users"):
+            body = self._read_body_json()
+            if body is not None:
+                handle_users_write(self, body, "PUT")
+            return
 
-            if token_candidates:
-                from config.credentials import _decode_token_exp
-                token_candidates = list(dict.fromkeys(token_candidates))
-                token_candidates.sort(key=lambda t: _decode_token_exp(t) or 0, reverse=True)
-                result["token"] = token_candidates[0]
-                result["extracted"].append("Token (JWT)")
+        if path.startswith("/api/archive/"):
+            sub = path[len("/api/archive/"):]
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
+            return
 
-        # 3. 提取并智能合并所有 Cookie (-b, --cookie, -H "cookie: ...", cookie: ..., Set-Cookie)
-        if not result["cookie"]:
-            cookie_candidates = []
-            for m in re.finditer(r'(?:-b|--cookie)\s+["\']([^"\']+)["\']', cleaned, re.IGNORECASE):
-                cookie_candidates.append(m.group(1).strip())
-            for m in re.finditer(r'(?:-H|--header)\s+["\']cookie:\s*([^"\']+)["\']', cleaned, re.IGNORECASE):
-                cookie_candidates.append(m.group(1).strip())
-            for m in re.finditer(r'^cookie:\s*(.+)$', cleaned, re.IGNORECASE | re.MULTILINE):
-                cookie_candidates.append(m.group(1).strip())
-            for m in re.finditer(r'set-cookie:\s*([^;\r\n]+)', cleaned, re.IGNORECASE):
-                cookie_candidates.append(m.group(1).strip())
+        self._send_404()
 
-            if cookie_candidates:
-                from config.credentials import _clean_cookie_string
-                merged_cookies = {}
-                cookie_candidates.sort(key=lambda c: ("session=" in c.lower(), len(c)))
-                for cand in cookie_candidates:
-                    parsed = _clean_cookie_string(cand)
-                    merged_cookies.update(parsed)
-
-                if merged_cookies:
-                    result["cookie"] = "; ".join(f"{k}={v}" for k, v in merged_cookies.items())
-                    result["extracted"].append("Cookie")
-                    if "session" in merged_cookies:
-                        result["extracted"].append("session (长期会话)")
-
-        # 4. 提取 refresh_token
-        if not result["refresh_token"]:
-            m = re.search(r'["\']?refresh_token["\']?\s*[:=]\s*["\']([a-f0-9\-]{32,36})["\']', cleaned, re.IGNORECASE)
-            if m:
-                result["refresh_token"] = m.group(1).strip()
-                result["extracted"].append("Refresh Token")
-
-        return result
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._check_host():
+            return
+        if not self._check_origin():
+            return
+        path = self.path.split("?", 1)[0]
+        if path in ("/api/users", "/api/auth/users"):
+            body = self._read_body_json() or {}
+            handle_users_write(self, body, "POST")
+            return
+        self._send_404()
 
     def _handle_secrets(self) -> None:
-        """写入凭证到 .env（值只进不出）。body:
-           { "values": {"HINATA_SHARED_TOKEN": "...", ...}, "account": "hinata_shared"? }
-           带 account 时执行凭证轮换（删除磁盘旧凭证，热重载后用新值重建）。"""
+        """写入凭证到 .env。"""
         if not self._check_auth():
             return
         body = self._read_body_json()
@@ -3120,10 +595,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         remove = body.get("remove")
         if isinstance(remove, list) and remove and not body.get("values"):
-            # 删除模式：仅接受白名单内的键（与写入同一套校验）
-            bad = [k for k in remove
-                   if not isinstance(k, str) or k in _FORBIDDEN_ENV_KEYS
-                   or not _SECRET_KEY_RE.match(k)]
+            bad = [k for k in remove if not isinstance(k, str) or k in _FORBIDDEN_ENV_KEYS or not _SECRET_KEY_RE.match(k)]
             if bad:
                 self._send_json({"ok": False, "errors": [f"不允许删除的变量: {bad}"]}, 400)
                 return
@@ -3141,30 +613,13 @@ class _Handler(BaseHTTPRequestHandler):
                 status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
             except Exception:
                 status = {}
-            self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove),
-                             "env_status": _env_status(), **status})
+            self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove), "env_status": _env_status(), **status})
             return
 
         values = body.get("values")
         if not isinstance(values, dict):
             self._send_json({"ok": False, "errors": ["缺少 values 对象"]}, 400)
             return
-
-        # 智能支持：若用户在 INSTAGRAM_SESSIONID 填入了包含多行 Netscape / JSON / cURL 的完整 Cookie
-        if "INSTAGRAM_SESSIONID" in values:
-            raw_ig = str(values["INSTAGRAM_SESSIONID"]).strip()
-            if "\n" in raw_ig or "Netscape" in raw_ig or "sessionid" in raw_ig or "{" in raw_ig or "\t" in raw_ig:
-                try:
-                    from src.social import ig_session
-                    parsed_ig = ig_session.parse_cookies(raw_ig)
-                    if parsed_ig:
-                        ig_session.write_cookie_file(parsed_ig)
-                        if parsed_ig.get("sessionid"):
-                            values["INSTAGRAM_SESSIONID"] = parsed_ig["sessionid"]
-                        if parsed_ig.get("ds_user_id"):
-                            values["INSTAGRAM_DS_USER_ID"] = parsed_ig["ds_user_id"]
-                except Exception:  # nosec B110
-                    pass
 
         errors = validate_secret_values(values)
         account = body.get("account")
@@ -3192,35 +647,18 @@ class _Handler(BaseHTTPRequestHandler):
                 _rotate_account_creds(account)
             reloaded = _trigger_reload()
 
-        handshake_info = None
-        if account is not None:
-            try:
-                from config.credentials import verify_and_handshake_account
-                import asyncio
-                h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
-                handshake_info = {"ok": h_ok, "msg": h_msg, "details": h_details}
-            except Exception as e:
-                handshake_info = {"ok": False, "msg": f"握手过程异常: {e}", "details": {}}
-
         try:
             raw = _load_raw_config()
             status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
         except Exception:
             status = {}
-        self._send_json({
-            "ok": True, "reloaded": reloaded, "updated": sorted(values),
-            "env_status": _env_status(),
-            "handshake": handshake_info,
-            **status,
-        })
+        self._send_json({"ok": True, "reloaded": reloaded, "updated": sorted(values), "env_status": _env_status(), **status})
 
     def log_message(self, fmt: str, *args) -> None:
-        # 静默常规访问日志，避免刷屏主程序输出；错误仍由异常路径打印
         pass
 
 
 class _ThreadingHTTPServer(ThreadingHTTPServer):
-    """静默处理客户端主动断开连接等无害网络异常。"""
     allow_reuse_address = True
     allow_reuse_port = getattr(socket, "SO_REUSEPORT", None) is not None
 
@@ -3231,20 +669,17 @@ class _ThreadingHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def start_webui(host: str | None = None, port: int | None = None,
-                on_reload=None, on_restart=None, on_poll=None, on_test_push=None,
-                on_openid=None):
-    """启动网页管理端（后台守护线程）。
-
-    参数缺省时从 config.config 读取 WEB_ADMIN_HOST / WEB_ADMIN_PORT。
-    on_restart:   主程序注入的重启回调（触发优雅停机 + 进程自替换）。
-    on_poll:      主程序注入的立即巡查回调（唤醒主循环）。
-    on_test_push: 主程序注入的测试推送回调（(channel, target, text) -> (ok, err)）。
-    不传则网页上不显示对应按钮（独立模式）。
-    返回 ThreadingHTTPServer 实例（用于 shutdown() 清理），失败时返回 None。
-    """
-    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _on_openid_cb, \
-        _enforce_host_check
+def start_webui(
+    host: str | None = None,
+    port: int | None = None,
+    on_reload=None,
+    on_restart=None,
+    on_poll=None,
+    on_test_push=None,
+    on_openid=None,
+):
+    """启动网页管理端（后台守护线程）。"""
+    global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _on_openid_cb, _enforce_host_check
     _on_reload_cb = on_reload
     _on_restart_cb = on_restart
     _on_poll_cb = on_poll
@@ -3286,24 +721,20 @@ def start_webui(host: str | None = None, port: int | None = None,
         has_auth = True
     else:
         hint = "无鉴权（仅限本机访问时可接受）"
+
     from src.logger import log_all
     if host not in _LOOPBACK_HOSTS and not has_auth:
-        log_all(f"⚠️ [安全警告] 网页管理端监听非回环地址 ({host}) 且未启用密码或 Token 鉴权！强烈建议在 config.json 开启 auth.enabled 或配置 WEB_ADMIN_TOKEN 防范未授权访问。", is_error=True)
+        log_all(f"⚠️ [安全警告] 网页管理端监听非回环地址 ({host}) 且未启用密码或 Token 鉴权！", is_error=True)
 
     try:
         log_all(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
-    except Exception:  # nosec B110
+    except Exception:
         log_all(f"WebUI started: http://{host}:{server.server_address[1]}/")
     return server
 
 
-# ================================================================
-# 独立运行：python -m src.webui
-# （主程序未运行时也可编辑配置；主程序若装了 watchdog 会自动热重载）
-# ================================================================
-
 if __name__ == "__main__":
-    import config.config as _cfg  # noqa: F401 - 触发 .env 加载与配置校验
+    import config.config as _cfg  # noqa: F401
     from src.logger import log_all
 
     server = start_webui()
