@@ -23,7 +23,6 @@ from pathlib import Path
 import re
 import sys
 import time
-from datetime import datetime
 
 # Windows 终端编码容错设置
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -303,7 +302,7 @@ def print_audit_report(code_res: dict, file_res: dict) -> None:
 
         top_err = file_res.get("top_errors", {})
         if top_err:
-            print(f"\n  • 📊 高频错误分布 TOP 5:")
+            print("\n  • 📊 高频错误分布 TOP 5:")
             sorted_err = sorted(top_err.items(), key=lambda x: x[1], reverse=True)[:5]
             for err_text, count in sorted_err:
                 print(f"    [{count:>3} 次] {YELLOW}{err_text}{RESET}")

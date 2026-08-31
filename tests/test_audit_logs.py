@@ -5,7 +5,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from tools import audit_logs
+from tools import audit_logs  # noqa: E402
 
 
 def test_audit_codebase_logs(tmp_path: Path):

@@ -5,13 +5,13 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.webui_modules import (
-    static_handler,
-    auth_handlers,
-    system_handlers,
+from src.webui_modules import (  # noqa: E402
     archive_handlers,
-    media_service,
+    auth_handlers,
     config_service,
+    media_service,
+    static_handler,
+    system_handlers,
 )
 
 
@@ -37,3 +37,9 @@ def test_system_handlers_smart_parse():
 def test_auth_handlers_loopback():
     assert "127.0.0.1" in auth_handlers.LOOPBACK_HOSTS
     assert "localhost" in auth_handlers.LOOPBACK_HOSTS
+
+
+def test_archive_handlers_and_media_service():
+    assert archive_handlers.ARCHIVE_TYPES == frozenset({"text", "picture", "image", "video", "voice"})
+    assert callable(media_service.serve_file_range)
+    assert callable(config_service.validate_config)

@@ -8,13 +8,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import socket
 import sys
 import threading
-import time as _time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import parse_qs
 
 from src.webui_modules.config_service import (
     _FORBIDDEN_ENV_KEYS,
@@ -44,7 +42,7 @@ from src.webui_modules.static_handler import (
     ARCHIVE_HTML_PATH,
     INDEX_HTML_PATH,
     LOGIN_HTML_PATH,
-    NOT_FOUND_HTML_PATH,
+    NOT_FOUND_HTML_PATH,  # noqa: F401
     compress_if_supported,
     send_404,
     send_html,
@@ -82,12 +80,12 @@ from src.webui_modules.system_handlers import (
     handle_storage_clean as _sys_handle_storage_clean,
     handle_test_push as _sys_handle_test_push,
     smart_parse_credentials_text as _sys_smart_parse,
-    tail_file as _tail_file,
+    tail_file as _tail_file,  # noqa: F401
 )
 from src.webui_modules.archive_handlers import (
     ARCHIVE_TYPES,
-    BLOG_IMAGE_DIR,
-    get_blog_db as _get_blog_db,
+    BLOG_IMAGE_DIR,  # noqa: F401
+    get_blog_db as _get_blog_db,  # noqa: F401
     handle_archive as _mod_handle_archive,
 )
 

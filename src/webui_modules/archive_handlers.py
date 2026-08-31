@@ -9,27 +9,21 @@ src/webui_modules/archive_handlers.py — WebUI 归档数据路由与业务处�
   5. 媒体流服务：头像、博客图片与消息图片分发调度
 """
 
-from __future__ import annotations
-
+from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
 import random
-import re
 import sqlite3
-import sys
-from datetime import datetime, timedelta
+import threading
 from urllib.parse import parse_qs, quote, unquote
 
 import config.config as cfg
 from src import archive as _archive
-from src.logger import log_all
 from src.webui_modules.media_service import serve_file_range
 from src.webui_modules.static_handler import send_json
 
 BLOG_IMAGE_DIR = Path("data/blog_images")
-_blog_db_local = threading_local = sys.modules.get("threading", {}).local() if hasattr(sys.modules.get("threading", {}), "local") else None
-import threading
 _blog_db_local = threading.local()
 
 _home_cache: dict | None = None
@@ -702,7 +696,6 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         total_blog_authors = 0
         recent_blogs = []
         blog_pics = []
-        rand_blog_msgs = []
         today_blog_cnt = 0
         blog_this_week = 0
 

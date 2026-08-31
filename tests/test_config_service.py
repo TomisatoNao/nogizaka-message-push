@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
+import sys
 import json5
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.webui_modules import config_service
 

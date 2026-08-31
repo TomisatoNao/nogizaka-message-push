@@ -5,9 +5,13 @@ import json
 import os
 import unittest
 from http.server import HTTPServer
+from pathlib import Path
+import sys
 from threading import Thread
 import urllib.request
 import urllib.error
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.utils import format_bytes, get_storage_breakdown
 import config.config as cfg

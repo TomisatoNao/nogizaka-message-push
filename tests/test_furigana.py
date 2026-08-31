@@ -1,3 +1,8 @@
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from src.furigana import (
     add_furigana_to_text,
     add_furigana_to_html,

@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 import sys
 import time
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs
 
 import httpx
 

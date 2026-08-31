@@ -13,7 +13,6 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
-import os
 from pathlib import Path
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent

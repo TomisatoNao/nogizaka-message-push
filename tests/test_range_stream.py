@@ -1,6 +1,9 @@
 import io
 from pathlib import Path
+import sys
 from unittest.mock import MagicMock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.webui_modules.media_service import serve_file_range
 
