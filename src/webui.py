@@ -392,8 +392,8 @@ def _cred_status(raw: dict) -> dict:
         prefix = acc_id.upper()
         is_mobile = acc.get("auth") == "mobile"
 
-        def has(suffix: str) -> bool:
-            return bool(os.getenv(f"{prefix}_{suffix}") or os.getenv(f"ACCOUNT_{prefix}_{suffix}"))
+        def has(suffix: str, p: str = prefix) -> bool:
+            return bool(os.getenv(f"{p}_{suffix}") or os.getenv(f"ACCOUNT_{p}_{suffix}"))
 
         entry: dict = {}
         if is_mobile:
@@ -2724,77 +2724,9 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "errors": ["未知路径"]}, 404)
 
     def _serve_file_range(self, path: Path) -> None:
-        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。
-
-        缓存策略用 private + no-cache：浏览器可以存副本，但每次使用前必须回源
-        验证（带 ETag 命中则 304，几乎零流量）。绝不能用 max-age —— 那会让
-        登出后的浏览器直接从本地缓存渲染私密图片，绕过鉴权。
-        """
-        import mimetypes
-        from email.utils import formatdate, parsedate_to_datetime
-        st = path.stat()
-        size = st.st_size
-        etag = f'"{int(st.st_mtime)}-{size:x}"'
-        last_modified = formatdate(st.st_mtime, usegmt=True)
-        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-
-        # 条件请求（无 Range 时才处理 304）
-        if not self.headers.get("Range"):
-            fresh = False
-            inm = self.headers.get("If-None-Match", "")
-            if inm:
-                fresh = any(t.strip().lstrip("W/") == etag for t in inm.split(","))
-            elif self.headers.get("If-Modified-Since"):
-                try:
-                    since = parsedate_to_datetime(self.headers["If-Modified-Since"]).timestamp()
-                    fresh = int(st.st_mtime) <= int(since)
-                except (TypeError, ValueError):
-                    fresh = False
-            if fresh:
-                self.send_response(304)
-                self.send_header("ETag", etag)
-                self.send_header("Cache-Control", "private, no-cache")
-                self.end_headers()
-                return
-
-        start, end, status = 0, size - 1, 200
-        m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", "").strip())
-        if m and (m.group(1) or m.group(2)):
-            if m.group(1):
-                start = int(m.group(1))
-                if m.group(2):
-                    end = min(int(m.group(2)), size - 1)
-            else:
-                start = max(0, size - int(m.group(2)))
-            if start >= size or start > end:
-                self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{size}")
-                self.end_headers()
-                return
-            status = 206
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(end - start + 1))
-        if status == 206:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("ETag", etag)
-        self.send_header("Last-Modified", last_modified)
-        # private: 禁止中间代理缓存；no-cache: 每次使用前必须回源鉴权
-        self.send_header("Cache-Control", "private, no-cache")
-        self.end_headers()
-        try:
-            with open(path, "rb") as f:
-                f.seek(start)
-                remaining = end - start + 1
-                while remaining > 0:
-                    chunk = f.read(min(1 << 16, remaining))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
-        except (ConnectionError, OSError):
-            pass   # 播放器中断连接是常态
+        """媒体文件服务，支持 HTTP Range（视频/音频拖进度条必需）。"""
+        from src.webui_modules.media_service import serve_file_range
+        serve_file_range(self, path)
 
     def _handle_status(self) -> None:
         """运行状态快照：健康追踪数据 + 各账号实时 Token 剩余时间。"""

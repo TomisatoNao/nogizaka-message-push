@@ -1,10 +1,10 @@
-"""乃木坂46 博客抓取（JSONP API，httpx async 版）。"""
-import re
+import itertools
 import json
-import httpx
+import re
 from html import unescape
-from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+from bs4 import BeautifulSoup
+import httpx
 
 NOGI_API_URL = "https://www.nogizaka46.com/s/n46/api/list/blog"
 NOGI_HEADERS = {"accept": "application/json", "x-requested-with": "XMLHttpRequest"}
@@ -34,12 +34,13 @@ async def fetch_posts(client: httpx.AsyncClient, limit: int = 30) -> list[dict]:
                 urljoin("https://www.nogizaka46.com", img["src"])
                 for img in soup.find_all("img") if img.get("src")
             ]
-            _counter = [0]
-
-            def _img_placeholder(m):
-                _counter[0] += 1
-                return f"\n【图片{_counter[0]}】\n"
-            body_text = re.sub(r"<img[^>]*>", _img_placeholder, raw_html, flags=re.IGNORECASE)
+            img_counter = itertools.count(1)
+            body_text = re.sub(
+                r"<img[^>]*>",
+                lambda _: f"\n【图片{next(img_counter)}】\n",
+                raw_html,
+                flags=re.IGNORECASE,
+            )
             body_text = re.sub(r"<br\s*/?>", "\n", body_text, flags=re.IGNORECASE)
             body_text = re.sub(r"<[^>]+>", "", body_text)
             body_text = unescape(body_text).strip()

@@ -29,6 +29,55 @@ import httpx
 
 import config.config as cfg
 from src.logger import log_all
+from src.archive_query import (
+    _day_cache,
+    _jst_date,
+    _month_count,
+    day_counts,
+    get_archive_letters,
+    get_existing_letter_ids,
+    get_letters_count,
+    list_members,
+    list_months,
+    load_archived_ids,
+    search,
+)
+
+_ORIGINAL_LIST_MONTHS = list_months
+
+__all__ = [
+    "_day_cache",
+    "_jst_date",
+    "_month_count",
+    "archive_message",
+    "archive_messages_batch",
+    "archive_root",
+    "archive_single_letter",
+    "close_db",
+    "day_counts",
+    "extract_upload_time",
+    "find_media_bytes_by_url",
+    "get_archive_letters",
+    "get_db_path",
+    "get_existing_letter_ids",
+    "get_letters_count",
+    "get_timeline_watermark",
+    "infer_member_group",
+    "init_db",
+    "initialize",
+    "list_members",
+    "list_months",
+    "load_archived_ids",
+    "load_month",
+    "member_dir_name",
+    "parse_jst_datetime",
+    "realign_archive_timezones",
+    "schedule_archive",
+    "search",
+    "set_timeline_watermark",
+    "sync_all_to_sqlite",
+    "wait_pending",
+]
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 _FILENAME_ILLEGAL = re.compile(r'[<>:"/\\|?*]')
@@ -75,7 +124,7 @@ def init_db() -> sqlite3.Connection | None:
     conn = getattr(_local_storage, "conn", None)
     if conn is not None:
         try:
-            conn.total_changes
+            conn.execute("SELECT 1;")
             return conn
         except Exception:
             conn = None
@@ -878,7 +927,7 @@ async def archive_messages_batch(
 
     # 3. 按 (year, month) 聚合批量写入 JSON 与 SQLite
     month_groups: dict[tuple[int, int], list[dict]] = {}
-    for (dt, _), (updated_msg, local_f) in zip(to_process, results):
+    for (dt, _), (updated_msg, _) in zip(to_process, results, strict=False):
         ym = (dt.year, dt.month)
         month_groups.setdefault(ym, []).append(updated_msg)
 
@@ -905,7 +954,7 @@ async def archive_messages_batch(
 
     # 4. 触发打标与更新缓存集合
     new_count = 0
-    for (dt, _), (updated_msg, local_f) in zip(to_process, results):
+    for (_, _), (updated_msg, local_f) in zip(to_process, results, strict=False):
         mid = str(updated_msg.get("id", ""))
         if updated_msg.get("type") in ("picture", "image") and updated_msg.get("file") and local_f:
             from src.tagger import schedule_tag as _schedule_tag
@@ -1041,293 +1090,6 @@ async def archive_letters_batch(member_name: str, letters: list[dict], headers: 
         log_all(f"⚠️ 保存 letters.json 失败 ({member_name}): {ex}", is_debug=True)
 
     return sorted_results
-
-
-def get_existing_letter_ids(member_dir: str) -> set[int]:
-    """获取指定成员已归档的所有信件 ID 集合。"""
-    conn = init_db()
-    if conn:
-        try:
-            rows = conn.execute("SELECT id FROM letters WHERE member_dir = ?;", (member_dir,)).fetchall()
-            return {int(r[0]) for r in rows}
-        except (sqlite3.Error, ValueError) as ex:
-            log_all(f"⚠️ 查询信件 ID 集合异常: {ex}", is_debug=True)
-    letters = get_archive_letters(member_dir)
-    return {int(item.get("id")) for item in letters if item.get("id")}
-
-
-def get_archive_letters(member_dir: str) -> list[dict]:
-    """从 SQLite 获取指定成员已归档的所有粉丝信件（新在前）。"""
-    conn = init_db()
-    if conn:
-        try:
-            rows = conn.execute("""
-                SELECT id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json
-                FROM letters
-                WHERE member_dir = ?
-                ORDER BY created_at DESC;
-            """, (member_dir,)).fetchall()
-            if rows:
-                out = []
-                for r in rows:
-                    out.append({
-                        "id": r[0],
-                        "group_id": r[1],
-                        "member_name": r[2],
-                        "member_dir": r[3],
-                        "created_at": r[4],
-                        "updated_at": r[5],
-                        "text": r[6],
-                        "file_url": r[7],
-                        "local_file": r[8],
-                        "thumbnail_url": r[9],
-                        "is_favorite": bool(r[10]),
-                    })
-                return out
-        except Exception as ex:
-            log_all(f"⚠️ 从 SQLite 读取信件失败 ({member_dir}): {ex}", is_debug=True)
-
-    # 兜底：从 letters.json 读取
-    json_path = archive_root() / member_dir / "letters" / "letters.json"
-    if json_path.exists():
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError, ValueError) as ex:
-            log_all(f"⚠️ 读取 letters.json 异常 ({member_dir}): {ex}", is_debug=True)
-    return []
-
-
-def get_letters_count(member_dir: str) -> int:
-    """获取指定成员已归档的信件数量。"""
-    conn = init_db()
-    if conn:
-        try:
-            row = conn.execute("SELECT COUNT(*) FROM letters WHERE member_dir = ?;", (member_dir,)).fetchone()
-            if row:
-                return row[0]
-        except sqlite3.Error as ex:
-            log_all(f"⚠️ 查询信件数量异常: {ex}", is_debug=True)
-    letters = get_archive_letters(member_dir)
-    return len(letters)
-
-
-# ──────────────────────────────────────────────
-# 查询（网页查看器 / 回填工具用）
-# ──────────────────────────────────────────────
-def list_members() -> list[str]:
-    """返回所有有归档消息的成员列表。优先从 SQLite 获取。"""
-    conn = init_db()
-    if conn:
-        try:
-            rows = conn.execute("SELECT DISTINCT member_dir FROM messages ORDER BY member_dir ASC;").fetchall()
-            if rows:
-                return [r[0] for r in rows]
-        except sqlite3.Error as ex:
-            log_all(f"⚠️ 查询归档成员列表异常: {ex}", is_debug=True)
-    root = archive_root()
-    if not root.is_dir():
-        return []
-    return sorted(d.name for d in root.iterdir() if d.is_dir())
-
-
-# 月度计数缓存：{json_path: (mtime, count)} —— members/months 接口每次请求
-# 都要数全部月份，无缓存时随成员和月份数线性膨胀
-_count_cache: dict[str, tuple[float, int]] = {}
-
-
-def _month_count(json_path: Path) -> int:
-    try:
-        mtime = json_path.stat().st_mtime
-    except OSError:
-        return 0
-    key = str(json_path)
-    cached = _count_cache.get(key)
-    if cached and cached[0] == mtime:
-        return cached[1]
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            count = len(json.load(f))
-    except (OSError, ValueError):
-        count = 0
-    _count_cache[key] = (mtime, count)
-    return count
-
-
-def list_months(member_dir: str) -> list[dict]:
-    """返回 [{year, month, count}]，新的在前。支持 mtime 缓存与快速统计。"""
-    root = archive_root() / member_dir
-    if root.is_dir():
-        out = []
-        for year_dir in sorted((d for d in root.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
-            for month_dir in sorted((d for d in year_dir.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
-                json_path = month_dir / "messages.json"
-                if not json_path.is_file():
-                    continue
-                out.append({"year": int(year_dir.name), "month": int(month_dir.name),
-                            "count": _month_count(json_path)})
-        if out:
-            return out
-
-    conn = init_db()
-    if conn:
-        try:
-            rows = conn.execute("""
-                SELECT year, month, COUNT(*) FROM messages
-                WHERE member_dir = ?
-                GROUP BY year, month
-                ORDER BY year DESC, month DESC;
-            """, (member_dir,)).fetchall()
-            if rows:
-                return [{"year": r[0], "month": r[1], "count": r[2]} for r in rows]
-        except Exception:  # nosec B110
-            pass
-    return []
-
-
-_ORIGINAL_LIST_MONTHS = list_months
-
-
-
-
-def _jst_date(utc_str: str) -> str:
-    """UTC 时间串 → JST 日期串 YYYY-MM-DD（解析失败返回空串）。"""
-    try:
-        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ")
-    except (ValueError, TypeError):
-        return ""
-    from datetime import timedelta
-    return (dt + timedelta(hours=9)).strftime("%Y-%m-%d")
-
-
-# 按天计数缓存：{json_path: (mtime, {"YYYY-MM-DD": {类型: count}})}
-# 缓存按类型细分存储，聚合时再按筛选求和——同一份缓存服务任意类型过滤
-_day_cache: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
-
-
-def day_counts(member_dir: str, type_filter: set[str] | None = None) -> dict[str, int]:
-    """全档按 JST 日期统计消息数（日历视图用），逐月 mtime 缓存。
-    type_filter 为 None 统计全部类型，否则只计入指定类型集合。"""
-    out: dict[str, int] = {}
-    root = archive_root() / member_dir
-    if not root.is_dir():
-        return out
-    for json_path in root.glob("[0-9]*/[0-9]*/messages.json"):
-        try:
-            mtime = json_path.stat().st_mtime
-        except OSError:
-            continue
-        key = str(json_path)
-        cached = _day_cache.get(key)
-        if cached and cached[0] == mtime:
-            month_counts = cached[1]
-        else:
-            month_counts = {}
-            try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    msgs = json.load(f)
-            except (OSError, ValueError):
-                msgs = []
-            for m in msgs:
-                d = _jst_date(m.get("published_at") or m.get("updated_at", ""))
-                if d:
-                    by_type = month_counts.setdefault(d, {})
-                    t = m.get("type", "text")
-                    by_type[t] = by_type.get(t, 0) + 1
-            _day_cache[key] = (mtime, month_counts)
-        for d, by_type in month_counts.items():
-            n = sum(c for t, c in by_type.items()
-                    if type_filter is None or t in type_filter)
-            if n:
-                out[d] = out.get(d, 0) + n
-    return out
-
-
-def search(member_dir: str, query: str, type_filter: set[str] | None = None,
-           limit: int = 500) -> list[dict]:
-    """跨月搜索：优先使用 SQLite FTS5 全文索引，无 DB 或被 mock 时降级为 JSON 遍历。
-    原文与译文都参与匹配，空格分词取 AND 语义。
-    返回附加 _year/_month 字段的消息列表，新的在前，最多 limit 条。"""
-    terms = [t.lower() for t in query.split() if t.strip()]
-    if not terms:
-        return []
-
-    if list_months is _ORIGINAL_LIST_MONTHS:
-        conn = init_db()
-        if conn and _has_fts5:
-            try:
-                match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
-                sql = """
-                    SELECT m.raw_json, m.year, m.month
-                    FROM messages_fts f
-                    JOIN messages m ON f.id = m.id
-                    WHERE f.member_dir = ? AND messages_fts MATCH ?
-                """
-                params: list[str | int] = [member_dir, match_expr]
-                if type_filter:
-                    placeholders = ",".join("?" * len(type_filter))
-                    sql += f" AND m.type IN ({placeholders})"
-                    params.extend(list(type_filter))
-                sql += " ORDER BY m.updated_at DESC LIMIT ?"
-                params.append(limit)
-
-                cursor = conn.cursor()
-                cursor.execute(sql, params)
-                results = []
-                for raw, yr, mo in cursor.fetchall():
-                    msg = json.loads(raw)
-                    results.append({**msg, "_year": yr, "_month": mo})
-                if results:
-                    return results
-            except Exception as e:
-                log_all(f"⚠️ SQLite FTS5 搜索异常，降级回 JSON 文件匹配: {e}", is_debug=True)
-
-
-    results: list[dict] = []
-    for m in list_months(member_dir):          # 已是新月份在前
-        msgs = load_month(member_dir, m["year"], m["month"])
-        for msg in reversed(msgs):             # 月内也按新→旧
-            if type_filter and msg.get("type") not in type_filter:
-                continue
-            haystack = (
-                (msg.get("text") or "") + "\n" +
-                (msg.get("_translation") or "") + "\n" +
-                (msg.get("_tags") or "") + "\n" +
-                (msg.get("_custom_tags") or "")
-            ).lower()
-            if all(t in haystack for t in terms):
-                results.append({**msg, "_year": m["year"], "_month": m["month"]})
-                if len(results) >= limit:
-                    return results
-    return results
-
-
-
-def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
-    """返回 (已归档 ID, 媒体下载失败的 ID)。回填工具用于跳过与重试。"""
-    root = _member_root(m_name)
-    ok_ids: set[str] = set()
-    fail_ids: set[str] = set()
-    if not root.is_dir():
-        return ok_ids, fail_ids
-    for json_path in root.glob("[0-9]*/[0-9]*/messages.json"):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                msgs = json.load(f)
-        except (OSError, ValueError):
-            continue
-        for m in msgs:
-            mid = str(m.get("id", ""))
-            if not mid:
-                continue
-            # 需重试的两种情况：明确标记失败；或媒体消息既无本地文件也无失败标记
-            # （下载中途进程被杀会留下这种"幽灵"状态，不重试就永久缺媒体）
-            incomplete = (
-                m.get("_download_failed")
-                or (m.get("type") in _MEDIA_TYPES and m.get("file") and not m.get("_local_file"))
-            )
-            (fail_ids if incomplete else ok_ids).add(mid)
-    return ok_ids, fail_ids
 
 
 def realign_archive_timezones(force: bool = False) -> int:

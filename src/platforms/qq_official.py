@@ -662,7 +662,7 @@ class QQOfficialBot:
         buf = ""
         for block in blocks:
             if len(buf) + len(block) + 4 <= MAX_LEN:
-                buf = (buf + "\n​\n" + block) if buf else block
+                buf = (buf + "\n\u200b\n" + block) if buf else block
             else:
                 if buf:
                     parts.append(buf)
