@@ -49,13 +49,15 @@ def initialize(client: httpx.AsyncClient | None = None) -> None:
     _http_client = client
 
 
-async def _post_json(url: str, payload: dict) -> httpx.Response:
+async def _post_json(url: str, payload: dict, headers: dict | None = None) -> httpx.Response:
     """发送 Gemini 请求。优先复用共享连接池。"""
-    headers = {"Content-Type": "application/json"}
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
     if _http_client is not None and not _http_client.is_closed:
-        return await _http_client.post(url, json=payload, headers=headers, timeout=30)
+        return await _http_client.post(url, json=payload, headers=req_headers, timeout=30)
     async with httpx.AsyncClient(timeout=30) as client:
-        return await client.post(url, json=payload, headers=headers)
+        return await client.post(url, json=payload, headers=req_headers)
 
 
 def _optimize_image_for_gemini(img_data: bytes, suffix: str, max_side: int = 1024) -> tuple[str, str]:
@@ -196,10 +198,15 @@ async def tag_image(member_dir: str, local_file: str, text: str = "") -> str:
     limiter = _get_limiter()
     async with limiter:
         for model in cfg.GEMINI_TAG_MODELS:
-            url = f"{model['url']}?key={cfg.GEMINI_API_KEY}"
+            url = model["url"]
+            headers = {}
+            if "key=" not in url and getattr(cfg, "GEMINI_API_KEY", ""):
+                headers["x-goog-api-key"] = cfg.GEMINI_API_KEY
+            elif "key=" not in url:
+                url = f"{url}?key={cfg.GEMINI_API_KEY}"
             for attempt in range(2):
                 try:
-                    resp = await _post_json(url, payload)
+                    resp = await _post_json(url, payload, headers=headers if headers else None)
 
                     if resp.status_code == 200:
                         data = resp.json()
