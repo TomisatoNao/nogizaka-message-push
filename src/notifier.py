@@ -1,8 +1,14 @@
 # ============================================================
 # notifier.py — QQ 多通道推送调度 (已解耦)
 # ============================================================
+import asyncio
+from dataclasses import dataclass
+from typing import Awaitable, Callable
+
+import httpx
+
 import config.config as cfg
-from src.logger import error_logger, log_all
+from src.logger import log_all
 from src.platforms.napcat import send_qq_message
 from src.platforms import qq_official
 from src.platforms.qq_official import get_configured_bots, has_bots
@@ -10,6 +16,107 @@ from src.platforms import tgbot
 from src import health
 from src.health import ErrorTier
 from src.utils import match_member_filter
+
+
+@dataclass(frozen=True)
+class DeliveryAttempt:
+    """一次路由投递的安全结果摘要。
+
+    ``error_code`` 只保留可展示、可聚合的分类，不携带上游响应或凭证，
+    这样既能诊断部分失败，也不会把 Bot Token 等内容带进管理端日志。
+    """
+
+    channel: str
+    label: str
+    target: str
+    ok: bool
+    error_code: str | None = None
+
+
+@dataclass(frozen=True)
+class DeliveryReport:
+    """一条消息在多个已匹配目标上的投递结果。"""
+
+    attempts: tuple[DeliveryAttempt, ...]
+
+    @property
+    def ok(self) -> bool:
+        """至少一个目标已成功接收；保持旧接口的去重/重试语义。"""
+        return any(attempt.ok for attempt in self.attempts)
+
+    @property
+    def partial(self) -> bool:
+        return self.ok and any(not attempt.ok for attempt in self.attempts)
+
+    @property
+    def success_count(self) -> int:
+        return sum(attempt.ok for attempt in self.attempts)
+
+    @property
+    def failure_count(self) -> int:
+        return sum(not attempt.ok for attempt in self.attempts)
+
+
+def _classify_delivery_exception(exc: Exception) -> str:
+    """将跨通道异常压缩为稳定、安全的错误码。"""
+    if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)):
+        return "timeout"
+    if isinstance(exc, httpx.RequestError):
+        return "network_error"
+    if isinstance(exc, (ValueError, TypeError)):
+        return "invalid_response"
+    return "unexpected_error"
+
+
+async def _run_delivery(
+    channel: str,
+    label: str,
+    target: str,
+    sender: Callable[[], Awaitable[bool]],
+    *,
+    known_error: str | None = None,
+) -> DeliveryAttempt:
+    """执行单个路由，确保一个协程异常不会吞掉同批其他通道。"""
+    if known_error:
+        return DeliveryAttempt(channel, label, target, False, known_error)
+    try:
+        ok = bool(await sender())
+    except Exception as exc:  # 外部 SDK / 网络调用的边界，必须隔离单路失败
+        error_code = _classify_delivery_exception(exc)
+        return DeliveryAttempt(channel, label, target, False, error_code)
+    return DeliveryAttempt(
+        channel, label, target, ok, None if ok else "delivery_failed"
+    )
+
+
+def _record_delivery_report(context: str, report: DeliveryReport) -> None:
+    """写入通道健康状态和可读日志，不记录不可信的原始异常文本。"""
+    for attempt in report.attempts:
+        health.get_tracker().record_channel(
+            attempt.channel, attempt.ok, attempt.error_code
+        )
+        if attempt.ok:
+            log_all(
+                f"✅ [{context} | 通道: {attempt.label} | 目标: {attempt.target}] 推送成功",
+                is_debug=True,
+            )
+
+    failed = [attempt for attempt in report.attempts if not attempt.ok]
+    if not failed:
+        return
+
+    details = "; ".join(
+        f"{attempt.label} -> {attempt.target} ({attempt.error_code})"
+        for attempt in failed
+    )
+    state = "部分目标失败" if report.ok else "全部目标失败"
+    log_all(
+        f"⚠️ [{context}] {state}，成功 {report.success_count}/{len(report.attempts)}；{details}",
+        is_error=True,
+    )
+    health.get_tracker().record_error(
+        f"{context}{state}: {details}", ErrorTier.TRANSIENT
+    )
 
 
 def enabled_channels() -> list[str]:
@@ -23,17 +130,17 @@ def enabled_channels() -> list[str]:
     return channels
 
 
-async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
-    """向已启用的各通道并发广播成员消息。
+async def send_member_message_detailed(
+    member: dict, message_chain: list[dict]
+) -> DeliveryReport:
+    """向已匹配的通道并发广播成员消息，并返回每个目标的结果。
 
-    解耦模式下：各通道按自己的 target/group 和 member_filter 进行独立路由与并发投递。
-    返回 True 表示至少一个通道发送成功，或没有启用任何通道（不应重试）；
-    返回 False 表示启用的通道全部失败（需要按重试逻辑处理）。
+    这是新调用方可使用的细粒度接口；旧的 ``send_member_message`` 保持 bool
+    返回值，避免把部分成功误当作需要重试的整条消息，从而造成重复推送。
     """
-    import asyncio
     m_name = member.get("m_name") or member.get("name") or "未知成员"
     m_id = member.get("m_id") or member.get("id")
-    tasks = []
+    tasks: list[Awaitable[DeliveryAttempt]] = []
 
     # 1. NapCat QQ 路由并发任务
     if cfg.ENABLE_NAPCAT_QQ:
@@ -46,46 +153,46 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
                 gid = route.get("group_id")
                 if gid:
                     r_label = f"NapCat:{route['remark']}" if route.get("remark") else "NapCat"
-                    async def _send_napcat(target_gid=gid, label=r_label):
-                        ok = await send_qq_message(target_gid, message_chain)
-                        health.get_tracker().record_channel("napcat", ok, f"群 {target_gid} 发送失败")
-                        if not ok:
-                            log_all(f"⚠️ [通道: {label} | 目标群: {target_gid} | 成员: {m_name}] 消息推送失败", is_error=True)
-                        else:
-                            log_all(f"✅ [通道: {label} | 目标群: {target_gid} | 成员: {m_name}] 消息推送成功", is_debug=True)
-                        return ok
-                    tasks.append(_send_napcat())
+                    tasks.append(_run_delivery(
+                        "napcat", r_label, f"群 {gid}",
+                        lambda target_gid=gid: send_qq_message(target_gid, message_chain),
+                    ))
 
     # 2. QQ 官方 Bot 路由并发任务
     if cfg.ENABLE_QQ_OFFICIAL_BOT:
         bots = get_configured_bots()
+        media_payloads = None
+        media_error = None
         if bots:
-            media_payloads = await qq_official.download_media_payloads(member, message_chain)
+            try:
+                media_payloads = await qq_official.download_media_payloads(member, message_chain)
+            except (asyncio.TimeoutError, httpx.RequestError, OSError, ValueError):
+                # 媒体预处理本身也属于官方 Bot 通道失败；不可阻塞 NapCat/TG 投递。
+                media_error = "media_prepare_failed"
             for bot in bots:
                 b_label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
                 # 单聊目标（target_openid）
                 if bot.target_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
-                    async def _send_bot_private(b=bot, label=b_label):
-                        ok = await b.send_message_chain(member, message_chain, media_payloads=media_payloads)
-                        health.get_tracker().record_channel(f"official:{b.name}", ok)
-                        if not ok:
-                            log_all(f"⚠️ [通道: {label} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送失败", is_error=True)
-                        else:
-                            log_all(f"✅ [通道: {label} | 目标: {b.target_openid[:10]}... | 成员: {m_name}] 单聊推送成功", is_debug=True)
-                        return ok
-                    tasks.append(_send_bot_private())
+                    tasks.append(_run_delivery(
+                        f"official:{bot.name}", b_label,
+                        f"用户 {bot.target_openid[:10]}...",
+                        lambda b=bot: b.send_message_chain(
+                            member, message_chain, media_payloads=media_payloads
+                        ),
+                        known_error=media_error,
+                    ))
 
                 # 群聊目标（group_openid）
                 if bot.group_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
-                    async def _send_bot_group(b=bot, label=b_label):
-                        ok = await b.send_message_chain_to_group(b.group_openid, member, message_chain, media_payloads=media_payloads)
-                        health.get_tracker().record_channel(f"official:{b.name}:group", ok)
-                        if not ok:
-                            log_all(f"⚠️ [通道: {label} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送失败", is_error=True)
-                        else:
-                            log_all(f"✅ [通道: {label} | 目标群: {b.group_openid[:10]}... | 成员: {m_name}] 群推送成功", is_debug=True)
-                        return ok
-                    tasks.append(_send_bot_group())
+                    tasks.append(_run_delivery(
+                        f"official:{bot.name}:group", b_label,
+                        f"群 {bot.group_openid[:10]}...",
+                        lambda b=bot: b.send_message_chain_to_group(
+                            b.group_openid, member, message_chain,
+                            media_payloads=media_payloads,
+                        ),
+                        known_error=media_error,
+                    ))
 
     # 3. TG Bot 路由并发任务
     if cfg.ENABLE_TG_BOT:
@@ -93,100 +200,114 @@ async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
         for bot in tg_bots:
             if bot.target_chat and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
                 tg_label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
-                async def _send_tg(b=bot, label=tg_label):
-                    tg_ok = await b.send_member_message(message_chain)
-                    health.get_tracker().record_channel(f"tg:{b.name}", tg_ok)
-                    if not tg_ok:
-                        log_all(f"⚠️ [通道: {label} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送失败", is_error=True)
-                    else:
-                        log_all(f"✅ [通道: {label} | TargetChat: {b.target_chat} | 成员: {m_name}] 推送成功", is_debug=True)
-                    return tg_ok
-                tasks.append(_send_tg())
+                tasks.append(_run_delivery(
+                    f"tg:{bot.name}", tg_label, f"Chat {bot.target_chat}",
+                    lambda b=bot: b.send_member_message(message_chain),
+                ))
 
     if not tasks:
-        return True
+        return DeliveryReport(())
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return any(isinstance(r, bool) and r for r in results)
+    report = DeliveryReport(tuple(await asyncio.gather(*tasks)))
+    _record_delivery_report(f"成员消息 | {m_name}", report)
+    return report
+
+
+async def send_member_message(member: dict, message_chain: list[dict]) -> bool:
+    """兼容旧调用方：无匹配目标视为已处理，至少一个成功才确认消息。"""
+    report = await send_member_message_detailed(member, message_chain)
+    return report.ok or not report.attempts
 
 
 async def send_report_message(text: str) -> bool:
     """向所有已启用通道并发发送运行报告（每日摘要等，非警报语义、无前缀）。"""
-    import asyncio
-    tasks = []
+    tasks: list[Awaitable[DeliveryAttempt]] = []
 
     if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
         for route in getattr(cfg, "NAPCAT_ROUTES", []):
             if route.get("push_alert") and route.get("group_id"):
-                tasks.append(send_qq_message(route["group_id"], [{"type": "text", "data": {"text": text}}]))
+                gid = route["group_id"]
+                label = f"NapCat:{route.get('remark')}" if route.get("remark") else "NapCat"
+                tasks.append(_run_delivery(
+                    "napcat", label, f"群 {gid}",
+                    lambda target_gid=gid: send_qq_message(
+                        target_gid, [{"type": "text", "data": {"text": text}}]
+                    ),
+                ))
 
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
         for bot in get_configured_bots():
             if bot.target_openid and bot.push_alert:
-                tasks.append(bot.send_text(text))
+                label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
+                tasks.append(_run_delivery(
+                    f"official:{bot.name}", label, f"用户 {bot.target_openid[:10]}...",
+                    lambda b=bot: b.send_text(text),
+                ))
 
     if getattr(cfg, "ENABLE_TG_BOT", False):
         for bot in tgbot.get_configured_bots():
             if bot.target_chat and bot.push_alert:
-                tasks.append(bot.send_text(text))
+                label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
+                tasks.append(_run_delivery(
+                    f"tg:{bot.name}", label, f"Chat {bot.target_chat}",
+                    lambda b=bot: b.send_text(text),
+                ))
 
     if not tasks:
         return False
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return any(isinstance(r, bool) and r for r in results)
+    report = DeliveryReport(tuple(await asyncio.gather(*tasks)))
+    _record_delivery_report("运行报告", report)
+    return report.ok
 
 
 async def send_alert_message(target_group: int, text: str) -> bool:
     """向所有配置为推送告警的通道并发发送系统警报。"""
-    import asyncio
     channels = enabled_channels()
     if not channels:
         log_all(f"⏸️ 没有可用的推送通道，警报未发送: {text}", is_error=True)
         return False
 
-    tasks = []
+    tasks: list[Awaitable[DeliveryAttempt]] = []
 
     # NapCat 群告警
     if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
         for route in getattr(cfg, "NAPCAT_ROUTES", []):
             if route.get("push_alert") and route.get("group_id"):
                 gid = route["group_id"]
-                async def _send_napcat_alert(target_gid=gid):
-                    alert_chain = [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}]
-                    ok = await send_qq_message(target_gid, alert_chain)
-                    if not ok:
-                        health.get_tracker().record_error(f"NapCat 告警发送失败 (群 {target_gid})", ErrorTier.TRANSIENT)
-                        if error_logger:
-                            error_logger.error(f"NapCat 告警发送失败: {text}")
-                    return ok
-                tasks.append(_send_napcat_alert())
+                label = f"NapCat:{route.get('remark')}" if route.get("remark") else "NapCat"
+                tasks.append(_run_delivery(
+                    "napcat", label, f"群 {gid}",
+                    lambda target_gid=gid: send_qq_message(
+                        target_gid,
+                        [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}],
+                    ),
+                ))
 
     # QQ 官方 Bot 告警
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
         for bot in get_configured_bots():
             if bot.target_openid and bot.push_alert:
-                async def _send_bot_alert(b=bot):
-                    ok = await b.send_text(f"📢 系统警报\n{text}")
-                    if not ok:
-                        health.get_tracker().record_error(f"官方Bot [{b.name}] 告警发送失败", ErrorTier.TRANSIENT)
-                    return ok
-                tasks.append(_send_bot_alert())
+                label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
+                tasks.append(_run_delivery(
+                    f"official:{bot.name}", label, f"用户 {bot.target_openid[:10]}...",
+                    lambda b=bot: b.send_text(f"📢 系统警报\n{text}"),
+                ))
 
     # TG Bot 告警
     if getattr(cfg, "ENABLE_TG_BOT", False):
         for bot in tgbot.get_configured_bots():
             if bot.push_alert and bot.target_chat:
-                async def _send_tg_alert(b=bot):
-                    ok = await b.send_text(f"📢 系统警报\n{text}")
-                    if not ok:
-                        health.get_tracker().record_error(f"TG Bot [{b.name}] 告警发送失败", ErrorTier.TRANSIENT)
-                    return ok
-                tasks.append(_send_tg_alert())
+                label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
+                tasks.append(_run_delivery(
+                    f"tg:{bot.name}", label, f"Chat {bot.target_chat}",
+                    lambda b=bot: b.send_text(f"📢 系统警报\n{text}"),
+                ))
 
     if not tasks:
         return False
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return any(isinstance(r, bool) and r for r in results)
+    report = DeliveryReport(tuple(await asyncio.gather(*tasks)))
+    _record_delivery_report("系统警报", report)
+    return report.ok
 
 
 # ── 博客推送 ──
