@@ -1,7 +1,9 @@
 import sys
 import tempfile
+import asyncio
 from pathlib import Path
 import pytest
+import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -69,3 +71,36 @@ def test_save_and_get_subscriptions(temp_auth_db):
 
     assert row_map["1002"][1] == "五百城 茉央"
     assert row_map["1002"][2] == "unsubscribed"
+
+
+def test_member_directory_reports_timeout_without_hiding_cause(monkeypatch):
+    class TimeoutClient:
+        async def get(self, *_args, **_kwargs):
+            raise httpx.ReadTimeout("simulated timeout")
+
+    monkeypatch.setattr(member_directory.cfg, "ACCOUNTS", {
+        "demo": {"group_type": "nogizaka46", "auth_method": "web"},
+    })
+    groups, error = asyncio.run(member_directory.fetch_member_directory(TimeoutClient(), "demo"))
+
+    assert groups is None
+    assert "请求超时" in error
+
+
+def test_subscription_sync_continues_after_one_account_failure(monkeypatch):
+    async def fake_fetch(_client, account_id):
+        if account_id == "broken":
+            return None, "HTTP 401：凭证已失效"
+        return [{"id": "1"}], None
+
+    monkeypatch.setattr(member_directory.cfg, "ACCOUNTS", {"healthy": {}, "broken": {}})
+    monkeypatch.setattr(member_directory, "fetch_member_directory", fake_fetch)
+    import config.credentials as credentials
+    monkeypatch.setattr(credentials, "validate_account_cred", lambda _account: (True, ""))
+
+    stats, failures = asyncio.run(
+        member_directory.sync_all_accounts_subscriptions(client=object(), include_errors=True)
+    )
+
+    assert stats == {"healthy": 1}
+    assert failures == {"broken": "HTTP 401：凭证已失效"}

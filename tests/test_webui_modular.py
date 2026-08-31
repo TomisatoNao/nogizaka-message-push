@@ -184,3 +184,42 @@ def test_proxy_test_frontend_has_legacy_field_fallbacks():
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
     assert "r.name ?? r.target" in html
     assert "r.status_code ?? r.status" in html
+
+
+def test_proxy_test_classifies_transport_failure(monkeypatch):
+    class FailingClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def head(self, _url):
+            raise system_handlers.httpx.ConnectError("simulated failure")
+
+    monkeypatch.setattr(system_handlers.httpx, "AsyncClient", FailingClient)
+    handler = _ResponseHandler()
+    system_handlers.handle_proxy_test(handler, {})
+    payload = json.loads(handler.wfile.getvalue())
+
+    assert not payload["any_ok"] and not payload["all_ok"]
+    assert all(item["error_code"] == "network_error" for item in payload["results"])
+    assert all(item["name"] and item["target"] for item in payload["results"])
+
+
+def test_subscription_sync_reports_partial_failure(monkeypatch):
+    async def fake_sync(*_args, **_kwargs):
+        return {"healthy": 3}, {"expired": "凭证不可用或已过期"}
+
+    import src.member_directory as member_directory
+    monkeypatch.setattr(member_directory, "sync_all_accounts_subscriptions", fake_sync)
+    monkeypatch.setattr(member_directory, "get_all_subscriptions", lambda: {"healthy:1": {"state": "active"}})
+    handler = _ResponseHandler()
+
+    assert social_handlers.handle_subscriptions_sync(handler)
+    payload = json.loads(handler.wfile.getvalue())
+    assert payload["ok"] and payload["partial"]
+    assert payload["warnings"] == {"expired": "凭证不可用或已过期"}

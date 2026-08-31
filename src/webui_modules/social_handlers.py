@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 
+from src.logger import log_all
 from src.webui_modules.static_handler import send_json
 
 
@@ -20,11 +22,30 @@ def handle_subscriptions_sync(handler) -> bool:
     try:
         from src.member_directory import get_all_subscriptions, sync_all_accounts_subscriptions
 
-        stats = asyncio.run(sync_all_accounts_subscriptions())
-        send_json(handler, {"ok": True, "stats": stats, "subscriptions": get_all_subscriptions()})
+        stats, failures = asyncio.run(sync_all_accounts_subscriptions(include_errors=True))
+        if failures and not stats:
+            send_json(handler, {
+                "ok": False,
+                "errors": [f"{account}: {reason}" for account, reason in failures.items()],
+                "failure_details": failures,
+                "stats": stats,
+            }, 502)
+            return False
+        send_json(handler, {
+            "ok": True,
+            "partial": bool(failures),
+            "warnings": failures,
+            "stats": stats,
+            "subscriptions": get_all_subscriptions(),
+        })
         return True
-    except Exception as exc:
-        send_json(handler, {"ok": False, "errors": [f"同步订阅状态失败: {type(exc).__name__}: {exc}"]}, 500)
+    except (OSError, sqlite3.Error, RuntimeError) as exc:
+        log_all(f"🚨 WebUI 订阅同步失败: {type(exc).__name__}: {exc}", is_error=True)
+        send_json(handler, {"ok": False, "errors": [f"同步订阅状态失败: {type(exc).__name__}"]}, 500)
+        return False
+    except Exception as exc:  # 最后兜底：请求线程不崩溃，但错误必须可追踪。
+        log_all(f"🚨 WebUI 订阅同步未处理异常: {type(exc).__name__}: {exc}", is_error=True)
+        send_json(handler, {"ok": False, "errors": ["同步订阅状态发生内部错误，请查看系统日志"]}, 500)
         return False
 
 
@@ -39,7 +60,8 @@ def _get_proxy(load_raw_config) -> str:
     """解析社媒检查所使用的代理地址。"""
     try:
         raw_cfg = load_raw_config()
-    except Exception:
+    except (OSError, ValueError) as exc:
+        log_all(f"⚠️ 读取社媒代理配置失败，已回退默认代理: {type(exc).__name__}: {exc}", is_error=True)
         raw_cfg = {}
     proxy = ""
     if isinstance(raw_cfg, dict):
@@ -49,7 +71,8 @@ def _get_proxy(load_raw_config) -> str:
         import config.config as app_cfg
 
         proxy = proxy or getattr(app_cfg, "PROXY", "")
-    except Exception:
+    except ImportError:
+        # 独立工具模式下配置模块可能不可用，保留空代理作为安全降级。
         pass
     return str(proxy).strip()
 
@@ -82,8 +105,13 @@ def handle_ig_session_save(handler, body: dict, *, load_raw_config, trigger_relo
                 update_env_file(env_updates)
                 os.environ.update(env_updates)
             reloaded = trigger_reload()
-    except Exception as exc:
-        send_json(handler, {"ok": False, "errors": [f"保存 Instagram Cookies 失败: {type(exc).__name__}: {exc}"]}, 500)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        log_all(f"🚨 保存 Instagram Cookies 失败: {type(exc).__name__}: {exc}", is_error=True)
+        send_json(handler, {"ok": False, "errors": [f"保存 Instagram Cookies 失败: {type(exc).__name__}"]}, 500)
+        return False, 0
+    except Exception as exc:  # 最终边界：不能泄露 Cookie 内容到响应。
+        log_all(f"🚨 保存 Instagram Cookies 未处理异常: {type(exc).__name__}: {exc}", is_error=True)
+        send_json(handler, {"ok": False, "errors": ["保存 Instagram Cookies 发生内部错误，请查看系统日志"]}, 500)
         return False, 0
 
     assessment = ig_session.assess(cookies)
@@ -127,8 +155,13 @@ def handle_ig_session_clear(handler, *, trigger_reload, update_env_file, mutatio
             os.environ.pop("INSTAGRAM_SESSIONID", None)
             os.environ.pop("INSTAGRAM_DS_USER_ID", None)
             reloaded = trigger_reload()
-    except Exception as exc:
-        send_json(handler, {"ok": False, "errors": [f"清理 Instagram Cookies 失败: {type(exc).__name__}: {exc}"]}, 500)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        log_all(f"🚨 清理 Instagram Cookies 失败: {type(exc).__name__}: {exc}", is_error=True)
+        send_json(handler, {"ok": False, "errors": [f"清理 Instagram Cookies 失败: {type(exc).__name__}"]}, 500)
+        return False
+    except Exception as exc:  # 最终边界：保持请求线程可用并记录完整诊断。
+        log_all(f"🚨 清理 Instagram Cookies 未处理异常: {type(exc).__name__}: {exc}", is_error=True)
+        send_json(handler, {"ok": False, "errors": ["清理 Instagram Cookies 发生内部错误，请查看系统日志"]}, 500)
         return False
     send_json(handler, {"ok": True, "reloaded": reloaded, "status": ig_session.status()})
     return True

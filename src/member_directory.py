@@ -10,6 +10,8 @@
 # ============================================================
 from __future__ import annotations
 
+import sqlite3
+
 import httpx
 
 import config.config as cfg
@@ -19,6 +21,7 @@ from config.credentials import (
     get_mobile_headers,
     get_web_headers,
 )
+from src.logger import log_all
 
 
 def is_mobile(acc_cfg: dict) -> bool:
@@ -79,8 +82,10 @@ async def fetch_member_directory(
     url = f"{api_base(account_id, acc_cfg).rstrip('/')}/v2/groups"
     try:
         resp = await client.get(url, headers=build_headers(account_id, acc_cfg))
-    except Exception as e:
-        return None, f"请求失败: {type(e).__name__}: {e}"
+    except httpx.TimeoutException:
+        return None, "请求超时：上游成员接口在限定时间内未响应，可稍后重试或检查代理。"
+    except httpx.RequestError as exc:
+        return None, f"网络请求失败: {type(exc).__name__}，请检查网络、代理或域名解析。"
 
     if resp.status_code == 401:
         return None, "HTTP 401：凭证已失效或 Token 过期。主程序运行中会自动续期，稍后重试；仍失败则需重新填凭证。"
@@ -90,17 +95,19 @@ async def fetch_member_directory(
         return None, f"HTTP {resp.status_code}: {resp.text[:200]}"
 
     try:
-        groups = normalize_groups(resp.json())
+        payload = resp.json()
     except ValueError:
         return None, f"响应不是合法 JSON: {resp.text[:200]}"
+    groups = normalize_groups(payload)
     if groups is None:
-        return None, f"响应结构不认识: {str(resp.json())[:200]}"
+        return None, f"响应结构不认识: {str(payload)[:200]}"
 
     # 自动保存/刷新该账号成员的订阅元数据至 SQLite 数据库
     try:
         save_account_subscriptions(account_id, groups)
-    except Exception:  # nosec B110
-        pass
+    except (OSError, sqlite3.Error) as exc:
+        # 缓存写入失败不能阻塞成员选择，但必须留下可诊断记录。
+        log_all(f"⚠️ 账号 {account_id} 的订阅缓存写入失败: {type(exc).__name__}: {exc}", is_error=True)
 
     return groups, None
 
@@ -115,6 +122,9 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
     now_ts = time.time()
     rows = []
     for g in groups:
+        if not isinstance(g, dict):
+            log_all(f"⚠️ 账号 {account_id} 收到非对象成员记录，已跳过", is_error=True)
+            continue
         mid = str(g.get("id") or "")
         if not mid:
             continue
@@ -154,8 +164,8 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
                 acc_cfg = cfg.ACCOUNTS.get(account_id) or {}
                 grp_k = acc_cfg.get("group_type") or "msg"
                 save_member_avatar_record(grp_k, mname, mname, thumb)
-            except Exception:  # nosec B110
-                pass
+            except (OSError, sqlite3.Error) as exc:
+                log_all(f"⚠️ 成员 {mname} 的头像缓存更新失败: {type(exc).__name__}: {exc}", is_error=True)
 
         rows.append((account_id, mid, mname, state, sub_type, start_at, end_at, auto_renew, now_ts))
 
@@ -175,8 +185,9 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
                         auto_renewing = excluded.auto_renewing,
                         updated_at = excluded.updated_at;
                 """, rows)
-        except Exception:  # nosec B110
-            pass
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ 账号 {account_id} 的订阅缓存数据库写入失败: {type(exc).__name__}: {exc}", is_error=True)
+            raise
 
 
 def get_member_subscription(account_id: str, member_id: str) -> dict | None:
@@ -203,7 +214,8 @@ def get_member_subscription(account_id: str, member_id: str) -> dict | None:
                     "updated_at": row[5],
                     "member_name": row[6],
                 }
-        except Exception:
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ 查询成员订阅缓存失败: {type(exc).__name__}: {exc}", is_error=True)
             return None
     return None
 
@@ -238,8 +250,8 @@ def get_all_subscriptions(account_id: str = "") -> dict[str, dict]:
                     "auto_renewing": bool(auto_renew),
                     "updated_at": upd,
                 }
-        except Exception:  # nosec B110
-            pass
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ 读取订阅缓存失败: {type(exc).__name__}: {exc}", is_error=True)
     return result
 
 
@@ -251,26 +263,45 @@ def is_member_active_subscription(account_id: str, member_id: str) -> bool | Non
     return sub.get("state") == "active"
 
 
-async def sync_all_accounts_subscriptions(client: httpx.AsyncClient | None = None) -> dict[str, int]:
-    """并发同步所有已配置且凭据可用的账号的成员订阅状态。"""
+async def sync_all_accounts_subscriptions(
+    client: httpx.AsyncClient | None = None, *, include_errors: bool = False,
+) -> dict[str, int] | tuple[dict[str, int], dict[str, str]]:
+    """同步各账号订阅状态；单个账号失败不阻塞其余账号。
+
+    ``include_errors=True`` 时同时返回 ``{账号: 原因}``，供 WebUI 展示部分失败。
+    """
     from config.credentials import validate_account_cred
     stats = {}
+    errors = {}
     should_close = False
     if client is None:
         client = httpx.AsyncClient(timeout=20)
         should_close = True
 
-    try:
-        for acc_id in list(cfg.ACCOUNTS.keys()):
+    for acc_id in list(cfg.ACCOUNTS.keys()):
+        try:
             ok, _ = validate_account_cred(acc_id)
-            if not ok:
-                continue
+        except Exception as exc:  # 最后一层隔离：第三方凭证模块异常不能中断其他账号。
+            message = f"凭证检查异常: {type(exc).__name__}"
+            errors[acc_id] = message
+            log_all(f"⚠️ 订阅同步账号 {acc_id} {message}", is_error=True)
+            continue
+        if not ok:
+            errors[acc_id] = "凭证不可用或已过期"
+            log_all(f"⚠️ 订阅同步跳过账号 {acc_id}: 凭证不可用", is_error=True)
+            continue
+        try:
             groups, err = await fetch_member_directory(client, acc_id)
-            if groups:
-                stats[acc_id] = len(groups)
-    except Exception:  # nosec B110
-        pass
-    finally:
-        if should_close:
-            await client.aclose()
-    return stats
+        except Exception as exc:  # 最后一层隔离：保留每账号上下文并继续后续同步。
+            message = f"成员目录处理异常: {type(exc).__name__}"
+            errors[acc_id] = message
+            log_all(f"⚠️ 订阅同步账号 {acc_id} {message}", is_error=True)
+            continue
+        if err:
+            errors[acc_id] = err
+            log_all(f"⚠️ 订阅同步账号 {acc_id} 失败: {err}", is_error=True)
+            continue
+        stats[acc_id] = len(groups or [])
+    if should_close:
+        await client.aclose()
+    return (stats, errors) if include_errors else stats

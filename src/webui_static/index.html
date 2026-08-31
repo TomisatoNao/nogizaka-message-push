@@ -4351,7 +4351,12 @@ $("btnSyncSubs").addEventListener("click", async () => {
     if (res.ok) {
       subscriptions = res.subscriptions || {};
       renderMembers();
-      msg("✅ 已成功同步各账号最新订阅状态！", "ok");
+      if (res.partial) {
+        const detail = Object.entries(res.warnings || {}).map(([acc, reason]) => `${acc}: ${reason}`).join("；");
+        msg("⚠️ 已完成部分账号订阅同步：" + detail, "warn");
+      } else {
+        msg("✅ 已成功同步各账号最新订阅状态！", "ok");
+      }
     } else {
       msg("❌ 同步失败：" + (res.errors || []).join("；"), "err");
     }

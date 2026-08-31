@@ -175,8 +175,17 @@ def handle_proxy_test(handler, body: dict) -> None:
                     "status": r.status_code,
                     "latency_ms": latency,
                 }
-        except Exception as e:
-            return {"target": name, "ok": False, "error": str(e), "latency_ms": None}
+        except httpx.TimeoutException:
+            return {"name": name, "target": name, "ok": False, "error_code": "timeout",
+                    "error": "连接超时", "latency_ms": None}
+        except httpx.RequestError as exc:
+            return {"name": name, "target": name, "ok": False, "error_code": "network_error",
+                    "error": f"网络请求失败: {type(exc).__name__}", "latency_ms": None}
+        except Exception as exc:  # 最终边界：避免单个探测异常终止整批结果。
+            from src.logger import log_all
+            log_all(f"🚨 代理探测 {name} 未处理异常: {type(exc).__name__}: {exc}", is_error=True)
+            return {"name": name, "target": name, "ok": False, "error_code": "internal_error",
+                    "error": "探测发生内部错误，请查看系统日志", "latency_ms": None}
 
     async def _run_all():
         tasks = [_probe(name, url) for name, url in targets]
