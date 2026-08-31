@@ -142,9 +142,19 @@ def log_response(content: str) -> None:
 
 def format_httpx_error(e: Exception) -> str:
     """将 httpx 异常格式化为包含 URL 和底层原因的详细错误信息。"""
-    detail = str(e) if str(e) else type(e).__name__
-    if hasattr(e, "request") and e.request is not None:
-        detail += f" | URL: {e.request.url}"
+    try:
+        message = str(e)
+    except Exception:
+        message = ""
+    detail = message or type(e).__name__
+    # httpx.RequestError.request 在手工构造、连接尚未建立等场景可能抛出
+    # RuntimeError；错误格式化本身绝不能遮蔽原始网络异常。
+    try:
+        request = e.request
+    except (AttributeError, RuntimeError):
+        request = None
+    if request is not None:
+        detail += f" | URL: {request.url}"
     if getattr(e, "__cause__", None) is not None:
         cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
         detail += f" | 原因: {cause_msg}"

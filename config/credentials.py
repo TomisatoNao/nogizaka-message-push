@@ -3,9 +3,11 @@
 # ============================================================
 import asyncio
 import base64
+import binascii
 import hashlib
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 
 import httpx
@@ -64,7 +66,7 @@ async def _post(url: str, *, headers: dict,
             client_loop = getattr(transport, "_loop", None)
             if client_loop is None or client_loop is curr_loop:
                 client_to_use = _http_client
-        except Exception:
+        except RuntimeError:
             client_to_use = None
 
     if client_to_use is not None:
@@ -156,7 +158,8 @@ def _load_env_seen() -> dict[str, str]:
     try:
         from src import auth
         return auth.load_env_seen()
-    except Exception:
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        log_all(f"⚠️ 读取凭证环境指纹失败: {type(exc).__name__}: {exc}", is_error=True)
         return {}
 
 
@@ -164,17 +167,19 @@ def _save_env_seen(seen: dict[str, str]) -> None:
     try:
         from src import auth
         auth.save_env_seen(seen)
-    except Exception:
-        pass
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        log_all(f"⚠️ 保存凭证环境指纹失败: {type(exc).__name__}: {exc}", is_error=True)
 
 
-def _save_cred(account_id: str, token: str, cookies: dict) -> None:
+def _save_cred(account_id: str, token: str, cookies: dict) -> bool:
     # 1. 持久化到 SQLite 数据库
     try:
         from src import auth
         auth.set_account_credential(account_id, "web", {"token": token, "cookies": cookies})
-    except Exception:
-        pass
+        return True
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        log_all(f"🚨 账号 {account_id} Web 凭证持久化失败: {type(exc).__name__}: {exc}", is_error=True)
+        return False
 
 
 # ──────────────────────────────────────────────
@@ -194,13 +199,15 @@ def _resolve_mobile_group(acc_cfg: dict) -> str:
     )
 
 
-def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) -> None:
+def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) -> bool:
     """保存移动端凭证：{access_token, refresh_token} 到 SQLite 数据库。"""
     try:
         from src import auth
         auth.set_account_credential(account_id, "mobile", {"access_token": access_token, "refresh_token": refresh_token})
-    except Exception:
-        pass
+        return True
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        log_all(f"🚨 账号 {account_id} 移动端凭证持久化失败: {type(exc).__name__}: {exc}", is_error=True)
+        return False
 
 
 # ──────────────────────────────────────────────
@@ -256,7 +263,10 @@ async def refresh_mobile_token(account_id: str, target_group: int,
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
-        acc_cfg = cfg.ACCOUNTS[account_id]
+        acc_cfg = cfg.ACCOUNTS.get(account_id)
+        if not acc_cfg:
+            log_all(f"🚨 账号 {account_id} 缺少配置，无法执行移动端续期", is_error=True)
+            return False
         rt = cred.get("refresh_token") or acc_cfg.get("init_refresh_token", "")
         if not rt:
             log_all(f"🚨 账号 {account_id} 无 refresh_token", is_error=True)
@@ -282,13 +292,15 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                 if new_access:
                     cred["token"] = new_access
                     cred["refresh_token"] = new_refresh
-                    _save_mobile_cred(account_id, new_access, new_refresh)
-                    log_all(f"✅ 账号 {account_id} 移动端续期成功")
-                    # 记录 Token 状态
-                    remaining = get_token_remaining_seconds(account_id)
-                    if remaining is not None:
-                        _health_tracker().record_token(account_id, max(0, remaining))
-                    return True
+                    if not _save_mobile_cred(account_id, new_access, new_refresh):
+                        log_all(f"🚨 账号 {account_id} 移动端凭证未持久化，拒绝将续期视为成功", is_error=True)
+                    else:
+                        log_all(f"✅ 账号 {account_id} 移动端续期成功")
+                        # 记录 Token 状态
+                        remaining = get_token_remaining_seconds(account_id)
+                        if remaining is not None:
+                            _health_tracker().record_token(account_id, max(0, remaining))
+                        return True
                 else:
                     log_all(f"🚨 账号 {account_id} 移动端续期响应无 access_token", is_error=True)
             else:
@@ -298,11 +310,20 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                     is_error=True,
                 )
 
-        except Exception as e:
+        except httpx.TimeoutException as e:
+            log_all(
+                f"🔥 账号 {account_id} 移动端续期超时: {format_httpx_error(e)}",
+                is_error=True,
+            )
+        except httpx.RequestError as e:
             log_all(
                 f"🔥 账号 {account_id} 移动端续期网络异常: {format_httpx_error(e)}",
                 is_error=True,
             )
+        except (OSError, ValueError) as e:
+            log_all(f"🔥 账号 {account_id} 移动端续期处理失败: {type(e).__name__}: {e}", is_error=True)
+        except Exception as e:  # 最终边界：刷新失败必须记录，不能让主巡查崩溃。
+            log_all(f"🔥 账号 {account_id} 移动端续期未处理异常: {type(e).__name__}: {e}", is_error=True)
 
     # ---- 续期失败，触发报警 ----
     log_all(f"🚨 致命错误：账号 {account_id} 移动端续期失败，refresh_token 可能已失效", is_error=True)
@@ -315,8 +336,8 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                 target_group,
                 f"📢 警报：账号 {account_id} 移动端续期失败！请更新 refresh_token！",
             )
-        except Exception:
-            pass
+        except Exception as exc:  # 告警发送失败不能覆盖原始凭证故障。
+            log_all(f"⚠️ 账号 {account_id} 移动端续期告警发送失败: {type(exc).__name__}: {exc}", is_error=True)
     else:
         remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
         _health_tracker().record_alert_cooldown(account_id, float(remaining))
@@ -585,18 +606,24 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
     # 延迟导入，避免循环依赖
     from src.notifier import send_alert_message
 
-    lock = _token_refresh_locks.setdefault(account_id, asyncio.Lock())
+    lock = _get_refresh_lock(account_id)
     async with lock:
         cred = ACCOUNT_CREDS.get(account_id)
         if not cred:
             log_all(f"🚨 账号 {account_id} 无凭据", is_error=True)
             return False
 
-        if old_token and cred["token"] != old_token:
+        if old_token and cred.get("token") != old_token:
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
-        acc_cfg    = cfg.ACCOUNTS[account_id]
+        acc_cfg = cfg.ACCOUNTS.get(account_id)
+        if not acc_cfg:
+            log_all(f"🚨 账号 {account_id} 缺少配置，无法执行 Web 续期", is_error=True)
+            return False
+        if not cred.get("token") or not isinstance(cred.get("cookies"), dict):
+            log_all(f"🚨 账号 {account_id} Web 凭证结构不完整，无法执行续期", is_error=True)
+            return False
         group_type = acc_cfg["group_type"]
         api_base   = acc_cfg.get("api_base")
         if api_base:
@@ -632,24 +659,35 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                         if "=" in sc:
                             k, v = sc.split("=", 1)
                             cred["cookies"][k] = v
-                    _save_cred(account_id, cred["token"], cred["cookies"])
-                    log_all(f"✅ 账号 {account_id} 续期成功")
-                    # 记录 Token 状态
-                    remaining = get_token_remaining_seconds(account_id)
-                    if remaining is not None:
-                        _health_tracker().record_token(account_id, max(0, remaining))
-                    return True
+                    if not _save_cred(account_id, cred["token"], cred["cookies"]):
+                        log_all(f"🚨 账号 {account_id} Web 凭证未持久化，拒绝将续期视为成功", is_error=True)
+                    else:
+                        log_all(f"✅ 账号 {account_id} 续期成功")
+                        # 记录 Token 状态
+                        remaining = get_token_remaining_seconds(account_id)
+                        if remaining is not None:
+                            _health_tracker().record_token(account_id, max(0, remaining))
+                        return True
                 else:
                     log_all(f"🚨 账号 {account_id} 续期响应无 access_token", is_error=True)
             else:
                 body_snippet = r.text[:120].strip() if r.text else ""
                 log_all(f"🚨 账号 {account_id} 续期被拒: HTTP {r.status_code} | {body_snippet}", is_error=True)
 
-        except Exception as e:
+        except httpx.TimeoutException as e:
+            log_all(
+                f"🔥 账号 {account_id} Web 续期超时: {format_httpx_error(e)}",
+                is_error=True,
+            )
+        except httpx.RequestError as e:
             log_all(
                 f"🔥 账号 {account_id} 续期网络异常: {format_httpx_error(e)}",
                 is_error=True,
             )
+        except (OSError, ValueError) as e:
+            log_all(f"🔥 账号 {account_id} Web 续期处理失败: {type(e).__name__}: {e}", is_error=True)
+        except Exception as e:  # 最终边界：刷新失败必须记录，不能让主巡查崩溃。
+            log_all(f"🔥 账号 {account_id} Web 续期未处理异常: {type(e).__name__}: {e}", is_error=True)
 
     # ---- 续期失败，触发报警 ----
     log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)
@@ -662,8 +700,8 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                 target_group,
                 f"📢 警报：账号 {account_id} 续期失败，Cookie 已死亡！请重新抓包！",
             )
-        except Exception:
-            pass
+        except Exception as exc:  # 告警发送失败不能覆盖原始凭证故障。
+            log_all(f"⚠️ 账号 {account_id} Web 续期告警发送失败: {type(exc).__name__}: {exc}", is_error=True)
     else:
         remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
         _health_tracker().record_alert_cooldown(account_id, float(remaining))
@@ -691,7 +729,7 @@ def _decode_token_exp(token: str) -> int | None:
         payload = json.loads(payload_bytes)
         exp = int(payload.get("exp", 0))
         return exp if exp > 0 else None
-    except Exception:
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error):
         return None
 
 
@@ -813,7 +851,7 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
                     client_loop = getattr(transport, "_loop", None)
                     if client_loop is None or client_loop is curr_loop:
                         client_to_use = _http_client
-                except Exception:
+                except RuntimeError:
                     client_to_use = None
 
             if client_to_use is not None:
@@ -837,8 +875,16 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
                 }
             else:
                 return False, f"❌ 凭证验证失败：API 返回 HTTP {r.status_code}，Token 或 Cookie 可能已失效", {"auth_method": "web"}
-        except Exception as e:
-            return False, f"❌ 验证网络异常: {format_httpx_error(e)}", {"auth_method": "web"}
+        except httpx.TimeoutException:
+            return False, "❌ 凭证验证超时：请检查代理或稍后重试", {"auth_method": "web", "error_code": "timeout"}
+        except httpx.RequestError as exc:
+            return False, f"❌ 凭证验证网络异常: {format_httpx_error(exc)}", {"auth_method": "web", "error_code": "network_error"}
+        except (OSError, ValueError) as exc:
+            log_all(f"🚨 账号 {account_id} 凭证验证处理失败: {type(exc).__name__}: {exc}", is_error=True)
+            return False, f"❌ 凭证验证处理失败: {type(exc).__name__}", {"auth_method": "web", "error_code": "processing_error"}
+        except Exception as exc:  # 最终边界：网页端必须收到可处理的错误，而不是请求中断。
+            log_all(f"🚨 账号 {account_id} 凭证验证未处理异常: {type(exc).__name__}: {exc}", is_error=True)
+            return False, "❌ 凭证验证发生内部错误，请查看系统日志", {"auth_method": "web", "error_code": "internal_error"}
 
     return False, "❌ 凭证不完整，无法完成验证", {"auth_method": "web"}
 
@@ -852,6 +898,5 @@ def rename_account(old_id: str, new_id: str) -> None:
     try:
         from src import auth
         auth.rename_account_credential(old_id, new_id)
-    except Exception:
-        pass
-
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        log_all(f"⚠️ 重命名账号 {old_id} 的持久化凭证失败: {type(exc).__name__}: {exc}", is_error=True)

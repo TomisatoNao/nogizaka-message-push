@@ -146,8 +146,8 @@ async def _fetch_member_messages(member: dict):
                 l_time = f.read().strip()
             if l_time:
                 archive.set_timeline_watermark(group_type, m_id, l_time)
-        except Exception:  # nosec B110
-            pass
+        except (OSError, UnicodeError) as exc:
+            log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 读取旧时间水位线失败: {type(exc).__name__}: {exc}", is_error=True)
 
     is_first_fetch = False
     if not l_time:
@@ -212,7 +212,7 @@ async def _fetch_member_messages(member: dict):
             if resp.status_code == 200:
                 try:
                     msgs = resp.json().get("messages", [])
-                except Exception:
+                except ValueError:
                     log_all(f"🚨 [成员ID: {m_id} | 名字: {m_name}] API 响应 HTTP 200 但不是合法 JSON", is_error=True)
                     _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "API 响应非 JSON")
                     return None
@@ -230,8 +230,14 @@ async def _fetch_member_messages(member: dict):
                                 for pm in past_msgs:
                                     if str(pm.get("id") or pm.get("updated_at", "")) not in existing_ids:
                                         msgs.append(pm)
-                    except Exception as e:
-                        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 拉取 past_messages 失败: {e}", is_debug=True)
+                    except httpx.TimeoutException:
+                        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 拉取 past_messages 超时，已跳过历史补偿", is_debug=True)
+                    except httpx.RequestError as e:
+                        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 拉取 past_messages 网络失败: {format_httpx_error(e)}", is_debug=True)
+                    except ValueError:
+                        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] past_messages 响应不是合法 JSON", is_debug=True)
+                    except Exception as e:  # 可选历史补偿不可阻断实时抓取，但必须可追踪。
+                        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] past_messages 未处理异常: {type(e).__name__}: {e}", is_error=True)
 
                 new_msgs = sorted(
                     [
@@ -297,6 +303,18 @@ async def _fetch_member_messages(member: dict):
                 log_all(f"🚨 {m_name} 达到最大重试次数，放弃", is_error=True)
                 _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"网络错误: {format_httpx_error(e)}")
                 return None
+
+        except httpx.RequestError as e:
+            log_all(
+                f"🔥 {m_name} HTTP 请求失败 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {format_httpx_error(e)}",
+                is_error=True,
+            )
+            if attempt < MAX_FETCH_ATTEMPTS:
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)  # nosec B311
+                await asyncio.sleep(delay)
+                continue
+            _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "HTTP 请求失败")
+            return None
 
         except RuntimeError as e:
             if "Event loop is closed" in str(e) or "closed" in str(e):
