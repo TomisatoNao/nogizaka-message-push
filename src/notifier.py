@@ -27,6 +27,7 @@ class DeliveryAttempt:
     """
 
     channel: str
+    route_id: str
     label: str
     target: str
     ok: bool
@@ -70,6 +71,7 @@ def _classify_delivery_exception(exc: Exception) -> str:
 
 async def _run_delivery(
     channel: str,
+    route_id: str,
     label: str,
     target: str,
     sender: Callable[[], Awaitable[bool]],
@@ -78,14 +80,14 @@ async def _run_delivery(
 ) -> DeliveryAttempt:
     """执行单个路由，确保一个协程异常不会吞掉同批其他通道。"""
     if known_error:
-        return DeliveryAttempt(channel, label, target, False, known_error)
+        return DeliveryAttempt(channel, route_id, label, target, False, known_error)
     try:
         ok = bool(await sender())
     except Exception as exc:  # 外部 SDK / 网络调用的边界，必须隔离单路失败
         error_code = _classify_delivery_exception(exc)
-        return DeliveryAttempt(channel, label, target, False, error_code)
+        return DeliveryAttempt(channel, route_id, label, target, False, error_code)
     return DeliveryAttempt(
-        channel, label, target, ok, None if ok else "delivery_failed"
+        channel, route_id, label, target, ok, None if ok else "delivery_failed"
     )
 
 
@@ -131,7 +133,7 @@ def enabled_channels() -> list[str]:
 
 
 async def send_member_message_detailed(
-    member: dict, message_chain: list[dict]
+    member: dict, message_chain: list[dict], *, skip_route_ids: set[str] | None = None
 ) -> DeliveryReport:
     """向已匹配的通道并发广播成员消息，并返回每个目标的结果。
 
@@ -140,6 +142,7 @@ async def send_member_message_detailed(
     """
     m_name = member.get("m_name") or member.get("name") or "未知成员"
     m_id = member.get("m_id") or member.get("id")
+    skip_route_ids = skip_route_ids or set()
     tasks: list[Awaitable[DeliveryAttempt]] = []
 
     # 1. NapCat QQ 路由并发任务
@@ -152,9 +155,12 @@ async def send_member_message_detailed(
             if match_member_filter(m_name, filters, m_id):
                 gid = route.get("group_id")
                 if gid:
+                    route_id = f"napcat:{gid}"
+                    if route_id in skip_route_ids:
+                        continue
                     r_label = f"NapCat:{route['remark']}" if route.get("remark") else "NapCat"
                     tasks.append(_run_delivery(
-                        "napcat", r_label, f"群 {gid}",
+                        "napcat", route_id, r_label, f"群 {gid}",
                         lambda target_gid=gid: send_qq_message(target_gid, message_chain),
                     ))
 
@@ -173,8 +179,11 @@ async def send_member_message_detailed(
                 b_label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
                 # 单聊目标（target_openid）
                 if bot.target_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                    route_id = f"official:{bot.name}:private"
+                    if route_id in skip_route_ids:
+                        continue
                     tasks.append(_run_delivery(
-                        f"official:{bot.name}", b_label,
+                        f"official:{bot.name}", route_id, b_label,
                         f"用户 {bot.target_openid[:10]}...",
                         lambda b=bot: b.send_message_chain(
                             member, message_chain, media_payloads=media_payloads
@@ -184,8 +193,11 @@ async def send_member_message_detailed(
 
                 # 群聊目标（group_openid）
                 if bot.group_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                    route_id = f"official:{bot.name}:group"
+                    if route_id in skip_route_ids:
+                        continue
                     tasks.append(_run_delivery(
-                        f"official:{bot.name}:group", b_label,
+                        f"official:{bot.name}:group", route_id, b_label,
                         f"群 {bot.group_openid[:10]}...",
                         lambda b=bot: b.send_message_chain_to_group(
                             b.group_openid, member, message_chain,
@@ -199,9 +211,12 @@ async def send_member_message_detailed(
         tg_bots = tgbot.get_configured_bots()
         for bot in tg_bots:
             if bot.target_chat and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                route_id = f"tg:{bot.name}"
+                if route_id in skip_route_ids:
+                    continue
                 tg_label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
                 tasks.append(_run_delivery(
-                    f"tg:{bot.name}", tg_label, f"Chat {bot.target_chat}",
+                    f"tg:{bot.name}", route_id, tg_label, f"Chat {bot.target_chat}",
                     lambda b=bot: b.send_member_message(message_chain),
                 ))
 
@@ -229,7 +244,7 @@ async def send_report_message(text: str) -> bool:
                 gid = route["group_id"]
                 label = f"NapCat:{route.get('remark')}" if route.get("remark") else "NapCat"
                 tasks.append(_run_delivery(
-                    "napcat", label, f"群 {gid}",
+                    "napcat", f"napcat:{gid}", label, f"群 {gid}",
                     lambda target_gid=gid: send_qq_message(
                         target_gid, [{"type": "text", "data": {"text": text}}]
                     ),
@@ -240,7 +255,7 @@ async def send_report_message(text: str) -> bool:
             if bot.target_openid and bot.push_alert:
                 label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
                 tasks.append(_run_delivery(
-                    f"official:{bot.name}", label, f"用户 {bot.target_openid[:10]}...",
+                    f"official:{bot.name}", f"official:{bot.name}:private", label, f"用户 {bot.target_openid[:10]}...",
                     lambda b=bot: b.send_text(text),
                 ))
 
@@ -249,7 +264,7 @@ async def send_report_message(text: str) -> bool:
             if bot.target_chat and bot.push_alert:
                 label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
                 tasks.append(_run_delivery(
-                    f"tg:{bot.name}", label, f"Chat {bot.target_chat}",
+                    f"tg:{bot.name}", f"tg:{bot.name}", label, f"Chat {bot.target_chat}",
                     lambda b=bot: b.send_text(text),
                 ))
 
@@ -276,7 +291,7 @@ async def send_alert_message(target_group: int, text: str) -> bool:
                 gid = route["group_id"]
                 label = f"NapCat:{route.get('remark')}" if route.get("remark") else "NapCat"
                 tasks.append(_run_delivery(
-                    "napcat", label, f"群 {gid}",
+                    "napcat", f"napcat:{gid}", label, f"群 {gid}",
                     lambda target_gid=gid: send_qq_message(
                         target_gid,
                         [{"type": "text", "data": {"text": f"📢 系统警报\n{text}"}}],
@@ -289,7 +304,7 @@ async def send_alert_message(target_group: int, text: str) -> bool:
             if bot.target_openid and bot.push_alert:
                 label = f"官方Bot:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"官方Bot:{bot.name}"
                 tasks.append(_run_delivery(
-                    f"official:{bot.name}", label, f"用户 {bot.target_openid[:10]}...",
+                    f"official:{bot.name}", f"official:{bot.name}:private", label, f"用户 {bot.target_openid[:10]}...",
                     lambda b=bot: b.send_text(f"📢 系统警报\n{text}"),
                 ))
 
@@ -299,7 +314,7 @@ async def send_alert_message(target_group: int, text: str) -> bool:
             if bot.push_alert and bot.target_chat:
                 label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
                 tasks.append(_run_delivery(
-                    f"tg:{bot.name}", label, f"Chat {bot.target_chat}",
+                    f"tg:{bot.name}", f"tg:{bot.name}", label, f"Chat {bot.target_chat}",
                     lambda b=bot: b.send_text(f"📢 系统警报\n{text}"),
                 ))
 
@@ -444,8 +459,8 @@ async def send_blog_post(post: dict) -> bool:
     try:
         from src.blog_card_renderer import render_blog_card
         card_path = await render_blog_card(post)
-    except Exception as e:
-        log_all(f"💡 长图卡片预渲染跳过或失败，自动降级为标准图文: {e}", is_debug=True)
+    except (OSError, RuntimeError, ValueError) as e:
+        log_all(f"💡 长图卡片预渲染跳过或失败，自动降级为标准图文: {type(e).__name__}", is_debug=True)
 
     # 辅助函数：向 QQ 官方 Bot 发送全量原始写真
     async def _send_qq_official_raw_images(bot, scope, target):
@@ -474,11 +489,13 @@ async def send_blog_post(post: dict) -> bool:
                         if r.status_code == 200:
                             img_bytes = r.content
 
-                if img_bytes:
-                    await bot.send_media_file(scope, target, "image", img_bytes)
-            except Exception as ex:
-                log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送异常: {ex}", is_debug=True)
+                if not img_bytes or not await bot.send_media_file(scope, target, "image", img_bytes):
+                    return False
+            except (OSError, httpx.HTTPError, ValueError) as ex:
+                log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送失败: {type(ex).__name__}", is_debug=True)
+                return False
             await asyncio.sleep(0.4)
+        return True
 
     tasks = []
 
@@ -502,9 +519,11 @@ async def send_blog_post(post: dict) -> bool:
                     mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
 
                     if scope == "groups":
-                        await b.send_group_text(target, header_text)
+                        if not await b.send_group_text(target, header_text):
+                            return False
                     else:
-                        await b.send_private_text(target, header_text)
+                        if not await b.send_private_text(target, header_text):
+                            return False
                     await asyncio.sleep(0.3)
 
                     if mode == "card_only":
@@ -526,21 +545,24 @@ async def send_blog_post(post: dict) -> bool:
 
                         if sent_card:
                             if media_urls:
-                                await _send_qq_official_raw_images(b, scope, target)
+                                if not await _send_qq_official_raw_images(b, scope, target):
+                                    return False
                         else:
                             if media_urls:
-                                await _send_qq_official_raw_images(b, scope, target)
+                                if not await _send_qq_official_raw_images(b, scope, target):
+                                    return False
                             if pairs:
                                 await b.send_translation_qq(scope, target, pairs)
                     else:
                         if media_urls:
-                            await _send_qq_official_raw_images(b, scope, target)
+                            if not await _send_qq_official_raw_images(b, scope, target):
+                                return False
                         if pairs:
                             await b.send_translation_qq(scope, target, pairs)
                     return True
-                except Exception as e:
+                except (OSError, httpx.HTTPError, ValueError, RuntimeError) as e:
                     b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
-                    log_all(f"⚠️ 官方 QQ Bot 博客推送失败 [{b_label}]: {e}", is_error=True)
+                    log_all(f"⚠️ 官方 QQ Bot 博客推送失败 [{b_label}]: {type(e).__name__}", is_error=True)
                     return False
 
             tasks.append(_send_official_blog())
@@ -564,7 +586,8 @@ async def send_blog_post(post: dict) -> bool:
                 from src.platforms.napcat import send_qq_message
                 try:
                     mode = r.get("blog_card_mode") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
-                    await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": header_text}}])
+                    if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": header_text}}]):
+                        return False
                     await asyncio.sleep(0.3)
 
                     if mode == "card_only":
@@ -610,9 +633,9 @@ async def send_blog_post(post: dict) -> bool:
                             body_txt = "\n\n".join(blocks)
                             await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
                     return True
-                except Exception as e:
+                except (OSError, ValueError, RuntimeError) as e:
                     r_label = f"{r.get('remark')} ({target_gid})" if r.get("remark") else f"群 {target_gid}"
-                    log_all(f"⚠️ NapCat 博客推送失败 [{r_label}]: {e}", is_error=True)
+                    log_all(f"⚠️ NapCat 博客推送失败 [{r_label}]: {type(e).__name__}", is_error=True)
                     return False
 
             tasks.append(_send_napcat_blog())
@@ -634,7 +657,8 @@ async def send_blog_post(post: dict) -> bool:
             async def _send_tg_blog(b=bot):
                 try:
                     mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
-                    await b._post_message(b.target_chat, header_text)
+                    if not await b._post_message(b.target_chat, header_text):
+                        return False
                     await asyncio.sleep(0.3)
 
                     if mode == "card_only":
@@ -666,9 +690,9 @@ async def send_blog_post(post: dict) -> bool:
                         if pairs:
                             await b.send_translation_tg(pairs)
                     return True
-                except Exception as e:
+                except (OSError, ValueError, RuntimeError) as e:
                     b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
-                    log_all(f"⚠️ TG 博客推送失败 [{b_label}]: {e}", is_error=True)
+                    log_all(f"⚠️ TG 博客推送失败 [{b_label}]: {type(e).__name__}", is_error=True)
                     return False
 
             tasks.append(_send_tg_blog())
@@ -677,4 +701,7 @@ async def send_blog_post(post: dict) -> bool:
         return True
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    return any(isinstance(r, bool) and r for r in results)
+    failures = [type(r).__name__ for r in results if isinstance(r, Exception)]
+    if failures:
+        log_all(f"⚠️ 博客路由任务异常: {' · '.join(failures)}", is_error=True)
+    return any(r is True for r in results)

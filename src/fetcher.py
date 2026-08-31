@@ -18,7 +18,8 @@ from config.credentials import (
 )
 from src.dedup import load_sent_ids, save_sent_id
 from src.translator import translate_text_with_model
-from src.notifier import send_member_message
+from src.notifier import send_member_message_detailed
+from src.delivery_state import mark_successful_routes, successful_routes
 from src.health import ErrorTier, get_tracker as _health_tracker
 from src.platforms.napcat import build_message_chain
 
@@ -93,7 +94,15 @@ async def _handle_message(member: dict, msg: dict,
 
     # 推送各通道（若含有媒体，各通道直接复用本地素材，免去重复网络请求）
     chain = build_message_chain(m_name, updated, msg, translated, model_name=trans_model)
-    if not await send_member_message(member, chain):
+    delivered_routes = successful_routes(group_type, m_id, msg_id)
+    report = await send_member_message_detailed(
+        member, chain, skip_route_ids=delivered_routes
+    )
+    mark_successful_routes(
+        group_type, m_id, msg_id,
+        {attempt.route_id for attempt in report.attempts if attempt.ok},
+    )
+    if report.failure_count:
         log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息推送失败，保留时间戳等待下次重试", is_error=True)
         return False
     else:

@@ -110,3 +110,19 @@ def test_official_media_failure_does_not_block_telegram(monkeypatch) -> None:
     assert report.ok is True
     official = next(a for a in report.attempts if a.channel.startswith("official:"))
     assert official.error_code == "media_prepare_failed"
+
+
+def test_successful_route_is_not_sent_again_on_retry(monkeypatch) -> None:
+    _prepare_channels(monkeypatch)
+
+    async def napcat_down(group_id: int, message_chain: list[dict]) -> bool:
+        return False
+
+    monkeypatch.setattr(notifier, "send_qq_message", napcat_down)
+    report = asyncio.run(notifier.send_member_message_detailed(
+        {"m_name": "测试成员", "m_id": "1"}, [{"type": "text", "data": {"text": "hello"}}],
+        skip_route_ids={"tg:tg-test"},
+    ))
+
+    assert all(attempt.route_id != "tg:tg-test" for attempt in report.attempts)
+    assert report.ok is False

@@ -58,7 +58,7 @@ def start_social_service(config: dict) -> SocialScheduler | None:
         _shared_config = config
         _store = SocialStore()
         _downloader = MediaDownloader(config)
-        _forwarder = SocialForwarder(config, _downloader)
+        _forwarder = SocialForwarder(config, _downloader, _store)
 
         # 实例化全部 Fetcher
         fetchers = [
@@ -74,10 +74,12 @@ def start_social_service(config: dict) -> SocialScheduler | None:
             succeeded = []
             for p in posts:
                 try:
-                    _forwarder.forward_post(p)
-                    succeeded.append(p)
+                    if _forwarder.forward_post(p):
+                        succeeded.append(p)
+                    else:
+                        log_all(f"⚠️ [{platform}] 动态 {p.post_id} 未投递成功，将在下轮重试", is_error=True)
                 except Exception as ex:
-                    log_all(f"⚠️ [{platform}] 动态 {p.post_id} 推送失败: {ex}", is_error=True)
+                    log_all(f"⚠️ [{platform}] 动态 {p.post_id} 推送失败: {type(ex).__name__}", is_error=True)
             return succeeded
 
         _scheduler = SocialScheduler(

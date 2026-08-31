@@ -37,9 +37,10 @@ class SendFailed(RuntimeError):
 class SocialForwarder:
     """社交平台多通道推送器。"""
 
-    def __init__(self, config: dict, downloader=None):
+    def __init__(self, config: dict, downloader=None, store=None):
         self._config = config
         self._dl = downloader
+        self._store = store
 
     @property
     def _cfg(self) -> dict:
@@ -94,8 +95,12 @@ class SocialForwarder:
         else:
             return asyncio.run(coro)
 
-    def forward_post(self, post: Post, target_channels: list[str] | None = None) -> None:
-        """推送一条社交动态至各通道（支持定向通道列表）。"""
+    def forward_post(self, post: Post, target_channels: list[str] | None = None) -> bool:
+        """推送一条社交动态至各通道，返回是否已安全完成。
+
+        仅当至少一个已匹配路由成功时才返回 ``True``；没有匹配路由属于
+        配置决定的跳过，也视为完成，避免被调度器无限重复拉取。
+        """
         # 1. AI 翻译（如明确跳过或已有翻译则不再调用）
         skip_translate = post.extra.get("_skip_translate", False)
         if skip_translate:
@@ -131,11 +136,15 @@ class SocialForwarder:
         m_name = post.extra.get("member_name")
         acc_name = post.extra.get("account") or post.author
         plat = post.platform.lower()
+        delivered_routes = (
+            self._store.delivered_routes(plat, post.post_id) if self._store else set()
+        )
 
         async def _do_broadcast():
             any_success = False
             errors = []
             tasks = []
+            task_route_ids = []
 
             # ── A. Telegram Bot 并发推送 ──────────────────────────────
             if getattr(cfg, "ENABLE_TG_BOT", False) and (not target_channels or any(c == "tg" or c.startswith("tg:") for c in target_channels)):
@@ -153,10 +162,15 @@ class SocialForwarder:
                             continue
                         if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
                             continue
+                    route_id = f"tg:{getattr(b, 'name', b.target_chat)}"
+                    if route_id in delivered_routes:
+                        continue
 
                     async def _send_tg_post(target_bot=b):
                         try:
                             t_ok = await target_bot._post_message(target_bot.target_chat, full_text)
+                            if not t_ok:
+                                return False
                             for m in post.media:
                                 fp = m.local_path
                                 if fp and os.path.exists(fp):
@@ -164,21 +178,24 @@ class SocialForwarder:
                                         try:
                                             with open(fp, "rb") as photo_file:
                                                 await target_bot._bot.send_photo(chat_id=target_bot.target_chat, photo=photo_file)
-                                        except Exception as ex:
-                                            log_all(f"⚠️ TG Bot 发送图片异常: {ex}", is_error=True)
+                                        except (OSError, ValueError) as ex:
+                                            log_all(f"⚠️ TG Bot 发送图片失败: {type(ex).__name__}", is_error=True)
+                                            return False
                                     elif m.type == "video":
                                         try:
                                             with open(fp, "rb") as video_file:
                                                 await target_bot._bot.send_video(chat_id=target_bot.target_chat, video=video_file)
-                                        except Exception as ex:
-                                            log_all(f"⚠️ TG Bot 发送视频异常: {ex}", is_error=True)
+                                        except (OSError, ValueError) as ex:
+                                            log_all(f"⚠️ TG Bot 发送视频失败: {type(ex).__name__}", is_error=True)
+                                            return False
                             return t_ok
                         except Exception as e:
                             bot_label = f"{target_bot.remark} ({target_bot.name})" if getattr(target_bot, "remark", None) else target_bot.name
-                            errors.append(f"Telegram 推送失败 [{bot_label}]: {e}")
+                            errors.append(f"Telegram 推送失败 [{bot_label}]: {type(e).__name__}")
                             return False
 
                     tasks.append(_send_tg_post())
+                    task_route_ids.append(route_id)
 
             # ── B. NapCat QQ 群并发推送 ──────────────────────────────
             if getattr(cfg, "ENABLE_NAPCAT_QQ", False) and (not target_channels or any(c == "napcat" or c.startswith("napcat:") for c in target_channels)):
@@ -211,16 +228,20 @@ class SocialForwarder:
                         s_filters = r.get("social_filter") or []
                         if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
                             continue
+                    route_id = f"napcat:{gid}"
+                    if route_id in delivered_routes:
+                        continue
 
                     async def _send_napcat_post(route=r, target_gid=gid):
                         try:
                             return await napcat.send_qq_message(target_gid, chain)
                         except Exception as e:
                             r_label = f"{route.get('remark')} ({target_gid})" if route.get("remark") else f"群 {target_gid}"
-                            errors.append(f"NapCat 推送失败 [{r_label}]: {e}")
+                            errors.append(f"NapCat 推送失败 [{r_label}]: {type(e).__name__}")
                             return False
 
                     tasks.append(_send_napcat_post())
+                    task_route_ids.append(route_id)
 
             # ── C. QQ 官方机器人并发推送 ─────────────────────────────
             if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False) and (not target_channels or any(c == "qq_official" or c.startswith("official:") for c in target_channels)):
@@ -256,13 +277,18 @@ class SocialForwarder:
                             continue
                         if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
                             continue
+                    route_id = f"official:{bot.name}"
+                    if route_id in delivered_routes:
+                        continue
 
                     async def _send_official_post(b=bot, sp=send_private, sg=send_group):
                         try:
                             if sp and b.target_openid:
-                                await b.send_private_text(b.target_openid, full_text)
+                                if not await b.send_private_text(b.target_openid, full_text):
+                                    return False
                             if sg and getattr(b, "group_openid", None):
-                                await b.send_group_text(b.group_openid, full_text)
+                                if not await b.send_group_text(b.group_openid, full_text):
+                                    return False
 
                             for m in post.media:
                                 fp = m.local_path
@@ -276,19 +302,31 @@ class SocialForwarder:
                                                 await b.send_media_file("users", b.target_openid, m_type, m_bytes)
                                             if sg and getattr(b, "group_openid", None):
                                                 await b.send_media_file("groups", b.group_openid, m_type, m_bytes)
-                                    except Exception as ex:
-                                        log_all(f"⚠️ QQ 官方 Bot 发送媒体异常: {ex}", is_error=True)
+                                    except (OSError, ValueError) as ex:
+                                        log_all(f"⚠️ QQ 官方 Bot 发送媒体失败: {type(ex).__name__}", is_error=True)
+                                        return False
                             return True
                         except Exception as e:
                             b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
-                            errors.append(f"QQ 官方机器人推送失败 [{b_label}]: {e}")
+                            errors.append(f"QQ 官方机器人推送失败 [{b_label}]: {type(e).__name__}")
                             return False
 
                     tasks.append(_send_official_post())
+                    task_route_ids.append(route_id)
 
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                any_success = any(isinstance(r, bool) and r for r in results)
+            if not tasks:
+                return True, errors
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for route_id, result in zip(task_route_ids, results):
+                if isinstance(result, Exception):
+                    errors.append(f"路由任务异常: {type(result).__name__}")
+                if self._store:
+                    self._store.mark_route_result(
+                        plat, post.post_id, route_id, result is True,
+                        "" if result is True else type(result).__name__,
+                    )
+            any_success = all(result is True for result in results)
 
             return any_success, errors
 
@@ -297,16 +335,21 @@ class SocialForwarder:
             if errors:
                 for err in errors:
                     log_all(f"⚠️ [社媒推送] {err}", is_error=True)
-            log_all(f"✅ [社媒推送] {post.platform} 动态已分发: {post.author} - {post.post_id[:20]}", is_debug=True)
+            if any_success:
+                log_all(f"✅ [社媒推送] {post.platform} 动态已分发: {post.author} - {post.post_id[:20]}", is_debug=True)
+            else:
+                log_all(f"⚠️ [社媒推送] {post.platform} 动态全部目标失败，将在下轮重试: {post.post_id[:20]}", is_error=True)
         except Exception as e:
-            log_all(f"🔥 [社媒推送] 分发异常: {e}", is_error=True)
+            log_all(f"🔥 [社媒推送] 分发异常: {type(e).__name__}", is_error=True)
+            return False
 
         # 4. 写入内容归档库
         try:
             from src.social import archive
             archive.get_archive().add_post(post)
-        except Exception as e:
-            log_all(f"⚠️ [社媒归档] 写入失败: {e}", is_debug=True)
+        except (OSError, ValueError) as e:
+            log_all(f"⚠️ [社媒归档] 写入失败: {type(e).__name__}", is_debug=True)
+        return any_success
 
     def send_recording(self, result) -> None:
         """发送「直播录制完成」通知并归档。"""

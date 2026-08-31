@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS account_bootstrap (
     done_at     REAL DEFAULT 0,
     PRIMARY KEY (platform, account, kind)
 );
+
+CREATE TABLE IF NOT EXISTS delivery_routes (
+    platform TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    route_id TEXT NOT NULL,
+    delivered_at REAL DEFAULT 0,
+    last_error TEXT DEFAULT '',
+    PRIMARY KEY (platform, item_id, route_id)
+);
 """
 
 
@@ -171,6 +180,28 @@ class SocialStore:
                 "SELECT COUNT(*) AS c FROM seen_items WHERE platform=?", (platform,),
             ).fetchone()
         return int(row["c"]) if row else 0
+
+    def delivered_routes(self, platform: str, item_id: str) -> set[str]:
+        """返回已成功的路由；失败路由保持为空以供下轮单独补发。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT route_id FROM delivery_routes WHERE platform=? AND item_id=? AND delivered_at>0",
+                (platform, item_id),
+            ).fetchall()
+        return {str(row["route_id"]) for row in rows}
+
+    def mark_route_result(self, platform: str, item_id: str, route_id: str,
+                          ok: bool, error: str = "") -> None:
+        now = time.time() if ok else 0
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO delivery_routes (platform,item_id,route_id,delivered_at,last_error) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(platform,item_id,route_id) DO UPDATE SET "
+                "delivered_at=CASE WHEN excluded.delivered_at>0 THEN excluded.delivered_at ELSE delivery_routes.delivered_at END, "
+                "last_error=CASE WHEN excluded.delivered_at>0 THEN '' ELSE excluded.last_error END",
+                (platform, item_id, route_id, now, error[:120]),
+            )
+            self._conn.commit()
 
     # ── 首次运行标记（避免历史内容刷屏）───────────────────
 

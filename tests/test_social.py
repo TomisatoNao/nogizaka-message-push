@@ -65,6 +65,13 @@ class TestSocialIntegration(unittest.TestCase):
         self.store.mark_sent("x", "tweet_123456", account="nogizaka46")
         self.assertTrue(self.store.is_sent("x", "tweet_123456"))
 
+    def test_route_delivery_state_keeps_only_successful_targets(self):
+        self.store.mark_route_result("x", "tweet_routes", "tg:main", True)
+        self.store.mark_route_result("x", "tweet_routes", "napcat:123", False, "timeout")
+        self.assertEqual(
+            self.store.delivered_routes("x", "tweet_routes"), {"tg:main"}
+        )
+
     def test_formatter(self):
         post = Post(
             platform="x",
@@ -180,5 +187,4 @@ class TestSocialIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 
