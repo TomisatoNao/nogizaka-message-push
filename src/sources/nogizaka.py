@@ -37,7 +37,7 @@ async def fetch_posts(client: httpx.AsyncClient, limit: int = 30) -> list[dict]:
             img_counter = itertools.count(1)
             body_text = re.sub(
                 r"<img[^>]*>",
-                lambda _: f"\n【图片{next(img_counter)}】\n",
+                lambda _, c=img_counter: f"\n【图片{next(c)}】\n",
                 raw_html,
                 flags=re.IGNORECASE,
             )
