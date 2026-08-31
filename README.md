@@ -72,6 +72,7 @@ flowchart TD
     - [方式 A：Docker Compose 部署 (强烈推荐)](#方式-adocker-compose-部署-强烈推荐)
     - [方式 B：原生 Python 环境运行](#方式-b原生-python-环境运行)
     - [🖥️ 首次登录与 Web 界面极简配置 (4 步搞定)](#️-首次登录与-web-界面极简配置-4-步搞定)
+    - [🔑 Message 账号凭证极简提取指南 (Web 一键复制，1 分钟搞定)](#-message-账号凭证极简提取指南-web-一键复制1-分钟搞定)
     - [🔑 初始管理员账号与密码重置](#-初始管理员账号与密码重置)
   - [✨ 核心特性 / Features](#-核心特性--features)
     - [1. Message 私密消息、yodel 与粉丝信件归档](#1-message-私密消息yodel-与粉丝信件归档)
@@ -174,6 +175,41 @@ flowchart TD
 
 ---
 
+### 🔑 Message 账号凭证极简提取指南 (Web 一键复制，1 分钟搞定)
+
+> [!TIP]
+> **无需任何抓包软件**：无需安装 Fiddler、Charles、Mitmproxy 等抓包工具，直接在电脑浏览器（Chrome / Edge 等）利用自带的开发者工具（F12）即可 **1 分钟内完成全套凭证复制**，系统支持 cURL 智能一键解析！
+
+```mermaid
+flowchart LR
+    A["1. 打开无痕窗口<br/>开启「保留日志」"] --> B["2. 登录 Message Web版<br/>复制 signin 请求 cURL"]
+    B --> C["3. 粘贴至 Web 管理端<br/>「智能一键解析」"]
+    C --> D["4. 自动握手成功<br/>每小时全自动无感续期 🚀"]
+```
+
+#### 步骤 1：打开浏览器无痕窗口并开启「保留日志」
+1. 建议在浏览器中打开 **无痕模式（Incognito Window）**，避免历史登录缓存干扰；
+2. 访问对应团体的 Message Web 版官方欢迎页：
+   - **乃木坂46 Message**: `https://message.nogizaka46.com/welcome`
+   - **櫻坂46 Message**: `https://message.sakurazaka46.com/welcome`
+   - **日向坂46 Message**: `https://message.hinatazaka46.com/welcome`
+3. 按键盘 **`F12`**（或鼠标右键选择「检查」）打开开发者工具，切换到 **「网络 (Network)」** 标签页；
+4. 🔴 **关键要点**：务必勾选顶部的 **「保留日志 (Preserve log)」** 复选框（防止页面授权跳转重定向时清空抓包记录）。
+
+#### 步骤 2：登录账号并复制 `signin` 请求 cURL
+1. 在网页上勾选服务条款与隐私政策，点击「开始」并完成你的第三方账号（Google / Apple / Sony 等）授权登录；
+2. 登录成功跳转后，在右侧 F12「网络」请求列表中找到名为 **`signin`** 的请求（或任意包含鉴权凭证的请求如 `profile` / `timeline`）；
+3. **右键点击 `signin` 请求** ➔ **「复制 (Copy)」** ➔ 选择 **「以 cURL (bash) 格式复制」** 或 **「以 cURL (cmd) 格式复制」**（也可以选择「复制请求标头」）。
+
+#### 步骤 3：粘贴至 Web 管理端，一键解析并自动握手
+1. 打开本系统 Web 管理后台（`http://127.0.0.1:46046/`）➔ 进入 **「👥 账号与成员」** 页面；
+2. 找到对应团体账号，点击 **「🔑 填写凭证」** 按钮；
+3. 点击展开 **「📋 智能一键解析」**，直接将刚才复制的整段 cURL 代码粘贴到文本框中，点击 **「🚀 解析并填充」**；
+4. 系统将瞬间自动提取并填入 `access_token`、`refresh_token`、`session` Cookie 及 `user_id` 等全部参数；
+5. 点击 **「🔐 保存并自动握手」**，系统将自动发起鉴权握手，并在后台开启**每小时全自动无感静默续期**，永不过期！
+
+---
+
 ### 🔑 初始管理员账号与密码重置
 
 若未留意或遗忘了密码，可在终端直接重设：
@@ -268,9 +304,22 @@ flowchart LR
 
 ### 3. 凭证全自动握手续期机制 (Web vs Mobile)
 
-系统支持 **Web**（网页端凭证）与 **Mobile**（移动端 `refresh_token`）双模式：
-- **0 秒全套凭证捕获**：在浏览器开发者工具中，复制登录时 `POST /v2/signin` 的 cURL 并在 WebUI 粘贴，系统自动提取 Token 与持久 Cookie；
-- **每小时全自动无感续期**：每次巡查前校验 JWT `exp` 寿命，不足 300 秒自动静默续期，永久不过期。
+系统全面支持 **Web（网页端会话）** 与 **Mobile（移动端 OAuth）** 双模式：
+
+```
+浏览器 F12 复制 signin cURL
+   ↓
+Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_token / session Cookie
+   ↓
+安全写入 SQLite (data/auth.db)
+   ↓
+每次巡查前校验 JWT 剩余寿命 (exp)
+   ├─ 剩余 > 300s ─── 直接使用现有 Token 请求 Message
+   └─ 剩余 ≤ 300s ─── 后台自动带 session Cookie 握手续期，0 秒无感刷新
+```
+
+- **0 秒全套凭证捕获**：在浏览器开发者工具中，复制登录时 `signin` 请求的 cURL 并在 WebUI 粘贴，系统自动解构出 Token、User ID 与持久会话 Cookie；
+- **全自动无感续期**：每次巡查前严格校验 JWT `exp` 寿命，当 Token 剩余有效期不足 300 秒时，后台自动静默发起握手续期，实现永久有效、永不掉线。
 
 ---
 
@@ -430,6 +479,14 @@ INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 <summary><b>Q6: 如何将 Message 归档免登录公开给同好浏览？</b></summary>
 
 在 Web 管理端「⚙️ 系统设置」中开启 `auth.archive_public: true` 并保存，此时管理后台仍然受密码保护，而 `/archive` 页面允许所有人匿名查阅。
+</details>
+
+<details>
+<summary><b>Q7: 复制了 cURL 粘贴后提示「未包含有效凭证」或找不到 signin 请求？</b></summary>
+
+1. **务必勾选「保留日志 (Preserve log)」**：第三方账号（Google/Apple/Sony）登录过程伴随多次 302 重定向，若未勾选保留日志，关键的 `signin` 请求会在页面跳转时被浏览器 DevTools 自动清空；
+2. **推荐使用无痕窗口 (Incognito)**：若浏览器已有持久缓存，直接访问可能会跳过 `signin` 授权请求。打开无痕窗口重新从 `/welcome` 页面点击登录即可完整捕获；
+3. **支持多种请求格式**：除了 `signin` 请求外，右键复制 `timeline` 或 `profile` 请求的 cURL，系统同样支持智能解析提取。
 </details>
 
 ---
