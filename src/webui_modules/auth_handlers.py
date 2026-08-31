@@ -117,17 +117,49 @@ def _normalise_origin(value: str) -> tuple[str, str, int] | None:
         return None
 
 
-def _expected_origin(handler) -> tuple[str, str, int] | None:
-    """取得部署配置的公开 Origin，未配置时按直连 HTTP 服务推导。"""
+def _first_forwarded_value(handler, name: str) -> str:
+    """取得逗号分隔代理头中的第一个值。"""
+    return handler.headers.get(name, "").split(",", 1)[0].strip()
+
+
+def _proxy_scheme(handler) -> str | None:
+    """读取可信反向代理通常添加的原始协议头。"""
+    scheme = _first_forwarded_value(handler, "X-Forwarded-Proto").lower()
+    return scheme if scheme in {"http", "https"} else None
+
+
+def _public_host(handler) -> str:
+    """优先使用代理保留的外部 Host，缺失时回退到请求 Host。"""
+    return _first_forwarded_value(handler, "X-Forwarded-Host") or handler.headers.get("Host", "").strip()
+
+
+def _normalise_host(value: str) -> tuple[str, int | None] | None:
+    """解析 Host 头，端口为省略时保留 None，便于比较 HTTPS 默认端口。"""
+    try:
+        parsed = urlparse(f"//{value}")
+        if not parsed.hostname or parsed.username or parsed.password or parsed.path not in ("", "/"):
+            return None
+        return parsed.hostname.lower(), parsed.port
+    except ValueError:
+        return None
+
+
+def _configured_origin() -> tuple[str, str, int] | None:
     configured = str(getattr(cfg, "WEB_ADMIN_ORIGIN", "") or "").strip()
-    if configured:
-        return _normalise_origin(configured)
-    raw_host = handler.headers.get("Host", "").strip()
-    return _normalise_origin(f"http://{raw_host}")
+    return _normalise_origin(configured) if configured else None
+
+
+def _expected_origin(handler) -> tuple[str, str, int] | None:
+    """取得公开 Origin；代理头存在时保留原始协议，直连默认 HTTP。"""
+    configured = _configured_origin()
+    if configured is not None:
+        return configured
+    scheme = _proxy_scheme(handler) or "http"
+    return _normalise_origin(f"{scheme}://{_public_host(handler)}")
 
 
 def check_origin(handler) -> bool:
-    """非 GET 请求校验完整 Origin（协议、主机和端口）。"""
+    """校验写请求 Origin，支持保留 Host 的 HTTPS 反向代理自动部署。"""
     origin = handler.headers.get("Origin", "")
     if not origin:
         # 非浏览器 API 客户端通常不带 Origin；鉴权仍由 Cookie/API Token 完成。
@@ -135,6 +167,22 @@ def check_origin(handler) -> bool:
     actual = _normalise_origin(origin)
     expected = _expected_origin(handler)
     if actual is not None and actual == expected:
+        return True
+
+    # 常见反向代理会传 X-Forwarded-Proto，从而走上面的严格完整 Origin
+    # 比较。少数代理仅保留 Host 时，协议会在代理到后端的 HTTP 这一跳中丢失；
+    # 此时仍可安全比较浏览器目标 Host（跨站请求的 Host 始终是本服务的地址）。
+    # 若 Host 未保留端口，则只接受协议的默认端口，避免同域其他端口被放宽。
+    # 显式 origin 和已提供协议头的部署始终保持严格的协议/端口比较。
+    public_host = _normalise_host(_public_host(handler))
+    if (
+        actual is not None
+        and _configured_origin() is None
+        and _proxy_scheme(handler) is None
+        and public_host is not None
+        and actual[1] == public_host[0]
+        and actual[2] == (public_host[1] or (443 if actual[0] == "https" else 80))
+    ):
         return True
     send_json(handler, {"ok": False, "errors": [f"拒绝跨站请求 Origin: {origin!r}"]}, 403)
     return False

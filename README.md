@@ -129,7 +129,7 @@ flowchart TD
    ```bash
    docker logs sakamichi-push
    ```
-   在服务器本机打开浏览器访问 **`http://127.0.0.1:46046/`** 登录。需要远程访问时，请通过 HTTPS 反向代理公开该地址，并配置 `web_admin.origin` 与 `auth.cookie_secure`。
+   在服务器本机打开浏览器访问 **`http://127.0.0.1:46046/`** 登录。需要远程访问时，请通过 HTTPS 反向代理公开该地址。常见的 Lucky、Nginx、Caddy 配置会自动适配同域访问；生产环境仍应将 `auth.cookie_secure` 设为 `true`。
 
 ---
 
@@ -449,7 +449,7 @@ Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env
 }
 ```
 
-> Docker Compose 默认只将管理端发布到宿主机 `127.0.0.1:46046`。需要远程访问时，请使用 HTTPS 反向代理，并在 `web_admin.origin` 填写外部地址、在 `auth.cookie_secure` 设为 `true`；不要直接将 HTTP 管理端暴露到公网。
+> Docker Compose 默认只将管理端发布到宿主机 `127.0.0.1:46046`。需要远程访问时，请使用 HTTPS 反向代理并把 `auth.cookie_secure` 设为 `true`；不要直接将 HTTP 管理端暴露到公网。应用会自动接受与请求 Host 相同的 HTTPS Origin；若要锁定唯一访问域名或代理没有保留 Host，可在 `web_admin.origin` 填写完整外部地址。
 
 #### `.env` 环境变量列表
 ```bash

@@ -85,6 +85,51 @@ def test_auth_cookie_secure_configuration():
         auth_handlers.cfg.AUTH_COOKIE_SECURE = original
 
 
+def test_auth_origin_auto_detects_reverse_proxy_without_manual_origin():
+    class Handler(_ResponseHandler):
+        def __init__(self, headers):
+            super().__init__()
+            self.headers = headers
+
+    original = auth_handlers.cfg.WEB_ADMIN_ORIGIN
+    try:
+        auth_handlers.cfg.WEB_ADMIN_ORIGIN = ""
+        # 代理保留 Host 但未传协议头时，HTTPS Origin 也应能正常登录。
+        assert auth_handlers.check_origin(Handler({
+            "Host": "push.example.com",
+            "Origin": "https://push.example.com",
+        }))
+        # 标准代理头存在时仍严格校验协议，避免 HTTPS/HTTP 混淆。
+        assert auth_handlers.check_origin(Handler({
+            "Host": "internal:46046",
+            "X-Forwarded-Host": "push.example.com",
+            "X-Forwarded-Proto": "https",
+            "Origin": "https://push.example.com",
+        }))
+        assert not auth_handlers.check_origin(Handler({
+            "Host": "push.example.com",
+            "X-Forwarded-Proto": "http",
+            "Origin": "https://push.example.com",
+        }))
+        assert not auth_handlers.check_origin(Handler({
+            "Host": "push.example.com",
+            "Origin": "https://evil.example.com",
+        }))
+        assert not auth_handlers.check_origin(Handler({
+            "Host": "push.example.com",
+            "Origin": "https://push.example.com:8443",
+        }))
+
+        # 配置了固定 Origin 时，自动模式不应放宽该约束。
+        auth_handlers.cfg.WEB_ADMIN_ORIGIN = "https://admin.example.com"
+        assert not auth_handlers.check_origin(Handler({
+            "Host": "push.example.com",
+            "Origin": "https://push.example.com",
+        }))
+    finally:
+        auth_handlers.cfg.WEB_ADMIN_ORIGIN = original
+
+
 def test_archive_handlers_and_media_service():
     assert archive_handlers.ARCHIVE_TYPES == frozenset({"text", "picture", "image", "video", "voice"})
     assert callable(media_service.serve_file_range)

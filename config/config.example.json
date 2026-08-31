@@ -21,7 +21,8 @@
     "enabled": true,
     "host": "0.0.0.0",
     "port": 46046,
-    // 若通过 HTTPS 反向代理公开访问，填写完整的公开 Origin，例如 https://push.example.com
+    // 可选：固定唯一公开 Origin。留空时会自动适配同域 HTTPS 反向代理。
+    // 仅在要限制为唯一访问域名、或代理未保留 Host 时填写。
     // "origin": "https://push.example.com"
   },
 

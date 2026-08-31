@@ -102,7 +102,7 @@ _DEFAULTS: dict = {
     "web_admin_enabled":        False,
     "web_admin_host":           "127.0.0.1",
     "web_admin_port":           46046,
-    # 反向代理/TLS 部署时填写对外 Origin，例如 https://push.example.com
+    # 可选：固定唯一公开 Origin。留空时自动适配同域反向代理（推荐）。
     "web_admin_origin":         "",
     # 消息归档（config.json 的 archive 可覆盖）
     "archive_enabled":          False,
