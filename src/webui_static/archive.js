@@ -1428,6 +1428,8 @@ function openBlogReader(post, bodyHtml) {
   $("blogReader").style.display = "";
   $("blogReader").scrollTop = 0;
   
+  document.documentElement.classList.add("modal-open");
+  document.body.classList.add("modal-open");
   document.body.style.overflow = "hidden";
   if (typeof handleBackTopScroll === "function") handleBackTopScroll();
 
@@ -1489,6 +1491,8 @@ function openBlogReader(post, bodyHtml) {
 
 function closeBlogReader() {
   $("blogReader").style.display = "none";
+  document.documentElement.classList.remove("modal-open");
+  document.body.classList.remove("modal-open");
   document.body.style.overflow = "";
   $("brContent").innerHTML = "";
   currentBlogReaderPost = null;
@@ -3303,6 +3307,8 @@ async function handleRoute(isInitial = false) {
     // 未指定博客 ID：若阅读器正开着，关闭它并回到列表
     if ($("blogReader").style.display !== "none") {
       $("blogReader").style.display = "none";
+      document.documentElement.classList.remove("modal-open");
+      document.body.classList.remove("modal-open");
       document.body.style.overflow = "";
       $("brContent").innerHTML = "";
       currentBlogReaderPost = null;
@@ -3380,6 +3386,8 @@ async function boot() {
       reader.style.display = "";
       $("brTitle").textContent = "正在打开博客...";
       $("brContent").innerHTML = '<div class="home-skeleton" style="padding:32px 16px;"><div class="sk-hero" style="height:40px;width:65%;margin-bottom:20px;"></div><div class="sk-strip"><div></div><div></div><div></div></div><div class="sk-msg" style="margin-top:20px;"><div></div><div></div><div></div></div></div>';
+      document.documentElement.classList.add("modal-open");
+      document.body.classList.add("modal-open");
       document.body.style.overflow = "hidden";
     }
   }

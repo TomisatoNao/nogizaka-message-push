@@ -1517,10 +1517,27 @@ html.view-blog #blogGrid { display: block !important; }
   .bp-btn:hover { background: var(--bg-hover); border-color: var(--border-hover); transform: translateY(-1px); }
   .bp-btn:disabled { opacity: 0.5; pointer-events: none; cursor: not-allowed; }
   .bp-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 2px 8px var(--accent-ring); }
-  .bp-ellipsis { color: var(--muted); font-size: 14px; margin: 0 4px; }
-  
+  /* 模态/阅读器打开时彻底锁定背景 html 与 body，消除双重滑条 */
+  html.modal-open,
+  body.modal-open {
+    overflow: hidden !important;
+    height: 100% !important;
+  }
+
   /* Blog Reader Overlay */
-  .blog-reader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 1000; overflow-y: auto; display: block; }
+  .blog-reader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    z-index: 1000;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: block;
+  }
   .br-header { position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 12px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm); z-index: 10; }
   /* 成员 & 作者胶囊下拉选择器 (Integrated Toolbar Selectors) */
   .member-dropdown-wrap,
