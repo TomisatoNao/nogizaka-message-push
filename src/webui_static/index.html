@@ -6,8 +6,8 @@
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
-<link href="/static/theme.css?v=20260831_1" rel="stylesheet"/>
-<script src="/static/theme.js?v=20260831_1"></script>
+<link href="/static/theme.css?v=20260831_2" rel="stylesheet"/>
+<script src="/static/theme.js?v=20260831_2"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
   .dirty-dot { display: none !important; }
@@ -565,7 +565,7 @@
   <!-- Block 4: Telegram Bot 模块 -->
   <div class="card">
     <h2>✈️ Telegram Bots (独立解耦，凭证存 .env)</h2>
-    <div style="margin-bottom: 14px; padding: 10px 14px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+    <div style="margin-bottom: 14px; padding: 12px 16px; background: var(--card-soft); border-radius: var(--radius-sm); border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
       <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <span style="font-size: 13px; font-weight: 500;">默认 TG Bot Token (.env):</span>
         <span id="tgTokenStatus"></span>
@@ -680,13 +680,13 @@
         <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
       </label>
     </div>
-    <div style="margin-top:14px; padding:12px 14px; background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+    <div style="margin-top:14px; padding:14px 16px; background:var(--card-soft); border:1px solid var(--border-soft); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
       <div>
         <div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;">
           <span>🍪 Instagram 登录凭证 (Cookies)</span>
           <span id="igSessionStatus"></span>
         </div>
-        <div id="igSessionDetail" style="font-size:11.5px; color:var(--muted); margin-top:3px;">
+        <div id="igSessionDetail" style="font-size:12px; color:var(--muted); margin-top:4px;">
           支持 Netscape / JSON / 完整 Cookies 格式，保障 Story 与图集解析
         </div>
       </div>
@@ -1304,12 +1304,12 @@
 <dialog id="secretDialog">
 <h3 id="secretDialogTitle">填写凭证</h3>
 <div class="dialog-note" id="secretDialogHint"></div>
-<details class="help-box" id="secretSmartBox" style="margin-bottom: 12px; border: 1px dashed var(--border, #333); border-radius: 6px; padding: 6px 10px;">
-  <summary style="font-size: 13px; color: var(--accent, #60a5fa); cursor: pointer; user-select: none; font-weight: 500;">
+<details class="help-box" id="secretSmartBox" style="margin-bottom: 14px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--card-soft);">
+  <summary style="font-size: 13px; color: var(--accent); cursor: pointer; user-select: none; font-weight: 500;">
     📋 智能一键解析（从 DevTools cURL / 请求标头快速提取）
   </summary>
   <div style="margin-top: 8px;">
-    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; border-radius: 4px; padding: 6px; background: rgba(0,0,0,0.2); color: inherit; border: 1px solid var(--border, #444);" placeholder="在浏览器 F12 Network 右键 signin 或 timeline 请求 → 复制为 cURL 或复制请求标头，粘贴到此处..."></textarea>
+    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; resize: vertical; border-radius: var(--radius-sm); padding: 8px 10px; background: var(--field); color: var(--text); border: 1px solid var(--border);" placeholder="在浏览器 F12 Network 右键 signin 或 timeline 请求 → 复制为 cURL 或复制请求标头，粘贴到此处..."></textarea>
     <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted);">
       💡 提示：Web 账号自动续期必须包含 <code>session</code> Cookie 项。若手动填写，可在 F12 ➔ Application ➔ Cookies 中复制 <code>session</code> 的值。
     </div>
@@ -1335,13 +1335,13 @@
     用于突破 Instagram 匿名限制、拉取 24h 快拍 (Story) 及点播解析多图/视频。
   </div>
   <div style="margin-top: 10px;">
-    <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px; line-height: 1.5;">
+    <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 8px; line-height: 1.55;">
       💡 <b>推荐方式</b>：在浏览器打开并登录 Instagram，使用插件 <code>Get cookies.txt LOCALLY</code> 或 <code>EditThisCookie</code> 导出完整 Cookies 粘贴于此（自带设备指纹，最抗风控）。也支持粘贴 cURL 或裸 <code>sessionid</code>。
     </div>
-    <textarea id="igCookieTextarea" rows="6" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; border-radius: 6px; padding: 8px; background: rgba(0,0,0,0.25); color: inherit; border: 1px solid var(--border, #444);" placeholder="# 直接粘贴 Netscape cookies.txt、JSON 数组或 sessionid=xxx..."></textarea>
-    <div id="igCookieFeedback" style="margin-top: 6px; font-size: 12px; min-height: 18px; color: var(--muted);"></div>
+    <textarea id="igCookieTextarea" rows="6" style="width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; resize: vertical; border-radius: var(--radius-sm); padding: 10px 12px; background: var(--field); color: var(--text); border: 1px solid var(--border);" placeholder="# 直接粘贴 Netscape cookies.txt、JSON 数组或 sessionid=xxx..."></textarea>
+    <div id="igCookieFeedback" style="margin-top: 8px; font-size: 12px; min-height: 18px; color: var(--muted);"></div>
   </div>
-  <div class="actions" style="display:flex; justify-content:space-between; align-items:center; margin-top: 14px;">
+  <div class="actions" style="display:flex; justify-content:space-between; align-items:center; margin-top: 16px;">
     <button class="btn danger" id="btnIgCookieClear" type="button">🗑️ 清空凭证</button>
     <div style="display:flex; gap:8px; margin-left:auto;">
       <button class="btn" id="btnIgCookieCancel" type="button">取消</button>
@@ -3028,7 +3028,7 @@ if ($("btnIgCookieSave")) {
     }
     saveBtn.disabled = true;
     const origText = saveBtn.textContent;
-    saveBtn.textContent = "正在验证与落盘…";
+    saveBtn.textContent = "正在验证并存库…";
     try {
       const resp = await api("/api/social/ig_session", {
         method: "POST",
@@ -3041,8 +3041,8 @@ if ($("btnIgCookieSave")) {
       }
       try { $("igCookieDialog").close(); } catch(e){}
       renderIgSessionUI();
-      const healthMsg = (resp.health && resp.health.detail) ? resp.health.detail : "Cookie 已成功保存并热重载！";
-      uiAlert(healthMsg, { title: (resp.health && resp.health.valid) ? "✅ Instagram 凭证配置成功" : "ℹ️ 凭证已落盘" });
+      const healthMsg = (resp.health && resp.health.detail) ? resp.health.detail : "Cookie 已成功保存至数据库并热重载！";
+      uiAlert(healthMsg, { title: (resp.health && resp.health.valid) ? "✅ Instagram 凭证配置成功" : "ℹ️ 凭证已就绪" });
       msg("✅ Instagram Cookies 已更新并生效", "ok");
     } catch (e) {
       if (fb) { fb.textContent = "❌ 保存异常: " + e.message; fb.style.color = "var(--danger, #ef4444)"; }

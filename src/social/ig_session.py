@@ -295,15 +295,28 @@ def check_session(cookies: dict | None = None, *, proxy: str = "",
                 "username": "", "user_id": cookies.get("ds_user_id", "")}
 
     ua = user_agent or DEFAULT_UA
+    proxies_dict = None
+    if proxy:
+        p_str = str(proxy).strip()
+        if p_str:
+            proxies_dict = {"http": p_str, "https": p_str, "all": p_str}
+
     try:
         from curl_cffi import requests as curl_requests
-        r = curl_requests.get(CHECK_URL, headers={
-            "User-Agent": ua,
-            "X-IG-App-ID": IG_APP_ID,
-            "Accept": "*/*",
-            "Referer": "https://www.instagram.com/",
-            "X-CSRFToken": cookies.get("csrftoken", ""),
-        }, cookies=cookies, proxies=proxy, timeout=25, impersonate="chrome")
+        r = curl_requests.get(
+            CHECK_URL,
+            headers={
+                "User-Agent": ua,
+                "X-IG-App-ID": IG_APP_ID,
+                "Accept": "*/*",
+                "Referer": "https://www.instagram.com/",
+                "X-CSRFToken": cookies.get("csrftoken", ""),
+            },
+            cookies=cookies,
+            proxies=proxies_dict,
+            timeout=25,
+            impersonate="chrome",
+        )
     except ImportError:
         headers = {
             "User-Agent": ua,
@@ -313,18 +326,30 @@ def check_session(cookies: dict | None = None, *, proxy: str = "",
         }
         if cookies.get("csrftoken"):
             headers["X-CSRFToken"] = cookies["csrftoken"]
-        proxies = {"http": proxy, "https": proxy} if proxy else None
         try:
-            r = requests.get(CHECK_URL, headers=headers, cookies=cookies,
-                             proxies=proxies, timeout=25)
+            r = requests.get(
+                CHECK_URL,
+                headers=headers,
+                cookies=cookies,
+                proxies=proxies_dict,
+                timeout=25,
+            )
         except Exception as e:
-            return {"valid": False, "status": -1,
-                    "detail": f"网络错误：{str(e)[:120]}",
-                    "username": "", "user_id": cookies.get("ds_user_id", "")}
+            return {
+                "valid": False,
+                "status": -1,
+                "detail": f"网络错误：{str(e)[:120]}",
+                "username": "",
+                "user_id": cookies.get("ds_user_id", ""),
+            }
     except Exception as e:
-        return {"valid": None, "status": -1,
-                "detail": f"检测请求失败：{str(e)[:120]}",
-                "username": "", "user_id": cookies.get("ds_user_id", "")}
+        return {
+            "valid": None,
+            "status": -1,
+            "detail": f"检测请求失败：{str(e)[:120]}",
+            "username": "",
+            "user_id": cookies.get("ds_user_id", ""),
+        }
 
     uid = cookies.get("ds_user_id", "")
     if r.status_code == 200:
