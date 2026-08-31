@@ -11,6 +11,7 @@ from src.webui_modules import (  # noqa: E402
     auth_handlers,
     config_service,
     media_service,
+    social_handlers,
     static_handler,
     system_handlers,
 )
@@ -134,3 +135,12 @@ def test_archive_handlers_and_media_service():
     assert archive_handlers.ARCHIVE_TYPES == frozenset({"text", "picture", "image", "video", "voice"})
     assert callable(media_service.serve_file_range)
     assert callable(config_service.validate_config)
+
+
+def test_social_handlers_restore_webui_routes():
+    assert callable(social_handlers.handle_subscriptions)
+    assert callable(social_handlers.handle_subscriptions_sync)
+    assert callable(social_handlers.handle_ig_session_status)
+    assert callable(social_handlers.handle_ig_session_save)
+    assert callable(social_handlers.handle_ig_session_check)
+    assert callable(social_handlers.handle_ig_session_clear)

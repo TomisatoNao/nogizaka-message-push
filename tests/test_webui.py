@@ -337,6 +337,39 @@ def main() -> None:
         assert data["channels"]["napcat"]["total"] == 2, "应包含 Test 2.7 记录的通道数据"
         assert not data["embedded"], "独立模式 embedded 应为 false"
 
+        # WebUI 模块化后必须继续保留订阅与 Instagram Cookie 状态接口，
+        # 否则登录后首页初始化会持续产生 404。
+        code, data = _http("GET", base + "/api/subscriptions")
+        assert code == 200 and data["ok"] and isinstance(data["subscriptions"], dict), \
+            f"订阅状态接口应可用: {code} {data}"
+        code, data = _http("GET", base + "/api/social/ig_session")
+        assert code == 200 and data["ok"] and "configured" in data, \
+            f"Instagram Cookie 状态接口应可用: {code} {data}"
+
+        # POST 路由以桩函数验证派发，不触发外网同步或真实凭证修改。
+        originals = (
+            webui._social_handle_subscriptions_sync,
+            webui._social_handle_ig_session_save,
+            webui._social_handle_ig_session_check,
+            webui._social_handle_ig_session_clear,
+        )
+        try:
+            webui._social_handle_subscriptions_sync = lambda h: (h._send_json({"ok": True}), True)[1]
+            webui._social_handle_ig_session_save = lambda h, body, **kw: (h._send_json({"ok": True}), True, 1)[1:]
+            webui._social_handle_ig_session_check = lambda h, **kw: (h._send_json({"ok": True}), True)[1]
+            webui._social_handle_ig_session_clear = lambda h, **kw: (h._send_json({"ok": True}), True)[1]
+            assert _http("POST", base + "/api/subscriptions/sync")[0] == 200
+            assert _http("POST", base + "/api/social/ig_session", body={})[0] == 200
+            assert _http("POST", base + "/api/social/ig_session/check")[0] == 200
+            assert _http("POST", base + "/api/social/ig_session/clear")[0] == 200
+        finally:
+            (
+                webui._social_handle_subscriptions_sync,
+                webui._social_handle_ig_session_save,
+                webui._social_handle_ig_session_check,
+                webui._social_handle_ig_session_clear,
+            ) = originals
+
         # GET /api/members：未知账号 → 400（凭证/网络路径不在单测覆盖）
         code, data = _http("GET", base + "/api/members?account=ghost")
         assert code == 400 and any("未知账号" in e for e in data["errors"]), f"未知账号应 400: {data}"

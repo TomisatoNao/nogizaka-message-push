@@ -91,6 +91,14 @@ from src.webui_modules.archive_handlers import (
     get_blog_db as _get_blog_db,  # noqa: F401
     handle_archive as _mod_handle_archive,
 )
+from src.webui_modules.social_handlers import (
+    handle_ig_session_check as _social_handle_ig_session_check,
+    handle_ig_session_clear as _social_handle_ig_session_clear,
+    handle_ig_session_save as _social_handle_ig_session_save,
+    handle_ig_session_status as _social_handle_ig_session_status,
+    handle_subscriptions as _social_handle_subscriptions,
+    handle_subscriptions_sync as _social_handle_subscriptions_sync,
+)
 
 __all__ = [
     "CONFIG_PATH",
@@ -325,6 +333,18 @@ class _Handler(BaseHTTPRequestHandler):
             _sys_handle_storage(self)
             return
 
+        if path == "/api/subscriptions":
+            if not self._check_auth():
+                return
+            _social_handle_subscriptions(self)
+            return
+
+        if path == "/api/social/ig_session":
+            if not self._check_auth():
+                return
+            _social_handle_ig_session_status(self)
+            return
+
         if path == "/api/members":
             if not self._guard(need_admin=True):
                 return
@@ -440,6 +460,43 @@ class _Handler(BaseHTTPRequestHandler):
             body = self._read_body_json()
             if body is not None:
                 handle_users_write(self, body, "POST")
+            return
+
+        if path == "/api/subscriptions/sync":
+            if not self._check_auth():
+                return
+            if _social_handle_subscriptions_sync(self):
+                self._audit("subscriptions.sync")
+            return
+
+        if path == "/api/social/ig_session":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            ok, cookie_count = _social_handle_ig_session_save(
+                self, body, load_raw_config=_load_raw_config, trigger_reload=_trigger_reload,
+                update_env_file=update_env_file, mutation_lock=_mutation_lock,
+            )
+            if ok:
+                self._audit("social.ig_session.save", details={"cookie_count": cookie_count})
+            return
+
+        if path == "/api/social/ig_session/check":
+            if not self._check_auth():
+                return
+            _social_handle_ig_session_check(self, load_raw_config=_load_raw_config)
+            return
+
+        if path == "/api/social/ig_session/clear":
+            if not self._check_auth():
+                return
+            if _social_handle_ig_session_clear(
+                self, trigger_reload=_trigger_reload, update_env_file=update_env_file,
+                mutation_lock=_mutation_lock,
+            ):
+                self._audit("social.ig_session.clear")
             return
 
         # 2. 配置与密钥管理
