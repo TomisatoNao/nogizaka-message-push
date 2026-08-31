@@ -195,20 +195,32 @@ def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
 
 def handle_auth_me(handler) -> None:
     """GET /api/auth/me 返回当前登录用户信息。"""
-    user = current_user(handler)
     auth_enabled = bool(getattr(cfg, "AUTH_ENABLED", False))
+    archive_public = bool(getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False))
+    has_u = _auth.has_users()
+    user = current_user(handler) if auth_enabled else None
     if not user:
-        send_json(handler, {"ok": True, "auth_enabled": auth_enabled, "user": None, "authenticated": False}, 200)
+        send_json(handler, {
+            "ok": True,
+            "auth_enabled": auth_enabled,
+            "archive_public": archive_public,
+            "has_users": has_u,
+            "user": None,
+            "authenticated": False,
+        }, 200)
         return
     send_json(handler, {
         "ok": True,
         "auth_enabled": auth_enabled,
+        "archive_public": archive_public,
+        "has_users": has_u,
         "authenticated": True,
-        "user": user,
+        "user": {"username": user["username"], "role": user["role"]},
         "username": user["username"],
         "role": user["role"],
         "via": user.get("via", "session"),
     }, 200)
+
 
 
 
