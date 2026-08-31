@@ -1218,6 +1218,8 @@ function hasTranslation(post) {
   return getStructuredBlocks(post) !== null;
 }
 
+let isFuriganaActive = localStorage.getItem("archive_furigana") === "true";
+
 function renderBlocks(blocks, mode) {
   const parts = [];
   for (const b of blocks) {
@@ -1225,7 +1227,12 @@ function renderBlocks(blocks, mode) {
       parts.push('<img src="' + esc(b.src || "") + '" referrerpolicy="no-referrer" loading="lazy">');
       continue;
     }
-    const jp = esc(b.jp || "").replace(/\n/g, "<br>");
+    let jp = b.jp || "";
+    if (jp.includes("<ruby>")) {
+      jp = sanitizeHtml(jp).replace(/\n/g, "<br>");
+    } else {
+      jp = esc(jp).replace(/\n/g, "<br>");
+    }
     const zh = (b.zh || "").trim();
     const zhHtml = esc(zh).replace(/\n/g, "<br>");
     if (mode === "zh-only") {
@@ -1263,11 +1270,71 @@ function updateModeSelectorUI() {
       delBtn.style.display = "none";
     }
   }
+  updateFuriganaUI();
+}
+
+function updateFuriganaUI() {
+  const btn = $("brFuriganaBtn");
+  if (!btn) return;
+  btn.classList.toggle("active", isFuriganaActive);
+  btn.innerHTML = `<span class="btn-icon" style="font-weight:750; font-size:13.5px;">ふ</span><span>${isFuriganaActive ? "已注音" : "注音"}</span>`;
+}
+
+async function ensureFuriganaLoaded(post) {
+  if (!post || post._furigana_html || post._loading_furigana) return;
+  post._loading_furigana = true;
+  const btn = $("brFuriganaBtn");
+  if (btn && isFuriganaActive) {
+    btn.innerHTML = '<span class="btn-icon">⏳</span><span>注音中…</span>';
+  }
+  try {
+    const res = await api("/api/archive/blogs/furigana", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: post.id,
+        html: post.body_html,
+        title: post.title,
+      }),
+    });
+    if (res && res.ok) {
+      post._furigana_html = res.furigana_html;
+      post._furigana_title = res.title;
+      if (res.furigana_content_json) {
+        try {
+          post._furigana_blocks = JSON.parse(res.furigana_content_json);
+        } catch (e) {}
+      }
+      if (currentBlogReaderPost && currentBlogReaderPost.id === post.id) {
+        renderCurrentBlogContent();
+      }
+    }
+  } catch (e) {
+    console.warn("Furigana loading failed:", e);
+  } finally {
+    post._loading_furigana = false;
+    updateFuriganaUI();
+  }
+}
+
+async function toggleFurigana() {
+  if (!currentBlogReaderPost) return;
+  isFuriganaActive = !isFuriganaActive;
+  localStorage.setItem("archive_furigana", isFuriganaActive ? "true" : "false");
+  updateFuriganaUI();
+  
+  if (isFuriganaActive && !currentBlogReaderPost._furigana_html) {
+    await ensureFuriganaLoaded(currentBlogReaderPost);
+  } else {
+    renderCurrentBlogContent();
+  }
 }
 
 function renderCurrentBlogContent() {
   if (!currentBlogReaderPost) return;
-  const blocks = getStructuredBlocks(currentBlogReaderPost);
+  const blocks = (isFuriganaActive && currentBlogReaderPost._furigana_blocks)
+    ? currentBlogReaderPost._furigana_blocks
+    : getStructuredBlocks(currentBlogReaderPost);
   const images = JSON.parse(currentBlogReaderPost.images_json || "[]");
   const paths = JSON.parse(currentBlogReaderPost.image_paths_json || "[]");
 
@@ -1277,7 +1344,10 @@ function renderCurrentBlogContent() {
     bodyHtml = _replaceImgUrls(renderBlocks(blocks, currentTransMode), images, paths);
   } else {
     // 日文（或暂无结构化译文）：直接渲染原始日文 body_html，经过 DOM 净化确保安全
-    bodyHtml = sanitizeHtml(_replaceImgUrls(currentBlogReaderPost.body_html || "", images, paths));
+    const rawJa = (isFuriganaActive && currentBlogReaderPost._furigana_html)
+      ? currentBlogReaderPost._furigana_html
+      : (currentBlogReaderPost.body_html || "");
+    bodyHtml = sanitizeHtml(_replaceImgUrls(rawJa, images, paths));
   }
 
   // 翻译模型标记：仅在「日中对照/中文」视图且存在译文时展示，右对齐次级灰字
@@ -1287,13 +1357,17 @@ function renderCurrentBlogContent() {
     ? '<div class="br-model-tag">翻译模型：' + esc(modelName) + '</div>'
     : '';
 
+  const displayTitle = (isFuriganaActive && currentBlogReaderPost._furigana_title)
+    ? currentBlogReaderPost._furigana_title
+    : esc(currentBlogReaderPost.title || "无题");
+
   $("brContent").innerHTML =
     '<div class="br-meta">' +
       '<div><span class="br-author">' + esc(currentBlogReaderPost.author) + '</span><span style="margin-left:12px">' + esc((currentBlogReaderPost.date || "").substring(0, 16)) + '</span></div>' +
       '<a class="br-link" href="' + esc(currentBlogReaderPost.url) + '" target="_blank">阅读原文 ↗</a>' +
     '</div>' +
     modelTag +
-    '<h1 style="margin-top:0; font-size:24px;">' + esc(currentBlogReaderPost.title || "无题") + '</h1>' +
+    '<h1 style="margin-top:0; font-size:24px;">' + displayTitle + '</h1>' +
     bodyHtml;
 
   // 博客正文图片支持点击灯箱放大预览、加载失败自动重试与兜底
@@ -1348,6 +1422,9 @@ function openBlogReader(post, bodyHtml) {
   }
 
   renderCurrentBlogContent();
+  if (isFuriganaActive && !post._furigana_html) {
+    ensureFuriganaLoaded(post);
+  }
   $("blogReader").style.display = "";
   $("blogReader").scrollTop = 0;
   
@@ -1452,6 +1529,11 @@ if (brShareBtn) {
       customPrompt({ title: "博客分享链接", message: "请复制下方链接直接分享：", defaultValue: url, confirmText: "完成", icon: "🔗" });
     }
   });
+}
+
+const brFuriganaBtn = $("brFuriganaBtn");
+if (brFuriganaBtn) {
+  brFuriganaBtn.addEventListener("click", toggleFurigana);
 }
 
 // 绑定全局 Esc 键退出博客阅读器

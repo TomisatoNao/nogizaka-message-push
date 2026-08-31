@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>坂道监控 · 消息归档</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260831_5">
-<script src="/static/theme.js?v=20260831_5"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260831_5">
+<link rel="stylesheet" href="/static/theme.css?v=20260831_6">
+<script src="/static/theme.js?v=20260831_6"></script>
+<link rel="stylesheet" href="/static/archive.css?v=20260831_6">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -272,6 +272,10 @@
         <button type="button" class="brm-btn" data-mode="ja-only">日文</button>
         <button type="button" class="brm-btn" data-mode="zh-only">中文</button>
       </div>
+      <button id="brFuriganaBtn" class="br-action-btn" type="button" title="切换平假名注音 (振仮名)">
+        <span class="btn-icon" style="font-weight:750; font-size:13.5px;">ふ</span>
+        <span>注音</span>
+      </button>
       <button id="brDeleteTranslate" class="br-action-btn danger" style="display:none;" title="删除当前中文译文">
         <span class="btn-icon">🗑️</span>
         <span>删除翻译</span>
@@ -336,6 +340,6 @@
   </div>
 </div>
 
-<script src="/static/archive.js?v=20260831_5"></script>
+<script src="/static/archive.js?v=20260831_6"></script>
 </body>
 </html>

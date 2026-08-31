@@ -2623,6 +2623,73 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "msg": f"异常: {e}"})
             return
 
+        if sub == "blogs/furigana":
+            if self.command != "POST":
+                self._send_json({"ok": False, "msg": "Method not allowed"}, 405)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0 or content_length > 5 * 1024 * 1024:
+                self._send_json({"ok": False, "msg": "请求体为空或过大"}, 400)
+                return
+
+            body_data = self.rfile.read(content_length).decode("utf-8")
+            try:
+                data = json.loads(body_data)
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "msg": "Invalid JSON"}, 400)
+                return
+
+            blog_id = data.get("id")
+            raw_html = data.get("html")
+            raw_title = data.get("title")
+
+            try:
+                from src import furigana
+
+                if blog_id:
+                    db = _get_blog_db()
+                    row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (int(blog_id),)).fetchone()
+                    if not row:
+                        self._send_json({"ok": False, "msg": "未找到该博客"}, 404)
+                        return
+                    row = dict(row)
+                    f_title = furigana.add_furigana_to_text(row.get("title") or "")
+                    f_html = furigana.add_furigana_to_html(row.get("body_html") or "")
+
+                    f_content_json = None
+                    if row.get("content_json") and row["content_json"] != "[]":
+                        try:
+                            blocks = json.loads(row["content_json"])
+                            f_blocks = furigana.add_furigana_to_blocks(blocks)
+                            f_content_json = json.dumps(f_blocks, ensure_ascii=False)
+                        except Exception:
+                            pass
+
+                    self._send_json({
+                        "ok": True,
+                        "id": blog_id,
+                        "title": f_title,
+                        "furigana_html": f_html,
+                        "furigana_content_json": f_content_json,
+                    })
+                    return
+
+                if raw_html:
+                    f_html = furigana.add_furigana_to_html(str(raw_html))
+                    f_title = furigana.add_furigana_to_text(str(raw_title)) if raw_title else ""
+                    self._send_json({
+                        "ok": True,
+                        "title": f_title,
+                        "furigana_html": f_html,
+                    })
+                    return
+
+                self._send_json({"ok": False, "msg": "缺少 id 或 html 参数"}, 400)
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"生成振假名异常: {e}"}, 500)
+            return
+
         if sub.startswith("blog_media/"):
             rel_str = unquote(sub[len("blog_media/"):].replace("\\", "/"))
             rel = Path(rel_str)

@@ -12,4 +12,5 @@ curl-cffi>=0.7.0           # Instagram/TikTok 请求增强（可选）
 pillow>=10.0.0             # 博客卡片渲染与图片处理
 playwright>=1.40.0,<2.0.0   # 博客长图无头 Chromium 渲染引擎
 defusedxml>=0.7.1           # XML 实体注入安全防护
+pykakasi>=2.3.0             # 日文形态素分析与振假名 (Furigana) 引擎
 
