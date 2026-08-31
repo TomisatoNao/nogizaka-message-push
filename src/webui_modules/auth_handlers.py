@@ -13,7 +13,7 @@ from __future__ import annotations
 import hmac
 import os
 from html import escape as html_escape
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import quote, urlparse
 
 from src import auth as _auth
 import config.config as cfg
@@ -21,6 +21,8 @@ from src.webui_modules.static_handler import send_json
 
 SESSION_COOKIE = "sakamichi_session"
 REFRESH_COOKIE = "sakamichi_refresh_token"
+API_TOKEN_SESSION_USER = "(api-token-session)"
+API_TOKEN_SESSION_MAX_SECONDS = 2 * 3600
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -40,7 +42,12 @@ def check_host(handler, enforce_host_check: bool = False) -> bool:
 
 
 def api_token_ok(handler) -> bool:
-    """校验静态管理 Token（WEB_ADMIN_TOKEN）。"""
+    """校验静态管理 Token（WEB_ADMIN_TOKEN）。
+
+    Token 只允许通过请求头提交；将它放在 URL 中会泄露到浏览器历史、
+    代理日志和 Referer。浏览器需要访问媒体时，可先调用
+    /api/auth/token-session 换取 HttpOnly 会话 Cookie。
+    """
     token = os.getenv("WEB_ADMIN_TOKEN", "").strip()
     if not token:
         return False
@@ -49,8 +56,6 @@ def api_token_ok(handler) -> bool:
         authz = handler.headers.get("Authorization", "").strip()
         if authz.startswith("Bearer "):
             supplied = authz[7:].strip()
-    if not supplied:
-        supplied = (parse_qs(handler.path.partition("?")[2]).get("token") or [""])[0]
     return bool(supplied) and hmac.compare_digest(supplied, token)
 
 
@@ -77,28 +82,61 @@ def cookie_refresh_token(handler) -> str:
 def current_user(handler) -> dict | None:
     """解析当前身份：会话 cookie 优先，其次 API token（视为 admin）。"""
     ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
-    sess = _auth.get_session(cookie_token(handler), ttl_seconds=ttl)
+    session_token = cookie_token(handler)
+    sess = _auth.get_session(session_token)
     if sess:
+        # 静态 API Token 换取的 Cookie 不做滑动续期，避免 Token 轮换后仍长期有效。
+        if sess["username"] != API_TOKEN_SESSION_USER:
+            sess = _auth.get_session(session_token, ttl_seconds=ttl) or sess
         return {"username": sess["username"], "role": sess["role"], "via": "session"}
     if api_token_ok(handler):
         return {"username": "(api-token)", "role": "admin", "via": "token"}
     return None
 
 
+def _normalise_origin(value: str) -> tuple[str, str, int] | None:
+    """返回可比较的 (scheme, hostname, port)，无效 Origin 返回 None。"""
+    try:
+        parsed = urlparse(value)
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or "").lower()
+        if scheme not in {"http", "https"} or not hostname or parsed.path not in ("", "/"):
+            return None
+        port = parsed.port or (443 if scheme == "https" else 80)
+        return scheme, hostname, port
+    except ValueError:
+        return None
+
+
+def _expected_origin(handler) -> tuple[str, str, int] | None:
+    """取得部署配置的公开 Origin，未配置时按直连 HTTP 服务推导。"""
+    configured = str(getattr(cfg, "WEB_ADMIN_ORIGIN", "") or "").strip()
+    if configured:
+        return _normalise_origin(configured)
+    raw_host = handler.headers.get("Host", "").strip()
+    return _normalise_origin(f"http://{raw_host}")
+
+
 def check_origin(handler) -> bool:
-    """非 GET 请求校验 Origin（配合 SameSite=Strict cookie 防 CSRF）。"""
+    """非 GET 请求校验完整 Origin（协议、主机和端口）。"""
     origin = handler.headers.get("Origin", "")
     if not origin:
+        # 非浏览器 API 客户端通常不带 Origin；鉴权仍由 Cookie/API Token 完成。
         return True
-    host = (urlparse(origin).hostname or "").lower()
-    if host in LOOPBACK_HOSTS:
-        return True
-    raw_host = handler.headers.get("Host", "")
-    req_host = (urlparse(f"//{raw_host}").hostname or "").lower()
-    if host == req_host:
+    actual = _normalise_origin(origin)
+    expected = _expected_origin(handler)
+    if actual is not None and actual == expected:
         return True
     send_json(handler, {"ok": False, "errors": [f"拒绝跨站请求 Origin: {origin!r}"]}, 403)
     return False
+
+
+def _cookie(name: str, value: str, max_age: int) -> str:
+    """统一构造会话 Cookie，并按 HTTPS 部署配置添加 Secure。"""
+    parts = [f"{name}={value}", "Path=/", f"Max-Age={max(0, int(max_age))}", "HttpOnly", "SameSite=Strict"]
+    if bool(getattr(cfg, "AUTH_COOKIE_SECURE", False)):
+        parts.append("Secure")
+    return "; ".join(parts)
 
 
 def send_html_prompt(handler, title: str, message: str, code: int = 200, link: tuple[str, str] | None = None) -> None:
@@ -113,9 +151,17 @@ def send_html_prompt(handler, title: str, message: str, code: int = 200, link: t
         "a{color:#6d5bd0}</style>"
         f"<div><h2>{html_escape(title)}</h2><p>{html_escape(message)}</p>{extra}</div>"
     ).encode("utf-8")
+    pending_headers = list(getattr(handler, "_pending_headers", []))
+    pending_cookies = list(getattr(handler, "_pending_set_cookies", []))
+    handler._pending_headers = []
+    handler._pending_set_cookies = []
     handler.send_response(code)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
+    for key, value in pending_headers:
+        handler.send_header(key, value)
+    for cookie in pending_cookies:
+        handler.send_header("Set-Cookie", cookie)
     handler.end_headers()
     handler.wfile.write(body)
 
@@ -134,6 +180,13 @@ def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
         if not os.getenv("WEB_ADMIN_TOKEN", ""):
             return True
         if api_token_ok(handler):
+            return True
+        # 静态 Token 在浏览器中会先换成短效 HttpOnly Cookie，避免放入 localStorage 或 URL。
+        user = current_user(handler)
+        if user and user["username"] == API_TOKEN_SESSION_USER and user["role"] == "admin":
+            return True
+        # HTML 本身不含业务数据；放行后由 API 请求触发 Token 输入与换取会话。
+        if is_page:
             return True
         send_json(handler, {"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
         return False
@@ -155,8 +208,8 @@ def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
             if rot_user:
                 user = {"username": rot_user["username"], "role": rot_user["role"], "via": "refresh"}
                 handler._pending_set_cookies = [
-                    f"{SESSION_COOKIE}={new_access}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
-                    f"{REFRESH_COOKIE}={new_refresh}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
+                    _cookie(SESSION_COOKIE, new_access, access_ttl),
+                    _cookie(REFRESH_COOKIE, new_refresh, refresh_days * 86400),
                 ]
 
     if user is not None:
@@ -235,6 +288,10 @@ def handle_login(handler, body: dict) -> None:
         send_json(handler, {"ok": False, "errors": [f"登录失败次数过多，请 {int(locked // 60) + 1} 分钟后再试"]}, 429)
         return
 
+    if not isinstance(body, dict):
+        send_json(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+        return
+
     username = str(body.get("username", ""))[:64]
     password = str(body.get("password", ""))[:256]
     user = _auth.authenticate(username, password)
@@ -246,7 +303,8 @@ def handle_login(handler, body: dict) -> None:
         return
 
     _auth.clear_failures(ip)
-    remember = bool(body.get("remember", True))
+    remember_raw = body.get("remember", True)
+    remember = remember_raw if isinstance(remember_raw, bool) else str(remember_raw).strip().lower() in {"1", "true", "yes", "on"}
     access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
     refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30))) if remember else 1
     token = _auth.create_session(user["username"], user["role"], access_ttl)
@@ -255,16 +313,14 @@ def handle_login(handler, body: dict) -> None:
     log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
 
     handler._pending_set_cookies = [
-        f"{SESSION_COOKIE}={token}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
-        f"{REFRESH_COOKIE}={refresh_token}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
+        _cookie(SESSION_COOKIE, token, access_ttl),
+        _cookie(REFRESH_COOKIE, refresh_token, refresh_days * 86400),
     ]
     send_json(handler, {
         "ok": True,
         "user": user,
         "username": user["username"],
         "role": user["role"],
-        "token": token,
-        "refresh_token": refresh_token,
         "session_ttl_seconds": access_ttl,
     }, 200)
 
@@ -272,7 +328,7 @@ def handle_login(handler, body: dict) -> None:
 def handle_refresh(handler) -> None:
     """POST /api/auth/refresh 刷新 Session Token。"""
     body = handler._read_body_json() if hasattr(handler, "_read_body_json") else {}
-    body = body or {}
+    body = body if isinstance(body, dict) else {}
     r_token = cookie_refresh_token(handler) or str(body.get("refresh_token", "")).strip()
     if not r_token:
         send_json(handler, {"ok": False, "errors": ["缺少 Refresh Token"]}, 401)
@@ -288,25 +344,37 @@ def handle_refresh(handler) -> None:
     )
     if not user:
         handler._pending_set_cookies = [
-            f"{SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
-            f"{REFRESH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
+            _cookie(SESSION_COOKIE, "", 0),
+            _cookie(REFRESH_COOKIE, "", 0),
         ]
         send_json(handler, {"ok": False, "errors": ["刷新令牌已失效，请重新登录"]}, 401)
         return
 
     handler._pending_set_cookies = [
-        f"{SESSION_COOKIE}={new_access}; Path=/; Max-Age={access_ttl}; HttpOnly; SameSite=Strict",
-        f"{REFRESH_COOKIE}={new_refresh}; Path=/; Max-Age={refresh_days * 86400}; HttpOnly; SameSite=Strict",
+        _cookie(SESSION_COOKIE, new_access, access_ttl),
+        _cookie(REFRESH_COOKIE, new_refresh, refresh_days * 86400),
     ]
     send_json(handler, {
         "ok": True,
         "user": user,
         "username": user["username"],
         "role": user["role"],
-        "token": new_access,
-        "refresh_token": new_refresh,
         "session_ttl_seconds": access_ttl,
     }, 200)
+
+
+def handle_api_token_session(handler) -> None:
+    """将一次性的 WEB_ADMIN_TOKEN 请求头换成最长两小时的 HttpOnly 会话。"""
+    if not api_token_ok(handler):
+        send_json(handler, {"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
+        return
+    access_ttl = min(
+        API_TOKEN_SESSION_MAX_SECONDS,
+        max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600,
+    )
+    token = _auth.create_session(API_TOKEN_SESSION_USER, "admin", access_ttl)
+    handler._pending_set_cookies = [_cookie(SESSION_COOKIE, token, access_ttl)]
+    send_json(handler, {"ok": True, "session_ttl_seconds": access_ttl}, 200)
 
 
 def handle_logout(handler) -> None:
@@ -319,8 +387,8 @@ def handle_logout(handler) -> None:
         _auth.destroy_refresh_token(r_token)
 
     handler._pending_set_cookies = [
-        f"{SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
-        f"{REFRESH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
+        _cookie(SESSION_COOKIE, "", 0),
+        _cookie(REFRESH_COOKIE, "", 0),
     ]
     handler._pending_headers = [
         ("Clear-Site-Data", '"cache", "cookies"'),

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import asyncio
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,3 +30,16 @@ async def test_http_pool_lifecycle():
     # Close all
     await http_pool.close_all()
     assert client_gen.is_closed or client_new.is_closed
+
+
+def test_http_pool_does_not_reuse_clients_across_event_loops():
+    async def get_client():
+        return await http_pool.get_general_client()
+
+    first = asyncio.run(get_client())
+    second = asyncio.run(get_client())
+    try:
+        assert first is not second
+        assert first.is_closed, "切换事件循环时应关闭并替换旧 Client"
+    finally:
+        asyncio.run(http_pool.close_all())

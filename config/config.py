@@ -101,6 +101,8 @@ _DEFAULTS: dict = {
     "web_admin_enabled":        False,
     "web_admin_host":           "127.0.0.1",
     "web_admin_port":           46046,
+    # 反向代理/TLS 部署时填写对外 Origin，例如 https://push.example.com
+    "web_admin_origin":         "",
     # 消息归档（config.json 的 archive 可覆盖）
     "archive_enabled":          False,
     "archive_dir":              "data/archive",
@@ -108,11 +110,13 @@ _DEFAULTS: dict = {
     # 每日运行摘要（config.json 的 daily_summary 可覆盖；hour 为 JST 小时）
     "daily_summary_enabled":    False,
     "daily_summary_hour":       23,
-    # 账号系统（config.json 的 auth 可覆盖；用户库 data/users.json 由
+    # 账号系统（config.json 的 auth 可覆盖；用户库 data/auth.db 由
     # tools/manage_users.py 维护）
     "auth_enabled":             False,
     "auth_archive_public":      False,   # true = 归档页无需登录即可访问
     "auth_session_hours":       12,
+    # 仅 HTTPS 反向代理部署时启用；直连 HTTP/localhost 保持 false
+    "auth_cookie_secure":       False,
     # 官方 Bot 指令（私聊 Bot 查状态/归档）；allow 为空则默认只允许各 Bot 的
     # target_openid，即"只有你自己能用"
     "qq_commands_enabled":      False,
@@ -185,6 +189,8 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["web_admin_host"] = wa["host"]
             if "port" in wa:
                 cfg["web_admin_port"] = wa["port"]
+            if "origin" in wa:
+                cfg["web_admin_origin"] = wa["origin"]
 
         if "archive" in cfg:
             ar = cfg.pop("archive")
@@ -219,6 +225,8 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["auth_archive_public"] = au["archive_public"]
             if "session_hours" in au:
                 cfg["auth_session_hours"] = au["session_hours"]
+            if "cookie_secure" in au:
+                cfg["auth_cookie_secure"] = au["cookie_secure"]
 
         if "translate" in cfg:
             cfg["enable_translation"] = cfg.pop("translate")
@@ -520,6 +528,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "web_admin_enabled":            "WEB_ADMIN_ENABLED",
     "web_admin_host":               "WEB_ADMIN_HOST",
     "web_admin_port":               "WEB_ADMIN_PORT",
+    "web_admin_origin":             "WEB_ADMIN_ORIGIN",
     "archive_enabled":              "ARCHIVE_ENABLED",
     "archive_dir":                  "ARCHIVE_DIR",
     "archive_media":                "ARCHIVE_MEDIA",
@@ -531,6 +540,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "auth_enabled":                 "AUTH_ENABLED",
     "auth_archive_public":          "AUTH_ARCHIVE_PUBLIC",
     "auth_session_hours":           "AUTH_SESSION_HOURS",
+    "auth_cookie_secure":           "AUTH_COOKIE_SECURE",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from io import BytesIO
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -20,6 +21,42 @@ def test_static_handler_mime():
     assert static_handler._STATIC_MIME["theme.css"] == "text/css"
 
 
+class _ResponseHandler:
+    def __init__(self, accept_encoding: str = ""):
+        self.headers = {"Accept-Encoding": accept_encoding}
+        self.sent_headers: list[tuple[str, str]] = []
+        self.wfile = BytesIO()
+        self._pending_headers = []
+        self._pending_set_cookies = []
+
+    def send_response(self, _code):
+        pass
+
+    def send_header(self, key, value):
+        self.sent_headers.append((key, value))
+
+    def end_headers(self):
+        pass
+
+
+def test_static_handler_respects_gzip_quality_and_consumes_pending_headers():
+    handler = _ResponseHandler("gzip;q=0")
+    data, headers = static_handler.compress_if_supported(handler, b"x" * 1024)
+    assert data == b"x" * 1024
+    assert headers == {}
+
+    handler._pending_headers = [("Clear-Site-Data", '"cache"')]
+    handler._pending_set_cookies = ["session=abc; HttpOnly"]
+    static_handler.send_json(handler, {"ok": True})
+    assert ("Vary", "Accept-Encoding") in handler.sent_headers
+    assert ("Clear-Site-Data", '"cache"') in handler.sent_headers
+    assert ("Set-Cookie", "session=abc; HttpOnly") in handler.sent_headers
+
+    handler.sent_headers.clear()
+    static_handler.send_json(handler, {"ok": True})
+    assert not any(key in {"Clear-Site-Data", "Set-Cookie"} for key, _ in handler.sent_headers)
+
+
 def test_system_handlers_env():
     status = system_handlers.env_status()
     assert isinstance(status, dict)
@@ -37,6 +74,15 @@ def test_system_handlers_smart_parse():
 def test_auth_handlers_loopback():
     assert "127.0.0.1" in auth_handlers.LOOPBACK_HOSTS
     assert "localhost" in auth_handlers.LOOPBACK_HOSTS
+
+
+def test_auth_cookie_secure_configuration():
+    original = auth_handlers.cfg.AUTH_COOKIE_SECURE
+    try:
+        auth_handlers.cfg.AUTH_COOKIE_SECURE = True
+        assert auth_handlers._cookie("session", "abc", 60).endswith("Secure")
+    finally:
+        auth_handlers.cfg.AUTH_COOKIE_SECURE = original
 
 
 def test_archive_handlers_and_media_service():

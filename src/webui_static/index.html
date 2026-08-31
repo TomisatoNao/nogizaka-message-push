@@ -1432,7 +1432,8 @@ let credStatus = {};      // 账号凭证状态
 let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
 let envStatus = {};       // GEMINI_API_KEY / TG_BOT_TOKEN 是否已配置
 let dirty = false;
-let authToken = localStorage.getItem("webAdminToken") || "";
+// 清理旧版保存在 localStorage 中的静态 Token；Token 模式改用 HttpOnly 会话 Cookie。
+try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 
 const $ = (id) => document.getElementById(id);
 const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
@@ -1566,14 +1567,7 @@ async function silentRefreshAdminToken() {
           cache: "no-store",
         });
         const data = await resp.json();
-        if (data && data.ok) {
-          if (data.token) {
-            authToken = data.token;
-            try { localStorage.setItem("webAdminToken", data.token); } catch (_) {}
-          }
-          return true;
-        }
-        return false;
+        return !!(data && data.ok);
       } catch (_) {
         return false;
       } finally {
@@ -1584,9 +1578,22 @@ async function silentRefreshAdminToken() {
   return _refreshingAdminPromise;
 }
 
+async function establishApiTokenSession(rawToken) {
+  try {
+    const resp = await fetch("/api/auth/token-session", {
+      method: "POST",
+      headers: { "X-Auth-Token": rawToken },
+      cache: "no-store",
+    });
+    const data = await resp.json();
+    return !!(resp.ok && data && data.ok);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function api(path, opts = {}) {
   opts.headers = Object.assign({}, opts.headers);
-  if (authToken) opts.headers["X-Auth-Token"] = authToken;
   const resp = await fetch(path, opts);
 
   if (resp.status === 401 && !opts._retried && path !== "/api/auth/refresh" && path !== "/api/auth/login") {
@@ -1607,9 +1614,7 @@ async function api(path, opts = {}) {
     }
     // WEB_ADMIN_TOKEN 模式 → 弹出令牌输入框
     const t = prompt("需要访问令牌（.env 的 WEB_ADMIN_TOKEN）：");
-    if (t !== null && t !== "") {
-      authToken = t.trim();
-      localStorage.setItem("webAdminToken", authToken);
+    if (t && await establishApiTokenSession(t.trim())) {
       return api(path, opts);
     }
     throw new Error("未授权");
@@ -5067,7 +5072,6 @@ $("btnRestart").addEventListener("click", async () => {
     await new Promise((r) => setTimeout(r, 1500));
     try {
       const resp = await fetch("/api/config", {
-        headers: authToken ? { "X-Auth-Token": authToken } : {},
         cache: "no-store",
       });
       if (resp.ok) {

@@ -1,7 +1,8 @@
 // archive.js
 "use strict";
 const $ = (id) => document.getElementById(id);
-const authToken = localStorage.getItem("webAdminToken") || "";
+// 清理旧版本遗留的可读 Token；新的 Token 模式使用 HttpOnly 会话 Cookie。
+try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
 
 let members = [];        // [{name, display, total, months}]
@@ -52,17 +53,7 @@ function sanitizeHtml(htmlStr) {
   }
 }
 function mediaUrl(u) {
-  if (!u) return "";
-  if (!authToken) return u;
-  const hashIdx = u.indexOf('#');
-  if (hashIdx !== -1) {
-    const base = u.substring(0, hashIdx);
-    const frag = u.substring(hashIdx);
-    const sep = base.includes('?') ? '&' : '?';
-    return base + sep + 'token=' + encodeURIComponent(authToken) + frag;
-  }
-  const sep = u.includes('?') ? '&' : '?';
-  return u + sep + 'token=' + encodeURIComponent(authToken);
+  return u || "";
 }
 
 window.handleImgError = function(img) {
@@ -72,9 +63,7 @@ window.handleImgError = function(img) {
     const rawUrl = img.dataset.src || img.src;
     setTimeout(() => {
       const base = rawUrl.split("?")[0];
-      const sep = base.includes("?") ? "&" : "?";
-      const tokenParam = authToken ? "token=" + encodeURIComponent(authToken) + "&" : "";
-      img.src = base + sep + tokenParam + "_retry=" + Date.now();
+      img.src = base + "?_retry=" + Date.now();
     }, 250 * (retryCount + 1));
   } else {
     // 若本地媒体重试失败，尝试回退到官方 CDN 原始链接
@@ -106,14 +95,7 @@ async function silentRefreshToken() {
           cache: "no-store",
         });
         const data = await resp.json();
-        if (data && data.ok) {
-          if (data.token) {
-            authToken = data.token;
-            try { localStorage.setItem("webAdminToken", data.token); } catch (_) {}
-          }
-          return true;
-        }
-        return false;
+        return !!(data && data.ok);
       } catch (_) {
         return false;
       } finally {
@@ -124,12 +106,22 @@ async function silentRefreshToken() {
   return _refreshingPromise;
 }
 
+async function establishApiTokenSession(rawToken) {
+  try {
+    const resp = await fetch("/api/auth/token-session", {
+      method: "POST",
+      headers: { "X-Auth-Token": rawToken },
+      cache: "no-store",
+    });
+    const data = await resp.json();
+    return !!(resp.ok && data && data.ok);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function api(path, options = {}) {
-  const headers = Object.assign(
-    {},
-    authToken ? { "X-Auth-Token": authToken } : {},
-    options.headers || {}
-  );
+  const headers = Object.assign({}, options.headers || {});
   const resp = await fetch(path, {
     method: options.method || "GET",
     headers: headers,
@@ -149,6 +141,15 @@ async function api(path, options = {}) {
   try { data = await resp.json(); } catch (_) {}
   if (!resp.ok) {
     const err = (data && data.errors && data.errors.join("；")) || ("HTTP " + resp.status);
+    if (resp.status === 401 && err.includes("未授权")) {
+      const supplied = prompt("需要访问令牌（.env 的 WEB_ADMIN_TOKEN）：");
+      if (supplied && await establishApiTokenSession(supplied.trim())) {
+        return api(path, Object.assign({}, options, { _retried: true }));
+      }
+    }
+    if (resp.status === 401 && err.includes("未登录")) {
+      window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname + window.location.search);
+    }
     throw new Error(err);
   }
   return data;
@@ -2246,12 +2247,11 @@ function renderBubble(msg) {
     async function saveTags() {
       const val = input.value.trim();
       try {
-        const resp = await fetch("/api/archive/tags?member=" + encodeURIComponent(curMember), {
+        const data = await api("/api/archive/tags?member=" + encodeURIComponent(curMember), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: msgId, year: msgYear, month: msgMonth, custom_tags: val }),
         });
-        const data = await resp.json();
         if (data.ok) {
           msg.custom_tags = val;
           // 重建标签区

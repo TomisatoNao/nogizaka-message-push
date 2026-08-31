@@ -16,11 +16,13 @@
   // ── Telegram Bot 路由配置 ──
   "tg_bots": [],
 
-  // ── 网页管理端（开箱即用，访问 http://localhost:46046）──
+  // ── 网页管理端（Docker 默认仅发布到宿主机 localhost）──
   "web_admin": {
     "enabled": true,
     "host": "0.0.0.0",
-    "port": 46046
+    "port": 46046,
+    // 若通过 HTTPS 反向代理公开访问，填写完整的公开 Origin，例如 https://push.example.com
+    // "origin": "https://push.example.com"
   },
 
   // ── 消息归档 ──
@@ -46,7 +48,9 @@
   "auth": {
     "enabled": true,
     "archive_public": false,
-    "session_hours": 12
+    "session_hours": 12,
+    // HTTPS 反向代理部署时设为 true；localhost 直连 HTTP 请保持 false
+    // "cookie_secure": true
   },
 
   // ── 账号池预设 ──

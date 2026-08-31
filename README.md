@@ -110,7 +110,7 @@ flowchart TD
        container_name: sakamichi-push
        restart: unless-stopped
        ports:
-         - "46046:46046"
+         - "127.0.0.1:46046:46046"
        environment:
          - TZ=Asia/Tokyo
        volumes:
@@ -129,7 +129,7 @@ flowchart TD
    ```bash
    docker logs sakamichi-push
    ```
-   打开浏览器访问 **`http://<你的服务器IP>:46046/`** 登录！
+   在服务器本机打开浏览器访问 **`http://127.0.0.1:46046/`** 登录。需要远程访问时，请通过 HTTPS 反向代理公开该地址，并配置 `web_admin.origin` 与 `auth.cookie_secure`。
 
 ---
 
@@ -429,6 +429,8 @@ Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env
   "sleep_hours": [2, 7]
 }
 ```
+
+> Docker Compose 默认只将管理端发布到宿主机 `127.0.0.1:46046`。需要远程访问时，请使用 HTTPS 反向代理，并在 `web_admin.origin` 填写外部地址、在 `auth.cookie_secure` 设为 `true`；不要直接将 HTTP 管理端暴露到公网。
 
 #### `.env` 环境变量列表
 ```bash

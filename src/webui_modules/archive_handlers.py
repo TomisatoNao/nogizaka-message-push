@@ -28,6 +28,7 @@ _blog_db_local = threading.local()
 
 _home_cache: dict | None = None
 _home_cache_key: tuple[float, float, str] | None = None
+_archive_write_lock = threading.Lock()
 
 ARCHIVE_TYPES = frozenset({"text", "picture", "image", "video", "voice"})
 
@@ -272,6 +273,8 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
 
     # 7. 自定义标签
     if sub == "tags":
+        if not guard_fn(need_admin=True):
+            return
         raw_m = qp("member")
         member = _archive.member_dir_name(raw_m) if raw_m else ""
         if not member or member not in _archive.list_members():
@@ -280,29 +283,47 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         body = read_body_json_fn()
         if body is None:
             return
+        if not isinstance(body, dict):
+            _send_json_resp(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+            return
         msg_id = str(body.get("id") or "")
-        tags = (body.get("custom_tags") or "").strip()
-        year = body.get("year")
-        month = body.get("month")
-        if not msg_id or not year or not month:
+        raw_tags = body.get("custom_tags", "")
+        if not isinstance(raw_tags, str):
+            _send_json_resp(handler, {"ok": False, "errors": ["custom_tags 必须是字符串"]}, 400)
+            return
+        tags = raw_tags.strip()
+        if len(tags) > 500:
+            _send_json_resp(handler, {"ok": False, "errors": ["custom_tags 不能超过 500 个字符"]}, 400)
+            return
+        try:
+            year = int(body.get("year"))
+            month = int(body.get("month"))
+        except (TypeError, ValueError):
+            _send_json_resp(handler, {"ok": False, "errors": ["year/month 必须是数字"]}, 400)
+            return
+        if not msg_id or not 1 <= month <= 12 or not 1 <= year <= 9999:
             _send_json_resp(handler, {"ok": False, "errors": ["缺少 id/year/month"]}, 400)
             return
-        msgs = _archive.load_month(member, year, month)
-        found = None
-        for m in msgs:
-            if str(m.get("id", "")) == msg_id:
-                m["_custom_tags"] = tags
-                found = True
-                break
-        if not found:
-            _send_json_resp(handler, {"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
-            return
-        json_path = (_archive.archive_root() / member / f"{year:04d}" / f"{month:02d}" / "messages.json")
-        tmp = json_path.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(msgs, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, json_path)
-        _send_json_resp(handler, {"ok": True, "id": int(msg_id), "custom_tags": tags})
+        with _archive_write_lock:
+            msgs = _archive.load_month(member, year, month)
+            found = False
+            for m in msgs:
+                if str(m.get("id", "")) == msg_id:
+                    m["_custom_tags"] = tags
+                    found = True
+                    break
+            if not found:
+                _send_json_resp(handler, {"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
+                return
+            json_path = (_archive.archive_root() / member / f"{year:04d}" / f"{month:02d}" / "messages.json")
+            if not json_path.is_file():
+                _send_json_resp(handler, {"ok": False, "errors": ["归档文件不存在"]}, 404)
+                return
+            tmp = json_path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(msgs, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, json_path)
+        _send_json_resp(handler, {"ok": True, "id": msg_id, "custom_tags": tags})
         return
 
     # 8. 粉丝信件

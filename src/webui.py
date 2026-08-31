@@ -62,6 +62,7 @@ from src.webui_modules.auth_handlers import (
     current_user,
     guard,
     handle_auth_me,
+    handle_api_token_session,
     handle_login,
     handle_logout,
     handle_refresh,
@@ -157,8 +158,9 @@ class _Handler(BaseHTTPRequestHandler):
             pass
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             pass
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.logger import log_all
+            log_all(f"🚨 WebUI 请求未处理异常: {type(exc).__name__}: {exc}", is_error=True)
 
     # ── 兼容性代理方法 ─────────────────────────────────────
     def _query_params(self) -> dict[str, str]:
@@ -217,8 +219,16 @@ class _Handler(BaseHTTPRequestHandler):
         serve_file_range(self, path)
 
     def _read_body_json(self):
-        length = int(self.headers.get("Content-Length", 0))
-        if length <= 0:
+        raw_length = self.headers.get("Content-Length", "0")
+        try:
+            length = int(raw_length)
+        except (TypeError, ValueError):
+            self._send_json({"ok": False, "errors": ["Content-Length 必须是非负整数"]}, 400)
+            return None
+        if length < 0:
+            self._send_json({"ok": False, "errors": ["Content-Length 必须是非负整数"]}, 400)
+            return None
+        if length == 0:
             return {}
         if length > 5 * 1024 * 1024:
             self._send_json({"ok": False, "errors": ["请求体过大（上限 5MB）"]}, 413)
@@ -411,6 +421,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/auth/refresh":
             handle_refresh(self)
+            return
+        if path == "/api/auth/token-session":
+            handle_api_token_session(self)
             return
         if path == "/api/auth/logout":
             handle_logout(self)

@@ -4,7 +4,8 @@ services:
     container_name: sakamichi-push
     restart: unless-stopped
     ports:
-      - "46046:46046"
+      # 管理端默认仅暴露给宿主机；远程访问请使用 HTTPS 反向代理。
+      - "127.0.0.1:46046:46046"
     environment:
       - TZ=Asia/Tokyo
       # 容器网络直连 NapCat 服务的 HTTP API

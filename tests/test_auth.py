@@ -27,19 +27,37 @@ def _http(method: str, url: str, body: dict | None = None, headers: dict | None 
             return None
 
     opener = urllib.request.build_opener(_NoRedirect)
+
+    def _headers(message):
+        result = dict(message)
+        # dict(message) 会丢弃重复的 Set-Cookie；认证测试需要保留两枚 Cookie。
+        cookies = message.get_all("Set-Cookie") or []
+        if cookies:
+            result["Set-Cookie"] = "\n".join(cookies)
+        return result
+
     try:
         with opener.open(req, timeout=10) as resp:
             raw = resp.read()
             try:
-                return resp.status, json.loads(raw), dict(resp.headers)
+                return resp.status, json.loads(raw), _headers(resp.headers)
             except ValueError:
-                return resp.status, raw, dict(resp.headers)
+                return resp.status, raw, _headers(resp.headers)
     except urllib.error.HTTPError as e:
         raw = e.read()
         try:
-            return e.code, json.loads(raw), dict(e.headers)
+            return e.code, json.loads(raw), _headers(e.headers)
         except ValueError:
-            return e.code, raw, dict(e.headers)
+            return e.code, raw, _headers(e.headers)
+
+
+def _cookie(headers: dict, name: str) -> str:
+    """从测试响应中提取单枚 Cookie 的 name=value。"""
+    prefix = name + "="
+    for raw in str(headers.get("Set-Cookie", "")).splitlines():
+        if raw.startswith(prefix):
+            return raw.split(";", 1)[0]
+    raise AssertionError(f"响应未包含 Cookie: {name}; headers={headers!r}")
 
 
 def main() -> None:
@@ -205,6 +223,9 @@ def main() -> None:
             assert code == 302, "归档页未登录应重定向"
             code, _, _ = _http("GET", base + "/api/archive/members")
             assert code == 401, "归档 API 未登录应 401"
+            code, body, _ = _http("POST", base + "/api/archive/tags?member=missing",
+                                  {"id": 1, "year": 2026, "month": 1, "custom_tags": "x"})
+            assert code == 401, f"未登录不应写归档标签: {code}, {body}"
             # 主题静态资源对未登录也开放（登录页要用），且限定白名单
             code, body, h = _http("GET", base + "/static/theme.css")
             assert code == 200 and b"--accent" in body, "主题 CSS 应可匿名获取"
@@ -232,7 +253,10 @@ def main() -> None:
             set_cookie = h.get("Set-Cookie", "")
             assert "HttpOnly" in set_cookie and "SameSite=Strict" in set_cookie, \
                 f"cookie 应带 HttpOnly/SameSite: {set_cookie}"
-            admin_cookie = set_cookie.split(";")[0]
+            assert "token" not in login_data and "refresh_token" not in login_data, \
+                "浏览器登录响应不得暴露会话令牌"
+            admin_cookie = _cookie(h, "sakamichi_session")
+            admin_refresh_cookie = _cookie(h, "sakamichi_refresh_token")
 
             ck = {"Cookie": admin_cookie}
             code, body, _ = _http("GET", base + "/api/config", headers=ck)
@@ -245,19 +269,19 @@ def main() -> None:
             assert body["user"]["username"] == "admin1"
 
             # 验证 Refresh Token 接口 (/api/auth/refresh)
-            rt_admin = login_data["refresh_token"]
             code, rbody, rh = _http("POST", base + "/api/auth/refresh",
-                                    body={"refresh_token": rt_admin})
+                                    headers={"Cookie": admin_refresh_cookie})
             assert code == 200 and rbody["ok"] and rbody["user"]["username"] == "admin1"
-            assert rbody["token"] and rbody["refresh_token"] and rbody["refresh_token"] != rt_admin, "应轮换得到新 Refresh Token"
-            new_rt = rbody["refresh_token"]
+            assert "token" not in rbody and "refresh_token" not in rbody, "刷新响应不得暴露令牌"
+            new_refresh_cookie = _cookie(rh, "sakamichi_refresh_token")
+            assert new_refresh_cookie != admin_refresh_cookie, "应轮换得到全新的 Refresh Token Cookie"
             # 旧 Refresh Token 已被轮换作废
             code, rbody_fail, _ = _http("POST", base + "/api/auth/refresh",
-                                        body={"refresh_token": rt_admin})
+                                        headers={"Cookie": admin_refresh_cookie})
             assert code == 401, "已使用的 Refresh Token 再次使用应 401"
             # 新 Refresh Token 可用
             code, rbody2, _ = _http("POST", base + "/api/auth/refresh",
-                                    body={"refresh_token": new_rt})
+                                    headers={"Cookie": new_refresh_cookie})
             assert code == 200 and rbody2["ok"]
 
             # viewer 登录 → 只能归档
@@ -277,6 +301,9 @@ def main() -> None:
             assert code == 403, "viewer 不应能重启"
             code, body, _ = _http("PUT", base + "/api/config", body={"x": 1}, headers=vck)
             assert code == 403, "viewer 不应能改配置"
+            code, body, _ = _http("POST", base + "/api/archive/tags?member=missing",
+                                  body={"id": 1, "year": 2026, "month": 1, "custom_tags": "x"}, headers=vck)
+            assert code == 403, f"viewer 不应写归档标签: {code}, {body}"
 
             # 用户管理接口：admin 可用，viewer 一律 403
             code, body, _ = _http("GET", base + "/api/users", headers=ck)
@@ -335,7 +362,9 @@ def main() -> None:
             assert code == 403 and "跨站" in body["errors"][0], f"跨站 Origin 应 403: {code}"
             code, body, _ = _http("PUT", base + "/api/config", body={"x": 1},
                                   headers={**ck, "Origin": "http://127.0.0.1:1"})
-            assert code != 403 or "跨站" not in str(body), "同源 Origin 不应被拦"
+            assert code == 403 and "跨站" in body["errors"][0], "不同端口 Origin 必须被拦"
+            code, body, _ = _http("PUT", base + "/api/config", body={"x": 1}, headers={**ck, "Origin": base})
+            assert code != 403, "完整同源 Origin 不应被 CSRF 校验拦截"
 
             # 登出后 cookie 失效，且指示浏览器清理已缓存的私密媒体
             code, _, h = _http("POST", base + "/api/auth/logout", headers=ck)
@@ -374,6 +403,20 @@ def main() -> None:
             assert code == 200, "关闭账号系统后应放行"
             code, _, _ = _http("GET", base + "/api/archive/members")
             assert code == 200
+
+            # 静态管理 Token 仅接受请求头，浏览器可换取 HttpOnly 短效会话。
+            os.environ["WEB_ADMIN_TOKEN"] = "static-test-token"
+            code, _, _ = _http("GET", base + "/api/config")
+            assert code == 401, "静态 Token 模式下 API 必须鉴权"
+            code, body, token_headers = _http("POST", base + "/api/auth/token-session",
+                                               headers={"X-Auth-Token": "static-test-token"})
+            assert code == 200 and body["ok"], f"静态 Token 应可换取会话: {body}"
+            assert body["session_ttl_seconds"] <= 2 * 3600, "静态 Token 会话必须为短效且不可长期续期"
+            token_session = _cookie(token_headers, "sakamichi_session")
+            assert _http("GET", base + "/api/config", headers={"Cookie": token_session})[0] == 200
+            code, _, _ = _http("POST", base + "/api/auth/token-session?token=static-test-token")
+            assert code == 401, "URL 查询参数不得再接受管理 Token"
+            os.environ.pop("WEB_ADMIN_TOKEN", None)
         finally:
             server.shutdown()
             server.server_close()

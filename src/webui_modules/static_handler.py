@@ -33,10 +33,32 @@ _STATIC_MIME = {
 }
 
 
+def _gzip_accepted(value: str) -> bool:
+    """按 Accept-Encoding 的 q 值判断是否可返回 gzip。"""
+    wildcard_q: float | None = None
+    for raw_item in value.lower().split(","):
+        parts = [p.strip() for p in raw_item.split(";") if p.strip()]
+        if not parts:
+            continue
+        coding = parts[0]
+        quality = 1.0
+        for param in parts[1:]:
+            if param.startswith("q="):
+                try:
+                    quality = float(param[2:])
+                except ValueError:
+                    quality = 0.0
+        if coding == "gzip":
+            return quality > 0
+        if coding == "*":
+            wildcard_q = quality
+    return bool(wildcard_q and wildcard_q > 0)
+
+
 def compress_if_supported(handler, data: bytes) -> tuple[bytes, dict[str, str]]:
     """若客户端支持 gzip 且数据大于 512 字节，进行 gzip 压缩并返回 Content-Encoding 头。"""
     accept_encoding = handler.headers.get("Accept-Encoding", "") if hasattr(handler, "headers") and handler.headers else ""
-    if "gzip" in accept_encoding and len(data) > 512:
+    if _gzip_accepted(accept_encoding) and len(data) > 512:
         try:
             compressed = gzip.compress(data, compresslevel=6)
             if len(compressed) < len(data):
@@ -46,20 +68,31 @@ def compress_if_supported(handler, data: bytes) -> tuple[bytes, dict[str, str]]:
     return data, {}
 
 
+def _take_pending_headers(handler) -> tuple[list[tuple[str, str]], list[str]]:
+    """消费单次响应专用头，避免 HTTP keep-alive 重复发送 Cookie/登出头。"""
+    headers = list(getattr(handler, "_pending_headers", []))
+    cookies = list(getattr(handler, "_pending_set_cookies", []))
+    handler._pending_headers = []
+    handler._pending_set_cookies = []
+    return headers, cookies
+
+
 def send_json(handler, obj: dict, code: int = 200) -> None:
     """发送标准 JSON 响应。"""
     try:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         body, enc_headers = compress_if_supported(handler, body)
+        pending_headers, pending_cookies = _take_pending_headers(handler)
         handler.send_response(code)
         handler.send_header("Content-Type", "application/json; charset=utf-8")
         handler.send_header("Content-Length", str(len(body)))
         handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Vary", "Accept-Encoding")
         for k, v in enc_headers.items():
             handler.send_header(k, v)
-        for k, v in getattr(handler, "_pending_headers", []):
+        for k, v in pending_headers:
             handler.send_header(k, v)
-        for sc in getattr(handler, "_pending_set_cookies", []):
+        for sc in pending_cookies:
             handler.send_header("Set-Cookie", sc)
         handler.end_headers()
         handler.wfile.write(body)
@@ -84,6 +117,7 @@ def send_static(handler, name: str) -> None:
         handler.send_response(304)
         handler.send_header("ETag", etag)
         handler.send_header("Cache-Control", "public, max-age=120, must-revalidate")
+        handler.send_header("Vary", "Accept-Encoding")
         handler.end_headers()
         return
 
@@ -93,6 +127,7 @@ def send_static(handler, name: str) -> None:
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("ETag", etag)
     handler.send_header("Cache-Control", "public, max-age=120, must-revalidate")
+    handler.send_header("Vary", "Accept-Encoding")
     for k, v in enc_headers.items():
         handler.send_header(k, v)
     handler.end_headers()
@@ -107,13 +142,17 @@ def send_html(handler, file_path: Path, code: int = 200) -> None:
         send_json(handler, {"ok": False, "errors": ["页面文件缺失"]}, 500)
         return
     body, enc_headers = compress_if_supported(handler, body)
+    pending_headers, pending_cookies = _take_pending_headers(handler)
     handler.send_response(code)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Vary", "Accept-Encoding")
     for k, v in enc_headers.items():
         handler.send_header(k, v)
-    for sc in getattr(handler, "_pending_set_cookies", []):
+    for k, v in pending_headers:
+        handler.send_header(k, v)
+    for sc in pending_cookies:
         handler.send_header("Set-Cookie", sc)
     handler.end_headers()
     handler.wfile.write(body)
@@ -146,11 +185,17 @@ def send_html_text(handler, title: str, message: str, code: int = 200, redirect_
 </html>"""
     body = html.encode("utf-8")
     body, enc_headers = compress_if_supported(handler, body)
+    pending_headers, pending_cookies = _take_pending_headers(handler)
     handler.send_response(code)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Vary", "Accept-Encoding")
     for k, v in enc_headers.items():
         handler.send_header(k, v)
+    for k, v in pending_headers:
+        handler.send_header(k, v)
+    for sc in pending_cookies:
+        handler.send_header("Set-Cookie", sc)
     handler.end_headers()
     handler.wfile.write(body)
 

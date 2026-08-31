@@ -6,7 +6,8 @@ services:
     container_name: sakamichi-push
     restart: unless-stopped
     ports:
-      - "46046:46046"
+      # 管理端默认仅暴露给宿主机；要公网访问请经 HTTPS 反向代理转发。
+      - "127.0.0.1:46046:46046"
     environment:
       - TZ=Asia/Tokyo
       # 可直接在此处注入密钥（或写入挂载的 .env 文件）：
