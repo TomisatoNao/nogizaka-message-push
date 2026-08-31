@@ -65,6 +65,7 @@ _DEFAULTS: dict = {
     "error_log_file":           "logs/error_debug.log",
     "system_log_file":          "logs/system_info.log",
     "response_log_file":        "logs/response_debug.log",
+    "audit_log_file":           "logs/audit.jsonl",
     "sent_ids_max":             500,
     # 账号与成员（必须由 config.json 提供，这里仅为缺失时的安全兜底）
     "accounts":                 {},
@@ -489,7 +490,7 @@ def _build_paths(cfg: dict) -> dict:
     """将 JSON 中的相对路径字符串拼接为项目根目录下的绝对路径。"""
     _path_keys = {
         "cred_dir", "time_record_dir", "sent_ids_dir",
-        "error_log_file", "system_log_file", "response_log_file", "archive_dir",
+        "error_log_file", "system_log_file", "response_log_file", "audit_log_file", "archive_dir",
     }
     for key in _path_keys:
         if key in cfg:
@@ -550,6 +551,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "error_log_file":               "ERROR_LOG_FILE",
     "system_log_file":              "SYSTEM_LOG_FILE",
     "response_log_file":            "RESPONSE_LOG_FILE",
+    "audit_log_file":               "AUDIT_LOG_FILE",
     "sent_ids_max":                 "SENT_IDS_MAX",
     "debug_log_response":           "DEBUG_LOG_RESPONSE",
     "debug_log_qq_payload":         "DEBUG_LOG_QQ_PAYLOAD",

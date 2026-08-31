@@ -398,7 +398,26 @@ bash tools/install_systemd.sh --stop       # 停止服务
 ```
 </details>
 
-### 3. 进阶底层配置结构参考
+### 3. 审计、备份与健康监控
+
+- Web 管理端的登录、注销、用户管理、归档自定义标签、配置/密钥变更，以及重启/立即巡查会写入 `logs/audit.jsonl`；在「📟 控制台实时运行日志」中切换到「管理审计日志」即可查看。审计记录会自动脱敏，并按大小滚动保留。
+- 备份默认包含 `config/` 与 `data/`，**可能含凭据数据库**；备份文件请保存在受限位置，不要上传至公开仓库。
+
+```bash
+# 创建备份，默认保留最近 7 份
+python tools/backup_data.py create
+
+# 校验备份完整性（不写入数据）
+python tools/backup_data.py verify backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz
+
+# 仅预演恢复；确认已停止服务后才执行下一条
+python tools/backup_data.py restore backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz
+python tools/backup_data.py restore backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz --apply
+```
+
+- 使用 Uptime Kuma 等工具监控 `https://<你的域名>/api/health/status`。项目已有的 QQ/TG/官方 Bot 告警通道会沿用各通道的 `push_alert` 配置发送运行告警。
+
+### 4. 进阶底层配置结构参考
 
 <details>
 <summary><b>底层配置文件结构参考（仅供自动化脚本与开发者查阅，点击展开）</b></summary>

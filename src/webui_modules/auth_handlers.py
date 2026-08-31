@@ -17,6 +17,7 @@ from urllib.parse import quote, urlparse
 
 from src import auth as _auth
 import config.config as cfg
+from src.audit import record_event
 from src.webui_modules.static_handler import send_json
 
 SESSION_COOKIE = "sakamichi_session"
@@ -24,6 +25,14 @@ REFRESH_COOKIE = "sakamichi_refresh_token"
 API_TOKEN_SESSION_USER = "(api-token-session)"
 API_TOKEN_SESSION_MAX_SECONDS = 2 * 3600
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _audit(handler, event: str, outcome: str, *, actor: str | None = None,
+           target: str | None = None, details: dict | None = None) -> None:
+    """记录管理端安全事件；绝不传入请求体、密码或 Token。"""
+    source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
+    record_event(event, outcome=outcome, actor=actor, source_ip=source_ip,
+                 target=target, details=details)
 
 
 def check_host(handler, enforce_host_check: bool = False) -> bool:
@@ -285,6 +294,7 @@ def handle_login(handler, body: dict) -> None:
     ip = handler.client_address[0] if handler.client_address else "?"
     locked = _auth.is_locked_out(ip)
     if locked > 0:
+        _audit(handler, "auth.login", "rate_limited", target="login")
         send_json(handler, {"ok": False, "errors": [f"登录失败次数过多，请 {int(locked // 60) + 1} 分钟后再试"]}, 429)
         return
 
@@ -297,6 +307,7 @@ def handle_login(handler, body: dict) -> None:
     user = _auth.authenticate(username, password)
     if user is None:
         _auth.record_failure(ip)
+        _audit(handler, "auth.login", "denied", actor=username, target="login")
         from src.logger import log_all
         log_all(f"🔒 网页登录失败: {username!r} 来自 {ip}", is_error=True)
         send_json(handler, {"ok": False, "errors": ["用户名或密码错误"]}, 401)
@@ -311,6 +322,8 @@ def handle_login(handler, body: dict) -> None:
     refresh_token = _auth.create_refresh_token(user["username"], user["role"], ttl_days=refresh_days)
     from src.logger import log_all
     log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
+    _audit(handler, "auth.login", "success", actor=user["username"], target="login",
+           details={"role": user["role"], "remember": remember})
 
     handler._pending_set_cookies = [
         _cookie(SESSION_COOKIE, token, access_ttl),
@@ -366,6 +379,7 @@ def handle_refresh(handler) -> None:
 def handle_api_token_session(handler) -> None:
     """将一次性的 WEB_ADMIN_TOKEN 请求头换成最长两小时的 HttpOnly 会话。"""
     if not api_token_ok(handler):
+        _audit(handler, "auth.token_session", "denied", target="token-session")
         send_json(handler, {"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
         return
     access_ttl = min(
@@ -373,12 +387,15 @@ def handle_api_token_session(handler) -> None:
         max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600,
     )
     token = _auth.create_session(API_TOKEN_SESSION_USER, "admin", access_ttl)
+    _audit(handler, "auth.token_session", "success", actor=API_TOKEN_SESSION_USER,
+           target="token-session", details={"ttl_seconds": access_ttl})
     handler._pending_set_cookies = [_cookie(SESSION_COOKIE, token, access_ttl)]
     send_json(handler, {"ok": True, "session_ttl_seconds": access_ttl}, 200)
 
 
 def handle_logout(handler) -> None:
     """POST /api/auth/logout 注销当前会话。"""
+    user = current_user(handler) or {}
     s_token = cookie_token(handler)
     if s_token:
         _auth.destroy_session(s_token)
@@ -393,6 +410,7 @@ def handle_logout(handler) -> None:
     handler._pending_headers = [
         ("Clear-Site-Data", '"cache", "cookies"'),
     ]
+    _audit(handler, "auth.logout", "success", actor=user.get("username"), target="logout")
     send_json(handler, {"ok": True, "message": "已成功退出登录"}, 200)
 
 
@@ -440,6 +458,10 @@ def handle_users_write(handler, body: dict, method: str = "POST") -> None:
     if ok:
         from src.logger import log_all
         log_all(f"👤 用户管理[{me}]: {action} {username} — {msg}")
+        _audit(handler, "auth.user_manage", "success", actor=me, target=username,
+               details={"action": action, "role": role if action in ("add", "role", "set_role") else ""})
         send_json(handler, {"ok": True, "message": msg}, 200)
     else:
+        _audit(handler, "auth.user_manage", "denied", actor=me, target=username,
+               details={"action": action})
         send_json(handler, {"ok": False, "errors": [msg]}, 400)

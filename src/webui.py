@@ -14,6 +14,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
+from src.audit import record_event
+
 from src.webui_modules.config_service import (
     _FORBIDDEN_ENV_KEYS,
     _HISTORY_KEEP,
@@ -196,6 +198,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _check_auth(self) -> bool:
         return guard(self, need_admin=True)
+
+    def _audit(self, event: str, outcome: str = "success", *, target: str = "", details: dict | None = None) -> None:
+        user = self._current_user() or {}
+        source_ip = self.client_address[0] if self.client_address else "?"
+        record_event(event, outcome=outcome, actor=user.get("username"), source_ip=source_ip,
+                     target=target, details=details)
 
     def _send_static(self, name: str) -> None:
         send_static(self, name)
@@ -441,6 +449,7 @@ class _Handler(BaseHTTPRequestHandler):
             reloaded = _trigger_reload()
             from src.logger import log_all
             log_all("⟳ 网页端请求系统配置热重载")
+            self._audit("config.reload", details={"reloaded": reloaded})
             self._send_json({"ok": True, "reloaded": reloaded})
             return
 
@@ -476,6 +485,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
                     return
                 reloaded = _trigger_reload()
+            self._audit("config.restore", target=filename, details={"reloaded": reloaded})
             self._send_json({
                 "ok": True, "reloaded": reloaded, "restored": filename, "restored_from": filename,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
@@ -501,6 +511,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 return
             if _on_restart_cb is not None:
+                self._audit("system.restart")
                 threading.Thread(target=_on_restart_cb, name="restart_trigger", daemon=True).start()
                 self._send_json({"ok": True, "message": "已触发系统优雅重启"})
             else:
@@ -512,6 +523,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             if _on_poll_cb is not None:
                 _on_poll_cb()
+                self._audit("system.poll")
                 self._send_json({"ok": True, "message": "已触发立即巡查"})
             else:
                 self._send_json({"ok": False, "errors": ["独立运行模式不支持立即巡查"]}, 400)
@@ -566,6 +578,7 @@ class _Handler(BaseHTTPRequestHandler):
                 reloaded = _trigger_reload()
                 from src.logger import log_all
                 log_all("⚙️ 网页端更新 config.json 并成功触发热重载")
+            self._audit("config.update", details={"reloaded": reloaded})
             self._send_json({
                 "ok": True, "reloaded": reloaded,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
@@ -624,6 +637,7 @@ class _Handler(BaseHTTPRequestHandler):
                 status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
             except Exception:
                 status = {}
+            self._audit("secrets.remove", details={"keys": ",".join(sorted(remove)), "reloaded": reloaded})
             self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove), "env_status": _env_status(), **status})
             return
 
@@ -663,6 +677,8 @@ class _Handler(BaseHTTPRequestHandler):
             status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
         except Exception:
             status = {}
+        self._audit("secrets.update", target=str(account or ""),
+                    details={"keys": ",".join(sorted(values)), "reloaded": reloaded})
         self._send_json({"ok": True, "reloaded": reloaded, "updated": sorted(values), "env_status": _env_status(), **status})
 
     def log_message(self, fmt: str, *args) -> None:

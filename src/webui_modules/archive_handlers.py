@@ -22,6 +22,7 @@ import config.config as cfg
 from src import archive as _archive
 from src.webui_modules.media_service import serve_file_range
 from src.webui_modules.static_handler import send_json
+from src.audit import record_event
 
 BLOG_IMAGE_DIR = Path("data/blog_images")
 _blog_db_local = threading.local()
@@ -323,6 +324,15 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(msgs, f, ensure_ascii=False, indent=2)
             os.replace(tmp, json_path)
+        try:
+            from src.webui_modules.auth_handlers import current_user
+            user = current_user(handler) or {}
+            source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
+            record_event("archive.custom_tags", outcome="success", actor=user.get("username"),
+                         source_ip=source_ip, target=f"{member}/{year:04d}-{month:02d}/{msg_id}",
+                         details={"tag_count": len([tag for tag in tags.split(",") if tag.strip()])})
+        except Exception:
+            pass
         _send_json_resp(handler, {"ok": True, "id": msg_id, "custom_tags": tags})
         return
 

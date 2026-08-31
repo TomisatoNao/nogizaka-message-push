@@ -95,12 +95,14 @@ def handle_logs(handler) -> None:
         send_json(handler, {"ok": True, "source": "live", "entries": entries, "seq": seq})
         return
 
-    if source in ("error", "response", "system"):
+    if source in ("error", "response", "system", "audit"):
         import config.config as cfg
         if source == "error":
             fp = Path(cfg.ERROR_LOG_FILE)
         elif source == "system":
             fp = Path(getattr(cfg, "SYSTEM_LOG_FILE", "logs/system_info.log"))
+        elif source == "audit":
+            fp = Path(getattr(cfg, "AUDIT_LOG_FILE", "logs/audit.jsonl"))
         else:
             fp = Path(cfg.RESPONSE_LOG_FILE)
 

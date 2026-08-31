@@ -26,6 +26,9 @@ GEMINI.md
 # Docker 镜像导出临时文件
 *.tar
 
+# 本地备份归档（通常含配置与凭据数据库）
+backups/
+
 # Git worktrees
 .worktrees/
 
