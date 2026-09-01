@@ -25,7 +25,7 @@ ENDPOINTS = (
     ("archive_blog_groups", "/api/archive/blog_groups"),
     ("archive_home", "/api/archive/home"),
     ("archive_css", "/static/archive.css?v=20260831_7"),
-    ("archive_js", "/static/archive.js?v=20260901_2"),
+    ("archive_js", "/static/archive.js?v=20260901_3"),
 )
 
 

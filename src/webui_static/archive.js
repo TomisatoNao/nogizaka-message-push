@@ -3272,6 +3272,7 @@ function renderHome(data) {
     });
   } else {
     tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px;grid-column:1/-1;">暂无历史消息</div>';
+  }
   };
 
   const renderIfCurrent = (callback) => {

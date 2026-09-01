@@ -296,7 +296,7 @@ def test_archive_home_boot_starts_home_request_in_parallel():
 
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260901_2" in html
+    assert "/static/archive.js?v=20260901_3" in html
 
 
 def test_social_handlers_restore_webui_routes():
