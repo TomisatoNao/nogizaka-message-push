@@ -72,14 +72,44 @@ def start_social_service(config: dict) -> SocialScheduler | None:
 
         def _forward_callback(platform: str, posts: list):
             succeeded = []
+            outcome_counts: dict[str, int] = {}
             for p in posts:
                 try:
-                    if _forwarder.forward_post(p):
+                    completed = _forwarder.forward_post(p)
+                    result = _forwarder.last_delivery_result
+                    outcome = result.outcome if result is not None else (
+                        "success" if completed else "error"
+                    )
+                    outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+                    if completed:
                         succeeded.append(p)
-                    else:
-                        log_all(f"⚠️ [{platform}] 动态 {p.post_id} 未投递成功，将在下轮重试", is_error=True)
+                    elif result is None:
+                        log_all(
+                            f"⚠️ [{platform}] 动态 {p.post_id} 未投递成功，将在下轮重试",
+                            is_error=True,
+                        )
                 except Exception as ex:
+                    outcome_counts["error"] = outcome_counts.get("error", 0) + 1
                     log_all(f"⚠️ [{platform}] 动态 {p.post_id} 推送失败: {type(ex).__name__}", is_error=True)
+
+            if posts:
+                labels = (
+                    ("success", "完整成功"),
+                    ("partial", "部分成功"),
+                    ("failed", "全部失败"),
+                    ("no_route", "无匹配路由"),
+                    ("already_delivered", "已投递"),
+                    ("error", "异常"),
+                )
+                summary = " · ".join(
+                    f"{label} {outcome_counts[key]}"
+                    for key, label in labels
+                    if outcome_counts.get(key, 0)
+                )
+                log_all(
+                    f"📊 [{platform}] 推送汇总 | 待处理 {len(posts)} | "
+                    f"完成 {len(succeeded)} | {summary or '无结果'}",
+                )
             return succeeded
 
         _scheduler = SocialScheduler(

@@ -88,7 +88,14 @@ async def _handle_message(member: dict, msg: dict,
         else:
             translated = raw
             trans_model = model_name or ""
-            log_all(f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成 ({trans_model}): {translated[:100]}...", is_debug=True)
+            # 日志只保留可定位的元数据，不输出翻译正文：正文可能包含隐私，
+            # 且多行内容会把一条事件拆成大量难以检索的日志行。
+            log_all(
+                f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成 | "
+                f"模型: {trans_model or '未知'} | 原文: {len(original_text)} 字 | "
+                f"译文: {len(translated)} 字",
+                is_debug=True,
+            )
 
     # 归档（先行下载媒体并持久化，保证本地素材就绪供各推送通道复用）
     await archive.archive_message(member, msg, translated)

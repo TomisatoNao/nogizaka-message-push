@@ -10,6 +10,7 @@ social/forwarder.py — 社交平台多通道推送分发中心
 """
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import subprocess  # nosec B404
@@ -34,6 +35,33 @@ class SendFailed(RuntimeError):
     """发送失败 —— 向上抛出，让调度器不标记已同步（下轮自动重试）。"""
 
 
+@dataclass(frozen=True)
+class SocialDeliveryResult:
+    """一条社交动态的路由投递结果。
+
+    ``complete`` 与 ``any_success`` 刻意分开：部分路由成功时，成功路由可以
+    保留在数据库中跳过，但失败路由仍需在下一轮补偿，因此不能把部分成功当作
+    整条内容已经完成。
+    """
+
+    outcome: str
+    matched_routes: int
+    attempted_routes: int
+    success_routes: int
+    failed_routes: int
+    skipped_routes: int = 0
+    errors: tuple[str, ...] = ()
+
+    @property
+    def any_success(self) -> bool:
+        return self.success_routes > 0
+
+    @property
+    def complete(self) -> bool:
+        """是否可以让 fetcher 将整条内容标记为已同步。"""
+        return self.outcome in {"success", "no_route", "already_delivered"}
+
+
 class SocialForwarder:
     """社交平台多通道推送器。"""
 
@@ -41,6 +69,16 @@ class SocialForwarder:
         self._config = config
         self._dl = downloader
         self._store = store
+        self._last_delivery_result: SocialDeliveryResult | None = None
+
+    @property
+    def last_delivery_result(self) -> SocialDeliveryResult | None:
+        """最近一次 ``forward_post()`` 的结果。
+
+        社媒管理器在持有共享转发锁时读取该属性，因此不会与另一个平台的
+        转发结果交叉。外部调用方也可以用它解释 bool 返回值的具体原因。
+        """
+        return self._last_delivery_result
 
     @property
     def _cfg(self) -> dict:
@@ -98,9 +136,12 @@ class SocialForwarder:
     def forward_post(self, post: Post, target_channels: list[str] | None = None) -> bool:
         """推送一条社交动态至各通道，返回是否已安全完成。
 
-        仅当至少一个已匹配路由成功时才返回 ``True``；没有匹配路由属于
-        配置决定的跳过，也视为完成，避免被调度器无限重复拉取。
+        所有匹配路由成功，或没有匹配路由（配置决定的跳过）时返回 ``True``。
+        部分成功仍返回 ``False``，这样 fetcher 不会过早标记整条内容已同步，
+        下一轮可以只补发失败路由。具体结果可从 ``last_delivery_result`` 读取。
         """
+        self._last_delivery_result = None
+
         # 1. AI 翻译（如明确跳过或已有翻译则不再调用）
         skip_translate = post.extra.get("_skip_translate", False)
         if skip_translate:
@@ -141,10 +182,11 @@ class SocialForwarder:
         )
 
         async def _do_broadcast():
-            any_success = False
             errors = []
             tasks = []
             task_route_ids = []
+            matched_routes = 0
+            skipped_routes = 0
 
             # ── A. Telegram Bot 并发推送 ──────────────────────────────
             if getattr(cfg, "ENABLE_TG_BOT", False) and (not target_channels or any(c == "tg" or c.startswith("tg:") for c in target_channels)):
@@ -163,7 +205,9 @@ class SocialForwarder:
                         if b.social_filter and acc_name not in b.social_filter and (not m_name or m_name not in b.social_filter):
                             continue
                     route_id = f"tg:{getattr(b, 'name', b.target_chat)}"
+                    matched_routes += 1
                     if route_id in delivered_routes:
+                        skipped_routes += 1
                         continue
 
                     async def _send_tg_post(target_bot=b):
@@ -229,7 +273,9 @@ class SocialForwarder:
                         if s_filters and acc_name not in s_filters and (not m_name or m_name not in s_filters):
                             continue
                     route_id = f"napcat:{gid}"
+                    matched_routes += 1
                     if route_id in delivered_routes:
+                        skipped_routes += 1
                         continue
 
                     async def _send_napcat_post(route=r, target_gid=gid):
@@ -278,7 +324,9 @@ class SocialForwarder:
                         if bot.social_filter and acc_name not in bot.social_filter and (not m_name or m_name not in bot.social_filter):
                             continue
                     route_id = f"official:{bot.name}"
+                    matched_routes += 1
                     if route_id in delivered_routes:
+                        skipped_routes += 1
                         continue
 
                     async def _send_official_post(b=bot, sp=send_private, sg=send_group):
@@ -315,7 +363,12 @@ class SocialForwarder:
                     task_route_ids.append(route_id)
 
             if not tasks:
-                return True, errors
+                return {
+                    "results": (),
+                    "errors": tuple(errors),
+                    "matched_routes": matched_routes,
+                    "skipped_routes": skipped_routes,
+                }
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for route_id, result in zip(task_route_ids, results):
@@ -326,20 +379,86 @@ class SocialForwarder:
                         plat, post.post_id, route_id, result is True,
                         "" if result is True else type(result).__name__,
                     )
-            any_success = all(result is True for result in results)
-
-            return any_success, errors
+            return {
+                "results": tuple(results),
+                "errors": tuple(errors),
+                "matched_routes": matched_routes,
+                "skipped_routes": skipped_routes,
+            }
 
         try:
-            any_success, errors = self._dispatch_async(_do_broadcast())
+            broadcast = self._dispatch_async(_do_broadcast())
+            results = tuple(broadcast.get("results", ()))
+            errors = tuple(broadcast.get("errors", ()))
+            matched_routes = int(broadcast.get("matched_routes", 0))
+            skipped_routes = int(broadcast.get("skipped_routes", 0))
+            attempted_routes = len(results)
+            success_routes = sum(result is True for result in results)
+            failed_routes = attempted_routes - success_routes
+
+            if matched_routes == 0:
+                outcome = "no_route"
+            elif attempted_routes == 0 and skipped_routes == matched_routes:
+                outcome = "already_delivered"
+            elif failed_routes == 0:
+                outcome = "success"
+            elif success_routes > 0:
+                outcome = "partial"
+            else:
+                outcome = "failed"
+
+            self._last_delivery_result = SocialDeliveryResult(
+                outcome=outcome,
+                matched_routes=matched_routes,
+                attempted_routes=attempted_routes,
+                success_routes=success_routes,
+                failed_routes=failed_routes,
+                skipped_routes=skipped_routes,
+                errors=errors,
+            )
             if errors:
                 for err in errors:
                     log_all(f"⚠️ [社媒推送] {err}", is_error=True)
-            if any_success:
-                log_all(f"✅ [社媒推送] {post.platform} 动态已分发: {post.author} - {post.post_id[:20]}", is_debug=True)
+
+            post_ref = f"{post.author} - {post.post_id[:20]}"
+            if outcome == "no_route":
+                log_all(
+                    f"⏭️ [社媒推送] {post.platform} 动态跳过 | 无匹配路由 | {post_ref}",
+                )
+            elif outcome == "already_delivered":
+                log_all(
+                    f"✅ [社媒推送] {post.platform} 动态已完成 | 路由已投递 "
+                    f"{skipped_routes}/{matched_routes} | {post_ref}",
+                    is_debug=True,
+                )
+            elif outcome == "success":
+                log_all(
+                    f"✅ [社媒推送] {post.platform} 动态已分发 | 路由成功 "
+                    f"{success_routes}/{matched_routes} | {post_ref}",
+                    is_debug=True,
+                )
+            elif outcome == "partial":
+                log_all(
+                    f"⚠️ [社媒推送] {post.platform} 动态部分成功 | 路由成功 "
+                    f"{success_routes}/{matched_routes} | 失败 {failed_routes} | "
+                    f"下轮仅重试失败路由 | {post_ref}",
+                    is_error=True,
+                )
             else:
-                log_all(f"⚠️ [社媒推送] {post.platform} 动态全部目标失败，将在下轮重试: {post.post_id[:20]}", is_error=True)
+                log_all(
+                    f"⚠️ [社媒推送] {post.platform} 动态全部目标失败 | "
+                    f"路由 0/{matched_routes} | 下轮重试 | {post_ref}",
+                    is_error=True,
+                )
         except Exception as e:
+            self._last_delivery_result = SocialDeliveryResult(
+                outcome="error",
+                matched_routes=0,
+                attempted_routes=0,
+                success_routes=0,
+                failed_routes=0,
+                errors=(f"{type(e).__name__}: {e}",),
+            )
             log_all(f"🔥 [社媒推送] 分发异常: {type(e).__name__}", is_error=True)
             return False
 
@@ -349,7 +468,7 @@ class SocialForwarder:
             archive.get_archive().add_post(post)
         except (OSError, ValueError) as e:
             log_all(f"⚠️ [社媒归档] 写入失败: {type(e).__name__}", is_debug=True)
-        return any_success
+        return bool(self._last_delivery_result and self._last_delivery_result.complete)
 
     def send_recording(self, result) -> None:
         """发送「直播录制完成」通知并归档。"""

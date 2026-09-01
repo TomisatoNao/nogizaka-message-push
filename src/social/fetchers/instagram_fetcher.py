@@ -688,22 +688,67 @@ class InstagramFetcher(SocialFetcher):
                       account)
             return []
 
-        log.info("[instagram] 📖 @%s 发现 %s 条 Story", account, len(entries))
-        ids = [f"instagram_story_{e['id']}" for e in entries]
+        # 这里拿到的是 API 当前仍可见的 Story 列表，不等于「待推送的新内容」。
+        # Story 在 24 小时内会被每轮重复返回，先记录扫描数，再单独统计去重结果，
+        # 避免日志让人误以为每次「发现」都会再次推送。
+        scan_count = len(entries)
+        ids = [
+            f"instagram_story_{e.get('id')}"
+            for e in entries
+            if e.get("id") is not None
+        ]
         # ⚠️ Story **不做** first_run_skip。
         # bootstrap 的做法是「只标记已发送、不下载」，对 Feed 没问题（帖子长期存在，
         # 以后随时能补），但 Story **24 小时就过期**——跳过一次就等于永久丢失，
         # 而这恰恰是监控 Story 的全部意义。当前在线的 Story 至多几条，不会刷屏。
         if self.cfg.get("story_first_run_skip", False):
             if self._bootstrap_guard(account, ids, kind="story"):
+                log.info(
+                    "[instagram] @%s Story 首次监控守卫 | 扫描 %s | 已记录 %s | 推送 0",
+                    account, scan_count, len(ids),
+                )
                 return []
 
-        out: list[Post] = []
-        for e in entries:
-            item_id = str(e["id"])
+        pending_entries: list[dict] = []
+        dedup_count = 0
+        invalid_count = 0
+        for entry in entries:
+            item_id = str(entry.get("id") or "")
+            if not item_id:
+                invalid_count += 1
+                continue
             post_id = f"instagram_story_{item_id}"
             if self.is_sent(post_id):
-                continue
+                dedup_count += 1
+            else:
+                pending_entries.append(entry)
+
+        pending_count = len(pending_entries)
+        if not pending_entries:
+            log.info(
+                "[instagram] @%s Story 扫描完成 | API返回 %s | 已推送/去重 %s | "
+                "待处理 0 | 不进入推送",
+                account, scan_count, dedup_count,
+            )
+            if invalid_count:
+                log.warning("[instagram] @%s Story 有 %s 条缺少媒体 ID，已跳过", account, invalid_count)
+            return []
+
+        log.info(
+            "[instagram] @%s Story 扫描完成 | API返回 %s | 已推送/去重 %s | "
+            "待处理 %s%s",
+            account, scan_count, dedup_count, pending_count,
+            f" | 无效 {invalid_count}" if invalid_count else "",
+        )
+
+        out: list[Post] = []
+        processed_count = 0
+        downloaded_count = 0
+        failed_count = invalid_count
+        for e in pending_entries:
+            processed_count += 1
+            item_id = str(e.get("id") or "")
+            post_id = f"instagram_story_{item_id}"
             self.mark_seen(post_id, account, "story")
             url = (e.get("url") or e.get("webpage_url")
                    or STORY_URL.format(account=account))
@@ -729,6 +774,7 @@ class InstagramFetcher(SocialFetcher):
                 if not files:
                     # Story 必然是图片或视频 —— 没下到就跳过，下轮重试
                     raise RuntimeError("Story 媒体下载失败")
+                downloaded_count += 1
                 ts = e.get("timestamp") or 0
                 out.append(Post(
                     platform="instagram",
@@ -744,9 +790,18 @@ class InstagramFetcher(SocialFetcher):
                            "item_id": item_id},
                 ))
             except Exception as ex:
+                failed_count += 1
                 log.warning("[instagram] Story %s 处理失败: %s", item_id, ex)
             if len(out) >= self.max_items_per_poll:
                 break
+
+        deferred_count = max(0, pending_count - processed_count)
+        log.info(
+            "[instagram] @%s Story 处理完成 | 待处理 %s | 下载成功 %s | "
+            "处理失败 %s | 待转发 %s | 延后 %s",
+            account, pending_count, downloaded_count, failed_count,
+            len(out), deferred_count,
+        )
         return out
 
 
