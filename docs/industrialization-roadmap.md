@@ -299,14 +299,14 @@ curl --connect-timeout 5 http://<NAS 局域网 IP>:46046
 
 ## P9：归档页与管理页顶部栏吸顶回归修复（2026-09-02）
 
-**状态：代码已落地，本地质量门禁通过，生产滚动验收待发布。**
+**状态：已推送并部署，生产滚动验收通过。**
 
 本批次修复两个页面顶部栏在长页面滚动后离开视口的问题。`header.app-header` 原本仍配置为 `position: sticky`，但全局 `html/body { overflow-x: hidden; }` 使 `body` 形成了额外的非实际滚动容器，导致 sticky 的参照物错误。该回归与 2026-08-30 的移动端横向溢出修复相关。
 
 | 领域 | 已落地内容 | 验收标准/当前结果 |
 | --- | --- | --- |
-| 滚动容器 | 全局及移动端重复规则改用 `overflow-x: clip`，只裁剪横向溢出，不创建 sticky 的错误滚动容器。 | 本地 CSS 回归断言通过；生产滚动验收待发布。 |
-| 顶部栏 | 保留共用 `header.app-header` 的 `position: sticky; top: 0; z-index: 1000`，不改为 fixed。 | 归档页、管理页在任意滚动位置顶部栏应保持可见。 |
+| 滚动容器 | 全局及移动端重复规则改用 `overflow-x: clip`，只裁剪横向溢出，不创建 sticky 的错误滚动容器。 | 本地与生产 computed style 均为 `clip/visible`，横向无溢出。 |
+| 顶部栏 | 保留共用 `header.app-header` 的 `position: sticky; top: 0; z-index: 1000`，不改为 fixed。 | 生产归档页滚动 1000px、管理页滚动 474px 后顶部栏均保持 `top=0`。 |
 | 缓存 | 归档页与管理页的 `theme.css/theme.js` 版本号更新为 `20260902_3`。 | 浏览器不会继续使用旧版主题资源。 |
 | 回归测试 | 增加根滚动容器与两个页面资源版本的静态回归断言。 | 全量 pytest、Ruff、compileall、diff 检查通过。 |
 
@@ -316,7 +316,9 @@ curl --connect-timeout 5 http://<NAS 局域网 IP>:46046
 - `python -m ruff check src tests tools`：通过；
 - `python -m compileall -q src tools tests`：通过；
 - `git diff --check`：通过；
-- 尚未推送或部署，生产验收需在发布后重新执行归档首页、消息/博客视图及管理后台长页面滚动检查。
+- 已推送提交 `bd0fbb7` 并部署 NAS；生产健康接口返回 `200`，归档页与管理页资源均加载 `theme.css?v=20260902_3`。
+- Chrome 生产验收：归档页 `scrollY=1000`、管理页 `scrollY=474` 时 `header.app-header.getBoundingClientRect().top=0`；两页 `html/body` 均为 `overflow-x=clip`、`overflow-y=visible`。
+- Chrome 扩展产生的异步消息通道错误属于浏览器扩展噪声，不是页面脚本异常；归档页在独立页面运行时控制台无应用错误。
 
 ## 4.1 实施台账（截至 2026-09-02）
 
@@ -331,7 +333,7 @@ curl --connect-timeout 5 http://<NAS 局域网 IP>:46046
 | M4 可观测性与恢复 | 部分完成 | 管理端审计日志（脱敏、滚动）、审计日志查看、可校验备份/恢复演练命令、健康接口及既有通道告警已上线（`ba3ed0a`）；本批次补齐翻译元数据日志、Instagram Story 扫描/去重/下载/待转发链路日志、社媒路由结果和批次汇总，以及成员消息巡查成功路径降噪与统计摘要。 | 结构化请求/任务 ID、指标仪表盘、定时备份和恢复演练制度尚未落地。 |
 | M5 代码治理 | 持续进行 | 见下方已部署批次。 | 其余外部 API、博客/社交路径的异常分类，持久化补偿重试与并发故障注入仍需继续。 |
 | P6 首页性能 | 已完成 | 数据库首页聚合已消除成员级 N+1，首页响应去除成员重复最新消息，Hero/写真优先渲染、动态流空闲延后、版本化静态资源长期缓存；完成 10 并发、浏览器回归、全量测试并部署 NAS。 | 后续可继续做真实冷启动的长期趋势监控。 |
-| P9 顶部栏吸顶 | 代码完成 | 修复 `html/body overflow-x` 创建错误滚动容器导致的共用顶部栏 sticky 失效；同步资源版本并增加回归断言。 | 生产滚动验收、推送和 NAS 部署待执行。 |
+| P9 顶部栏吸顶 | 已完成 | 修复 `html/body overflow-x` 创建错误滚动容器导致的共用顶部栏 sticky 失效；同步资源版本并增加回归断言。 | 已推送 `bd0fbb7`、部署 NAS，归档页与管理页生产滚动验收通过。 |
 
 ### M5 已部署批次
 
