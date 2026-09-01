@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260831_7">
 <script src="/static/theme.js?v=20260831_7"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260831_7">
+<link rel="stylesheet" href="/static/archive.css?v=20260902_1">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -121,11 +121,11 @@
   <button class="nav calendar-toggle" id="calendarToggle" type="button" aria-expanded="false">▦ 按日期跳转</button>
   <div class="cal">
     <div class="cal-head">
-      <button id="calPrev">◀</button>
+      <button id="calPrev" type="button" aria-label="上一个月">◀</button>
       <span class="title" id="calTitle">—</span>
-      <button id="calNext">▶</button>
+      <button id="calNext" type="button" aria-label="下一个月">▶</button>
     </div>
-    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-grid" id="calGrid" role="grid" aria-label="归档日历"></div>
     <div class="cal-foot" id="calFoot"></div>
   </div>
 </aside>
@@ -340,6 +340,6 @@
   </div>
 </div>
 
-<script src="/static/archive.js?v=20260901_3"></script>
+<script src="/static/archive.js?v=20260902_1"></script>
 </body>
 </html>

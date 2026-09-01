@@ -1716,6 +1716,13 @@ html.view-blog #blogGrid { display: block !important; }
     background: color-mix(in srgb, var(--accent) 12%, var(--card));
     color: var(--accent);
   }
+  .member-popover-item:focus-visible,
+  .author-popover-item:focus-visible,
+  .seg-btn:focus-visible,
+  .cal-head button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .member-popover-item.active,
   .author-popover-item.active {
     background: var(--accent);

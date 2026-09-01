@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import random
+import re
 import sqlite3
 import threading
 from urllib.parse import parse_qs, quote, unquote
@@ -91,6 +92,45 @@ def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "") ->
             continue
         days[day] = int(row[1] or 0)
     return days
+
+
+def _message_media_totals(members: list[dict]) -> dict[str, int]:
+    """汇总消息媒体数量；博客数量不应混入媒体指标。"""
+    pictures = sum(int((member.get("stats") or {}).get("pictures", 0) or 0) for member in members)
+    videos = sum(int((member.get("stats") or {}).get("videos", 0) or 0) for member in members)
+    voices = sum(int((member.get("stats") or {}).get("voices", 0) or 0) for member in members)
+    return {
+        "pictures": pictures,
+        "videos": videos,
+        "voices": voices,
+        "total": pictures + videos + voices,
+    }
+
+
+def _blog_media_url(relative_path: str) -> str:
+    """把博客本地媒体路径转换为同源代理 URL。"""
+    if not relative_path:
+        return ""
+    parts = str(relative_path).replace("\\", "/").strip("/").split("/")
+    return "/api/archive/blog_media/" + "/".join(quote(part) for part in parts if part)
+
+
+def _blog_list_excerpt(body_text: str, translation: str, query: str, limit: int = 260) -> str:
+    """生成博客列表摘要，不把正文/译文全文下发到列表接口。"""
+    text = " ".join(" ".join(re.sub(r"<[^>]+>", " ", str(value or "")).replace("\n", " ").split())
+                    for value in (body_text, translation)).strip()
+    if not text:
+        return ""
+    if query:
+        lower_text = text.lower()
+        idx = lower_text.find(str(query).lower())
+        if idx >= 0:
+            start = max(0, idx - limit // 3)
+            end = min(len(text), start + limit)
+            prefix = "…" if start else ""
+            suffix = "…" if end < len(text) else ""
+            return prefix + text[start:end].strip() + suffix
+    return text[:limit].rstrip() + ("…" if len(text) > limit else "")
 
 
 def _send_json_resp(handler, obj: dict, code: int = 200) -> None:
@@ -680,8 +720,9 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             authors.sort(key=lambda x: x["_sort"])
             for a_item in authors:
                 a_item.pop("_sort", None)
-        except Exception:
-            pass
+        except (sqlite3.Error, OSError, ImportError, ValueError) as exc:
+            _send_json_resp(handler, {"ok": False, "errors": [f"博客作者暂时不可用: {exc}"]}, 500)
+            return
         _send_json_resp(handler, {"ok": True, "group": group, "authors": authors})
         return
 
@@ -744,17 +785,46 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
                 offset = (page - 1) * per_page
                 total_pages = max(1, (total + per_page - 1) // per_page)
 
-            sql = f"SELECT * FROM blog_posts {where} ORDER BY date DESC LIMIT ? OFFSET ?"
+            # 列表只返回卡片所需的轻量摘要；正文、完整译文与 raw_json 由详情接口按需返回。
+            sql = f"""
+                SELECT id, group_key, author, title, url, date,
+                       body_text, translation, content_json,
+                       images_json, image_paths_json
+                FROM blog_posts {where}
+                ORDER BY date DESC LIMIT ? OFFSET ?
+            """
             rows = db.execute(sql, params + [limit, offset]).fetchall()
             for r in rows:
                 d = dict(r)
-                d["images_json"] = d.get("images_json") or "[]"
-                d["image_paths_json"] = d.get("image_paths_json") or "[]"
-                d["content_json"] = d.get("content_json") or "[]"
-                d["translation_model"] = d.get("translation_model") or ""
+                images_raw = d.pop("images_json", "") or "[]"
+                paths_raw = d.pop("image_paths_json", "") or "[]"
+                content_raw = d.pop("content_json", "") or "[]"
+                try:
+                    images = json.loads(images_raw) if isinstance(images_raw, str) else images_raw
+                except (TypeError, ValueError):
+                    images = []
+                try:
+                    paths = json.loads(paths_raw) if isinstance(paths_raw, str) else paths_raw
+                except (TypeError, ValueError):
+                    paths = []
+                images = images if isinstance(images, list) else []
+                paths = paths if isinstance(paths, list) else []
+                first_path = next((str(item) for item in paths if item), "")
+                first_image = next((str(item) for item in images if item), "")
+                d["cover"] = _blog_media_url(first_path) if first_path else first_image
+                d["cover_original"] = first_image if first_path and first_image else ""
+                d["image_count"] = max(len(images), len(paths))
+                translation = d.pop("translation", "") or ""
+                d["has_translation"] = bool(
+                    str(translation).strip() or
+                    (content_raw not in ("", "[]", "{}"))
+                )
+                body_text = d.pop("body_text", "") or ""
+                d["excerpt"] = _blog_list_excerpt(body_text, translation, q)
                 posts.append(d)
-        except Exception:
-            pass
+        except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+            _send_json_resp(handler, {"ok": False, "errors": [f"博客列表暂时不可用: {exc}"]}, 500)
+            return
         _send_json_resp(handler, {
             "ok": True, "group": group, "posts": posts,
             "total": total, "page": page, "total_pages": total_pages,
@@ -1060,6 +1130,7 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
 
         recent_feed = sorted(agg_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:8]
         total_messages = sum(m["stats"]["total"] for m in members)
+        media_totals = _message_media_totals(members)
         first_dates = [m["stats"]["first_date"] for m in members if m["stats"]["first_date"]] + [g["first_date"] for g in blog_groups if g["first_date"]]
         last_dates = [m["stats"]["last_date"] for m in members if m["stats"]["last_date"]] + [g["last_date"] for g in blog_groups if g["last_date"]]
 
@@ -1069,6 +1140,11 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
                 "total_messages": total_messages,
                 "total_blogs": total_blogs,
                 "total_all": total_messages + total_blogs,
+                # 明确区分消息媒体与消息/博客总量，避免首页把 total_all 当作媒体数。
+                "total_pictures": media_totals["pictures"],
+                "total_videos": media_totals["videos"],
+                "total_voices": media_totals["voices"],
+                "message_media_total": media_totals["total"],
                 "member_count": len(members),
                 "blog_group_count": len(blog_groups),
                 "blog_author_count": total_blog_authors,

@@ -153,6 +153,19 @@ def test_archive_handlers_and_media_service():
     assert callable(config_service.validate_config)
 
 
+def test_message_media_totals_do_not_fall_back_to_total_messages():
+    members = [
+        {"stats": {"total": 10, "pictures": 3, "videos": 2, "voices": 1}},
+        {"stats": {"total": 7, "pictures": 0, "videos": 1, "voices": 0}},
+    ]
+    assert archive_handlers._message_media_totals(members) == {
+        "pictures": 3,
+        "videos": 3,
+        "voices": 1,
+        "total": 7,
+    }
+
+
 def test_blog_calendar_endpoint_filters_group_author_and_invalid_dates(monkeypatch):
     import sqlite3
 
@@ -205,6 +218,62 @@ def test_blog_calendar_endpoint_filters_group_author_and_invalid_dates(monkeypat
     assert author.code == 200
     assert author.payload["days"] == {"2026-08-01": 2, "2026-08-02": 1}
     assert author.payload["total"] == 3
+
+
+def test_blog_list_endpoint_returns_summary_dto_without_full_body(monkeypatch):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute(
+        """CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY, group_key TEXT, author TEXT, title TEXT, url TEXT,
+            date TEXT, body_html TEXT, body_text TEXT, translation TEXT,
+            content_json TEXT, translation_model TEXT, images_json TEXT,
+            image_paths_json TEXT, raw_json TEXT
+        )"""
+    )
+    db.execute(
+        """INSERT INTO blog_posts
+           (id, group_key, author, title, url, date, body_html, body_text,
+            translation, content_json, translation_model, images_json, image_paths_json, raw_json)
+           VALUES (1, 'nogizaka', '冨里 奈央', '夏のブログ', 'https://example.test/1',
+                   '2026-08-01 10:00', '<p>正文</p>', ?, '译文', '[]', '', ?, ?, '{}')""",
+        ("正文 " * 400, '["https://cdn.test/cover.jpg"]', '["nogizaka/1/cover.jpg"]'),
+    )
+    db.commit()
+    monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
+
+    class Handler(_ResponseHandler):
+        def __init__(self, path):
+            super().__init__()
+            self.path = path
+            self.command = "GET"
+            self.payload = None
+            self.code = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+            self.code = code
+
+    handler = Handler("/api/archive/blogs?group=nogizaka&page=1&per_page=24")
+    archive_handlers.handle_archive(handler, "blogs", lambda **_: True, lambda: None)
+
+    assert handler.code == 200
+    post = handler.payload["posts"][0]
+    assert post["id"] == 1
+    assert post["cover"] == "/api/archive/blog_media/nogizaka/1/cover.jpg"
+    assert post["cover_original"] == "https://cdn.test/cover.jpg"
+    assert post["has_translation"] is True
+    assert len(post["excerpt"]) <= 261
+    assert "body_html" not in post
+    assert "raw_json" not in post
+    assert "images_json" not in post
+
+    detail = Handler("/api/archive/blogs?id=1")
+    archive_handlers.handle_archive(detail, "blogs", lambda **_: True, lambda: None)
+    assert detail.code == 200
+    assert detail.payload["post"]["body_html"] == "<p>正文</p>"
 
 
 def test_archive_home_cache_is_single_flight(monkeypatch):
@@ -294,9 +363,20 @@ def test_archive_home_boot_starts_home_request_in_parallel():
     assert "window.requestIdleCallback" in script
 
 
+def test_archive_blog_route_and_request_guards_are_present():
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    assert "let blogPageVersion = 0" in script
+    assert "if (version !== blogPageVersion || curMode !== \"blog\") return;" in script
+    assert "function syncBlogHash(pageNum = page)" in script
+    assert "const author = p.has(\"author\")" in script
+    assert "blogReaderReturnHash" in script
+    assert "message_media_total" in script
+    assert 'switchMainTab("blog", true)' not in script
+
+
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260901_3" in html
+    assert "/static/archive.js?v=20260902_1" in html
 
 
 def test_social_handlers_restore_webui_routes():

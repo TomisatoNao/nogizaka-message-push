@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 // 清理旧版本遗留的可读 Token；新的 Token 模式使用 HttpOnly 会话 Cookie。
 try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
+const BLOG_GROUP_KEYS = ["nogizaka", "sakurazaka", "hinatazaka"];
 
 let members = [];        // [{name, display, total, months}]
 let blogGroups = [];     // [{key, total, first_date, last_date}]
@@ -18,11 +19,16 @@ let lastDay = "";
 let searchQuery = "";    // 非空 = 搜索模式
 let dayCounts = {};      // "YYYY-MM-DD" -> 条数（日历用）
 let calYM = null;        // 日历当前显示的 {year, month}（可独立于时间线翻页）
+let blogCalendarError = "";
+let blogGroupsError = "";
 let contentVersion = 0;  // 成员 / 月份 / 筛选变化后，旧响应不应覆盖新页面
 let contentAbort = null;
 let pageLoading = false;
 let calendarVersion = 0;
 let calendarAbort = null;
+let blogPageVersion = 0;      // 博客列表请求版本，避免旧响应覆盖当前筛选
+let blogPageAbort = null;
+let blogSelectionVersion = 0; // 博客分组/作者切换版本
 let lightboxOpener = null;
 let memberVersion = 0;
 let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲掉）
@@ -359,14 +365,17 @@ async function loadBlogCalendar() {
     const data = await api("/api/archive/blog_calendar?group=" + encodeURIComponent(curBlogGroup) +
                            "&author=" + encodeURIComponent(curBlogAuthor || ""), { signal: calendarAbort.signal });
     if (version !== calendarVersion) return;
-    dayCounts = data.ok ? (data.days || {}) : {};
+    if (!data.ok || typeof data.days !== "object") throw new Error("博客日历接口返回无效数据");
+    blogCalendarError = "";
+    dayCounts = data.days || {};
   } catch (e) {
     if (e.name === "AbortError" || version !== calendarVersion) return;
     dayCounts = {};
+    blogCalendarError = "日历暂时不可用，请稍后重试";
   }
   if (version !== calendarVersion) return;
   
-  if (!calYM || Object.keys(dayCounts).length > 0) {
+  if (!curBlogDate && (!calYM || Object.keys(dayCounts).length > 0)) {
     const keys = Object.keys(dayCounts).sort();
     if (keys.length > 0) {
       const latest = keys[keys.length - 1];
@@ -400,6 +409,7 @@ function renderCalendar() {
     const n = dayCounts[key] || 0;
     monthTotal += n;
     const cell = document.createElement(n > 0 ? "button" : "div");
+    cell.setAttribute("role", "gridcell");
     let cls = "cal-day" + (n > 0 ? " has" : "") +
       (n >= 6 ? " h3" : n >= 3 ? " h2" : n >= 1 ? " h1" : "");
     if (curMode === "blog" && curBlogDate === key) {
@@ -411,6 +421,7 @@ function renderCalendar() {
       cell.type = "button";
       cell.title = key + " · " + n + " " + entryNoun;
       cell.setAttribute("aria-label", key + "，共 " + n + " " + entryNoun + "，跳转到当天");
+      cell.setAttribute("aria-pressed", String(curMode === "blog" && curBlogDate === key));
       const count = document.createElement("span");
       count.className = "n";
       count.textContent = n;
@@ -419,9 +430,11 @@ function renderCalendar() {
     }
     grid.appendChild(cell);
   }
-  $("calFoot").textContent = monthTotal > 0
-    ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
-    : (curMode === "blog" ? "本月无博客" : "本月无消息");
+  $("calFoot").textContent = (curMode === "blog" && blogCalendarError)
+    ? blogCalendarError
+    : (monthTotal > 0
+      ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
+      : (curMode === "blog" ? "本月无博客" : "本月无消息"));
 }
 
 $("calPrev").addEventListener("click", () => {
@@ -631,6 +644,9 @@ function renderMemberChips() {
 function renderMemberPopover(filterKeyword = "") {
   const list = $("memberPopoverList");
   if (!list) return;
+  list.setAttribute("role", "listbox");
+  const searchInput = $("memberSearchInput");
+  if (searchInput) searchInput.setAttribute("aria-label", "搜索成员");
   list.innerHTML = "";
   const kw = filterKeyword.toLowerCase().trim();
   const filtered = members.filter(m => !kw || m.display.toLowerCase().includes(kw) || m.name.toLowerCase().includes(kw));
@@ -684,6 +700,10 @@ function renderMemberPopover(filterKeyword = "") {
 
       const item = document.createElement("div");
       item.className = "member-popover-item " + g.cls + (m.name === curMember && curMode === "msg" ? " active" : "");
+      item.setAttribute("role", "option");
+      item.tabIndex = 0;
+      item.setAttribute("aria-selected", String(m.name === curMember && curMode === "msg"));
+      item.setAttribute("aria-label", (m.display || m.name) + "，" + (m.total || 0).toLocaleString() + " 条消息");
       item.innerHTML = '<div class="m-name-txt">' +
                        avatarHTML +
                        '<span class="mpi-name">' + esc(m.display) + '</span>' +
@@ -693,6 +713,14 @@ function renderMemberPopover(filterKeyword = "") {
         closeMemberPopover();
         hideHome();
         selectMember(m.name);
+      });
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          item.click();
+        } else if (event.key === "Escape") {
+          closeMemberPopover();
+        }
       });
       list.appendChild(item);
     });
@@ -728,7 +756,10 @@ function closeMemberPopover() {
 async function loadBlogGroupChips() {
   try {
     const bg = await api("/api/archive/blog_groups");
-    if (bg.ok) blogGroups = bg.groups;
+    if (!bg.ok || !Array.isArray(bg.groups)) throw new Error("博客分组接口返回无效数据");
+    blogGroupsError = "";
+    if ($("blogGroupSegment")) $("blogGroupSegment").removeAttribute("title");
+    blogGroups = bg.groups;
     blogGroups.forEach(g => {
       const numStr = g.total >= 1000 ? (g.total / 1000).toFixed(1).replace(/\.0$/, '') + "k" : g.total;
       if (g.key === "nogizaka" && $("bgNogiBadge")) $("bgNogiBadge").textContent = "(" + numStr + ")";
@@ -736,7 +767,15 @@ async function loadBlogGroupChips() {
       if (g.key === "hinatazaka" && $("bgHinataBadge")) $("bgHinataBadge").textContent = "(" + numStr + ")";
     });
     syncChipHighlight();
-  } catch(e) {}
+  } catch(e) {
+    // 分组接口失败不能让导航失去作用；保留固定分组并给出可见提示。
+    blogGroupsError = "博客分组统计暂不可用";
+    if ($("blogGroupSegment")) $("blogGroupSegment").setAttribute("title", blogGroupsError);
+    if (!blogGroups.length) blogGroups = BLOG_GROUP_KEYS.map(key => ({ key, total: 0 }));
+    const badgeMap = { nogizaka: "bgNogiBadge", sakurazaka: "bgSakuraBadge", hinatazaka: "bgHinataBadge" };
+    BLOG_GROUP_KEYS.forEach(key => { if ($(badgeMap[key])) $(badgeMap[key]).textContent = "(暂不可用)"; });
+    syncChipHighlight();
+  }
 }
 
 function _enterMemberMode() {
@@ -774,14 +813,39 @@ function syncChipHighlight() {
   }
   // 同步博客分组 Segmented Control
   document.querySelectorAll("#blogGroupSegment .seg-btn").forEach(btn => {
-    btn.classList.toggle("active", curMode === "blog" && btn.dataset.key === curBlogGroup);
+    const active = curMode === "blog" && btn.dataset.key === curBlogGroup;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
   });
 }
 
 // ── 博客相关逻辑 ─────────────────────────────────────
 let curGroupAuthors = [];
 
-async function selectBlogGroup(key, author = "", updateHash = true) {
+function writeArchiveHash(hash) {
+  selfHashUpdate = true;
+  location.hash = hash || "";
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+}
+
+function buildBlogHash({ group = curBlogGroup, author = curBlogAuthor, date = curBlogDate,
+                        query = searchQuery, pageNum = page, id = "" } = {}) {
+  const p = new URLSearchParams();
+  if (group) p.set("blog", group);
+  if (author) p.set("author", author);
+  if (date) p.set("date", date);
+  if (query) p.set("q", normalizedQuery(query));
+  if (pageNum && pageNum > 1) p.set("page", String(pageNum));
+  if (id !== "" && id !== null && id !== undefined) p.set("id", String(id));
+  return p.toString();
+}
+
+function syncBlogHash(pageNum = page) {
+  writeArchiveHash(buildBlogHash({ pageNum }));
+}
+
+async function selectBlogGroup(key, author = "", updateHash = true, routeState = {}) {
+  const selectionVersion = ++blogSelectionVersion;
   curMode = "blog";
   setHtmlViewClass("blog");
   curMember = "";
@@ -791,11 +855,25 @@ async function selectBlogGroup(key, author = "", updateHash = true) {
     localStorage.setItem("archive_last_blog_group", key);
     localStorage.setItem("archive_last_blog_author", curBlogAuthor);
   } catch (_) {}
-  curBlogDate = "";
-  dayCounts = {};
+  curBlogDate = Object.prototype.hasOwnProperty.call(routeState, "date")
+    ? String(routeState.date || "").slice(0, 10) : "";
   calYM = null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(curBlogDate)) {
+    const dateYear = Number(curBlogDate.slice(0, 4));
+    const dateMonth = Number(curBlogDate.slice(5, 7));
+    const dateDay = Number(curBlogDate.slice(8, 10));
+    const maxDay = new Date(Date.UTC(dateYear, dateMonth, 0)).getUTCDate();
+    if (dateMonth >= 1 && dateMonth <= 12 && dateDay >= 1 && dateDay <= maxDay) {
+      calYM = { year: dateYear, month: dateMonth };
+    } else {
+      curBlogDate = "";
+    }
+  }
+  dayCounts = {};
+  blogCalendarError = "";
   renderCalendar();
-  searchQuery = "";
+  searchQuery = Object.prototype.hasOwnProperty.call(routeState, "q")
+    ? normalizedQuery(routeState.q) : "";
   syncSearchInput();
   syncChipHighlight();
 
@@ -804,13 +882,8 @@ async function selectBlogGroup(key, author = "", updateHash = true) {
   if ($("tabBlog")) $("tabBlog").classList.add("active");
   if ($("tabLetter")) $("tabLetter").classList.remove("active");
 
-  if (updateHash) {
-    const p = new URLSearchParams({ blog: key });
-    if (curBlogAuthor) p.set("author", curBlogAuthor);
-    selfHashUpdate = true;
-    location.hash = p.toString();
-    setTimeout(() => { selfHashUpdate = false; }, 0);
-  }
+  const requestedPage = Math.max(1, parseInt(routeState.page, 10) || 1);
+  if (updateHash) syncBlogHash(1);
 
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
@@ -826,21 +899,29 @@ async function selectBlogGroup(key, author = "", updateHash = true) {
   if (searchTb) searchTb.style.display = "";
   $("tagToggle").parentElement.style.display = "none";
   
-  await loadBlogAuthors(key);
+  await loadBlogAuthors(key, selectionVersion);
+  if (selectionVersion !== blogSelectionVersion) return;
   await loadBlogCalendar();
-  await loadBlogPage(1);
+  if (selectionVersion !== blogSelectionVersion) return;
+  await loadBlogPage(requestedPage, updateHash);
 }
 
-async function loadBlogAuthors(key) {
+async function loadBlogAuthors(key, selectionVersion = blogSelectionVersion) {
   try {
     const data = await api("/api/archive/blog_authors?group=" + encodeURIComponent(key));
-    if (data.ok && data.authors) {
-      curGroupAuthors = data.authors.filter(a => a && a.name && a.name.trim());
-      renderBlogAuthorChips();
-      renderBlogAuthorPopover("");
-      updateBlogAuthorDisplay();
-    }
-  } catch (e) {}
+    if (selectionVersion !== blogSelectionVersion || curMode !== "blog" || curBlogGroup !== key) return;
+    if (!data.ok || !Array.isArray(data.authors)) throw new Error("博客作者接口返回无效数据");
+    curGroupAuthors = data.authors.filter(a => a && a.name && a.name.trim());
+    renderBlogAuthorChips();
+    renderBlogAuthorPopover("");
+    updateBlogAuthorDisplay();
+  } catch (e) {
+    if (e.name === "AbortError" || selectionVersion !== blogSelectionVersion) return;
+    curGroupAuthors = [];
+    renderBlogAuthorChips();
+    renderBlogAuthorPopover("");
+    updateBlogAuthorDisplay();
+  }
 }
 
 function renderBlogAuthorChips() {
@@ -870,6 +951,9 @@ function renderBlogAuthorChips() {
 function renderBlogAuthorPopover(filterKeyword = "") {
   const list = $("blogAuthorPopoverList");
   if (!list) return;
+  list.setAttribute("role", "listbox");
+  const searchInput = $("blogAuthorSearchInput");
+  if (searchInput) searchInput.setAttribute("aria-label", "搜索博客作者");
   list.innerHTML = "";
   const kw = filterKeyword.toLowerCase().trim();
   const filtered = curGroupAuthors.filter(a => !kw || a.name.toLowerCase().includes(kw));
@@ -886,10 +970,21 @@ function renderBlogAuthorPopover(filterKeyword = "") {
   if (!kw) {
     const allItem = document.createElement("div");
     allItem.className = "author-popover-item" + (!curBlogAuthor ? " active" : "");
+    allItem.setAttribute("role", "option");
+    allItem.tabIndex = 0;
+    allItem.setAttribute("aria-selected", String(!curBlogAuthor));
     allItem.innerHTML = '<div class="a-name-txt"><span class="mpi-avatar ' + grpClass + '">👥</span><span class="mpi-name">全部作者</span></div><span class="a-cnt">' + curGroupAuthors.length + ' 人</span>';
     allItem.addEventListener("click", () => {
       closeBlogAuthorPopover();
       selectBlogAuthor("");
+    });
+    allItem.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        allItem.click();
+      } else if (event.key === "Escape") {
+        closeBlogAuthorPopover();
+      }
     });
     list.appendChild(allItem);
   }
@@ -904,9 +999,13 @@ function renderBlogAuthorPopover(filterKeyword = "") {
 
   for (const a of filtered) {
     const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
+    const cntTxt = a.count ? a.count.toLocaleString() + ' 篇' : '作者';
     const item = document.createElement("div");
     item.className = "author-popover-item" + (isMatch ? " active" : "");
-    const cntTxt = a.count ? a.count.toLocaleString() + ' 篇' : '作者';
+    item.setAttribute("role", "option");
+    item.tabIndex = 0;
+    item.setAttribute("aria-selected", String(!!isMatch));
+    item.setAttribute("aria-label", (a.name || "") + "，" + cntTxt);
     let avText = (a.name || "").replace(/[\s_　]/g, "");
     if (avText.length > 2) avText = avText.slice(-2);
     if (!avText) avText = "✍️";
@@ -926,6 +1025,14 @@ function renderBlogAuthorPopover(filterKeyword = "") {
     item.addEventListener("click", () => {
       closeBlogAuthorPopover();
       selectBlogAuthor(a.name);
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        item.click();
+      } else if (event.key === "Escape") {
+        closeBlogAuthorPopover();
+      }
     });
     list.appendChild(item);
   }
@@ -964,10 +1071,12 @@ function closeBlogAuthorPopover() {
 }
 
 function selectBlogAuthor(author) {
+  ++blogSelectionVersion;
   curBlogAuthor = author;
   try { localStorage.setItem("archive_last_blog_author", author || ""); } catch (_) {}
   curBlogDate = "";
   dayCounts = {};
+  blogCalendarError = "";
   calYM = null;
   updateBlogAuthorDisplay();
   renderCalendar();
@@ -983,19 +1092,20 @@ function selectBlogAuthor(author) {
     }
   });
   
-  const p = new URLSearchParams({ blog: curBlogGroup });
-  if (author) p.set("author", author);
-  selfHashUpdate = true;
-  location.hash = p.toString();
-  setTimeout(() => { selfHashUpdate = false; }, 0);
+  syncBlogHash(1);
   
   loadBlogCalendar();
   loadBlogPage(1);
 }
 
 // ── 渲染博客网格 ─────────────────────────────────────
-async function loadBlogPage(pageNum) {
-  page = pageNum;
+async function loadBlogPage(pageNum, updateHash = true) {
+  const requestedPage = Math.max(1, parseInt(pageNum, 10) || 1);
+  const version = ++blogPageVersion;
+  if (blogPageAbort) blogPageAbort.abort();
+  blogPageAbort = new AbortController();
+  page = requestedPage;
+  if (updateHash && curMode === "blog") syncBlogHash(requestedPage);
   $("blogCards").innerHTML = "";
   $("blogHero").style.display = "none";
   $("blogHero").innerHTML = "";
@@ -1007,38 +1117,49 @@ async function loadBlogPage(pageNum) {
   setPageLoading(true);
   try {
     let perPage = 24;
-    let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + pageNum + "&per_page=" + perPage;
+    let url = "/api/archive/blogs?group=" + encodeURIComponent(curBlogGroup) + "&page=" + requestedPage + "&per_page=" + perPage;
     if (curBlogAuthor) url += "&author=" + encodeURIComponent(curBlogAuthor);
     if (curBlogDate) url += "&date=" + encodeURIComponent(curBlogDate);
     if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
     
-    const data = await api(url);
+    const data = await api(url, { signal: blogPageAbort.signal });
+    if (version !== blogPageVersion || curMode !== "blog") return;
     if (!data.ok) throw new Error("加载失败");
     
-    totalPages = data.total_pages;
-    if (data.posts.length === 0) {
+    totalPages = Math.max(1, Number(data.total_pages) || 1);
+    const postsData = Array.isArray(data.posts) ? data.posts : [];
+    const blogStats = $("blogStats");
+    if (blogStats) {
+      blogStats.textContent = (blogGroupsError ? blogGroupsError + " · " : "") +
+        (data.total || 0).toLocaleString() + " 篇" +
+        (curBlogAuthor ? " · " + curBlogAuthor : "");
+    }
+    if (postsData.length === 0) {
       $("emptyHint").textContent = curBlogDate ? (curBlogDate + " 暂无符合条件的博客") : "没有找到博客";
       $("emptyHint").hidden = false;
     } else {
-      let posts = data.posts;
-      if (pageNum === 1 && posts.length > 0 && !searchQuery && !curBlogDate) {
+      let posts = postsData;
+      if (requestedPage === 1 && posts.length > 0 && !searchQuery && !curBlogDate) {
         renderBlogHero(posts[0]);
         posts = posts.slice(1);
       }
       posts.forEach(p => {
         renderBlogMiniCard(p, $("blogCards"));
       });
-      renderBlogPagination(pageNum, totalPages);
+      renderBlogPagination(requestedPage, totalPages);
       
-      if (pageNum > 1) {
+      if (requestedPage > 1) {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     }
   } catch (e) {
-    $("emptyHint").textContent = "加载错误: " + e.message;
-    $("emptyHint").hidden = false;
+    if (e.name !== "AbortError" && version === blogPageVersion && curMode === "blog") {
+      $("emptyHint").textContent = "加载错误: " + e.message;
+      $("emptyHint").hidden = false;
+    }
+  } finally {
+    if (version === blogPageVersion) setPageLoading(false);
   }
-  setPageLoading(false);
 }
 
 function renderBlogPagination(curPage, total) {
@@ -1093,19 +1214,15 @@ function renderBlogHero(post) {
   hero.style.display = "block";
   hero.dataset.date = (post.date || "").substring(0, 10);
   const dateStr = (post.date || "").substring(0, 16);
-  
-  let images = [], paths = [];
-  try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
-  try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
+
+  // 列表接口只返回摘要和封面；正文在打开详情时按需加载。
   let bodyHtml = post.body_html || "";
-  bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
-  
-  // 提取第一张图作为 Hero 封面图
-  let coverUrl = _getCoverUrl(bodyHtml);
+  let coverUrl = post.cover || _getCoverUrl(bodyHtml);
+  const excerptText = post.excerpt || bodyHtml.replace(/<[^>]+>/g, "");
 
   let coverHtml = '';
   if (coverUrl) {
-    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" loading="lazy" decoding="async" alt=""></div>';
+    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" data-orig-src="' + esc(post.cover_original || "") + '" loading="lazy" decoding="async" alt=""></div>';
   } else {
     // 无封面链接：保留原有无封面样式（📝 占位）
     coverHtml = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
@@ -1116,13 +1233,18 @@ function renderBlogHero(post) {
     '<div class="bh-info">' +
       '<div class="bh-meta"><span class="bh-author">' + esc(post.author) + '</span><span class="bh-date">' + esc(dateStr) + '</span></div>' +
       '<h2 class="bh-title">' + highlightQuery(post.title || '无题', searchQuery) + '</h2>' +
-      '<div class="bh-excerpt">' + esc(bodyHtml.replace(/<[^>]+>/g, '').substring(0, 150)) + '...</div>' +
+      '<div class="bh-excerpt">' + esc(excerptText.substring(0, 150)) + (excerptText.length > 150 ? '...' : '') + '</div>' +
     '</div>';
 
   // 封面图加载失败（404/防盗链/资源不存在）→ 降级为 📝 占位
   const heroCoverImg = hero.querySelector('.bh-cover img');
   if (heroCoverImg) {
     heroCoverImg.addEventListener('error', () => {
+      if (post.cover_original && heroCoverImg.dataset.fallback !== "1") {
+        heroCoverImg.dataset.fallback = "1";
+        heroCoverImg.src = post.cover_original;
+        return;
+      }
       const cover = heroCoverImg.parentElement;
       if (cover) {
         cover.outerHTML = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
@@ -1132,21 +1254,15 @@ function renderBlogHero(post) {
 
   hero.onclick = function(e) {
     if (e.target.tagName === 'A') return;
-    openBlogReader(post, bodyHtml);
+    openBlogReaderById(post.id);
   };
 }
 
 function renderBlogMiniCard(post, container) {
   const grid = container || $("blogCards");
   const dateStr = (post.date || "").substring(0, 16);
-  
-  let images = [], paths = [];
-  try { images = JSON.parse(post.images_json || "[]"); } catch(e) {}
-  try { paths = JSON.parse(post.image_paths_json || "[]"); } catch(e) {}
-  let bodyHtml = post.body_html || "";
-  bodyHtml = _replaceImgUrls(bodyHtml, images, paths);
-  
-  let coverUrl = _getCoverUrl(bodyHtml);
+
+  const coverUrl = post.cover || _getCoverUrl(post.body_html || "");
 
   const card = document.createElement("div");
   card.className = "bmc-card blog-card-mini";
@@ -1154,7 +1270,7 @@ function renderBlogMiniCard(post, container) {
 
   let html = '';
   if (coverUrl) {
-    html += '<div class="bc-cover"><img src="' + esc(coverUrl) + '" alt="" loading="lazy"></div>';
+    html += '<div class="bc-cover"><img src="' + esc(coverUrl) + '" data-orig-src="' + esc(post.cover_original || "") + '" alt="" loading="lazy"></div>';
   } else {
     // 无封面链接：保留原有无封面样式（📝 占位）
     html += '<div class="bc-cover no-pic">📝</div>';
@@ -1162,11 +1278,7 @@ function renderBlogMiniCard(post, container) {
 
   let excerpt = "";
   if (searchQuery) {
-    let fullText = "";
-    if (post.body_text) fullText += post.body_text.replace(/\s+/g, " ");
-    else if (post.body_html) fullText += post.body_html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-    if (post.translation) fullText += " " + post.translation.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-    
+    const fullText = post.excerpt || "";
     const lowerText = fullText.toLowerCase();
     const lowerQuery = searchQuery.toLowerCase();
     let idx = lowerText.indexOf(lowerQuery);
@@ -1202,6 +1314,11 @@ function renderBlogMiniCard(post, container) {
   const coverImg = card.querySelector('.bc-cover img');
   if (coverImg) {
     coverImg.addEventListener('error', () => {
+      if (post.cover_original && coverImg.dataset.fallback !== "1") {
+        coverImg.dataset.fallback = "1";
+        coverImg.src = post.cover_original;
+        return;
+      }
       const cover = coverImg.parentElement;
       if (cover) {
         cover.outerHTML = '<div class="bc-cover no-pic">📝</div>';
@@ -1211,13 +1328,14 @@ function renderBlogMiniCard(post, container) {
 
   card.onclick = function(e) {
     if (e.target.tagName === 'A') return;
-    openBlogReader(post, bodyHtml);
+    openBlogReaderById(post.id);
   };
 
   grid.appendChild(card);
 }
 
 let currentBlogReaderPost = null;
+let blogReaderReturnHash = null;
 let currentTransMode = "ja-zh";
 
 function getStructuredBlocks(post) {
@@ -1406,7 +1524,14 @@ function renderCurrentBlogContent() {
   updateModeSelectorUI();
 }
 
-function openBlogReader(post, bodyHtml) {
+function openBlogReader(post, bodyHtml, returnHash) {
+  const readerWasHidden = $("blogReader").style.display === "none";
+  if (returnHash !== undefined) {
+    blogReaderReturnHash = returnHash || "";
+  } else if (readerWasHidden) {
+    // 记录打开来源：首页博客卡片应回到首页，列表卡片应回到原筛选/分页。
+    blogReaderReturnHash = location.hash ? location.hash.slice(1) : "";
+  }
   currentBlogReaderPost = post;
   // 进入博客时，若已有译文则默认选中「日中对照」
   if (hasTranslation(post)) {
@@ -1452,13 +1577,11 @@ function openBlogReader(post, bodyHtml) {
   if (typeof handleBackTopScroll === "function") handleBackTopScroll();
 
   // 同步 URL Hash 路由，便于直接分享定位单篇博客
-  selfHashUpdate = true;
   const p = new URLSearchParams();
   p.set("blog", post.group_key || curBlogGroup || "nogizaka");
   if (post.author) p.set("author", post.author);
   p.set("id", post.id);
-  location.hash = p.toString();
-  setTimeout(() => { selfHashUpdate = false; }, 0);
+  writeArchiveHash(p.toString());
 
   if (searchQuery) {
     setTimeout(() => {
@@ -1516,15 +1639,14 @@ function closeBlogReader() {
   currentBlogReaderPost = null;
   if (typeof handleBackTopScroll === "function") handleBackTopScroll();
 
-  // 恢复博客列表的 hash 路由
-  selfHashUpdate = true;
-  const p = new URLSearchParams();
-  p.set("blog", curBlogGroup || "nogizaka");
-  if (curBlogAuthor) p.set("author", curBlogAuthor);
-  if (curBlogDate) p.set("date", curBlogDate);
-  if (searchQuery) p.set("q", searchQuery);
-  location.hash = p.toString();
-  setTimeout(() => { selfHashUpdate = false; }, 0);
+  // 恢复打开前的路由：首页卡片关闭后必须回到首页，而不是博客列表。
+  const returnHash = blogReaderReturnHash !== null
+    ? blogReaderReturnHash
+    : buildBlogHash({ pageNum: page });
+  blogReaderReturnHash = null;
+  writeArchiveHash(returnHash);
+  // writeArchiveHash 会抑制同一轮 hashchange；主动分发一次，确保视觉状态与 URL 一致。
+  setTimeout(() => handleRoute(false), 0);
 }
 
 const brCloseBtn = $("brClose");
@@ -1762,13 +1884,29 @@ function _replaceImgUrls(html, images, paths) {
 
 async function selectMember(name, keepHash) {
   const version = ++memberVersion;
+  curMode = "msg";
+  ++blogSelectionVersion;
+  if (blogPageAbort) blogPageAbort.abort();
+  _enterMemberMode();
   curMember = name;
   try { localStorage.setItem("archive_last_msg_member", name); } catch (_) {}
   curBlogGroup = "";     // 切换到成员模式，清空博客分组
   syncChipHighlight();  // 同步 chip 高亮
   if (!keepHash) searchQuery = "";
   syncSearchInput();
-  const data = await api("/api/archive/months?member=" + encodeURIComponent(name));
+  let data;
+  try {
+    data = await api("/api/archive/months?member=" + encodeURIComponent(name));
+  } catch (e) {
+    if (e.name === "AbortError" || version !== memberVersion) return;
+    months = [];
+    $("monthSelect").innerHTML = "";
+    $("stats").textContent = "";
+    resetContent();
+    $("emptyHint").textContent = "成员「" + name + "」不可用：" + e.message + "。请重新选择成员。";
+    $("emptyHint").hidden = false;
+    return;
+  }
   if (version !== memberVersion) return;
   months = data.ok ? data.months : [];
   const sel = $("monthSelect");
@@ -1779,7 +1917,13 @@ async function selectMember(name, keepHash) {
     opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
     sel.appendChild(opt);
   }
-  if (!months.length) { showEmpty("该成员还没有归档内容"); return; }
+  if (!months.length) {
+    resetContent();
+    $("stats").textContent = "";
+    $("emptyHint").textContent = "成员「" + name + "」还没有归档内容。请从成员列表重新选择。";
+    $("emptyHint").hidden = false;
+    return;
+  }
   loadCalendar();   // 后台拉全档按天计数，不阻塞时间线
   const wanted = keepHash ? readHashYM() : null;
   const pick = (wanted && months.find((m) => m.year === wanted.year && m.month === wanted.month)) || months[0];
@@ -1797,12 +1941,10 @@ let selfHashUpdate = false;   // 区分"自己写的 hash"和"用户粘贴/前�
 
 function syncHash() {
   if (!curYM) return;
-  selfHashUpdate = true;
   const p = new URLSearchParams({ member: curMember, y: curYM.year, m: curYM.month });
   if (curType) p.set("t", curType);
   if (searchQuery) p.set("q", searchQuery);
-  location.hash = p.toString();
-  setTimeout(() => { selfHashUpdate = false; }, 0);
+  writeArchiveHash(p.toString());
 }
 
 
@@ -1896,14 +2038,13 @@ function startSearch(q, updateHash = true) {
   searchQuery = normalizedQuery(q);
   syncSearchInput();
   resetContent();
-  if (updateHash) syncHash();
-  if (!searchQuery) {
-    if (curMode === "blog") { loadBlogPage(1, true); return; }
-    if (curYM) { selectMonth(curYM.year, curYM.month); return; }
+  if (curMode === "blog") {
+    loadBlogPage(1, updateHash);
     return;
   }
-  if (curMode === "blog") {
-    loadBlogPage(1, true);
+  if (updateHash) syncHash();
+  if (!searchQuery) {
+    if (curYM) { selectMonth(curYM.year, curYM.month); return; }
     return;
   }
   loadPage();
@@ -2905,11 +3046,14 @@ function renderHome(data) {
   heroHTML += '<div class="pm-sub">3 团全量 · ' + (summary.blog_author_count || 0) + ' 位作者 ↗</div>';
   heroHTML += '</div>';
 
-  const totalMedia = (summary.total_pictures || 0) + (summary.total_videos || 0) + (summary.total_voices || 0);
+  const totalMedia = Number.isFinite(Number(summary.message_media_total))
+    ? Number(summary.message_media_total)
+    : (summary.total_pictures || 0) + (summary.total_videos || 0) + (summary.total_voices || 0);
   heroHTML += '<div class="portal-metric-card">';
-  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">写真与影音</span></div>';
-  heroHTML += '<div class="pm-val">' + (totalMedia > 0 ? totalMedia.toLocaleString() : (summary.total_all || 0).toLocaleString()) + ' <small>项</small></div>';
-  heroHTML += '<div class="pm-sub">包含高清写真 · 视频 · 语音</div>';
+  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">消息媒体</span></div>';
+  heroHTML += '<div class="pm-val">' + totalMedia.toLocaleString() + ' <small>项</small></div>';
+  heroHTML += '<div class="pm-sub">照片 ' + (summary.total_pictures || 0).toLocaleString() + ' · 视频 ' +
+    (summary.total_videos || 0).toLocaleString() + ' · 语音 ' + (summary.total_voices || 0).toLocaleString() + '</div>';
   heroHTML += '</div>';
 
   const lu = summary.last_updated ? fmtDate(summary.last_updated) : '—';
@@ -3135,8 +3279,6 @@ function renderHome(data) {
       const action = btn.dataset.action;
       if (action === "blog") {
         const gKey = btn.dataset.group;
-        curMode = "blog";
-        switchMainTab("blog", true);
         hideHome();
         selectBlogGroup(gKey);
       } else {
@@ -3152,8 +3294,6 @@ function renderHome(data) {
   secDiv.querySelectorAll('.channel-bento-card').forEach(card => {
     card.addEventListener("click", () => {
       const gKey = card.dataset.group;
-      curMode = "blog";
-      switchMainTab("blog", true);
       hideHome();
       selectBlogGroup(gKey);
     });
@@ -3297,10 +3437,11 @@ function renderHome(data) {
 function goHome() {
   curMember = ""; curBlogGroup = "";
   curType = ""; searchQuery = "";
+  ++blogSelectionVersion;
+  ++blogPageVersion;
+  if (blogPageAbort) blogPageAbort.abort();
   syncSearchInput();
-  selfHashUpdate = true;
-  location.hash = "";
-  setTimeout(() => { selfHashUpdate = false; }, 0);
+  writeArchiveHash("");
   switchMainTab("home", true);
   showHome();
 }
@@ -3327,17 +3468,21 @@ async function handleRoute(isInitial = false) {
       savedGroup = localStorage.getItem("archive_last_blog_group");
       savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
     } catch (_) {}
-    let group = p.get("blog") || (savedGroup && blogGroups.some(g => g.key === savedGroup) ? savedGroup : curBlogGroup) || "nogizaka";
+    const requestedGroup = p.get("blog") || "";
+    const knownGroups = new Set(BLOG_GROUP_KEYS);
+    let group = requestedGroup ||
+      (savedGroup && knownGroups.has(savedGroup) ? savedGroup : curBlogGroup) || "nogizaka";
     if (group === "true" || group === "1" || group === "") group = "nogizaka";
-    const author = p.get("author") || (blogId ? "" : savedAuthor) || "";
+    if (!knownGroups.has(group)) {
+      showToast("未知博客分组，已切换到乃木坂46", "error");
+      group = "nogizaka";
+    }
+    // 只要 URL 明确指定博客路由，就不能把上一次的作者筛选偷偷带入。
+    const author = p.has("author") ? (p.get("author") || "") :
+      (p.has("blog") || rawHash === "blog" || blogId ? "" : savedAuthor);
     const date = p.get("date") || "";
     const q = normalizedQuery(p.get("q"));
-
-    if (date) curBlogDate = date;
-    if (q) {
-      searchQuery = q;
-      syncSearchInput();
-    }
+    const requestedPage = Math.max(1, parseInt(p.get("page"), 10) || 1);
 
     if (blogId) {
       // 若当前已经打开了同一篇博客且阅读器处于显示状态，无需重复拉取
@@ -3350,15 +3495,20 @@ async function handleRoute(isInitial = false) {
           const post = res.post;
           const targetGroup = post.group_key || group || "nogizaka";
           const targetAuthor = post.author || author || "";
-          openBlogReader(post);
-          selectBlogGroup(targetGroup, targetAuthor, false);
+          const returnHash = buildBlogHash({
+            group: targetGroup, author: targetAuthor, date, query: q, pageNum: requestedPage,
+          });
+          openBlogReader(post, undefined, returnHash);
+          await selectBlogGroup(targetGroup, targetAuthor, false, {
+            date, q, page: requestedPage,
+          });
         } else {
           showToast("未找到该博客或已被移除", "error");
-          await selectBlogGroup(group, author);
+          await selectBlogGroup(group, author, false, { date, q, page: requestedPage });
         }
       } catch (err) {
         showToast("加载博客失败: " + err.message, "error");
-        await selectBlogGroup(group, author);
+        await selectBlogGroup(group, author, false, { date, q, page: requestedPage });
       }
       return;
     }
@@ -3371,8 +3521,9 @@ async function handleRoute(isInitial = false) {
       document.body.style.overflow = "";
       $("brContent").innerHTML = "";
       currentBlogReaderPost = null;
+      blogReaderReturnHash = null;
     }
-    await selectBlogGroup(group, author);
+    await selectBlogGroup(group, author, false, { date, q, page: requestedPage });
     return;
   }
 
