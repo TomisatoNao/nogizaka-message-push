@@ -234,7 +234,14 @@ async def _fetch_member_messages(member: dict):
                 )
                 headers["cookie"] = cookie_str
 
-            log_all(f"🔍 [成员ID: {m_id} | 名字: {m_name}] 请求 API (尝试 {attempt}/{MAX_FETCH_ATTEMPTS})", is_debug=True)
+            # 首次请求成功是正常路径，不额外打印“开始请求”噪声；只有真正进入
+            # 重试时才保留尝试次数，失败分支本身会记录具体状态码/异常类型。
+            if attempt > 1:
+                log_all(
+                    f"🔁 [成员ID: {m_id} | 名字: {m_name}] 重试 API 请求 "
+                    f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})",
+                    is_debug=True,
+                )
             async with _semaphore:
                 resp = await _http_client.get(url, headers=headers)
 
@@ -278,7 +285,11 @@ async def _fetch_member_messages(member: dict):
                     key=lambda x: x["updated_at"],
                 )
                 truly_new = [m for m in new_msgs if str(m.get("id") or m.get("updated_at", "")) not in id_set]
-                log_all(f"📥 [成员ID: {m_id} | 名字: {m_name}] HTTP 200 | 原始消息 {len(msgs)} 条 | 新增待推送 {len(truly_new)} 条", is_debug=True)
+                log_all(
+                    f"📥 [成员ID: {m_id} | 名字: {m_name}] API 成功 | HTTP 200 | "
+                    f"原始消息 {len(msgs)} 条 | 待处理 {len(truly_new)} 条",
+                    is_debug=True,
+                )
 
                 if truly_new:
                     log_response(resp.text)
@@ -397,7 +408,5 @@ async def _push_member_messages(member: dict, new_msgs: list,
     new_count = len(truly_new)
     if new_count > 0:
         log_all(f"✅ {m_name} 推送 {new_count} 条新消息")
-    else:
-        log_all(f"✅ {m_name} 无新消息", is_debug=True)
     _health_tracker().record_member_push(m_name, True)
     return True

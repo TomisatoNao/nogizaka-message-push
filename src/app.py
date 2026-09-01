@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -38,6 +39,44 @@ from src.utils import in_hour_range
 # ---- 博客状态 ----
 _blog_db: object = None
 _blog_client: httpx.AsyncClient | None = None
+
+
+@dataclass(frozen=True)
+class _MemberCycleResult:
+    """单个成员在本轮消息巡查中的结果，用于生成低噪声汇总日志。"""
+
+    name: str
+    fetch_ok: bool = False
+    skipped: bool = False
+    new_count: int = 0
+    push_ok: bool | None = None
+
+    @property
+    def failed(self) -> bool:
+        """是否需要在本轮汇总中作为异常成员突出显示。"""
+        return not self.skipped and (not self.fetch_ok or self.push_ok is False)
+
+
+def _message_cycle_summary(results: list[_MemberCycleResult], elapsed: float) -> tuple[str, bool]:
+    """生成消息巡查摘要，返回 ``(文本, 是否有异常)``。"""
+    total = len(results)
+    fetch_ok = sum(result.fetch_ok for result in results)
+    skipped = sum(result.skipped for result in results)
+    new_count = sum(result.new_count for result in results)
+    processed_count = sum(
+        result.new_count for result in results if result.push_ok is True
+    )
+    error_members = [result.name for result in results if result.failed]
+    has_errors = bool(error_members)
+
+    summary = (
+        f"🔍 消息巡查完毕 | 成员 {total} | 请求成功 {fetch_ok} | "
+        f"新增 {new_count} | 处理完成 {processed_count} | "
+        f"异常 {len(error_members)} | 跳过 {skipped} | 耗时 {elapsed:.1f}s"
+    )
+    if has_errors:
+        summary += f" | 异常成员: {' · '.join(error_members)}"
+    return summary, has_errors
 
 
 # ──────────────────────────────────────────────
@@ -474,8 +513,8 @@ async def _run_cycle() -> None:
     """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
     # ── Phase 1: Message 消息巡查 ──
     if getattr(cfg, "MESSAGE_MONITOR_ENABLED", True):
+        message_cycle_started = time.monotonic()
         valid_monitors = [m for m in cfg.MONITOR_LIST if m.get("account_id") and m.get("m_id")]
-        member_names = " · ".join(m["m_name"].replace(" ", "") for m in valid_monitors)
 
         # 每个账号取一个 target_group 作为报警目标
         account_target_groups: dict[str, int] = {
@@ -503,13 +542,13 @@ async def _run_cycle() -> None:
             )
 
             # Phase 2: 多成员并发流水线推送（各成员内部保持时间顺序，跨成员完全并发）
-            async def _push_one_member(i: int, result) -> str | None:
+            async def _push_one_member(i: int, result) -> _MemberCycleResult:
                 member = shuffled[i]
                 name = member['m_name'].replace(" ", "")
 
                 if isinstance(result, Exception):
                     log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
-                    return name
+                    return _MemberCycleResult(name=name)
 
                 if result is None:
                     acc_id = member.get("account_id") or ""
@@ -517,11 +556,14 @@ async def _run_cycle() -> None:
                     from src.member_directory import is_member_active_subscription
                     if not acc_id or not mid or is_member_active_subscription(acc_id, mid) is False:
                         # 纯社媒/博客或未订阅/离线成员，跳过是正常调度，不作为巡查异常
-                        return None
-                    log_all(f"⚠️ 跳过 {name}：抓取返回空（详情见上方错误日志）", is_debug=True)
-                    return name
+                        return _MemberCycleResult(name=name, skipped=True)
+                    return _MemberCycleResult(name=name)
 
                 new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
+                new_count = sum(
+                    1 for msg in new_msgs
+                    if str(msg.get("id") or msg.get("updated_at", "")) not in id_set
+                )
                 try:
                     ok = await fetcher.push_member_messages(
                         member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
@@ -529,19 +571,21 @@ async def _run_cycle() -> None:
                 except Exception:
                     log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
                     health.get_tracker().record_member_push(name, False)
-                    return name
+                    return _MemberCycleResult(
+                        name=name, fetch_ok=True, new_count=new_count, push_ok=False
+                    )
 
-                return None if ok else name
+                return _MemberCycleResult(
+                    name=name, fetch_ok=True, new_count=new_count, push_ok=ok
+                )
 
-            push_results = await asyncio.gather(
+            member_results = await asyncio.gather(
                 *[_push_one_member(i, res) for i, res in enumerate(fetch_results)]
             )
-            error_members = [name for name in push_results if name]
-
-            if not error_members:
-                log_all(f"🔍 巡查完毕 [{member_names}]")
-            else:
-                log_all(f"⚠️ 巡查完毕（异常成员：{' · '.join(error_members)}）", is_error=True)
+            summary, has_errors = _message_cycle_summary(
+                member_results, time.monotonic() - message_cycle_started
+            )
+            log_all(summary, is_error=has_errors)
     else:
         log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
 
