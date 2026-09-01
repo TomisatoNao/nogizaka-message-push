@@ -14,6 +14,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = Path(__file__).resolve().parent.parent / "webui_static"
@@ -112,11 +113,17 @@ def send_static(handler, name: str) -> None:
         send_json(handler, {"ok": False, "errors": ["静态资源缺失"]}, 404)
         return
 
+    query = parse_qs(urlsplit(getattr(handler, "path", "")).query)
+    cache_control = (
+        "public, max-age=31536000, immutable"
+        if query.get("v")
+        else "public, max-age=120, must-revalidate"
+    )
     etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
     if handler.headers.get("If-None-Match") == etag:
         handler.send_response(304)
         handler.send_header("ETag", etag)
-        handler.send_header("Cache-Control", "public, max-age=120, must-revalidate")
+        handler.send_header("Cache-Control", cache_control)
         handler.send_header("Vary", "Accept-Encoding")
         handler.end_headers()
         return
@@ -126,7 +133,7 @@ def send_static(handler, name: str) -> None:
     handler.send_header("Content-Type", f"{ctype}; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("ETag", etag)
-    handler.send_header("Cache-Control", "public, max-age=120, must-revalidate")
+    handler.send_header("Cache-Control", cache_control)
     handler.send_header("Vary", "Accept-Encoding")
     for k, v in enc_headers.items():
         handler.send_header(k, v)

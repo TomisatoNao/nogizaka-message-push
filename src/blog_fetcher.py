@@ -121,6 +121,7 @@ def init_blog_db() -> sqlite3.Connection:
         );
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_group_date ON blog_posts(group_key, date DESC);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_date ON blog_posts(date DESC);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_url ON blog_posts(url);")
     # 增量升级：旧表可能没有这些列
     for col in ["body_html", "body_text", "translation", "content_json", "translation_model", "image_paths_json"]:

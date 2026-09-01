@@ -1133,7 +1133,7 @@ async def main() -> None:
     webui_server = (
         start_webui(on_reload=_on_config_reload, on_restart=_request_restart,
                     on_poll=_request_poll, on_test_push=_request_test_push,
-                    on_openid=_openid_action)
+                    on_openid=_openid_action, prewarm_home=True)
         if cfg.WEB_ADMIN_ENABLED else None
     )
 

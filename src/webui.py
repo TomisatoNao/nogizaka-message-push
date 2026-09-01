@@ -90,6 +90,7 @@ from src.webui_modules.archive_handlers import (
     BLOG_IMAGE_DIR,  # noqa: F401
     get_blog_db as _get_blog_db,  # noqa: F401
     handle_archive as _mod_handle_archive,
+    warm_home_cache as _warm_archive_home_cache,
 )
 from src.webui_modules.social_handlers import (
     handle_ig_session_check as _social_handle_ig_session_check,
@@ -761,6 +762,7 @@ def start_webui(
     on_poll=None,
     on_test_push=None,
     on_openid=None,
+    prewarm_home: bool = False,
 ):
     """启动网页管理端（后台守护线程）。"""
     global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _on_openid_cb, _enforce_host_check
@@ -788,6 +790,13 @@ def start_webui(
 
     thread = threading.Thread(target=server.serve_forever, name="webui", daemon=True)
     thread.start()
+
+    if prewarm_home:
+        threading.Thread(
+            target=_warm_archive_home_cache,
+            name="archive-home-warmup",
+            daemon=True,
+        ).start()
 
     import config.config as cfg
     has_auth = False

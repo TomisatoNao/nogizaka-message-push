@@ -29,6 +29,8 @@ _blog_db_local = threading.local()
 
 _home_cache: dict | None = None
 _home_cache_key: tuple[float, float, str] | None = None
+_home_cache_condition = threading.Condition()
+_home_cache_building = False
 _archive_write_lock = threading.Lock()
 
 ARCHIVE_TYPES = frozenset({"text", "picture", "image", "video", "voice"})
@@ -101,7 +103,145 @@ def _send_json_resp(handler, obj: dict, code: int = 200) -> None:
         send_json(handler, obj, code)
 
 
+def _home_cache_key_for_request() -> tuple[float, float, str]:
+    """返回首页聚合缓存键；数据文件更新时间变化时自动触发重建。"""
+    try:
+        db_mtime = _archive.get_db_path().stat().st_mtime
+    except OSError:
+        db_mtime = 0
+    try:
+        blog_mtime = Path("data/archive/blogs.db").stat().st_mtime
+    except OSError:
+        blog_mtime = 0
+    return db_mtime, blog_mtime, datetime.now().strftime("%Y-%m-%d")
+
+
+def _acquire_home_cache(cache_key: tuple[float, float, str]) -> dict | None:
+    """命中缓存则直接返回，否则确保只有一个请求执行昂贵的首页聚合。"""
+    global _home_cache_building
+    with _home_cache_condition:
+        while True:
+            if _home_cache is not None and _home_cache_key == cache_key:
+                return _home_cache
+            if not _home_cache_building:
+                _home_cache_building = True
+                return None
+            _home_cache_condition.wait()
+
+
+def _release_home_cache() -> None:
+    """释放首页聚合占用并唤醒等待的请求。"""
+    global _home_cache_building
+    with _home_cache_condition:
+        _home_cache_building = False
+        _home_cache_condition.notify_all()
+
+
+def _load_latest_text_by_member(
+    db: sqlite3.Connection,
+    member_names: list[str],
+    limit: int = 4,
+) -> dict[str, list[dict]]:
+    """一次查询每个成员的最新文本，避免首页聚合产生成员级 N+1 查询。"""
+    latest: dict[str, list[dict]] = {name: [] for name in member_names}
+    if not member_names or limit <= 0:
+        return latest
+
+    try:
+        rows = db.execute(
+            """
+            SELECT id, member_dir, text, translation, published_at, updated_at
+            FROM (
+                SELECT id, member_dir, text, translation, published_at, updated_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY member_dir
+                           ORDER BY COALESCE(published_at, updated_at) DESC, id DESC
+                       ) AS row_num
+                FROM messages
+                WHERE type = 'text'
+                  AND text IS NOT NULL
+                  AND trim(text) != ''
+            )
+            WHERE row_num <= ?
+            ORDER BY member_dir, COALESCE(published_at, updated_at) DESC, id DESC
+            """,
+            (limit,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # 兼容旧版 SQLite；现代 SQLite 使用上面的窗口查询，旧版退回单次成员查询。
+        for name in member_names:
+            rows = db.execute(
+                """
+                SELECT id, text, translation, published_at, updated_at
+                FROM messages
+                WHERE member_dir = ?
+                  AND type = 'text'
+                  AND text IS NOT NULL
+                  AND trim(text) != ''
+                ORDER BY COALESCE(published_at, updated_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (name, limit),
+            ).fetchall()
+            latest[name] = [
+                {
+                    "id": row[0],
+                    "text": row[1] or "",
+                    "translation": row[2] or "",
+                    "published_at": row[3] or row[4] or "",
+                }
+                for row in rows
+            ]
+        return latest
+
+    for row in rows:
+        latest.setdefault(row[1], []).append({
+            "id": row[0],
+            "text": row[2] or "",
+            "translation": row[3] or "",
+            "published_at": row[4] or row[5] or "",
+        })
+    return latest
+
+
 def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
+    """归档路由入口；首页聚合请求使用单飞缓存避免并发重复计算。"""
+    if sub == "home":
+        cache_key = _home_cache_key_for_request()
+        cached = _acquire_home_cache(cache_key)
+        if cached is not None:
+            _send_json_resp(handler, cached)
+            return
+        try:
+            _handle_archive_impl(handler, sub, guard_fn, read_body_json_fn)
+        finally:
+            _release_home_cache()
+        return
+    _handle_archive_impl(handler, sub, guard_fn, read_body_json_fn)
+
+
+def warm_home_cache() -> bool:
+    """后台预热首页聚合缓存；失败不影响 WebUI 启动。"""
+    class _WarmupHandler:
+        path = "/api/archive/home"
+        headers = {}
+        _pending_headers = []
+        _pending_set_cookies = []
+
+        def _send_json(self, payload, _code=200):
+            self.payload = payload
+
+    handler = _WarmupHandler()
+    try:
+        handle_archive(handler, "home", lambda **_: True, lambda: {})
+        return bool(getattr(handler, "payload", None))
+    except Exception as exc:  # 预热失败不能影响主服务启动
+        from src.logger import log_all
+        log_all(f"⚠️ 首页缓存预热跳过: {type(exc).__name__}: {exc}", is_debug=True)
+        return False
+
+
+def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     """归档子路由统一派发。"""
     qs = parse_qs(handler.path.partition("?")[2])
 
@@ -703,16 +843,8 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     # 15. 首页仪表盘聚合数据
     if sub == "home":
         global _home_cache, _home_cache_key
-        try:
-            db_mtime = _archive.get_db_path().stat().st_mtime
-        except OSError:
-            db_mtime = 0
-        try:
-            blog_mtime = Path("data/archive/blogs.db").stat().st_mtime
-        except OSError:
-            blog_mtime = 0
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        cache_key = (db_mtime, blog_mtime, today_str)
+        cache_key = _home_cache_key_for_request()
+        today_str = cache_key[2]
         if _home_cache is not None and _home_cache_key == cache_key:
             _send_json_resp(handler, _home_cache)
             return
@@ -723,7 +855,10 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
             norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
             monitor_names[norm] = m.get("m_name", "")
 
+        now_dt = datetime.now()
+        tomorrow_str = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d")
         db = _archive.init_db()
+        archive_members = _archive.list_members()
         from src import avatar_manager
         avatar_map = avatar_manager.get_member_avatar_map()
 
@@ -737,9 +872,15 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
 
         if db:
             try:
-                r_td = db.execute("SELECT COUNT(*) FROM messages WHERE published_at LIKE ? OR updated_at LIKE ?", (f"{today_str}%", f"{today_str}%")).fetchone()
+                r_td = db.execute(
+                    """
+                    SELECT COUNT(*) FROM messages
+                    WHERE (published_at >= ? AND published_at < ?)
+                       OR (updated_at >= ? AND updated_at < ?)
+                    """,
+                    (today_str, tomorrow_str, today_str, tomorrow_str),
+                ).fetchone()
                 today_msg_cnt = r_td[0] if r_td else 0
-                now_dt = datetime.now()
                 w0 = (now_dt - timedelta(days=7)).strftime("%Y-%m-%d")
                 w1 = (now_dt - timedelta(days=14)).strftime("%Y-%m-%d")
                 r_this = db.execute("SELECT COUNT(*) FROM messages WHERE published_at >= ?", (w0,)).fetchone()
@@ -755,19 +896,14 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                     md, mtype, cnt = r_tc[0], r_tc[1] or "text", r_tc[2]
                     types_by_member.setdefault(md, {})[mtype] = cnt
 
-                for name in _archive.list_members():
-                    l_msgs = []
-                    for lm in db.execute("SELECT id, text, translation, published_at, updated_at FROM messages WHERE member_dir = ? AND type = 'text' AND text IS NOT NULL AND trim(text) != '' ORDER BY published_at DESC LIMIT 8", (name,)).fetchall():
-                        l_msgs.append({"id": lm[0], "text": lm[1] or "", "translation": lm[2] or "", "published_at": lm[3] or lm[4] or ""})
-                    latest_msgs_by_member[name] = l_msgs
+                latest_msgs_by_member = _load_latest_text_by_member(db, archive_members, limit=4)
             except Exception:
                 pass
 
-        for name in _archive.list_members():
+        for name in archive_members:
             months = months_by_member.get(name) or _archive.list_months(name)
             total = sum(m["count"] for m in months)
             type_counts = types_by_member.get(name, {})
-            latest_msgs = latest_msgs_by_member.get(name, [])
             monthly = [{"year": mo["year"], "month": mo["month"], "count": mo["count"]} for mo in months[:24]]
             first_date, last_date = "", ""
             if months:
@@ -791,7 +927,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
             avatar = avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or ""
             members.append({
                 "name": name, "display": display, "group": group, "avatar": avatar,
-                "stats": stats, "monthly": monthly, "days": {}, "latest_msgs": latest_msgs,
+                "stats": stats, "monthly": monthly, "days": {},
             })
 
         from src.sakamichi_roster import get_member_sort_tuple
@@ -826,7 +962,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                     row = blog_db.execute("SELECT COUNT(*), COUNT(DISTINCT author), MIN(date), MAX(date) FROM blog_posts WHERE group_key=?", (gkey,)).fetchone()
                     count = row[0] if row else 0
                     if count > 0:
-                        lp_row = blog_db.execute("SELECT id, author, title, date, body_text, images_json, image_paths_json FROM blog_posts WHERE group_key=? ORDER BY date DESC LIMIT 1", (gkey,)).fetchone()
+                        lp_row = blog_db.execute("SELECT id, author, title, date, image_paths_json FROM blog_posts WHERE group_key=? ORDER BY date DESC LIMIT 1", (gkey,)).fetchone()
                         latest_post = None
                         if lp_row:
                             lp = dict(lp_row)
@@ -842,7 +978,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                             "latest_post": latest_post,
                         })
 
-                for r in blog_db.execute("SELECT id, group_key, author, title, date, body_text, images_json, image_paths_json FROM blog_posts ORDER BY date DESC LIMIT 6").fetchall():
+                for r in blog_db.execute("SELECT id, group_key, author, title, date, image_paths_json FROM blog_posts ORDER BY date DESC LIMIT 6").fetchall():
                     bp = dict(r)
                     imgs = json.loads(bp.get("image_paths_json") or "[]")
                     first_img = imgs[0].replace("\\", "/") if imgs and imgs[0] else ""
@@ -863,9 +999,12 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                             "month": int(bp["date"][5:7]) if len(bp["date"]) >= 7 and bp["date"][5:7].isdigit() else 8,
                         })
 
-                r_b_td = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date LIKE ?", (f"{today_str}%",)).fetchone()
+                r_b_td = blog_db.execute(
+                    "SELECT COUNT(*) FROM blog_posts WHERE date >= ? AND date < ?",
+                    (today_str, tomorrow_str),
+                ).fetchone()
                 today_blog_cnt = r_b_td[0] if r_b_td else 0
-                week_ago_str = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                week_ago_str = (now_dt - timedelta(days=7)).strftime("%Y-%m-%d")
                 r_b_wk = blog_db.execute("SELECT COUNT(*) FROM blog_posts WHERE date >= ?", (week_ago_str,)).fetchone()
                 blog_this_week = r_b_wk[0] if r_b_wk else 0
             except Exception:
@@ -898,10 +1037,11 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
 
         agg_pics = sorted(msg_pics + blog_pics[:6], key=lambda x: x.get("published_at", ""), reverse=True)
         agg_msgs = []
-        for m in members:
-            for msg in m["latest_msgs"][:4]:
+        member_display_by_name = {m["name"]: m["display"] for m in members}
+        for name in archive_members:
+            for msg in latest_msgs_by_member.get(name, []):
                 agg_msgs.append({
-                    "type": "msg", "member": m["name"], "member_display": m["display"],
+                    "type": "msg", "member": name, "member_display": member_display_by_name.get(name, name),
                     "id": msg["id"], "text": msg["text"], "translation": msg.get("translation", ""),
                     "published_at": msg.get("published_at", ""),
                     "year": _ym(msg.get("published_at", ""))[0], "month": _ym(msg.get("published_at", ""))[1],
@@ -946,7 +1086,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         }
         _home_cache = result
         _home_cache_key = cache_key
-        send_json(handler, result)
+        _send_json_resp(handler, result)
         return
 
     send_json(handler, {"ok": False, "errors": ["未知路径"]}, 404)

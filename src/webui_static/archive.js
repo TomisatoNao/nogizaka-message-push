@@ -2790,8 +2790,13 @@ function jumpToMessage(member, year, month, msgId) {
 }
 
 let _portalHomeCached = null;
+let _homeRequestVersion = 0;
+let _homeRenderVersion = 0;
+let _homePhotoCleanup = null;
 
 async function showHome() {
+  const requestVersion = ++_homeRequestVersion;
+  const routeAtStart = location.hash;
   curMode = "home";
   setHtmlViewClass("home");
   if ($("tabHome")) $("tabHome").classList.add("active");
@@ -2833,6 +2838,8 @@ async function showHome() {
   
   try {
     const data = await api("/api/archive/home");
+    // 首页请求可能在用户切换到其它路由后才返回，避免旧响应覆盖当前视图。
+    if (requestVersion !== _homeRequestVersion || curMode !== "home" || location.hash !== routeAtStart) return;
     if (!data.ok || (!data.members.length && !data.blog_groups.length)) {
       $('homeSkeleton').classList.remove('active');
       $('archiveHome').innerHTML =
@@ -2857,6 +2864,8 @@ async function showHome() {
 }
 
 function renderHome(data) {
+  const renderVersion = ++_homeRenderVersion;
+  if (_homePhotoCleanup) _homePhotoCleanup();
   const summary = data.summary || {};
   const members = data.members || [];
   const blogGroups = data.blog_groups || [];
@@ -2961,6 +2970,7 @@ function renderHome(data) {
   // 图片条自动滚动与拖拽交互
   let photoTimer = null;
   let photoScrolling = false;
+  let photoDisposed = false;
   function photoAdvance() {
     if (photoScrolling) return;
     if (strip.scrollWidth <= strip.clientWidth) return;
@@ -2975,7 +2985,10 @@ function renderHome(data) {
     strip.scrollTo({ left: target, behavior: 'smooth' });
     setTimeout(() => { photoScrolling = false; }, 700);
   }
-  function startPhotoScroll() { if (!photoTimer) photoTimer = setInterval(photoAdvance, 2400); }
+  function startPhotoScroll() {
+    if (photoDisposed || photoTimer) return;
+    photoTimer = setInterval(photoAdvance, 2400);
+  }
   function stopPhotoScroll() { clearInterval(photoTimer); photoTimer = null; photoScrolling = false; }
   startPhotoScroll();
   strip.addEventListener("touchstart", stopPhotoScroll, { once: true });
@@ -3035,8 +3048,14 @@ function renderHome(data) {
   strip.addEventListener("click", (e) => {
     if (dragMoved) { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); }
   }, true);
+  _homePhotoCleanup = () => {
+    photoDisposed = true;
+    stopPhotoScroll();
+    cancelInertia();
+  };
 
   // 3. 核心归档专区入口：三坂官方频道便当卡 + 成员快捷入口
+  const renderSecondary = () => {
   const secDiv = $("portalSections");
   let secHTML = '';
 
@@ -3147,7 +3166,10 @@ function renderHome(data) {
     });
   });
 
+  };
+
   // 4. 最新动态聚合流 (Message + Blog 双列网格排版，严格对齐)
+  const renderTertiary = () => {
   const feedDiv = $("homeFeedList");
   // 保证偶数个卡片，使双列底部完美平齐
   const evenRecentFeed = recentFeed.length % 2 === 0 ? recentFeed : recentFeed.slice(0, recentFeed.length - 1);
@@ -3250,7 +3272,25 @@ function renderHome(data) {
     });
   } else {
     tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px;grid-column:1/-1;">暂无历史消息</div>';
-  }
+  };
+
+  const renderIfCurrent = (callback) => {
+    if (renderVersion !== _homeRenderVersion || curMode !== "home") return;
+    callback();
+  };
+  const scheduleIdle = (callback) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(callback, { timeout: 300 });
+    } else {
+      window.setTimeout(callback, 0);
+    }
+  };
+  window.requestAnimationFrame(() => {
+    renderIfCurrent(() => {
+      renderSecondary();
+      scheduleIdle(() => renderIfCurrent(renderTertiary));
+    });
+  });
 }
 
 function goHome() {
@@ -3265,6 +3305,7 @@ function goHome() {
 }
 
 function hideHome() {
+  _homeRequestVersion++;
   $('archiveHome').classList.remove('active');
   $('backTop').classList.remove('force-hide');
   document.querySelector('.layout').style.display = '';
@@ -3434,9 +3475,13 @@ async function boot() {
   syncSearchInput();
   initTypeChips();
 
-  // 并行预加载认证信息与成员列表，大幅削减首屏往返等待时间
-  await Promise.all([initAuth(), loadMembers(true)]);
-  await handleRoute(true);
+  // 首页数据不依赖成员选择器，直接与认证/成员列表并行，避免首屏串行等待。
+  const initialHome = !location.hash || location.hash === "#home";
+  const authPromise = initAuth();
+  const membersPromise = loadMembers(true);
+  const homePromise = initialHome ? showHome() : null;
+  await Promise.all([authPromise, membersPromise, homePromise].filter(Boolean));
+  if (!initialHome) await handleRoute(true);
 }
 
 boot();

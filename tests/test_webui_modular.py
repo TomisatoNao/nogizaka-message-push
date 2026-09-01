@@ -60,6 +60,20 @@ def test_static_handler_respects_gzip_quality_and_consumes_pending_headers():
     assert not any(key in {"Clear-Site-Data", "Set-Cookie"} for key, _ in handler.sent_headers)
 
 
+def test_static_handler_uses_long_cache_for_versioned_assets():
+    handler = _ResponseHandler("gzip")
+    handler.path = "/static/archive.js?v=20260901_2"
+    static_handler.send_static(handler, "archive.js")
+    headers = dict(handler.sent_headers)
+    assert headers["Cache-Control"] == "public, max-age=31536000, immutable"
+
+    handler.sent_headers.clear()
+    handler.path = "/static/archive.js"
+    static_handler.send_static(handler, "archive.js")
+    headers = dict(handler.sent_headers)
+    assert headers["Cache-Control"] == "public, max-age=120, must-revalidate"
+
+
 def test_system_handlers_env():
     status = system_handlers.env_status()
     assert isinstance(status, dict)
@@ -191,6 +205,98 @@ def test_blog_calendar_endpoint_filters_group_author_and_invalid_dates(monkeypat
     assert author.code == 200
     assert author.payload["days"] == {"2026-08-01": 2, "2026-08-02": 1}
     assert author.payload["total"] == 3
+
+
+def test_archive_home_cache_is_single_flight(monkeypatch):
+    import threading
+
+    cache_key = (1.0, 2.0, "2026-09-01")
+    monkeypatch.setattr(archive_handlers, "_home_cache", None)
+    monkeypatch.setattr(archive_handlers, "_home_cache_key", None)
+    monkeypatch.setattr(archive_handlers, "_home_cache_building", False)
+    monkeypatch.setattr(archive_handlers, "_home_cache_key_for_request", lambda: cache_key)
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def fake_impl(handler, _sub, _guard_fn, _read_body_json_fn):
+        calls.append(handler)
+        started.set()
+        if release.wait(2):
+            archive_handlers._home_cache = {"ok": True, "source": "builder"}
+            archive_handlers._home_cache_key = cache_key
+            handler._send_json(archive_handlers._home_cache)
+
+    monkeypatch.setattr(archive_handlers, "_handle_archive_impl", fake_impl)
+
+    class Handler:
+        def __init__(self):
+            self.payload = None
+
+        def _send_json(self, payload, _code=200):
+            self.payload = payload
+
+    first, second = Handler(), Handler()
+    t1 = threading.Thread(target=archive_handlers.handle_archive, args=(first, "home", None, None))
+    t2 = threading.Thread(target=archive_handlers.handle_archive, args=(second, "home", None, None))
+    t1.start()
+    assert started.wait(1)
+    t2.start()
+    release.set()
+    t1.join(2)
+    t2.join(2)
+
+    assert len(calls) == 1
+    assert first.payload == second.payload == {"ok": True, "source": "builder"}
+    assert archive_handlers._home_cache_building is False
+
+
+def test_archive_home_latest_messages_use_one_window_query():
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.execute(
+        "CREATE TABLE messages (id TEXT, member_dir TEXT, type TEXT, text TEXT, translation TEXT, published_at TEXT, updated_at TEXT)"
+    )
+    db.executemany(
+        "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("a-old", "a", "text", "old", "", "2026-08-01 10:00", "2026-08-01 10:00"),
+            ("a-new", "a", "text", "new", "译", "2026-09-01 10:00", "2026-09-01 10:00"),
+            ("a-mid", "a", "text", "mid", "", "2026-08-20 10:00", "2026-08-20 10:00"),
+            ("b-new", "b", "text", "b-new", "", "2026-09-01 11:00", "2026-09-01 11:00"),
+            ("ignored", "a", "picture", "image", "", "2026-09-01 12:00", "2026-09-01 12:00"),
+        ],
+    )
+    rows = archive_handlers._load_latest_text_by_member(db, ["a", "b"], limit=2)
+
+    assert [item["id"] for item in rows["a"]] == ["a-new", "a-mid"]
+    assert [item["id"] for item in rows["b"]] == ["b-new"]
+
+
+def test_archive_home_warmup_uses_noop_handler(monkeypatch):
+    def fake_handle(handler, sub, _guard_fn, _read_body_json_fn):
+        assert sub == "home"
+        handler._send_json({"ok": True})
+
+    monkeypatch.setattr(archive_handlers, "handle_archive", fake_handle)
+    assert archive_handlers.warm_home_cache() is True
+
+
+def test_archive_home_boot_starts_home_request_in_parallel():
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    assert "const homePromise = initialHome ? showHome() : null;" in script
+    assert "await Promise.all([authPromise, membersPromise, homePromise].filter(Boolean));" in script
+    assert "requestVersion !== _homeRequestVersion" in script
+    assert "const renderSecondary = () => {" in script
+    assert "const renderTertiary = () => {" in script
+    assert "window.requestIdleCallback" in script
+
+
+def test_archive_home_static_asset_version_bumped():
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    assert "/static/archive.js?v=20260901_2" in html
 
 
 def test_social_handlers_restore_webui_routes():
