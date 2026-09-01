@@ -900,11 +900,26 @@ async def main() -> None:
     if proxy_url:
         log_all(f"🌐 已配置网络代理: {proxy_url}")
 
-    # 2. 创建共享 HTTP 客户端
+    # 2. 创建普通请求与认证专用 HTTP 客户端。
+    #    认证续期使用独立连接池，避免媒体/翻译慢请求占满普通池；
+    #    credentials 内部还会用 TOKEN_REFRESH_CONCURRENCY 限制续期并发。
     http_client = httpx.AsyncClient(
         timeout=20,
         proxy=proxy_url,
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    )
+    try:
+        refresh_concurrency = max(1, int(getattr(cfg, "TOKEN_REFRESH_CONCURRENCY", 2)))
+    except (TypeError, ValueError):
+        refresh_concurrency = 2
+    auth_http_client = httpx.AsyncClient(
+        timeout=15,
+        proxy=proxy_url,
+        follow_redirects=True,
+        limits=httpx.Limits(
+            max_connections=max(2, refresh_concurrency * 2),
+            max_keepalive_connections=refresh_concurrency,
+        ),
     )
     qq_client = httpx.AsyncClient(
         timeout=15,
@@ -914,8 +929,8 @@ async def main() -> None:
     semaphore = asyncio.Semaphore(cfg.HTTP_SEMAPHORE_LIMIT)
 
     # 3. 注入依赖 & 在事件循环内创建各模块的锁
-    #    translator / credentials 也复用共享连接池，避免每次翻译/续期新建 TLS 连接
-    init_credentials(http_client)
+    #    translator / archive / tagger 复用普通池；credentials 使用认证专用池。
+    init_credentials(http_client, auth_client=auth_http_client)
     translator.initialize(http_client)
     archive.initialize(http_client)
     # 自动检查并纠正历史归档中因旧版 UTC 导致的跨月错位数据（全自动无损自愈）
@@ -1136,7 +1151,10 @@ async def main() -> None:
         except Exception:  # nosec B110
             pass
         try:
-            await asyncio.gather(http_client.aclose(), qq_client.aclose(), return_exceptions=True)
+            await asyncio.gather(
+                http_client.aclose(), auth_http_client.aclose(), qq_client.aclose(),
+                return_exceptions=True,
+            )
         except Exception:  # nosec B110
             pass
         if _blog_client is not None:

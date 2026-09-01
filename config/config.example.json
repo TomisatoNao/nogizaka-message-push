@@ -74,6 +74,10 @@
   "night_interval": [1500, 1800],
   "sleep_hours": [2, 7],
   "alert_cooldown": 3600,
+  // Token 续期保护：每次最多并发 2 个，网络失败后指数退避（秒）
+  "token_refresh_concurrency": 2,
+  "token_refresh_network_cooldown_seconds": 90,
+  "token_refresh_max_cooldown_seconds": 600,
 
   // ── 官方博客监控（默认关闭，按需开启指定团）──
   "blog_monitor": {

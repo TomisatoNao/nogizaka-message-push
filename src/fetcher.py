@@ -15,6 +15,7 @@ from src.logger import format_httpx_error, log_all, log_response
 from config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
     get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
+    get_refresh_state, is_account_fetch_available,
 )
 from src.dedup import load_sent_ids, save_sent_id
 from src.translator import translate_text_with_model
@@ -141,6 +142,18 @@ async def _fetch_member_messages(member: dict):
     if not cred:
         log_all(f"🚨 [成员ID: {m_id} | 名字: {m_name}] 账号 {account_id} 无可用凭据", is_error=True)
         _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, f"账号 {account_id} 无可用凭据")
+        return None
+
+    # 主动续期失败后禁止继续拿旧 Token 扫描所有成员；网络型失败会在冷却
+    # 到期后自动恢复，认证型失败则等待用户更新凭据并由管理端清除状态。
+    fetch_available, refresh_reason = is_account_fetch_available(account_id)
+    if not fetch_available:
+        refresh_state = get_refresh_state(account_id)
+        failure_kind = refresh_state.get("kind", "unknown")
+        tier = ErrorTier.PERSISTENT if failure_kind == "credential_invalid" else ErrorTier.TRANSIENT
+        message = f"账号 {account_id} {refresh_reason}，跳过成员抓取"
+        log_all(f"⏸️ [成员ID: {m_id} | 名字: {m_name}] {message}", is_debug=True)
+        _health_tracker().record_member_fetch(m_name, False, tier, message)
         return None
 
     # 优先从 SQLite 数据库获取时间戳水位线，旧磁盘文本文件作为平滑过渡
@@ -283,12 +296,16 @@ async def _fetch_member_messages(member: dict):
                 if is_mobile:
                     if not await refresh_mobile_token(account_id, target_group, old_token=cred.get("token")):
                         log_all(f"🔥 {m_name} 账号移动端刷新失败，放弃本次轮询", is_error=True)
-                        _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, "移动端 Token 刷新失败")
+                        state = get_refresh_state(account_id)
+                        tier = ErrorTier.PERSISTENT if state.get("kind") == "credential_invalid" else ErrorTier.TRANSIENT
+                        _health_tracker().record_member_fetch(m_name, False, tier, "移动端 Token 刷新失败")
                         return None
                 else:
                     if not await refresh_token(account_id, target_group, old_token=cred["token"]):
                         log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
-                        _health_tracker().record_member_fetch(m_name, False, ErrorTier.PERSISTENT, "Web Token 刷新失败")
+                        state = get_refresh_state(account_id)
+                        tier = ErrorTier.PERSISTENT if state.get("kind") == "credential_invalid" else ErrorTier.TRANSIENT
+                        _health_tracker().record_member_fetch(m_name, False, tier, "Web Token 刷新失败")
                         return None
                 continue
 

@@ -270,7 +270,7 @@ async def sync_all_accounts_subscriptions(
 
     ``include_errors=True`` 时同时返回 ``{账号: 原因}``，供 WebUI 展示部分失败。
     """
-    from config.credentials import validate_account_cred
+    from config.credentials import is_account_fetch_available, validate_account_cred
     stats = {}
     errors = {}
     should_close = False
@@ -279,6 +279,11 @@ async def sync_all_accounts_subscriptions(
         should_close = True
 
     for acc_id in list(cfg.ACCOUNTS.keys()):
+        fetch_available, refresh_reason = is_account_fetch_available(acc_id)
+        if not fetch_available:
+            errors[acc_id] = refresh_reason
+            log_all(f"⚠️ 订阅同步跳过账号 {acc_id}: {refresh_reason}", is_error=True)
+            continue
         try:
             ok, _ = validate_account_cred(acc_id)
         except Exception as exc:  # 最后一层隔离：第三方凭证模块异常不能中断其他账号。

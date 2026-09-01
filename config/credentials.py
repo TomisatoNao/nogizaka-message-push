@@ -8,13 +8,14 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 
 import httpx
 
 # 统一通过 cfg.X 访问，热重载后标量值（告警冷却、刷新阈值等）才能生效
 import config.config as cfg
-from src.health import get_tracker as _health_tracker
+from src.health import ErrorTier, get_tracker as _health_tracker
 from src.logger import format_httpx_error, log_all, log_response
 
 # ---- 运行时状态 ----
@@ -23,7 +24,13 @@ _file_locks:          dict[tuple, asyncio.Lock]  = {}
 _token_refresh_locks: dict[tuple, asyncio.Lock]  = {}
 _alert_last_sent:     dict[str, float]         = {}
 _http_client:         httpx.AsyncClient | None = None
+_auth_http_client:    httpx.AsyncClient | None = None
 _last_time_written:   dict[str, str]           = {}   # write_time_record 的值缓存
+
+# 续期失败状态只保存在进程内：它是网络熔断/退避状态，不是凭据本身。
+# kind: transient_network / credential_invalid / response_invalid / persistence_failure
+_refresh_state:       dict[str, dict]           = {}
+_refresh_semaphores:  dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Semaphore, int]] = {}
 
 
 def _get_refresh_lock(account_id: str) -> asyncio.Lock:
@@ -48,32 +55,212 @@ def _get_file_lock(filepath: str) -> asyncio.Lock:
     return _file_locks[key]
 
 
-def initialize(client: httpx.AsyncClient) -> None:
-    """注入共享 HTTP 客户端（Token 刷新复用连接池）。
-    未注入时（如 tools/list_members.py 单独运行）按需临时创建。"""
-    global _http_client
+def initialize(
+    client: httpx.AsyncClient,
+    *,
+    auth_client: httpx.AsyncClient | None = None,
+) -> None:
+    """注入普通请求与认证请求客户端。
+
+    ``auth_client`` 可选：主程序为 Token 续期提供独立连接池，避免媒体/翻译
+    请求占满普通连接池。单独运行工具时未传入则回退到 ``client``。
+    """
+    global _http_client, _auth_http_client
     _http_client = client
+    _auth_http_client = auth_client
+
+
+def _get_refresh_semaphore() -> asyncio.Semaphore:
+    """按事件循环创建 Token 续期并发闸门，防止多账号同时冲击代理。"""
+    loop = asyncio.get_running_loop()
+    try:
+        limit = max(1, int(getattr(cfg, "TOKEN_REFRESH_CONCURRENCY", 2)))
+    except (TypeError, ValueError):
+        limit = 2
+    key = id(loop)
+    current = _refresh_semaphores.get(key)
+    if current is None or current[0] is not loop or current[2] != limit:
+        semaphore = asyncio.Semaphore(limit)
+        _refresh_semaphores[key] = (loop, semaphore, limit)
+        return semaphore
+    return current[1]
+
+
+def _network_cooldown_seconds(failure_count: int) -> float:
+    """计算网络型续期失败的指数退避时间，并限制最大值。"""
+    try:
+        base = max(5.0, float(getattr(cfg, "TOKEN_REFRESH_NETWORK_COOLDOWN_SECONDS", 90)))
+    except (TypeError, ValueError):
+        base = 90.0
+    try:
+        ceiling = max(base, float(getattr(cfg, "TOKEN_REFRESH_MAX_COOLDOWN_SECONDS", 600)))
+    except (TypeError, ValueError):
+        ceiling = 600.0
+    return min(ceiling, base * (2 ** max(0, failure_count - 1)))
+
+
+def _record_refresh_failure(account_id: str, kind: str, detail: str) -> dict:
+    """记录账号续期失败并返回当前状态；不记录任何 Token/Cookie 内容。"""
+    now = time.monotonic()
+    previous = _refresh_state.get(account_id, {})
+    count = int(previous.get("failure_count", 0)) + 1 if previous.get("kind") == kind else 1
+    if kind == "credential_invalid":
+        blocked_until = float("inf")
+    else:
+        blocked_until = now + _network_cooldown_seconds(count)
+    state = {
+        "kind": kind,
+        "detail": detail[:240],
+        "failure_count": count,
+        "failed_at": now,
+        "blocked_until": blocked_until,
+        # 凭据对象被管理端轮换/测试替换后，旧的熔断状态自动失效。
+        "cred_ref": id(ACCOUNT_CREDS.get(account_id)),
+    }
+    _refresh_state[account_id] = state
+    # 网络/上游暂态不应污染为 PERSISTENT；凭据、落盘和响应结构问题需要人工关注。
+    _health_tracker().record_error(
+        f"账号 {account_id} Token 续期失败 [{kind}]: {detail[:160]}",
+        ErrorTier.TRANSIENT if kind == "transient_network" else ErrorTier.PERSISTENT,
+    )
+    return state
+
+
+def clear_refresh_state(account_id: str) -> None:
+    """凭据被更新/轮换后清除熔断状态，允许立即重新握手。"""
+    _refresh_state.pop(account_id, None)
+    # 新凭据是一条新的故障生命周期，不能被旧凭据的告警冷却吞掉。
+    _alert_last_sent.pop(account_id, None)
+
+
+def get_refresh_state(account_id: str) -> dict:
+    """返回账号续期状态的安全副本（不包含凭据）。"""
+    raw_state = _refresh_state.get(account_id, {})
+    if raw_state and raw_state.get("cred_ref") != id(ACCOUNT_CREDS.get(account_id)):
+        _refresh_state.pop(account_id, None)
+        raw_state = {}
+    state = dict(raw_state)
+    if not state:
+        return {"kind": "available", "blocked": False, "cooldown_remaining": 0.0}
+    blocked_until = state.get("blocked_until", 0.0)
+    remaining = float("inf") if blocked_until == float("inf") else max(0.0, float(blocked_until) - time.monotonic())
+    state.pop("cred_ref", None)
+    state["blocked"] = remaining > 0
+    state["cooldown_remaining"] = remaining
+    return state
+
+
+def is_account_fetch_available(account_id: str) -> tuple[bool, str]:
+    """判断账号是否允许发起成员抓取，并返回不可用原因。"""
+    state = get_refresh_state(account_id)
+    if not state.get("blocked"):
+        return True, ""
+    kind = state.get("kind", "unknown")
+    remaining = state.get("cooldown_remaining", 0.0)
+    if remaining == float("inf"):
+        return False, f"续期确认凭据失效（{kind}）"
+    return False, f"续期临时失败（{kind}，{int(remaining)}s 后重试）"
+
+
+def _classify_refresh_status(status_code: int, body: str) -> str:
+    """把 HTTP 续期响应分为认证失败或可恢复的上游故障。"""
+    if status_code in (401, 403):
+        return "credential_invalid"
+    if status_code in (408, 425, 429) or status_code >= 500:
+        return "transient_network"
+    # 400 常见于 refresh token / Cookie 被服务端拒绝；其它 4xx 视为响应/配置问题。
+    if status_code == 400:
+        return "credential_invalid"
+    return "response_invalid"
+
+
+async def _report_refresh_failure(
+    account_id: str,
+    target_group: int,
+    *,
+    kind: str,
+    detail: str,
+    platform: str,
+) -> None:
+    """记录、分级并按冷却发送续期告警。"""
+    from src.notifier import send_alert_message
+
+    previous_kind = _refresh_state.get(account_id, {}).get("kind")
+    state = _record_refresh_failure(account_id, kind, detail)
+    if kind == "transient_network":
+        cooldown = int(state.get("cooldown_remaining", 0))
+        log_all(
+            f"⚠️ 账号 {account_id} {platform} 续期暂时失败（{detail}），"
+            f"未判定凭据失效；{cooldown}s 后自动重试",
+            is_error=True,
+        )
+        alert_text = (
+            f"📢 提示：账号 {account_id} {platform} 续期网络失败（{detail}）。"
+            f"未判定 Cookie/Token 失效，将在约 {cooldown}s 后自动重试。"
+        )
+    elif kind == "credential_invalid":
+        log_all(
+            f"🚨 账号 {account_id} {platform} 续期被拒，凭据可能已失效（{detail}）",
+            is_error=True,
+        )
+        alert_text = f"📢 警报：账号 {account_id} {platform} 续期被认证服务拒绝，Cookie/Token 可能已失效，请更新凭据。"
+    else:
+        log_all(
+            f"🚨 账号 {account_id} {platform} 续期失败（{kind}: {detail}）",
+            is_error=True,
+        )
+        alert_text = f"📢 警报：账号 {account_id} {platform} 续期处理失败（{detail}），请检查 Cookie/Token 持久化和接口响应。"
+
+    now = datetime.now().timestamp()
+    last = _alert_last_sent.get(account_id, 0)
+    # 从暂态网络故障升级为明确认证拒绝时，必须立即通知，不能受旧告警冷却影响。
+    if kind == "credential_invalid" and previous_kind != kind:
+        last = 0
+    if now - last <= cfg.ALERT_COOLDOWN_SECONDS:
+        remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
+        _health_tracker().record_alert_cooldown(account_id, float(remaining))
+        log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
+        return
+
+    _alert_last_sent[account_id] = now
+    try:
+        await send_alert_message(target_group, alert_text)
+    except Exception as exc:  # 告警发送失败不能覆盖原始凭证故障。
+        log_all(
+            f"⚠️ 账号 {account_id} {platform} 续期告警发送失败: {type(exc).__name__}: {exc}",
+            is_error=True,
+        )
 
 
 async def _post(url: str, *, headers: dict,
                 json_body: dict | None = None,
                 content: bytes | None = None) -> httpx.Response:
     client_to_use = None
-    if _http_client is not None and not _http_client.is_closed:
-        try:
-            curr_loop = asyncio.get_running_loop()
-            transport = getattr(_http_client, "_transport", None)
-            client_loop = getattr(transport, "_loop", None)
-            if client_loop is None or client_loop is curr_loop:
-                client_to_use = _http_client
-        except RuntimeError:
-            client_to_use = None
+    try:
+        curr_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        curr_loop = None
+
+    # 续期优先使用隔离的认证连接池；单独脚本未注入时回退普通客户端。
+    for candidate in (_auth_http_client, _http_client):
+        if candidate is None or candidate.is_closed or curr_loop is None:
+            continue
+        transport = getattr(candidate, "_transport", None)
+        client_loop = getattr(transport, "_loop", None)
+        if client_loop is None or client_loop is curr_loop:
+            client_to_use = candidate
+            break
 
     if client_to_use is not None:
         return await client_to_use.post(
             url, headers=headers, json=json_body, content=content, timeout=15,
         )
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(
+        timeout=15,
+        proxy=getattr(cfg, "PROXY", "") or None,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
+    ) as client:
         return await client.post(url, headers=headers, json=json_body, content=content)
 
 
@@ -250,26 +437,34 @@ async def refresh_mobile_token(account_id: str, target_group: int,
       - 请求头不含 Authorization（仅凭 refresh_token 本身认证）
       - 响应中同时返回新的 access_token 和 refresh_token
     """
-    from src.notifier import send_alert_message
-
+    failure_kind = "credential_invalid"
+    failure_detail = "refresh_token 不可用"
     lock = _get_refresh_lock(account_id)
     async with lock:
         cred = ACCOUNT_CREDS.get(account_id)
         if not cred:
             log_all(f"🚨 账号 {account_id} 无凭据", is_error=True)
+            _record_refresh_failure(account_id, "credential_invalid", "凭据未加载")
             return False
 
         if old_token and cred.get("token") != old_token:
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
+        available, reason = is_account_fetch_available(account_id)
+        if not available:
+            log_all(f"⏸️ 账号 {account_id} 移动端续期处于冷却状态，跳过重复请求：{reason}", is_debug=True)
+            return False
+
         acc_cfg = cfg.ACCOUNTS.get(account_id)
         if not acc_cfg:
             log_all(f"🚨 账号 {account_id} 缺少配置，无法执行移动端续期", is_error=True)
+            _record_refresh_failure(account_id, "credential_invalid", "账号配置缺失")
             return False
         rt = cred.get("refresh_token") or acc_cfg.get("init_refresh_token", "")
         if not rt:
             log_all(f"🚨 账号 {account_id} 无 refresh_token", is_error=True)
+            _record_refresh_failure(account_id, "credential_invalid", "refresh_token 缺失")
             return False
 
         url = f"{get_mobile_api_base(account_id)}/v2/update_token"
@@ -277,7 +472,8 @@ async def refresh_mobile_token(account_id: str, target_group: int,
         headers.pop("Authorization", None)  # 移动端刷新时不含旧 Auth
 
         try:
-            r = await _post(url, headers=headers, json_body={"refresh_token": rt})
+            async with _get_refresh_semaphore():
+                r = await _post(url, headers=headers, json_body={"refresh_token": rt})
             log_response(r.text)
 
             if r.status_code == 200:
@@ -286,15 +482,19 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                     new_access = data.get("access_token")
                     new_refresh = data.get("refresh_token") or rt
                 except ValueError:
-                    log_all(f"🚨 账号 {account_id} 移动端续期响应不是合法 JSON", is_error=True)
+                    failure_kind = "response_invalid"
+                    failure_detail = "续期响应不是合法 JSON"
                     new_access = None
 
                 if new_access:
                     cred["token"] = new_access
                     cred["refresh_token"] = new_refresh
                     if not _save_mobile_cred(account_id, new_access, new_refresh):
+                        failure_kind = "persistence_failure"
+                        failure_detail = "新凭证无法持久化"
                         log_all(f"🚨 账号 {account_id} 移动端凭证未持久化，拒绝将续期视为成功", is_error=True)
                     else:
+                        clear_refresh_state(account_id)
                         log_all(f"✅ 账号 {account_id} 移动端续期成功")
                         # 记录 Token 状态
                         remaining = get_token_remaining_seconds(account_id)
@@ -302,47 +502,45 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                             _health_tracker().record_token(account_id, max(0, remaining))
                         return True
                 else:
+                    failure_kind = "response_invalid"
+                    failure_detail = "续期响应无 access_token"
                     log_all(f"🚨 账号 {account_id} 移动端续期响应无 access_token", is_error=True)
             else:
                 body_snippet = r.text[:300] if r.text else "(空响应)"
+                failure_kind = _classify_refresh_status(r.status_code, body_snippet)
+                failure_detail = f"HTTP {r.status_code}"
                 log_all(
                     f"🚨 账号 {account_id} 移动端续期被拒: HTTP {r.status_code} | {body_snippet}",
                     is_error=True,
                 )
 
         except httpx.TimeoutException as e:
+            failure_kind = "transient_network"
+            failure_detail = f"{type(e).__name__}: {format_httpx_error(e)}"
             log_all(
                 f"🔥 账号 {account_id} 移动端续期超时: {format_httpx_error(e)}",
                 is_error=True,
             )
         except httpx.RequestError as e:
+            failure_kind = "transient_network"
+            failure_detail = f"{type(e).__name__}: {format_httpx_error(e)}"
             log_all(
                 f"🔥 账号 {account_id} 移动端续期网络异常: {format_httpx_error(e)}",
                 is_error=True,
             )
         except (OSError, ValueError) as e:
+            failure_kind = "response_invalid"
+            failure_detail = f"{type(e).__name__}: {e}"
             log_all(f"🔥 账号 {account_id} 移动端续期处理失败: {type(e).__name__}: {e}", is_error=True)
         except Exception as e:  # 最终边界：刷新失败必须记录，不能让主巡查崩溃。
+            failure_kind = "response_invalid"
+            failure_detail = f"{type(e).__name__}: {e}"
             log_all(f"🔥 账号 {account_id} 移动端续期未处理异常: {type(e).__name__}: {e}", is_error=True)
 
-    # ---- 续期失败，触发报警 ----
-    log_all(f"🚨 致命错误：账号 {account_id} 移动端续期失败，refresh_token 可能已失效", is_error=True)
-    now  = datetime.now().timestamp()
-    last = _alert_last_sent.get(account_id, 0)
-    if now - last > cfg.ALERT_COOLDOWN_SECONDS:
-        _alert_last_sent[account_id] = now
-        try:
-            await send_alert_message(
-                target_group,
-                f"📢 警报：账号 {account_id} 移动端续期失败！请更新 refresh_token！",
-            )
-        except Exception as exc:  # 告警发送失败不能覆盖原始凭证故障。
-            log_all(f"⚠️ 账号 {account_id} 移动端续期告警发送失败: {type(exc).__name__}: {exc}", is_error=True)
-    else:
-        remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
-        _health_tracker().record_alert_cooldown(account_id, float(remaining))
-        log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
-
+    await _report_refresh_failure(
+        account_id, target_group, kind=failure_kind, detail=failure_detail,
+        platform="移动端",
+    )
     return False
 
 
@@ -603,26 +801,33 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
     - 若其他协程已抢先刷新（token 已变），直接返回 True。
     - 失败时触发 QQ 报警（带冷却）。
     """
-    # 延迟导入，避免循环依赖
-    from src.notifier import send_alert_message
-
+    failure_kind = "credential_invalid"
+    failure_detail = "Cookie/Token 不可用"
     lock = _get_refresh_lock(account_id)
     async with lock:
         cred = ACCOUNT_CREDS.get(account_id)
         if not cred:
             log_all(f"🚨 账号 {account_id} 无凭据", is_error=True)
+            _record_refresh_failure(account_id, "credential_invalid", "凭据未加载")
             return False
 
         if old_token and cred.get("token") != old_token:
             log_all(f"✅ 账号 {account_id} token 已被其他协程刷新，跳过")
             return True
 
+        available, reason = is_account_fetch_available(account_id)
+        if not available:
+            log_all(f"⏸️ 账号 {account_id} Web 续期处于冷却状态，跳过重复请求：{reason}", is_debug=True)
+            return False
+
         acc_cfg = cfg.ACCOUNTS.get(account_id)
         if not acc_cfg:
             log_all(f"🚨 账号 {account_id} 缺少配置，无法执行 Web 续期", is_error=True)
+            _record_refresh_failure(account_id, "credential_invalid", "账号配置缺失")
             return False
         if not cred.get("token") or not isinstance(cred.get("cookies"), dict):
             log_all(f"🚨 账号 {account_id} Web 凭证结构不完整，无法执行续期", is_error=True)
+            _record_refresh_failure(account_id, "credential_invalid", "Web 凭证结构不完整")
             return False
         group_type = acc_cfg["group_type"]
         api_base   = acc_cfg.get("api_base")
@@ -642,7 +847,8 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
         headers["cookie"] = cookie_str
 
         try:
-            r = await _post(url, headers=headers, content=b'{"refresh_token":null}')
+            async with _get_refresh_semaphore():
+                r = await _post(url, headers=headers, content=b'{"refresh_token":null}')
             log_response(r.text)
 
             if r.status_code == 200:
@@ -650,6 +856,8 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                     new_token = r.json().get("access_token")
                 except ValueError:
                     new_token = None
+                    failure_kind = "response_invalid"
+                    failure_detail = "续期响应不是合法 JSON"
                     log_all(f"🚨 账号 {account_id} 续期响应不是合法 JSON", is_error=True)
 
                 if new_token:
@@ -660,8 +868,11 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                             k, v = sc.split("=", 1)
                             cred["cookies"][k] = v
                     if not _save_cred(account_id, cred["token"], cred["cookies"]):
+                        failure_kind = "persistence_failure"
+                        failure_detail = "新凭证无法持久化"
                         log_all(f"🚨 账号 {account_id} Web 凭证未持久化，拒绝将续期视为成功", is_error=True)
                     else:
+                        clear_refresh_state(account_id)
                         log_all(f"✅ 账号 {account_id} 续期成功")
                         # 记录 Token 状态
                         remaining = get_token_remaining_seconds(account_id)
@@ -669,44 +880,42 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
                             _health_tracker().record_token(account_id, max(0, remaining))
                         return True
                 else:
+                    failure_kind = "response_invalid"
+                    failure_detail = "续期响应无 access_token"
                     log_all(f"🚨 账号 {account_id} 续期响应无 access_token", is_error=True)
             else:
                 body_snippet = r.text[:120].strip() if r.text else ""
+                failure_kind = _classify_refresh_status(r.status_code, body_snippet)
+                failure_detail = f"HTTP {r.status_code}"
                 log_all(f"🚨 账号 {account_id} 续期被拒: HTTP {r.status_code} | {body_snippet}", is_error=True)
 
         except httpx.TimeoutException as e:
+            failure_kind = "transient_network"
+            failure_detail = f"{type(e).__name__}: {format_httpx_error(e)}"
             log_all(
                 f"🔥 账号 {account_id} Web 续期超时: {format_httpx_error(e)}",
                 is_error=True,
             )
         except httpx.RequestError as e:
+            failure_kind = "transient_network"
+            failure_detail = f"{type(e).__name__}: {format_httpx_error(e)}"
             log_all(
                 f"🔥 账号 {account_id} 续期网络异常: {format_httpx_error(e)}",
                 is_error=True,
             )
         except (OSError, ValueError) as e:
+            failure_kind = "response_invalid"
+            failure_detail = f"{type(e).__name__}: {e}"
             log_all(f"🔥 账号 {account_id} Web 续期处理失败: {type(e).__name__}: {e}", is_error=True)
         except Exception as e:  # 最终边界：刷新失败必须记录，不能让主巡查崩溃。
+            failure_kind = "response_invalid"
+            failure_detail = f"{type(e).__name__}: {e}"
             log_all(f"🔥 账号 {account_id} Web 续期未处理异常: {type(e).__name__}: {e}", is_error=True)
 
-    # ---- 续期失败，触发报警 ----
-    log_all(f"🚨 致命错误：账号 {account_id} 续期失败，Cookie 可能已死亡", is_error=True)
-    now  = datetime.now().timestamp()
-    last = _alert_last_sent.get(account_id, 0)
-    if now - last > cfg.ALERT_COOLDOWN_SECONDS:
-        _alert_last_sent[account_id] = now
-        try:
-            await send_alert_message(
-                target_group,
-                f"📢 警报：账号 {account_id} 续期失败，Cookie 已死亡！请重新抓包！",
-            )
-        except Exception as exc:  # 告警发送失败不能覆盖原始凭证故障。
-            log_all(f"⚠️ 账号 {account_id} Web 续期告警发送失败: {type(exc).__name__}: {exc}", is_error=True)
-    else:
-        remaining = int(cfg.ALERT_COOLDOWN_SECONDS - (now - last))
-        _health_tracker().record_alert_cooldown(account_id, float(remaining))
-        log_all(f"⏳ 账号 {account_id} 报警冷却中，{remaining}s 后可再次通知")
-
+    await _report_refresh_failure(
+        account_id, target_group, kind=failure_kind, detail=failure_detail,
+        platform="Web",
+    )
     return False
 
 
@@ -744,17 +953,22 @@ def get_token_remaining_seconds(account_id: str) -> float | None:
     return exp - datetime.now(timezone.utc).timestamp()
 
 
-async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> None:
+async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> bool:
     """
     每轮巡查前调用。
     若 Token 剩余时间 <= cfg.TOKEN_REFRESH_BEFORE_SECONDS，主动刷新，
     避免在实际 API 请求时才触发 401 浪费一轮。
     按 auth_method 自动派发到 Web 或移动端刷新。
     """
+    available, reason = is_account_fetch_available(account_id)
+    if not available:
+        log_all(f"⏸️ {account_id} 跳过主动续期：{reason}", is_debug=True)
+        return False
+
     remaining = get_token_remaining_seconds(account_id)
     if remaining is None:
         log_all(f"⚠️ 无法解析 {account_id} 的 Token 过期时间，跳过主动刷新", is_debug=True)
-        return
+        return True
     if remaining <= cfg.TOKEN_REFRESH_BEFORE_SECONDS:
         acc_cfg = cfg.ACCOUNTS.get(account_id, {})
         log_all(
@@ -762,14 +976,15 @@ async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> N
             f"（阈值 {cfg.TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新...",
         )
         if acc_cfg.get("auth_method") == "mobile":
-            await refresh_mobile_token(account_id, target_group)
+            return await refresh_mobile_token(account_id, target_group)
         else:
-            await refresh_token(account_id, target_group)
+            return await refresh_token(account_id, target_group)
     else:
         log_all(
             f"✅ {account_id} Token 剩余 {int(remaining // 60)}min，无需刷新",
             is_debug=True,
         )
+        return True
 
 
 async def verify_and_handshake_account(account_id: str, custom_client: httpx.AsyncClient | None = None) -> tuple[bool, str, dict]:
@@ -861,6 +1076,9 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
                     r = await c.get(url, headers=headers)
 
             if r.status_code == 200:
+                # update_token 可能因 Cookie 缺少 session 而失败，但当前 Token
+                # 仍然可用；握手成功时解除之前的网络/续期熔断状态。
+                clear_refresh_state(account_id)
                 rem = get_token_remaining_seconds(account_id)
                 rem_min = max(0, int(rem or 0) // 60)
                 return True, (
@@ -895,6 +1113,8 @@ def rename_account(old_id: str, new_id: str) -> None:
         return
     if old_id in ACCOUNT_CREDS:
         ACCOUNT_CREDS[new_id] = ACCOUNT_CREDS.pop(old_id)
+    if old_id in _refresh_state:
+        _refresh_state[new_id] = _refresh_state.pop(old_id)
     try:
         from src import auth
         auth.rename_account_credential(old_id, new_id)

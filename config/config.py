@@ -72,6 +72,10 @@ _DEFAULTS: dict = {
     "monitor_list":             [],
     # 并发 / 反爬
     "http_semaphore_limit":     3,
+    # Token 续期独立限流与失败冷却，避免多个账号同时续期占满共享网络资源
+    "token_refresh_concurrency":              2,
+    "token_refresh_network_cooldown_seconds": 90,
+    "token_refresh_max_cooldown_seconds":     600,
     "qq_send_interval":         1.5,
     "token_refresh_before_seconds": 300,
     "backtrack_hours":          24,
@@ -543,6 +547,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "auth_session_hours":           "AUTH_SESSION_HOURS",
     "auth_cookie_secure":           "AUTH_COOKIE_SECURE",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
+    "token_refresh_concurrency":              "TOKEN_REFRESH_CONCURRENCY",
+    "token_refresh_network_cooldown_seconds": "TOKEN_REFRESH_NETWORK_COOLDOWN_SECONDS",
+    "token_refresh_max_cooldown_seconds":     "TOKEN_REFRESH_MAX_COOLDOWN_SECONDS",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",
     "cred_dir":                     "CRED_DIR",

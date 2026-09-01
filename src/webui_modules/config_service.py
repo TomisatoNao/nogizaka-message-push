@@ -359,6 +359,9 @@ def _rotate_account_creds(account_id: str) -> None:
     creds_mod = sys.modules.get("config.credentials")
     if creds_mod is not None:
         creds_mod.ACCOUNT_CREDS.pop(account_id, None)
+        clear_state = getattr(creds_mod, "clear_refresh_state", None)
+        if clear_state is not None:
+            clear_state(account_id)
 
 
 # ================================================================
