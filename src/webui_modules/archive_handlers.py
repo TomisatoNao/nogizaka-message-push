@@ -378,6 +378,12 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             _send_json_resp(handler, {"ok": False, "errors": ["year/month/page 必须是数字"]}, 400)
             return
 
+        # 保持未带参数的旧 API 为升序；网页端显式请求 desc 以首屏展示最新消息。
+        order = qp("order", "asc").strip().lower()
+        if order not in {"asc", "desc"}:
+            _send_json_resp(handler, {"ok": False, "errors": ["order 必须是 asc 或 desc"]}, 400)
+            return
+
         type_filter = qp("type")
         msgs = _archive.load_month(member, year, month)
         if type_filter:
@@ -386,6 +392,9 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
                 return
             wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
             msgs = [m for m in msgs if m.get("type") in wanted]
+
+        if order == "desc":
+            msgs.reverse()
 
         show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
         total = len(msgs)
@@ -409,7 +418,7 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
 
         _send_json_resp(handler, {
             "ok": True, "member": member, "group": grp, "year": year, "month": month,
-            "total": total, "page": page,
+            "total": total, "page": page, "order": order,
             "total_pages": max(1, -(-total // per_page)), "messages": slim,
         })
         return
@@ -452,6 +461,11 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             _send_json_resp(handler, {"ok": False, "errors": ["page 必须是数字"]}, 400)
             return
 
+        order = qp("order", "desc").strip().lower()
+        if order not in {"asc", "desc"}:
+            _send_json_resp(handler, {"ok": False, "errors": ["order 必须是 asc 或 desc"]}, 400)
+            return
+
         type_filter = qp("type")
         wanted = None
         if type_filter:
@@ -460,7 +474,7 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
                 return
             wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
 
-        hits = _archive.search(member, query, type_filter=wanted)
+        hits = _archive.search(member, query, type_filter=wanted, order=order)
         show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
         grp = _archive.infer_member_group(member)
         total = len(hits)
@@ -485,7 +499,7 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
 
         _send_json_resp(handler, {
             "ok": True, "member": member, "group": grp, "q": query, "total": total,
-            "page": page, "total_pages": max(1, -(-total // per_page)),
+            "page": page, "order": order, "total_pages": max(1, -(-total // per_page)),
             "capped": total >= 500, "messages": slim,
         })
         return

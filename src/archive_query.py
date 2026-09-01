@@ -215,13 +215,19 @@ def day_counts(member_dir: str, type_filter: set[str] | None = None) -> dict[str
 
 
 def search(member_dir: str, query: str, type_filter: set[str] | None = None,
-           limit: int = 500) -> list[dict]:
+           limit: int = 500, order: str = "desc") -> list[dict]:
     """跨月搜索：优先使用 SQLite FTS5 全文索引，无 DB 或被 mock 时降级为 JSON 遍历。
     原文与译文都参与匹配，空格分词取 AND 语义。
-    返回附加 _year/_month 字段的消息列表，新的在前，最多 limit 条。"""
+    返回附加 _year/_month 字段的消息列表，最多 limit 条。
+
+    ``order`` 仅接受 ``asc`` / ``desc``。默认新消息在前，保持搜索接口
+    原有行为；Web UI 会将用户选择的阅读顺序显式传入。
+    """
     terms = [t.lower() for t in query.split() if t.strip()]
     if not terms:
         return []
+    if order not in {"asc", "desc"}:
+        order = "desc"
 
     from src import archive
     is_mocked = getattr(archive, "list_months", None) is not getattr(archive, "_ORIGINAL_LIST_MONTHS", None)
@@ -241,7 +247,8 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
                     placeholders = ",".join("?" * len(type_filter))
                     sql += f" AND m.type IN ({placeholders})"
                     params.extend(list(type_filter))
-                sql += " ORDER BY m.updated_at DESC LIMIT ?"
+                direction = "ASC" if order == "asc" else "DESC"
+                sql += f" ORDER BY m.updated_at {direction}, m.id {direction} LIMIT ?"
                 params.append(limit)
 
                 cursor = conn.cursor()
@@ -260,9 +267,13 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
     if load_month_fn is None:
         from src.archive import load_month as load_month_fn
     results: list[dict] = []
-    for m in list_months_fn(member_dir):
+    month_list = list(list_months_fn(member_dir))
+    if order == "asc":
+        month_list.reverse()
+    for m in month_list:
         msgs = load_month_fn(member_dir, m["year"], m["month"])
-        for msg in reversed(msgs):
+        iterable = msgs if order == "asc" else reversed(msgs)
+        for msg in iterable:
             if type_filter and msg.get("type") not in type_filter:
                 continue
             haystack = "\n".join([

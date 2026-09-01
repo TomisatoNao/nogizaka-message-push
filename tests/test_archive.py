@@ -127,6 +127,13 @@ def main() -> None:
             media_url = j["messages"][1]["media_url"]
             assert media_url and media_url.endswith("102.jpg"), f"media_url: {media_url}"
 
+            # 网页端使用 desc 首屏展示最新消息；未带 order 的旧调用仍保持升序。
+            code, body, _ = _http("GET", base + "/api/archive/messages?member=%E6%B5%8B%E8%AF%95_%E6%88%90%E5%91%98&year=2026&month=7&order=desc")
+            j_desc = json.loads(body)
+            assert code == 200 and j_desc["order"] == "desc" and j_desc["messages"][0]["id"] == 102
+            code, body, _ = _http("GET", base + "/api/archive/messages?member=%E6%B5%8B%E8%AF%95_%E6%88%90%E5%91%98&year=2026&month=7&order=bogus")
+            assert code == 400, "非法消息排序应 400"
+
             code, body, _ = _http("GET", base + "/api/archive/messages?member=%E6%B5%8B%E8%AF%95_%E6%88%90%E5%91%98&year=2026&month=7&type=text")
             assert json.loads(body)["total"] == 1, "类型过滤应生效"
 
@@ -341,6 +348,9 @@ def main() -> None:
         hits = archive.search(sdir, "ライブ")
         assert len(hits) == 2 and hits[0]["_month"] == 4 and hits[1]["_month"] == 3, \
             f"跨月命中且新的在前: {[(h['id'], h['_month']) for h in hits]}"
+        asc_hits = archive.search(sdir, "ライブ", order="asc")
+        assert len(asc_hits) == 2 and asc_hits[0]["_month"] == 3 and asc_hits[1]["_month"] == 4, \
+            f"升序搜索应从旧到新: {[(h['id'], h['_month']) for h in asc_hits]}"
         assert len(archive.search(sdir, "演唱会")) == 1, "译文应参与匹配"
         assert len(archive.search(sdir, "ライブ 楽しかった")) == 1, "空格分词应为 AND 语义"
         assert archive.search(sdir, "LIVE不存在的词") == []
@@ -433,6 +443,12 @@ def main() -> None:
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96")
             j = json.loads(body)
             assert code == 200 and j["total"] == 2 and j["messages"][0]["year"] == 2026, f"搜索: {j}"
+            code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96&order=asc")
+            j = json.loads(body)
+            assert code == 200 and j["order"] == "asc" and j["messages"][0]["month"] == 3, \
+                f"升序搜索: {j}"
+            code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96&order=bogus")
+            assert code == 400, "非法搜索排序应 400"
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=")
             assert code == 400, "缺关键词应 400"
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=" + "x" * 101)

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>坂道监控 · 消息归档</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260831_7">
-<script src="/static/theme.js?v=20260831_7"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260902_1">
+<link rel="stylesheet" href="/static/theme.css?v=20260902_3">
+<script src="/static/theme.js?v=20260902_3"></script>
+<link rel="stylesheet" href="/static/archive.css?v=20260902_2">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -159,6 +159,10 @@
       <button class="nav" id="prevMonth">← 上月</button>
       <select id="monthSelect"></select>
       <button class="nav" id="nextMonth">下月 →</button>
+    </div>
+    <div class="message-order-toggle" id="messageOrderToggle" role="group" aria-label="消息阅读顺序">
+      <button class="order-btn" type="button" data-order="desc" aria-pressed="true">最新优先</button>
+      <button class="order-btn" type="button" data-order="asc" aria-pressed="false">从早到晚</button>
     </div>
     <div class="chips" id="typeChips"></div>
     <span class="stats" id="stats"></span>
@@ -340,6 +344,6 @@
   </div>
 </div>
 
-<script src="/static/archive.js?v=20260902_1"></script>
+<script src="/static/archive.js?v=20260902_2"></script>
 </body>
 </html>

@@ -377,10 +377,39 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260902_1" in html
-    assert "/static/archive.css?v=20260902_1" in html
-    assert "/static/archive.js?v=20260902_1" in perf
-    assert "/static/archive.css?v=20260902_1" in perf
+    assert "/static/archive.js?v=20260902_2" in html
+    assert "/static/archive.css?v=20260902_2" in html
+    assert "/static/archive.js?v=20260902_2" in perf
+    assert "/static/archive.css?v=20260902_2" in perf
+
+
+def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
+    theme = (_ROOT / "src" / "webui_static" / "theme.css").read_text(encoding="utf-8")
+    archive = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    admin = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    # html/body 的 hidden overflow 会创建一个额外的滚动容器，使 sticky header
+    # 跟随 body 一起离开视口；clip 只裁剪横向溢出，不改变 sticky 的参照物。
+    assert "header.app-header" in theme
+    assert "position: sticky;" in theme
+    assert "top: 0;" in theme
+    assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
+    assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
+    assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
+    assert "/static/theme.css?v=20260902_3" in archive
+    assert "/static/theme.css?v=20260902_3" in admin
+
+
+def test_archive_message_order_controls_and_route_state():
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    assert 'let messageOrder' in script
+    assert 'localStorage.getItem("archive_message_order")' in script
+    assert '&order=" + messageOrder' in script
+    assert 'p.set("order", messageOrder)' in script
+    assert 'setMessageOrder(requestedOrder' in script
+    assert 'id="messageOrderToggle"' in html
+    assert 'data-order="desc"' in html and 'data-order="asc"' in html
 
 
 def test_social_handlers_restore_webui_routes():

@@ -101,6 +101,14 @@ html.view-blog #blogGrid { display: block !important; }
 
   .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
   .month-nav-group { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .message-order-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--card); flex-shrink: 0; }
+  .order-btn { border: 0; border-radius: 6px; padding: 5px 9px; background: transparent;
+    color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+  .order-btn:hover { color: var(--text); background: var(--hover); }
+  .order-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 650;
+    box-shadow: 0 1px 4px var(--accent-ring); }
+  .order-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #searchBox {
     flex: 1; min-width: 220px; padding: 8px 12px;
     border: 1px solid var(--border); border-radius: 8px;
@@ -2468,6 +2476,16 @@ html.view-blog #blogGrid { display: block !important; }
       gap: 6px !important;
       align-items: center !important;
       box-sizing: border-box !important;
+    }
+    .message-order-toggle {
+      width: 100% !important;
+      justify-content: center !important;
+      box-sizing: border-box !important;
+    }
+    .order-btn {
+      flex: 1 1 0 !important;
+      padding: 7px 10px !important;
+      font-size: 13px !important;
     }
     .month-nav-group #prevMonth,
     .month-nav-group #nextMonth {

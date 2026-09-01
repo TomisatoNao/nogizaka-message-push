@@ -13,6 +13,14 @@ let curBlogGroup = "";   // 非空 = 博客模式
 let months = [];         // [{year, month, count}] 新的在前
 let curYM = null;        // {year, month}
 let curType = "";
+const MESSAGE_ORDER_DEFAULT = "desc";
+let messageOrder = (() => {
+  try {
+    return localStorage.getItem("archive_message_order") === "asc" ? "asc" : MESSAGE_ORDER_DEFAULT;
+  } catch (_) {
+    return MESSAGE_ORDER_DEFAULT;
+  }
+})();
 let page = 1, totalPages = 1;
 let images = [];         // 当月已渲染图片 [{url, caption}]，供灯箱翻页
 let lastDay = "";
@@ -163,6 +171,38 @@ async function api(path, options = {}) {
 
 function normalizedQuery(value) { return String(value || "").trim().slice(0, 100); }
 function syncSearchInput() { $("searchBox").value = searchQuery; $("searchClear").hidden = !searchQuery; }
+function messageOrderLabel() {
+  return messageOrder === "asc" ? "从早到晚" : "最新优先";
+}
+function loadMoreLabel() {
+  return messageOrder === "asc" ? "加载后续消息 ↓" : "加载更早消息 ↓";
+}
+function syncMessageOrderControls() {
+  document.querySelectorAll("#messageOrderToggle [data-order]").forEach((button) => {
+    const active = button.dataset.order === messageOrder;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+function setMessageOrder(order, { persist = true, reload = true } = {}) {
+  const next = order === "asc" ? "asc" : MESSAGE_ORDER_DEFAULT;
+  const changed = next !== messageOrder;
+  messageOrder = next;
+  if (persist) {
+    try { localStorage.setItem("archive_message_order", messageOrder); } catch (_) {}
+  }
+  syncMessageOrderControls();
+  if (!changed || !reload || curMode !== "msg") {
+    if (reload && curMode === "msg" && !curBlogGroup) syncHash();
+    return;
+  }
+  if (searchQuery) {
+    startSearch(searchQuery);
+  } else if (curYM) {
+    selectMonth(curYM.year, curYM.month);
+  }
+}
+
 function resetContent() {
   contentVersion++;
   if (contentAbort) contentAbort.abort();
@@ -173,7 +213,7 @@ function resetContent() {
   $("emptyHint").hidden = true;
   $("loadMore").hidden = true;
   $("loadMore").disabled = false;
-  $("loadMore").textContent = "加载更多 ↓";
+  $("loadMore").textContent = loadMoreLabel();
   return contentVersion;
 }
 function highlightQuery(str, query) {
@@ -231,7 +271,7 @@ function initInfiniteScroll() {
 function setPageLoading(loading) {
   pageLoading = loading;
   $("loadMore").disabled = loading;
-  $("loadMore").textContent = loading ? "加载中…" : "加载更多 ↓";
+  $("loadMore").textContent = loading ? "加载中…" : loadMoreLabel();
 }
 
 
@@ -1944,6 +1984,8 @@ function syncHash() {
   const p = new URLSearchParams({ member: curMember, y: curYM.year, m: curYM.month });
   if (curType) p.set("t", curType);
   if (searchQuery) p.set("q", searchQuery);
+  // asc 不是默认值时写入路由，分享链接能恢复用户的阅读顺序；desc 保持旧链接简洁。
+  if (messageOrder !== MESSAGE_ORDER_DEFAULT) p.set("order", messageOrder);
   writeArchiveHash(p.toString());
 }
 
@@ -1969,10 +2011,10 @@ async function loadPage() {
   const url = searchQuery
     ? "/api/archive/search?member=" + encodeURIComponent(curMember) +
       "&q=" + encodeURIComponent(searchQuery) +
-      "&type=" + curType + "&page=" + page + "&per_page=50"
+      "&type=" + curType + "&order=" + messageOrder + "&page=" + page + "&per_page=50"
     : "/api/archive/messages?member=" + encodeURIComponent(curMember) +
       "&year=" + curYM.year + "&month=" + curYM.month +
-      "&type=" + curType + "&page=" + page + "&per_page=50";
+      "&type=" + curType + "&order=" + messageOrder + "&page=" + page + "&per_page=50";
   let data;
   try {
     data = await api(url, { signal: contentAbort.signal });
@@ -1987,10 +2029,11 @@ async function loadPage() {
   totalPages = data.total_pages;
   if (searchQuery) {
     $("stats").textContent = "搜索「" + searchQuery + "」· " + data.total + " 条" +
-      (data.capped ? "（已达上限，仅显示最新 500 条）" : "");
+      " · 全历史 · " + messageOrderLabel() +
+      (data.capped ? "（已达上限，仅显示" + (messageOrder === "asc" ? "最早" : "最新") + " 500 条）" : "");
     if (!data.messages.length && page === 1) showEmpty("没有匹配「" + searchQuery + "」的消息");
   } else {
-    $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 条";
+    $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 条 · " + messageOrderLabel();
     if (!data.messages.length && page === 1) {
       showEmpty("本月没有" + (curType ? "该类型的" : "") + "消息");
     }
@@ -2618,6 +2661,14 @@ function initTypeChips() {
     box.appendChild(b);
   }
 }
+
+function initMessageOrder() {
+  document.querySelectorAll("#messageOrderToggle [data-order]").forEach((button) => {
+    button.onclick = () => setMessageOrder(button.dataset.order);
+  });
+  syncMessageOrderControls();
+}
+
 $("monthSelect").addEventListener("change", () => {
   const [y, m] = $("monthSelect").value.split("-").map(Number);
   selectMonth(y, m);
@@ -3550,6 +3601,10 @@ async function handleRoute(isInitial = false) {
     const t = p.get("t") || "";
     const q = normalizedQuery(p.get("q"));
     const msgId = p.get("msg_id") || p.get("msg") || "";
+    const requestedOrder = p.get("order") || p.get("o");
+    if (requestedOrder === "asc" || requestedOrder === "desc") {
+      setMessageOrder(requestedOrder, { persist: false, reload: false });
+    }
     if (msgId) targetMsgId = String(msgId);
     curType = t;
     searchQuery = q;
@@ -3626,6 +3681,7 @@ async function boot() {
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();
   initTypeChips();
+  initMessageOrder();
 
   // 首页数据不依赖成员选择器，直接与认证/成员列表并行，避免首屏串行等待。
   const initialHome = !location.hash || location.hash === "#home";
