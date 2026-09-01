@@ -86,6 +86,18 @@
        text-transform: uppercase; }
   td input, td select { min-width: 70px; }
   .table-wrap { overflow-x: auto; }
+  /* 监控成员表中姓名是可编辑字段；给第二列明确的最小宽度，避免窄屏下
+     table auto layout 将输入框压缩为几乎不可见，导致“姓名不显示”。 */
+  .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 95px; min-width: 95px; }
+  .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 145px; min-width: 145px; }
+  .member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }
+
+  /* OpenID 白名单卡片：左侧信息和右侧操作分别拥有可收缩/换行能力，
+     避免长 OpenID 覆盖复制、编辑和删除按钮。 */
+  .cmd-openid-card > .cmd-openid-main { min-width: 0; flex: 1 1 320px; flex-wrap: wrap; }
+  .cmd-openid-card .cmd-openid-name { min-width: 0; max-width: 170px; }
+  .cmd-openid-card .cmd-openid-code { min-width: 0; max-width: 100%; flex: 1 1 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmd-openid-card > .cmd-openid-actions { flex: 0 0 auto; flex-wrap: wrap; }
   .btn { border: 1px solid var(--border); background: var(--card-solid); color: var(--text);
     padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
     font-family: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
@@ -233,6 +245,22 @@
     .table-wrap { -webkit-overflow-scrolling: touch; }
     th, td { padding: 8px 9px; font-size: 13px; }
     td input, td select { min-width: 0; width: 100%; }
+    .member-table { min-width: 900px; }
+    .member-table th:nth-child(1), .member-table td:nth-child(1) { min-width: 95px; }
+    .member-table th:nth-child(2), .member-table td:nth-child(2) { min-width: 145px; }
+    .member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }
+
+    /* 白名单卡片在手机端改为上下两行：OpenID 信息在上，操作按钮在下。 */
+    .cmd-openid-card { align-items: flex-start !important; }
+    .cmd-openid-card > .cmd-openid-main {
+      width: 100%; flex: 1 1 100%; align-items: flex-start; row-gap: 6px;
+    }
+    .cmd-openid-card .cmd-openid-name { flex: 0 1 auto; max-width: min(170px, 48vw); }
+    .cmd-openid-card .cmd-openid-code { flex: 1 1 160px; max-width: 100%; }
+    .cmd-openid-card > .cmd-openid-actions {
+      width: 100%; flex: 1 1 100%; justify-content: flex-start; gap: 6px;
+    }
+    .cmd-openid-card > .cmd-openid-actions .btn { flex: 0 0 auto; }
 
     /* 弹窗不溢出窄屏 */
     dialog { min-width: 0; width: min(92vw, 600px); padding: 16px 14px; }
@@ -402,7 +430,7 @@
       <label class="switch" style="margin:0;"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
     </div>
     <div class="table-wrap">
-      <table>
+      <table class="member-table">
         <thead>
           <tr>
             <th style="width:95px;">成员 ID</th>
@@ -4653,7 +4681,8 @@ function renderCmdOpenids() {
     card.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--card-solid); border: 1px solid var(--border-soft); border-radius: 8px; gap: 10px; flex-wrap: wrap;";
 
     const left = document.createElement("div");
-    left.style.cssText = "display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;";
+    left.className = "cmd-openid-main";
+    left.style.cssText = "display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap;";
 
     const typeTag = document.createElement("span");
     const isGroup = item.type === "group";
@@ -4662,11 +4691,13 @@ function renderCmdOpenids() {
     typeTag.textContent = isGroup ? "👥 群聊" : "👤 私聊";
 
     const nameSpan = document.createElement("span");
-    nameSpan.style.cssText = "font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;";
+    nameSpan.className = "cmd-openid-name";
+    nameSpan.style.cssText = "font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
     nameSpan.textContent = item.name || (isGroup ? "未命名群聊" : "未命名用户");
     nameSpan.title = item.name || "";
 
     const code = document.createElement("code");
+    code.className = "cmd-openid-code";
     code.style.cssText = "font-family: Consolas, monospace; font-size: 12px; color: var(--muted); background: var(--bg); padding: 2.5px 8px; border-radius: 4px; border: 1px solid var(--border-soft); letter-spacing: 0.5px; user-select: all; cursor: pointer;";
     code.textContent = item.openid;
     code.title = "点击复制 OpenID";
@@ -4678,7 +4709,8 @@ function renderCmdOpenids() {
     left.append(typeTag, nameSpan, code);
 
     const right = document.createElement("div");
-    right.style.cssText = "display: flex; align-items: center; gap: 6px; flex-shrink: 0;";
+    right.className = "cmd-openid-actions";
+    right.style.cssText = "display: flex; align-items: center; gap: 6px; flex-wrap: wrap;";
 
     const btnCopy = document.createElement("button");
     btnCopy.className = "btn small";

@@ -400,6 +400,22 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "/static/theme.css?v=20260902_3" in admin
 
 
+def test_admin_mobile_member_and_openid_layout_guards_are_present():
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    # 姓名列必须保留足够宽度；否则移动端 table auto layout 会把 input 压成空白窄框。
+    assert '<table class="member-table">' in html
+    assert ".member-table { min-width: 900px; }" in html
+    assert ".member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }" in html
+
+    # OpenID 卡片的信息区与操作区必须可被移动端 CSS 独立换行，防止按钮覆盖长 ID。
+    assert 'left.className = "cmd-openid-main"' in html
+    assert 'code.className = "cmd-openid-code"' in html
+    assert 'right.className = "cmd-openid-actions"' in html
+    assert ".cmd-openid-card > .cmd-openid-actions" in html
+    assert "width: 100%; flex: 1 1 100%; justify-content: flex-start" in html
+
+
 def test_archive_message_order_controls_and_route_state():
     script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
