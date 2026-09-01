@@ -3,7 +3,7 @@ src/webui_modules/archive_handlers.py — WebUI 归档数据路由与业务处�
 
 提供：
   1. 消息归档：成员列表、月份列表、消息分页、日历热力图、FTS5 全文搜索、手动翻译与打标回填
-  2. 官方博客：博客列表、分页、分组统计、文章详情、单成员全量补抓、日文振假名与手动翻译
+  2. 官方博客：博客列表、分页、分组统计、按日历筛选、文章详情、单成员全量补抓、日文振假名与手动翻译
   3. 粉丝信件：信件列表、收藏状态切换与批量同步
   4. 首页聚合：全站动态瀑布流、时光隧道、写真画廊与统计指标
   5. 媒体流服务：头像、博客图片与消息图片分发调度
@@ -51,6 +51,44 @@ def get_blog_db() -> sqlite3.Connection:
     conn = init_blog_db()
     _blog_db_local.conn = conn
     return conn
+
+
+def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "") -> dict[str, int]:
+    """按博客分组/作者统计有效日期的文章数。
+
+    博客抓取时已将日期规范化为本地时间字符串（``YYYY-MM-DD HH:MM``），
+    日历只取前 10 位日期，不做时区转换。格式异常的历史记录会被忽略，
+    避免污染前端日历键。
+    """
+    where = [
+        "group_key = ?",
+        "date IS NOT NULL",
+        "length(substr(date, 1, 10)) = 10",
+        "substr(date, 5, 1) = '-'",
+        "substr(date, 8, 1) = '-'",
+    ]
+    params: list[str] = [group]
+    if author:
+        normalized_author = author.replace(" ", "").replace("　", "").replace("_", "")
+        where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
+        params.append(normalized_author)
+
+    rows = db.execute(
+        "SELECT substr(date, 1, 10) AS day, COUNT(*) AS count "
+        "FROM blog_posts WHERE " + " AND ".join(where) +
+        " GROUP BY substr(date, 1, 10) ORDER BY day",
+        params,
+    ).fetchall()
+
+    days: dict[str, int] = {}
+    for row in rows:
+        day = str(row[0] or "")
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            continue
+        days[day] = int(row[1] or 0)
+    return days
 
 
 def _send_json_resp(handler, obj: dict, code: int = 200) -> None:
@@ -436,7 +474,49 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         _send_json_resp(handler, {"ok": True, "id": int(letter_id), "is_favorite": is_fav})
         return
 
-    # 9. 博客作者列表
+    # 9. 博客分组统计
+    if sub == "blog_groups":
+        try:
+            rows = get_blog_db().execute("""
+                SELECT group_key, COUNT(*), MIN(date), MAX(date)
+                FROM blog_posts
+                GROUP BY group_key
+                ORDER BY group_key
+            """).fetchall()
+        except (sqlite3.Error, OSError):
+            _send_json_resp(handler, {"ok": False, "errors": ["博客分组暂时不可用"]}, 500)
+            return
+        groups = [{
+            "key": row[0],
+            "total": int(row[1] or 0),
+            "first_date": row[2] or "",
+            "last_date": row[3] or "",
+        } for row in rows]
+        _send_json_resp(handler, {"ok": True, "groups": groups})
+        return
+
+    # 10. 博客日历热力图
+    if sub == "blog_calendar":
+        group = qp("group", "hinatazaka")
+        author = qp("author", "").strip()
+        try:
+            days = _blog_calendar_days(get_blog_db(), group, author)
+        except (sqlite3.Error, OSError):
+            _send_json_resp(handler, {"ok": False, "errors": ["博客日历暂时不可用"]}, 500)
+            return
+        date_keys = sorted(days)
+        _send_json_resp(handler, {
+            "ok": True,
+            "group": group,
+            "author": author,
+            "days": days,
+            "total": sum(days.values()),
+            "first_date": date_keys[0] if date_keys else "",
+            "last_date": date_keys[-1] if date_keys else "",
+        })
+        return
+
+    # 11. 博客作者列表
     if sub == "blog_authors":
         group = qp("group", "hinatazaka")
         authors = []
@@ -465,7 +545,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         _send_json_resp(handler, {"ok": True, "group": group, "authors": authors})
         return
 
-    # 10. 博客列表与详情
+    # 12. 博客列表与详情
     if sub == "blogs":
         blog_id = qp("id")
         if blog_id:
@@ -541,7 +621,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         })
         return
 
-    # 11. 博客振假名
+    # 13. 博客振假名
     if sub == "blogs/furigana":
         if handler.command != "POST":
             _send_json_resp(handler, {"ok": False, "msg": "Method not allowed"}, 405)
@@ -588,7 +668,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
             _send_json_resp(handler, {"ok": False, "msg": f"生成振假名异常: {e}"}, 500)
         return
 
-    # 12. 媒体流服务
+    # 14. 媒体流服务
     if sub.startswith("blog_media/"):
         rel_str = unquote(sub[len("blog_media/"):].replace("\\", "/"))
         rel = Path(rel_str)
@@ -620,7 +700,7 @@ def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         serve_file_range(handler, full)
         return
 
-    # 13. 首页仪表盘聚合数据
+    # 15. 首页仪表盘聚合数据
     if sub == "home":
         global _home_cache, _home_cache_key
         try:

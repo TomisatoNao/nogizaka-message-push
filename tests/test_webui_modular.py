@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import json
 from io import BytesIO
+from urllib.parse import quote
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -136,6 +137,60 @@ def test_archive_handlers_and_media_service():
     assert archive_handlers.ARCHIVE_TYPES == frozenset({"text", "picture", "image", "video", "voice"})
     assert callable(media_service.serve_file_range)
     assert callable(config_service.validate_config)
+
+
+def test_blog_calendar_endpoint_filters_group_author_and_invalid_dates(monkeypatch):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE blog_posts (group_key TEXT, author TEXT, date TEXT)")
+    db.executemany(
+        "INSERT INTO blog_posts (group_key, author, date) VALUES (?, ?, ?)",
+        [
+            ("nogizaka", "冨里 奈央", "2026-08-01 10:00"),
+            ("nogizaka", "冨里奈央", "2026-08-01 12:00"),
+            ("nogizaka", "冨里 奈央", "2026-08-02 10:00"),
+            ("nogizaka", "池田 瑛紗", "2026-08-01 10:00"),
+            ("sakurazaka", "冨里 奈央", "2026-08-01 10:00"),
+            ("nogizaka", "冨里 奈央", "not-a-date"),
+        ],
+    )
+    db.commit()
+    monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
+
+    class Handler(_ResponseHandler):
+        def __init__(self, path):
+            super().__init__()
+            self.path = path
+            self.command = "GET"
+            self.payload = None
+            self.code = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+            self.code = code
+
+    groups = Handler("/api/archive/blog_groups")
+    archive_handlers.handle_archive(groups, "blog_groups", lambda **_: True, lambda: None)
+    assert groups.code == 200
+    assert [(item["key"], item["total"]) for item in groups.payload["groups"]] == [
+        ("nogizaka", 5),
+        ("sakurazaka", 1),
+    ]
+
+    all_posts = Handler("/api/archive/blog_calendar?group=nogizaka")
+    archive_handlers.handle_archive(all_posts, "blog_calendar", lambda **_: True, lambda: None)
+    assert all_posts.code == 200
+    assert all_posts.payload["days"] == {"2026-08-01": 3, "2026-08-02": 1}
+    assert all_posts.payload["total"] == 4
+    assert all_posts.payload["first_date"] == "2026-08-01"
+    assert all_posts.payload["last_date"] == "2026-08-02"
+
+    author = Handler("/api/archive/blog_calendar?group=nogizaka&author=" + quote("冨里 奈央"))
+    archive_handlers.handle_archive(author, "blog_calendar", lambda **_: True, lambda: None)
+    assert author.code == 200
+    assert author.payload["days"] == {"2026-08-01": 2, "2026-08-02": 1}
+    assert author.payload["total"] == 3
 
 
 def test_social_handlers_restore_webui_routes():

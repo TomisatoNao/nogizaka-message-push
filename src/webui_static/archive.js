@@ -324,6 +324,12 @@ function getCurGroup() {
 }
 
 // ── 日历 ─────────────────────────────────────────
+function ensureCalendarMonth() {
+  if (calYM) return;
+  const now = toJst(new Date());
+  calYM = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
+}
+
 async function loadCalendar() {
   if (curMode === "blog") {
     return loadBlogCalendar();
@@ -372,11 +378,13 @@ async function loadBlogCalendar() {
 }
 
 function renderCalendar() {
-  if (!calYM) return;
+  // 即使接口暂时失败或分组暂无数据，也显示一个可用的空日历，避免只剩标题占位符。
+  ensureCalendarMonth();
   const { year, month } = calYM;
   $("calTitle").textContent = year + " 年 " + month + " 月";
   const grid = $("calGrid");
   grid.innerHTML = "";
+  const entryNoun = curMode === "blog" ? "篇博客" : "条消息";
   for (const w of ["日", "一", "二", "三", "四", "五", "六"]) {
     const h = document.createElement("div");
     h.className = "cal-dow";
@@ -401,8 +409,8 @@ function renderCalendar() {
     cell.textContent = d;
     if (n > 0) {
       cell.type = "button";
-      cell.title = key + " · " + n + " 条";
-      cell.setAttribute("aria-label", key + "，共 " + n + " 条消息，跳转到当天");
+      cell.title = key + " · " + n + " " + entryNoun;
+      cell.setAttribute("aria-label", key + "，共 " + n + " " + entryNoun + "，跳转到当天");
       const count = document.createElement("span");
       count.className = "n";
       count.textContent = n;
@@ -411,15 +419,19 @@ function renderCalendar() {
     }
     grid.appendChild(cell);
   }
-  $("calFoot").textContent = monthTotal > 0 ? "本月 " + monthTotal + " 条 · 点日期跳转" : "本月无消息";
+  $("calFoot").textContent = monthTotal > 0
+    ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
+    : (curMode === "blog" ? "本月无博客" : "本月无消息");
 }
 
 $("calPrev").addEventListener("click", () => {
+  ensureCalendarMonth();
   calYM = calYM.month === 1 ? { year: calYM.year - 1, month: 12 }
                             : { year: calYM.year, month: calYM.month - 1 };
   renderCalendar();
 });
 $("calNext").addEventListener("click", () => {
+  ensureCalendarMonth();
   calYM = calYM.month === 12 ? { year: calYM.year + 1, month: 1 }
                              : { year: calYM.year, month: calYM.month + 1 };
   renderCalendar();
@@ -780,6 +792,9 @@ async function selectBlogGroup(key, author = "", updateHash = true) {
     localStorage.setItem("archive_last_blog_author", curBlogAuthor);
   } catch (_) {}
   curBlogDate = "";
+  dayCounts = {};
+  calYM = null;
+  renderCalendar();
   searchQuery = "";
   syncSearchInput();
   syncChipHighlight();
@@ -952,6 +967,8 @@ function selectBlogAuthor(author) {
   curBlogAuthor = author;
   try { localStorage.setItem("archive_last_blog_author", author || ""); } catch (_) {}
   curBlogDate = "";
+  dayCounts = {};
+  calYM = null;
   updateBlogAuthorDisplay();
   renderCalendar();
   
