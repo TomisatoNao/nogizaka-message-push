@@ -371,7 +371,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "ok": True, "config": raw,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
                 "env_status": _env_status(),
+                # 只返回稳定的逻辑名称，避免暴露容器内绝对路径。
+                "config_path": CONFIG_PATH.name,
+                "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
                 "can_restart": _on_restart_cb is not None,
+                "can_poll": _on_poll_cb is not None,
+                "can_test_push": _on_test_push_cb is not None,
             })
             return
 

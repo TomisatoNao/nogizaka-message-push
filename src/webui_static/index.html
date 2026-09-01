@@ -35,6 +35,7 @@
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
+    color-scheme: light;
     background-color: var(--field);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
     background-repeat: no-repeat !important;
@@ -61,8 +62,12 @@
   }
   select option {
     background-color: var(--card-solid, #1e202e);
-    color: var(--text, #f1f5f9);
+    color: var(--text, #f1f5f9) !important;
     padding: 8px 12px;
+  }
+  :root[data-theme="dark"] select { color-scheme: dark; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) select { color-scheme: dark; }
   }
   input.invalid { border-color: var(--err); outline: 1px solid var(--err); }
   .pair { display: flex; gap: 8px; align-items: center; }
@@ -1685,7 +1690,9 @@ async function loadConfig() {
     setDirty(false);
     loadPushTargets();
     loadSubscriptions();
-    msg("已载入 " + data.config_path, "ok");
+    const configLabel = (typeof data.config_path === "string" && data.config_path.trim())
+      ? data.config_path.trim() : "config.json";
+    msg("已载入 " + configLabel, "ok");
   } catch (e) {
     msg("载入失败：" + e.message, "err");
   }
@@ -2017,10 +2024,9 @@ function testPushPrefill(channel) {
       opt.value = b.name;
       const label = b.remark ? `${b.remark} (${b.name} · ${b.target_chat || "未填"})` : `${b.name} (目标: ${b.target_chat || "未填"})`;
       opt.textContent = label;
-      opt.style.color = "#000"; // 强制黑字，防止 Windows 默认白底导致的白字白底
       sel.appendChild(opt);
     }
-  } else if (channel === "official") {
+  } else if (channel === "qq_official" || channel === "official") {
     $("testPushTargetHint").textContent = "QQ 官方 Bot";
     const bots = config.qq_official_bots || [];
     for (const b of bots) {
@@ -2029,14 +2035,12 @@ function testPushPrefill(channel) {
         const opt = document.createElement("option");
         opt.value = `${b.name}|group`;
         opt.textContent = `${prefix} - 群聊 (${b.group_openid.slice(0, 10)}...)`;
-        opt.style.color = "#000";
         sel.appendChild(opt);
       }
       if (b.target_openid) {
         const opt = document.createElement("option");
         opt.value = `${b.name}|private`;
         opt.textContent = `${prefix} - 私聊 (${b.target_openid.slice(0, 10)}...)`;
-        opt.style.color = "#000";
         sel.appendChild(opt);
       }
     }
@@ -2048,7 +2052,6 @@ function testPushPrefill(channel) {
       opt.value = String(r.group_id);
       const label = r.remark ? `${r.remark} (${r.group_id})` : `群组: ${r.group_id}`;
       opt.textContent = label;
-      opt.style.color = "#000";
       sel.appendChild(opt);
     }
   }
@@ -2057,7 +2060,6 @@ function testPushPrefill(channel) {
     const opt = document.createElement("option");
     opt.value = "";
     opt.textContent = "（该通道暂未配置任何有效目标）";
-    opt.style.color = "#000";
     sel.appendChild(opt);
   }
 }
@@ -2066,7 +2068,7 @@ $("btnTestPush").addEventListener("click", () => {
   const enabled = [];
   if (ch.tg) enabled.push(["tg", "Telegram"]);
   if (ch.napcat) enabled.push(["napcat", "NapCat QQ"]);
-  if (ch.qq_official) enabled.push(["official", "QQ 官方 Bot"]);
+  if (ch.qq_official) enabled.push(["qq_official", "QQ 官方 Bot"]);
   if (!enabled.length) { uiAlert("没有已启用的可测试通道，先在「基本设置」打开通道开关。"); return; }
   chipGroup("testPushChannel", enabled, enabled[0][0]);
   // chip 切换时联动预填目标

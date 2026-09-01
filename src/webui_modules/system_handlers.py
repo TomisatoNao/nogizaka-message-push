@@ -221,14 +221,83 @@ def handle_members(handler, load_raw_config_fn) -> None:
         return
 
     try:
-        from src.member_directory import get_member_directory_async
-        members, err = asyncio.run(get_member_directory_async(account))
+        # 管理端运行在 HTTP 线程中，不能复用主事件循环中的 AsyncClient。
+        # 使用与 tools/list_members.py 相同的当前目录 API，并在本次请求结束后
+        # 关闭临时客户端，避免旧版 get_member_directory_async 重构后失效。
+        from config.credentials import (
+            is_account_fetch_available,
+            load_all_accounts,
+            validate_account_cred,
+        )
+        load_all_accounts()  # 幂等加载独立运行时也需要的凭证
+        available, reason = is_account_fetch_available(account)
+        if not available:
+            send_json(handler, {"ok": False, "errors": [f"账号暂不可抓取: {reason}"]}, 400)
+            return
+        valid, reason = validate_account_cred(account)
+        if not valid:
+            send_json(handler, {"ok": False, "errors": [f"账号凭证不可用: {reason}"]}, 400)
+            return
+
+        from src.member_directory import fetch_member_directory
+
+        async def _run():
+            async with httpx.AsyncClient(timeout=20) as client:
+                return await fetch_member_directory(client, account)
+
+        members, err = asyncio.run(_run())
         if err:
             send_json(handler, {"ok": False, "errors": [err]}, 502)
             return
-        send_json(handler, {"ok": True, "account": account, "members": members})
+        # 只返回成员选择器需要的字段，同时保留订阅状态/时间，供前端筛选。
+        slim = []
+        for member in members or []:
+            if not isinstance(member, dict):
+                continue
+            subscription = member.get("subscription")
+            sub_state = ""
+            sub_start = ""
+            sub_end = ""
+            sub_type = ""
+            auto_renewing = False
+            if isinstance(subscription, dict) and subscription:
+                sub_state = str(subscription.get("state") or "").lower()
+                sub_start = str(subscription.get("start_at") or "")
+                sub_end = str(subscription.get("end_at") or "")
+                sub_type = str(subscription.get("type") or "")
+                auto_renewing = bool(subscription.get("auto_renewing", False))
+
+            is_subscribed = sub_state == "active"
+            is_past_subscribed = sub_state == "expired" or (not is_subscribed and bool(sub_state))
+            slim.append({
+                "id": str(member.get("id", "")),
+                "name": member.get("name") or "(无名)",
+                "state": member.get("state", "?"),
+                "tags": [str(tag) for tag in (member.get("tags") or [])],
+                "is_subscribed": is_subscribed,
+                "is_past_subscribed": is_past_subscribed,
+                "sub_state": sub_state,
+                "sub_start": sub_start,
+                "sub_end": sub_end,
+                "sub_type": sub_type,
+                "auto_renewing": auto_renewing,
+                "thumbnail": member.get("thumbnail") or "",
+            })
+
+        subscribed_count = sum(1 for item in slim if item["is_subscribed"])
+        past_subscribed_count = sum(1 for item in slim if item["is_past_subscribed"])
+        open_count = sum(1 for item in slim if item["state"] == "open")
+        send_json(handler, {
+            "ok": True,
+            "account": account,
+            "total": len(slim),
+            "subscribed_count": subscribed_count,
+            "past_subscribed_count": past_subscribed_count,
+            "open_count": open_count,
+            "members": slim,
+        })
     except Exception as e:
-        send_json(handler, {"ok": False, "errors": [f"拉取花名册失败: {e}"]}, 500)
+        send_json(handler, {"ok": False, "errors": [f"拉取花名册失败: {type(e).__name__}: {e}"]}, 500)
 
 
 def handle_test_push(handler, body: dict, on_test_push_cb) -> None:
@@ -236,7 +305,9 @@ def handle_test_push(handler, body: dict, on_test_push_cb) -> None:
     if on_test_push_cb is None:
         send_json(handler, {"ok": False, "errors": ["独立运行模式不支持测试推送"]}, 400)
         return
-    channel = str(body.get("channel", "")).strip()
+    channel = str(body.get("channel", "")).strip().lower()
+    # ``official`` 是旧版前端使用的名称；内部统一采用配置中的 qq_official。
+    channel = {"official": "qq_official"}.get(channel, channel)
     target = str(body.get("target", "")).strip()
     text = str(body.get("text", "这是来自 Sakamichi WebUI 的测试推送。")).strip()
     if channel not in ("tg", "napcat", "qq_official"):

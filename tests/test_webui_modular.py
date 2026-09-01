@@ -81,6 +81,90 @@ def test_system_handlers_env():
     assert "ZHIPU_API_KEY" in status
 
 
+def test_member_handler_uses_current_directory_api(monkeypatch):
+    """成员选择器必须调用当前 fetch_member_directory，而不是已删除的旧符号。"""
+    import config.credentials as credentials
+    from src import member_directory
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def fake_fetch(client, account_id):
+        assert isinstance(client, FakeClient)
+        assert account_id == "demo"
+        return ([
+            {
+                "id": "55",
+                "name": "测试成员",
+                "state": "open",
+                "tags": ["乃木坂46"],
+                "subscription": {
+                    "state": "active", "type": "monthly",
+                    "start_at": "2026-01-01", "end_at": "2026-12-31",
+                    "auto_renewing": True,
+                },
+            },
+            {"id": "56", "name": "离线成员", "state": "closed",
+             "subscription": {"state": "expired", "type": "monthly"}},
+        ], None)
+
+    monkeypatch.setattr(credentials, "load_all_accounts", lambda: None)
+    monkeypatch.setattr(credentials, "is_account_fetch_available", lambda _account: (True, ""))
+    monkeypatch.setattr(credentials, "validate_account_cred", lambda _account: (True, ""))
+    monkeypatch.setattr(system_handlers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(member_directory, "fetch_member_directory", fake_fetch)
+
+    handler = _ResponseHandler()
+    handler.path = "/api/members?account=demo"
+    system_handlers.handle_members(handler, lambda: {"accounts": {"demo": {}}})
+    payload = json.loads(handler.wfile.getvalue())
+
+    assert payload["ok"]
+    assert payload["total"] == 2
+    assert payload["subscribed_count"] == 1
+    assert payload["past_subscribed_count"] == 1
+    assert payload["open_count"] == 1
+    assert payload["members"][0]["is_subscribed"]
+    assert payload["members"][1]["is_past_subscribed"]
+
+
+def test_test_push_normalizes_legacy_official_channel():
+    """旧版前端的 official 仍应路由到统一的 qq_official 通道。"""
+    calls = []
+
+    def callback(channel, target, text):
+        calls.append((channel, target, text))
+        return True, ""
+
+    handler = _ResponseHandler()
+    system_handlers.handle_test_push(
+        handler,
+        {"channel": "official", "target": "bot1|private", "text": "hello"},
+        callback,
+    )
+    payload = json.loads(handler.wfile.getvalue())
+
+    assert payload["ok"]
+    assert calls == [("qq_official", "bot1|private", "hello")]
+
+
+def test_admin_frontend_config_and_dark_select_contracts():
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    assert "const configLabel =" in html
+    assert 'msg("已载入 " + configLabel, "ok")' in html
+    assert 'opt.style.color = "#000"' not in html
+    assert 'channel === "qq_official" || channel === "official"' in html
+    assert 'enabled.push(["qq_official", "QQ 官方 Bot"])' in html
+    assert "color-scheme: dark" in html
+
+
 def test_system_handlers_smart_parse():
     import asyncio
     raw_curl = "curl 'https://api.message.nogizaka46.com/v1/messages' -H 'authorization: Bearer my_jwt_token_12345678901234567890'"

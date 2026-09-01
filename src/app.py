@@ -1084,7 +1084,7 @@ async def main() -> None:
                     return False, "NapCat 通道未启用"
                 chain = [{"type": "text", "data": {"text": text}}]
                 coro = napcat.send_qq_message(int(target), chain)
-            elif channel == "official":
+            elif channel in ("qq_official", "official"):
                 if not cfg.ENABLE_QQ_OFFICIAL_BOT:
                     return False, "QQ 官方 Bot 通道未启用"
                 parts = target.split("|")

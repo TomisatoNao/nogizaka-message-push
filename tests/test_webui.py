@@ -245,6 +245,10 @@ def main() -> None:
         code, data = _http("GET", base + "/api/config")
         assert code == 200 and data["ok"] and data["config"] == SAMPLE
         assert "nogizaka_main" in data["cred_status"]
+        assert data["config_path"] == "config.json"
+        assert data["auth_required"] is False
+        assert data["can_poll"] is False
+        assert data["can_test_push"] is False
         # 未声明 Bot 且 .env 里也没配过 → 空列表（早先会凭空显示两个空槽位）。
         # 先清掉真实 .env 带来的编号槽位变量，让结果不依赖运行环境。
         saved_env = {k: os.environ.pop(k) for k in list(os.environ)
