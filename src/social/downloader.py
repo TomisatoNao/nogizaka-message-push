@@ -178,7 +178,11 @@ class MediaDownloader:
         # 优先使用 requests 直链下载（图片和一般直链速度最快）
         if tasks:
             download_tasks = [(url, dest) for url, dest, _ in tasks]
-            referer = "https://www.tiktok.com/" if post.platform in ("tiktok", "douyin") else None
+            referer = (
+                "https://www.tiktok.com/" if post.platform in ("tiktok", "douyin")
+                else "https://www.instagram.com/" if post.platform == "instagram"
+                else ""
+            )
             self.download_many(download_tasks, referer=referer)
             for _, dest_file, m in tasks:
                 if os.path.exists(dest_file) and os.path.getsize(dest_file) > 0:
@@ -496,20 +500,33 @@ class MediaDownloader:
         if ff:
             opts["ffmpeg_location"] = ff
 
-        # cookies —— Instagram Story / TikTok Story
+        # cookies —— 永远通过 yt-dlp 的 cookiefile/cookiesfrombrowser 传递。
+        # 过去把 SQLite 中的值拼进 ``Cookie`` 请求头，会触发 yt-dlp 的安全
+        # 警告，而且在新版中可能改变 cookie 的作用域。临时 Netscape 文件
+        # 只在一次调用期间存在，调用方会在 finally 中清理。
         if platform_cfg:
-            cf = platform_cfg.get("cookies_file") or ""
+            cf = os.path.expanduser(str(platform_cfg.get("cookies_file") or "").strip())
+            platform = str(platform_cfg.get("_platform") or platform_cfg.get("platform") or "").lower()
             if cf and os.path.exists(cf):
                 opts["cookiefile"] = cf
-            else:
+            elif platform == "instagram":
                 from src.social import ig_session
-                c_header = ig_session.get_cookie_header()
-                if c_header:
-                    opts.setdefault("http_headers", {})["Cookie"] = c_header
+                cookies = ig_session.resolve_cookies(cf)
+                if cookies:
+                    temp_cookiefile = ig_session.create_temp_cookie_file(cookies)
+                    if temp_cookiefile:
+                        opts["cookiefile"] = temp_cookiefile
+                        # Private bookkeeping key; stripped before YoutubeDL sees it.
+                        opts["_collink_temp_cookiefile"] = temp_cookiefile
             browser = (platform_cfg.get("cookies_from_browser") or "").strip()
-            if browser and not opts.get("cookiefile") and not opts.get("http_headers", {}).get("Cookie"):
+            if browser and not opts.get("cookiefile"):
                 opts["cookiesfrombrowser"] = (browser,)
         return opts
+
+    @staticmethod
+    def _take_temp_cookiefile(opts: dict) -> str:
+        """Remove internal cookie bookkeeping before passing options to yt-dlp."""
+        return str(opts.pop("_collink_temp_cookiefile", "") or "")
 
     def extract_info(self, url: str, *, platform_cfg: dict | None = None,
                      extra_opts: dict | None = None) -> dict | None:
@@ -523,12 +540,17 @@ class MediaDownloader:
         opts["skip_download"] = True
         if extra_opts:
             opts.update(extra_opts)
+        temp_cookiefile = self._take_temp_cookiefile(opts)
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(url, download=False)
         except Exception as e:
             log.debug("[download] extract_info 失败 %s: %s", url, _short(e))
             return None
+        finally:
+            if temp_cookiefile:
+                from src.social import ig_session
+                ig_session.remove_temp_cookie_file(temp_cookiefile)
 
     def extract_info_strict(self, url: str, *, platform_cfg: dict | None = None,
                             extra_opts: dict | None = None) -> dict:
@@ -538,8 +560,14 @@ class MediaDownloader:
         opts["skip_download"] = True
         if extra_opts:
             opts.update(extra_opts)
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            return ydl.extract_info(url, download=False)
+        temp_cookiefile = self._take_temp_cookiefile(opts)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        finally:
+            if temp_cookiefile:
+                from src.social import ig_session
+                ig_session.remove_temp_cookie_file(temp_cookiefile)
 
     def download_via_ytdlp(self, url: str, dest_dir: str, *,
                            platform_cfg: dict | None = None,
@@ -567,18 +595,24 @@ class MediaDownloader:
         opts["outtmpl"] = tmpl
         if extra_opts:
             opts.update(extra_opts)
+        temp_cookiefile = self._take_temp_cookiefile(opts)
 
         backoff = max(1, int(self._cfg.get("retry_backoff_seconds", 2)))
-        for attempt in range(1, self.retry_times + 1):
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([url])
-                break
-            except Exception as e:
-                log.warning("[download] yt-dlp 下载失败 (%s/%s) %s: %s",
-                            attempt, self.retry_times, url, _short(e))
-                if attempt < self.retry_times:
-                    time.sleep(backoff * attempt)
+        try:
+            for attempt in range(1, self.retry_times + 1):
+                try:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        ydl.download([url])
+                    break
+                except Exception as e:
+                    log.warning("[download] yt-dlp 下载失败 (%s/%s) %s: %s",
+                                attempt, self.retry_times, url, _short(e))
+                    if attempt < self.retry_times:
+                        time.sleep(backoff * attempt)
+        finally:
+            if temp_cookiefile:
+                from src.social import ig_session
+                ig_session.remove_temp_cookie_file(temp_cookiefile)
 
         after = set(_list_media(dest_dir))
         new_files = sorted(after - before)

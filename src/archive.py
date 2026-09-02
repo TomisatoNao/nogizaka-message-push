@@ -538,13 +538,20 @@ def _guess_extension(url: str, content_type: str | None) -> str:
     return ".bin"
 
 
-def _sniff_content_type(path: Path) -> str | None:
-    """魔数嗅探：voice/video 的 URL 后缀经常是骗人的。"""
+def _sniff_content_type(path: Path, declared_type: str = "") -> str | None:
+    """魔数嗅探：voice/video 的 URL 后缀经常是骗人的。
+
+    M4A 与 MP4 共用 ``ftyp`` 容器头，消息业务类型在此处比容器头更可靠；
+    明确声明为 voice/audio 时返回 ``audio/mp4``，避免归档把语音再次保存成
+    ``.mp4``。
+    """
     try:
         header = path.open("rb").read(12)
     except OSError:
         return None
     if header[4:8] == b"ftyp":
+        if declared_type in {"voice", "audio", "record"}:
+            return "audio/mp4"
         return "video/mp4"
     if header[:3] == b"ID3" or header[:2] == b"\xff\xfb":
         return "audio/mpeg"
@@ -776,7 +783,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
             pass
         return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_download_failed": True}
 
-    ext = _guess_extension(used_url, _sniff_content_type(tmp_path))
+    ext = _guess_extension(used_url, _sniff_content_type(tmp_path, str(msg.get("type", ""))))
     final_path = dest_dir / f"{ts}_{msg_id}{ext}"
     os.replace(tmp_path, final_path)
     rel = final_path.relative_to(member_root).as_posix()

@@ -1,8 +1,9 @@
 """
 social/ig_session.py — Instagram 登录态（cookies）管理与健康检测
 
-**为什么只要 cookies**：Instagram 已对匿名接口全面 429，必须带会话态；而用
-账号密码做程序化登录几乎必然触发风控（新设备 + 代理出口 IP → checkpoint）。
+**为什么仍然需要 cookies**：Instagram 的账号 Feed、Story 及受限内容接口要求
+会话态；公开单帖另有匿名 Embed 回退。用账号密码做程序化登录几乎必然触发风控
+（新设备 + 代理出口 IP → checkpoint）。
 复用浏览器里已经建立好的会话则不产生「登录」事件，是风险最低的方式。
 因此本项目**没有任何 Instagram 密码登录路径**，只吃 cookies。
 
@@ -17,7 +18,10 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
+from contextlib import contextmanager
+from collections.abc import Iterator
 
 import requests
 
@@ -232,7 +236,21 @@ def write_cookie_file(cookies: dict, path: str = "") -> str:
 
 
 def read_cookie_file(path: str = "") -> dict:
-    """从 SQLite 数据库读取 cookies，支持启动时静默自愈与旧文件迁移。"""
+    """读取 cookies：显式文件优先，其次 SQLite，并支持旧文件静默迁移。"""
+    # A configured cookies_file is an explicit source and must be honoured.
+    # Older versions ignored this argument and silently read the SQLite
+    # session instead, which made a newly exported file appear ineffective.
+    if path:
+        configured = os.path.expanduser(str(path).strip())
+        if os.path.exists(configured):
+            try:
+                with open(configured, encoding="utf-8", errors="replace") as f:
+                    parsed = parse_cookies(f.read())
+                if parsed:
+                    return parsed
+            except OSError:
+                pass
+
     conn = _get_db()
     rows = conn.execute("SELECT key, value FROM ig_session").fetchall()
     cookies = {row["key"]: row["value"] for row in rows}
@@ -269,6 +287,95 @@ def read_cookie_file(path: str = "") -> dict:
         return cookies
 
     return {}
+
+
+def read_browser_cookies(browser: str) -> dict:
+    """从已登录浏览器读取 Instagram cookies（不接触账号密码）。"""
+    browser = (browser or "").strip().lower()
+    if not browser:
+        return {}
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+        jar = extract_cookies_from_browser(browser)
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        log.debug("[instagram] 无法读取 %s 浏览器 cookies: %s", browser, str(exc)[:160])
+        return {}
+    out = {}
+    for cookie in jar:
+        domain = (cookie.domain or "").lower().lstrip(".")
+        if domain == "instagram.com" or domain.endswith(".instagram.com"):
+            out[cookie.name] = cookie.value
+    return out
+
+
+def resolve_cookies(path: str = "", browser: str = "") -> dict:
+    """按显式文件 → SQLite → 浏览器的顺序取得一套 cookies。"""
+    cookies = read_cookie_file(path)
+    if cookies:
+        return cookies
+    return read_browser_cookies(browser)
+
+
+def create_temp_cookie_file(cookies: dict | None = None) -> str:
+    """创建供 yt-dlp 使用的短生命周期 Netscape cookies 文件。
+
+    登录态长期存放在 SQLite；此文件只在一次 yt-dlp 调用期间存在，权限
+    设为当前用户可读写，调用方必须在 finally 中删除（见下方上下文管理器）。
+    """
+    cookies = cookies or read_cookie_file()
+    if not cookies:
+        return ""
+    fd, path = tempfile.mkstemp(prefix="collink-instagram-", suffix=".cookies.txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("# Netscape HTTP Cookie File\n")
+            for name, value in cookies.items():
+                if not name or value is None:
+                    continue
+                handle.write(
+                    "\t".join((
+                        ".instagram.com", "TRUE", "/", "TRUE", "0",
+                        str(name), str(value),
+                    ))
+                    + "\n"
+                )
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return path
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+
+
+def remove_temp_cookie_file(path: str) -> None:
+    """Best-effort removal of a temporary yt-dlp cookie file."""
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log.warning("[instagram] 临时 cookies 文件清理失败: %s", str(exc)[:120])
+
+
+@contextmanager
+def temporary_cookie_file(cookies: dict | None = None) -> Iterator[str]:
+    """在 ``with`` 块内提供临时 Netscape cookies 文件。"""
+    path = create_temp_cookie_file(cookies)
+    try:
+        yield path
+    finally:
+        remove_temp_cookie_file(path)
 
 
 def get_cookie_header() -> str:

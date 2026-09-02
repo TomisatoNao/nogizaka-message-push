@@ -5,18 +5,18 @@ fetchers/instagram_fetcher.py — Instagram 监控
   * Feed 帖子（单图 / 多图 Carousel / Reel）
   * Story（图片 / 视频）—— Story 更新同步推送
 
-数据来源（三后端，自动回退）：
+数据来源（多后端，自动回退）：
   1. yt-dlp（主）—— `instagram:user` / `instagram:story` extractor
   2. web_profile_info（备）—— Instagram Web API；请求前先访问首页拿
      csrftoken / mid cookie 再带上 X-IG-App-ID，可提高匿名成功率
-  3. 帖子 embed 页面（末）—— 单帖 `/p/<code>/embed/captioned/`，
-     用于在列表已知时补全正文与图片
+  3. 帖子 Embed 页面（末）—— 单帖 `/p/<code>/embed/captioned/`，
+     用于在列表已知但逐帖 API 被拒时匿名补全正文与图片
 
 关于「免登录」的实测结论（2026-07）：
-  Instagram 已对**匿名**的 `web_profile_info` / `feed/user` 接口统一返回
-  429「Please wait a few minutes」，主页 HTML 也不再内嵌帖子数据；
-  yt-dlp 的 `instagram:story` 会直接提示需要登录。也就是说
-  **Instagram 侧强制要求会话态**，这不是本项目能绕过的实现问题。
+ Instagram 已对**匿名**的 `web_profile_info` / `feed/user` 接口统一返回
+ 429「Please wait a few minutes」，主页 HTML 也不再内嵌帖子数据；
+ yt-dlp 的 `instagram:story` 会直接提示需要登录。公开的单帖 Embed
+ 仍可在不少情况下匿名取得图片/视频，但它不能替代账号 Feed，也不支持 Story。
 
   因此这里提供一条「不需要在本程序里登录」的可行路径：
       platforms.instagram.cookies_from_browser = "chrome"   （或 edge / firefox）
@@ -117,7 +117,7 @@ class InstagramFetcher(SocialFetcher):
         if ua:
             self._session.headers["User-Agent"] = ua
 
-        # 1) 复用已有登录态：cookies_file 优先，其次默认 data/instagram_cookies.txt 与环境变量，其次浏览器
+        # 1) 复用已有登录态：cookies_file 优先，其次 SQLite / 环境变量，其次浏览器
         cookies: dict = {}
         cfile = (cfg.get("cookies_file") or "").strip()
         from src.social import ig_session
@@ -186,8 +186,8 @@ class InstagramFetcher(SocialFetcher):
             return
         self._login_hint_shown = True
         log.warning(
-            "[instagram] ⚠️ 当前未配置有效登录态，只能抓取公开账号的基本 Feed，"
-            "且无法抓取 Story。\n"
+            "[instagram] ⚠️ 当前未配置有效登录态，只能尝试公开 Feed/单帖 Embed，"
+            "且无法抓取 Story、私密或受限内容。\n"
             "建议在具有 Instagram 正常访问权限的环境中配置登录态（任选其一）：\n"
             "  ① 安装浏览器扩展（如 Get cookies.txt LOCALLY），导出 "
             "instagram.com 的 cookies.txt，填到 config.json → "
@@ -514,7 +514,7 @@ class InstagramFetcher(SocialFetcher):
         # 后端 1：yt-dlp 扁平列出用户主页
         info = self._dl.extract_info(
             USER_URL.format(account=account),
-            platform_cfg=self.cfg,
+            platform_cfg=self.ytdlp_config(),
             extra_opts={"extract_flat": "in_playlist",
                         "playlistend": self.max_items_per_poll * 3},
         )
@@ -592,19 +592,60 @@ class InstagramFetcher(SocialFetcher):
         self.mark_seen(post_id, account, kind)
 
         # 完整解析拿正文与准确时间戳（扁平列表里往往缺失）
-        info = self._dl.extract_info(url, platform_cfg=self.cfg) or {}
+        info = self._dl.extract_info(url, platform_cfg=self.ytdlp_config()) or {}
+        public_embed_post = None
+        # 用户主页列表在部分出口仍能列出公开帖子，但逐帖 yt-dlp 解析会
+        # 因 media/info 403 失败。只有没有 API 直链时才启动匿名 Embed，
+        # 避免对已经拿到媒体的登录态请求增加一次浏览器开销。
+        if (
+            not info
+            and not entry.get("media")
+            and self.cfg.get("public_embed_enabled", True) is not False
+        ):
+            try:
+                from src.social.instagram_embed import fetch_public_post
+                public_embed_post = fetch_public_post(
+                    url,
+                    proxy=str(self._session.proxies.get("https") or ""),
+                    timeout=self.cfg.get("public_embed_timeout_seconds", 25),
+                    max_media=self.cfg.get("public_embed_max_media", 20),
+                )
+                log.info(
+                    "[instagram] 公开 Embed 补全 @%s/%s | 媒体 %s 条",
+                    account,
+                    item_id,
+                    len(public_embed_post.media),
+                )
+            except Exception as ex:
+                log.debug(
+                    "[instagram] 公开 Embed 补全失败 %s: %s",
+                    item_id,
+                    str(ex).replace("\n", " ")[:160],
+                )
 
         # 只推送本人发布的内容：作者可识别且不是被监控账号 → 跳过（转发/合拍等）
-        uploader = str(info.get("uploader_id") or info.get("channel")
-                       or "").lstrip("@").lower()
+        uploader = str(
+            info.get("uploader_id")
+            or info.get("channel")
+            or ((public_embed_post.extra.get("username") if public_embed_post else ""))
+            or ""
+        ).lstrip("@").lower()
         if uploader and uploader != account.lower():
             log.info("[instagram] 跳过非本人内容 %s（作者 @%s）", item_id, uploader)
             self._store.mark_sent("instagram", post_id, account, kind)
             return None
 
         text = (info.get("description") or info.get("title")
+                or (public_embed_post.text if public_embed_post else "")
                 or entry.get("title") or "")
         ts = info.get("timestamp") or entry.get("timestamp") or 0
+        if not ts and public_embed_post and public_embed_post.timestamp:
+            try:
+                ts = datetime.strptime(
+                    public_embed_post.timestamp, "%Y-%m-%d %H:%M:%S"
+                ).replace(tzinfo=_JST).timestamp()
+            except ValueError:
+                ts = 0
         if info.get("_type") == "playlist" and (info.get("playlist_count") or 0) > 1:
             kind = "carousel"
 
@@ -615,6 +656,12 @@ class InstagramFetcher(SocialFetcher):
         # （少一轮请求，对风控更友好，也避开了 yt-dlp 对 IG 已失效的问题）
         files = []
         direct = entry.get("media") or []
+        if not direct and public_embed_post:
+            direct = [
+                {"type": m.type, "url": m.url}
+                for m in public_embed_post.media
+                if m.url
+            ]
         if direct:
             tasks = []
             for i, m in enumerate(direct, 1):
@@ -627,7 +674,7 @@ class InstagramFetcher(SocialFetcher):
 
         if not files:
             files = self._dl.download_via_ytdlp(
-                url, d, platform_cfg=self.cfg,
+                url, d, platform_cfg=self.ytdlp_config(),
                 outtmpl=f"{item_id}_%(playlist_index|1)s.%(ext)s",
             )
         if not files:
@@ -768,7 +815,7 @@ class InstagramFetcher(SocialFetcher):
                         tasks, referer="https://www.instagram.com/")
                 if not files:
                     files = self._dl.download_via_ytdlp(
-                        url, d, platform_cfg=self.cfg,
+                        url, d, platform_cfg=self.ytdlp_config(),
                         outtmpl=f"{item_id}.%(ext)s",
                     )
                 if not files:

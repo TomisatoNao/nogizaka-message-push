@@ -15,6 +15,7 @@ import requests
 from src.social.downloader import MediaDownloader
 from src.social.forwarder import SocialForwarder
 from src.social import ig_session
+from src.social.instagram_embed import InstagramEmbedUnavailable, fetch_public_post
 from src.social.models import MediaItem, Post
 
 log = logging.getLogger("collink")
@@ -26,6 +27,10 @@ _UA = (
 )
 
 TWEET_RESULT_URL = "https://cdn.syndication.twimg.com/tweet-result"
+
+
+class InstagramAuthRequired(RuntimeError):
+    """The requested Instagram content requires a valid logged-in session."""
 
 
 def _syndication_token(tweet_id: str) -> str:
@@ -210,25 +215,113 @@ class SocialUrlParser:
             hl_id = m_story.group(1)
             username = m_story.group(2)
             story_id = m_story.group(3) or ""
+            if not self._instagram_cookies().get("sessionid"):
+                log.warning(
+                    "[single_fetcher] Instagram Story 需要有效登录态，已跳过匿名回退 (@%s)",
+                    username or hl_id,
+                )
+                raise InstagramAuthRequired(
+                    "Instagram Story 需要有效登录 Cookies；公开匿名访问不支持 Story，请在后台重新配置完整 Cookies。"
+                )
             try:
                 post = self._parse_instagram_story(username=username, story_id=story_id, highlight_id=hl_id, url=url)
                 if post and post.media:
                     return post
+            except InstagramAuthRequired:
+                raise
             except Exception as ex:
-                log.warning("[single_fetcher] Instagram Story 官方 API 解析失败 (@%s, %s)，回退 yt-dlp: %s", username or hl_id, story_id, ex)
+                log.warning(
+                    "[single_fetcher] Instagram Story 官方 API 解析失败 (@%s, %s)，未回退匿名路径: %s",
+                    username or hl_id,
+                    story_id,
+                    type(ex).__name__,
+                )
+                raise RuntimeError(
+                    "Instagram Story 官方接口暂时失败；Story 不支持匿名回退，请稍后重试或检查 Cookies。"
+                ) from ex
+
+            raise InstagramAuthRequired(
+                "Instagram Story 未返回媒体，可能已过期或登录态已失效；请重新配置 Cookies。"
+            )
 
         # 2. 判定普通 Post/Reel 链接（如 /p/xxx/ 或 /reel/xxx/）
         m = re.search(r"instagram\.com/(?:p|reel|tv)/([^/?#\s]+)", url)
         shortcode = m.group(1) if m else ""
         if shortcode:
+            if self._instagram_cookies().get("sessionid"):
+                try:
+                    post = self._parse_instagram_api(shortcode, url)
+                    if post and post.media:
+                        return post
+                except InstagramAuthRequired:
+                    log.debug(
+                        "[single_fetcher] Instagram 私有 media/info 被拒 (%s)，转公开 Embed",
+                        shortcode,
+                    )
+                except Exception as ex:
+                    log.debug(
+                        "[single_fetcher] Instagram 私有 media/info 解析失败 (%s)，转公开 Embed: %s",
+                        shortcode,
+                        type(ex).__name__,
+                    )
+            else:
+                log.debug(
+                    "[single_fetcher] Instagram 未配置登录态，跳过私有 media/info，直接尝试公开 Embed (%s)",
+                    shortcode,
+                )
+
+            # 公开帖子、Reel 和图片优先走匿名 Embed；它不读取本程序的
+            # cookies，避免因私有 API 403 而误判公开内容不可用。
             try:
-                post = self._parse_instagram_api(shortcode, url)
+                post = self._parse_instagram_embed(url)
                 if post and post.media:
                     return post
+            except InstagramEmbedUnavailable as ex:
+                log.debug(
+                    "[single_fetcher] Instagram 公开 Embed 不可用 (%s): %s，转 yt-dlp",
+                    shortcode,
+                    str(ex)[:160],
+                )
             except Exception as ex:
-                log.warning("[single_fetcher] Instagram 官方 API 单帖解析失败 (%s)，回退 yt-dlp: %s", shortcode, ex)
+                log.warning(
+                    "[single_fetcher] Instagram 公开 Embed 解析异常 (%s): %s",
+                    shortcode,
+                    type(ex).__name__,
+                )
 
         return self._extract_with_ytdlp(url, platform="instagram", post_id=shortcode or "ig_post")
+
+    def _instagram_settings(self) -> dict:
+        raw = (self.config.get("platforms") or {}).get("instagram")
+        return raw if isinstance(raw, dict) else {}
+
+    def _instagram_cookies(self) -> dict:
+        cfg = self._instagram_settings()
+        return ig_session.resolve_cookies(
+            str(cfg.get("cookies_file") or ""),
+            str(cfg.get("cookies_from_browser") or ""),
+        )
+
+    def _parse_instagram_embed(self, url: str) -> Post:
+        cfg = self._instagram_settings()
+        if cfg.get("public_embed_enabled", True) is False:
+            raise InstagramEmbedUnavailable("公开 Embed 已在配置中关闭")
+        timeout = cfg.get("public_embed_timeout_seconds", 25)
+        max_media = cfg.get("public_embed_max_media", 20)
+        try:
+            timeout = max(5, float(timeout))
+        except (TypeError, ValueError):
+            timeout = 25.0
+        try:
+            max_media = max(1, min(50, int(max_media)))
+        except (TypeError, ValueError):
+            max_media = 20
+        return fetch_public_post(
+            url,
+            proxy=self.proxy,
+            timeout=timeout,
+            max_media=max_media,
+        )
 
     def _parse_instagram_story(
         self,
@@ -237,7 +330,11 @@ class SocialUrlParser:
         highlight_id: str | None = None,
         url: str = "",
     ) -> Post:
-        cookies = ig_session.read_cookie_file()
+        cookies = self._instagram_cookies()
+        if not cookies.get("sessionid"):
+            raise InstagramAuthRequired(
+                "Instagram Story 需要有效登录 Cookies；公开匿名访问不支持 Story"
+            )
         session = requests.Session()
         if self.proxy:
             session.proxies.update({"http": self.proxy, "https": self.proxy})
@@ -265,6 +362,10 @@ class SocialUrlParser:
                 params={"reel_ids": reel_id},
                 timeout=15,
             )
+            if r_reel.status_code in (401, 403):
+                raise InstagramAuthRequired(
+                    f"Instagram Story 接口 HTTP {r_reel.status_code}（登录态被拒）"
+                )
             if r_reel.status_code == 200:
                 reel_data = r_reel.json()
                 reels = reel_data.get("reels") or {}
@@ -281,12 +382,18 @@ class SocialUrlParser:
                     f"https://i.instagram.com/api/v1/feed/user/{username}/username/",
                     timeout=15,
                 )
+                if r_user.status_code in (401, 403):
+                    raise InstagramAuthRequired(
+                        f"Instagram Story 用户接口 HTTP {r_user.status_code}（登录态被拒）"
+                    )
                 if r_user.status_code == 200:
                     u_data = r_user.json()
                     u_obj = u_data.get("user") or {}
                     uid = str(u_obj.get("pk") or u_obj.get("id") or "")
                     author = u_obj.get("full_name") or u_obj.get("username") or username
                     avatar_url = u_obj.get("profile_pic_url") or ""
+            except InstagramAuthRequired:
+                raise
             except Exception as e:
                 log.debug("[single_fetcher] Story 用户 UID 解析异常: %s", e)
 
@@ -296,6 +403,10 @@ class SocialUrlParser:
                     params={"reel_ids": uid},
                     timeout=15,
                 )
+                if r_reel.status_code in (401, 403):
+                    raise InstagramAuthRequired(
+                        f"Instagram Story 接口 HTTP {r_reel.status_code}（登录态被拒）"
+                    )
                 if r_reel.status_code == 200:
                     reel_data = r_reel.json()
                     reels = reel_data.get("reels") or {}
@@ -309,8 +420,14 @@ class SocialUrlParser:
                         f"https://i.instagram.com/api/v1/media/{story_id}/info/",
                         timeout=15,
                     )
+                    if resp.status_code in (401, 403):
+                        raise InstagramAuthRequired(
+                            f"Instagram Story media/info HTTP {resp.status_code}（登录态被拒）"
+                        )
                     if resp.status_code == 200:
                         items = resp.json().get("items") or []
+                except InstagramAuthRequired:
+                    raise
                 except Exception as e:
                     log.debug("[single_fetcher] media/%s/info 尝试失败: %s", story_id, e)
 
@@ -376,7 +493,7 @@ class SocialUrlParser:
 
     def _parse_instagram_api(self, shortcode: str, url: str) -> Post:
         media_id = _shortcode_to_media_id(shortcode)
-        cookies = ig_session.read_cookie_file()
+        cookies = self._instagram_cookies()
         session = requests.Session()
         if self.proxy:
             session.proxies.update({"http": self.proxy, "https": self.proxy})
@@ -394,6 +511,10 @@ class SocialUrlParser:
 
         api_url = f"https://i.instagram.com/api/v1/media/{media_id}/info/"
         resp = session.get(api_url, timeout=15)
+        if resp.status_code in (401, 403):
+            raise InstagramAuthRequired(
+                f"Instagram 私有 media/info HTTP {resp.status_code}（登录态被拒）"
+            )
         if resp.status_code != 200:
             raise RuntimeError(f"Instagram media/info API HTTP {resp.status_code}")
 
@@ -585,26 +706,44 @@ class SocialUrlParser:
         if self.proxy:
             ydl_opts["proxy"] = self.proxy
 
-        # Instagram 需要登录态 cookies，自动从 SQLite 数据库提取注入
+        temp_cookiefile = ""
+        # Instagram 登录态只通过 yt-dlp cookiefile/cookiesfrombrowser 传递。
+        # 不再拼接原始 Cookie Header，避免新版 yt-dlp 的安全警告与作用域问题。
         if platform == "instagram":
-            c_header = ig_session.get_cookie_header()
-            if c_header:
-                ydl_opts.setdefault("http_headers", {})["Cookie"] = c_header
-                log.debug("[single_fetcher] Instagram 已从 SQLite 数据库注入 Cookies Header")
-            else:
-                log.warning(
-                    "[single_fetcher] Instagram 尚未配置登录态 Cookies，"
-                    "抓取可能因需要登录而失败。请在后台「社媒监控」页配置账号 Cookies。"
-                )
+            cfg = self._instagram_settings()
+            cookies = self._instagram_cookies()
+            if cookies:
+                temp_cookiefile = ig_session.create_temp_cookie_file(cookies)
+                if temp_cookiefile:
+                    ydl_opts["cookiefile"] = temp_cookiefile
+                    log.debug("[single_fetcher] Instagram yt-dlp 已加载登录态 cookies（临时文件）")
+            browser = str(cfg.get("cookies_from_browser") or "").strip()
+            if browser and not temp_cookiefile:
+                ydl_opts["cookiesfrombrowser"] = (browser,)
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-            except Exception as e:
+        except Exception as e:
+            try:
                 err_str = str(e)
                 if platform == "instagram" and "No video formats found" in err_str:
-                    raise RuntimeError("该 Instagram 帖子为纯图片/图集，由于登录态未配置或已失效被登出，无法提取媒体。请在后台重新配置完整 Instagram Cookies。")
+                    raise RuntimeError(
+                        "Instagram 未提取到可下载媒体：公开 Embed 不可用，或内容为受限图集/Story。"
+                        "公开帖子通常无需登录；Story 与受限内容请在后台配置有效 Cookies。"
+                    ) from e
+                if platform == "instagram":
+                    raise RuntimeError(
+                        "Instagram 媒体解析失败：公开 Embed 与 yt-dlp 均未返回可下载媒体。"
+                        "Story、私密或受限内容需要有效 Cookies。"
+                    ) from e
                 raise RuntimeError(f"解析失败: {e}")
+            finally:
+                if temp_cookiefile:
+                    ig_session.remove_temp_cookie_file(temp_cookiefile)
+
+        if temp_cookiefile:
+            ig_session.remove_temp_cookie_file(temp_cookiefile)
 
         if not info:
             raise RuntimeError("未能从链接提取到内容信息")
@@ -737,4 +876,3 @@ def manual_push_social_url(
         "timestamp": post.timestamp,
         "post_id": post.post_id,
     }
-

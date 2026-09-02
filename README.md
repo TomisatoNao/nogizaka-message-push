@@ -143,6 +143,8 @@ flowchart TD
    cd nogizaka-message-push
 
    pip install -r requirements.txt
+   # 公开 Instagram Embed 回退与博客卡片渲染需要 Chromium
+   playwright install chromium
    ```
 
 2. **启动主程序**：
@@ -239,9 +241,9 @@ python tools/manage_users.py reset
 - **四维黄金排序**：作者列表与消息列表严格按「乃木坂 → 櫻坂 → 日向坂 → yodel → 1..6期 → 五十音」统一规范分层排列。
 
 ### 3. 全平台社交媒体监控与直播录制
-- **多平台免登录抓取**：
+- **多平台抓取与登录边界**：
   - **𝕏 (Twitter)**：三级降级容灾，自动提取原图无损直链（`?name=orig`）与无障碍 Alt 文本并翻译；
-  - **Instagram**：支持 Feed 轮播多图、Reels 短视频及 24h 快拍（Story），内置安全频控限流熔断；
+  - **Instagram**：公开帖子 / Reel / 图片优先使用匿名 Embed 解析（即使私有 `media/info` 返回 403 也可继续）；Feed 与 24h 快拍（Story）仍需有效 Cookies，内置安全频控限流熔断；
   - **TikTok**：短视频、图文幻灯片及原声音频无水印提取；
 - **TikTok Live 直播开播守护**：8 秒超轻量探测（单次约 120 字节），开播瞬间毫秒级捕获 HLS/FLV 流并拉起 ffmpeg 无损切片录制，优雅停机保护 Moov Atom；
 - **成员与账号解耦**：支持监控未开通 Message 的毕业成员、其他偶像团体（=LOVE / 48系等）的纯社媒与博客动态。
@@ -459,6 +461,12 @@ TG_BOT_TOKEN=123456:ABC...             # Telegram Bot Token
 WEB_ADMIN_TOKEN=your_token             # Web 管理端外部 API 调用 Token (可选)
 INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 ```
+
+> Instagram 单条公开帖子通常无需登录：解析器会在私有接口被拒后自动打开
+> `/p/<code>/embed/captioned/`，提取公开 CDN 图片或视频，再由下载器直下。
+> 账号 Feed、Story、私密/年龄限制/地区限制内容仍需在后台配置完整 Cookies。
+> Cookies 长期保存在 `data/social.db`，yt-dlp 使用的 Netscape 文件只在单次调用
+> 期间临时生成并清理，不会再把登录凭证拼成原始 `Cookie` 请求头。
 
 </details>
 

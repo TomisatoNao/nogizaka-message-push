@@ -307,8 +307,10 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
         raw_cfg = cfg._load_config() if hasattr(cfg, "_load_config") else {}
         parser = SocialUrlParser(raw_cfg)
 
-        # 1. 解析动态
-        post = parser.parse(url)
+        # 1. 解析动态。解析器包含 requests/yt-dlp/Playwright 等同步 I/O，
+        # 放到线程中避免阻塞 Bot 事件循环（Playwright 同步 API 也不能
+        # 直接在已有 asyncio loop 的线程里启动）。
+        post = await asyncio.to_thread(parser.parse, url)
 
         # 2. 并发执行：媒体多线程下载 与 异步 AI 智能翻译（带 10s 快速超时）
         downloader = MediaDownloader(raw_cfg)
@@ -517,5 +519,4 @@ def _clip_reply(text: str) -> str:
     if len(text) <= MAX_REPLY_CHARS:
         return text
     return text[:MAX_REPLY_CHARS - 30] + "\n\n…（内容过长已截断）"
-
 

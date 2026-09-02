@@ -110,7 +110,12 @@
       "interval_seconds": 1800,
       "night_interval_seconds": 5400,
       "accounts": [],
-      "display_names": {}
+      "display_names": {},
+      "cookies_file": "",
+      "cookies_from_browser": "",
+      "public_embed_enabled": true,
+      "public_embed_timeout_seconds": 25,
+      "public_embed_max_media": 20
     },
     "tiktok": {
       "enabled": false,

@@ -1,7 +1,18 @@
 import asyncio
 import base64
+from collections import OrderedDict
+from dataclasses import dataclass
+import hashlib
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess  # nosec B404 - controlled local ffmpeg invocation
+import tempfile
+import threading
 import time
+from typing import Iterator
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -16,6 +27,232 @@ _MEDIA_FILE_TYPES = {
     "record": 3,
     "file": 4,
 }
+
+_MEDIA_DEFAULT_EXTENSIONS = {
+    "image": ".jpg",
+    "video": ".mp4",
+    "record": ".m4a",
+    "file": ".bin",
+}
+_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
+_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".m4v", ".mkv", ".avi", ".flv", ".ts"})
+_AUDIO_EXTENSIONS = frozenset({
+    ".aac", ".amr", ".flac", ".m4a", ".m4b", ".m4p", ".mp3", ".oga",
+    ".ogg", ".opus", ".silk", ".wav", ".wma",
+})
+_QQ_VOICE_EXTENSION = ".amr"  # QQ 客户端语音文件扩展名，内容为 SILK 编码
+
+
+@dataclass(frozen=True)
+class MediaPayload:
+    """下载后交给 QQ Bot 的媒体载荷。
+
+    ``download_media_payloads`` 旧版返回二元组 ``(type, bytes)``。保留
+    ``__iter__``/``__getitem__`` 的二元行为，避免已有调用方立即失效，新增的
+    文件名和来源信息通过属性传递给上传层。
+    """
+
+    media_type: str
+    content: bytes | None
+    filename: str = ""
+    mime_type: str = ""
+    source_url: str = ""
+
+    def __iter__(self) -> Iterator[object]:
+        yield self.media_type
+        yield self.content
+
+    def __getitem__(self, index: int) -> object:
+        if index in (0, -2):
+            return self.media_type
+        if index in (1, -1):
+            return self.content
+        raise IndexError(index)
+
+    def __len__(self) -> int:
+        return 2
+
+
+def _filename_candidate(value: str) -> str:
+    """从 URL、路径或文件名中提取不含查询参数的 basename。"""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if parsed.scheme or parsed.netloc:
+        raw = parsed.path
+    raw = unquote(raw).replace("\\", "/")
+    return raw.rsplit("/", 1)[-1]
+
+
+def _safe_media_filename(filename: str, media_type: str, source_url: str = "") -> str:
+    """生成可传给 QQ Bot 的安全文件名，并按类型补齐扩展名。"""
+    candidate = _filename_candidate(filename) or _filename_candidate(source_url)
+    candidate = re.sub(r"[\x00-\x1f\x7f]", "_", candidate)
+    # 不允许把路径、查询语法或 Windows 保留字符带入上传元数据。
+    candidate = re.sub(r'[<>:"/\\|?*]+', "_", candidate).strip(" .")
+    if not candidate or candidate in {".", ".."}:
+        candidate = ""
+
+    if not candidate:
+        stem = {"image": "image", "video": "video", "record": "audio", "file": "file"}.get(media_type, "media")
+        candidate = stem
+
+    # QQ 对文件名长度没有统一公开上限，控制在常见安全范围内，避免超长 URL/标题。
+    candidate = candidate[:180].rstrip(" .") or "media"
+    if not Path(candidate).suffix:
+        candidate += _MEDIA_DEFAULT_EXTENSIONS.get(media_type, ".bin")
+    return candidate
+
+
+def _media_extension(filename: str) -> str:
+    return Path(_filename_candidate(filename)).suffix.lower()
+
+
+def _looks_like_silk(content: bytes) -> bool:
+    return content.startswith((b"#!SILK", b"\x02#!SILK"))
+
+
+def _resolve_media_type(media_type: str, filename: str, content: bytes | None, mime_type: str = "") -> str:
+    """在保留业务声明的前提下识别媒体类型。
+
+    M4A 是 MP4 容器，同样带有 ``ftyp``，不能仅凭该标记把音频改成视频。
+    """
+    declared = media_type if media_type in _MEDIA_FILE_TYPES else "file"
+    mime = str(mime_type or "").split(";", 1)[0].strip().lower()
+    ext = _media_extension(filename)
+
+    # 音频扩展名优先；这会覆盖旧归档中把 AAC/M4A 保存成 .mp4 的情况之外，
+    # 正常 URL 的 .m4a 也不会再被 ftyp 分支误判。
+    if mime.startswith("audio/") or ext in _AUDIO_EXTENSIONS or declared == "record":
+        return "record"
+    if mime.startswith("image/") or ext in _IMAGE_EXTENSIONS:
+        return "image"
+    if mime.startswith("video/") or ext in _VIDEO_EXTENSIONS:
+        return "video"
+
+    header = (content or b"")[:32]
+    if header.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF8")):
+        return "image"
+    if header.startswith(b"RIFF") and len(header) >= 12:
+        if header[8:12] == b"WEBP":
+            return "image"
+        if header[8:12] == b"WAVE":
+            return "record"
+    if header.startswith((b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"OggS", b"fLaC")):
+        return "record"
+    if _looks_like_silk(header):
+        return "record"
+
+    # 只有在没有更可靠声明时才将 MP4/WebM 容器识别为视频；不再使用
+    # 过于宽泛的 startswith(b"\\x00\\x00\\x00") 条件。
+    if len(header) >= 8 and header[4:8] == b"ftyp":
+        return "video" if declared != "record" else "record"
+    if header.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video"
+    return declared
+
+
+_VOICE_CACHE: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
+_VOICE_CACHE_BYTES = 0
+_VOICE_CACHE_LIMIT = 16 * 1024 * 1024
+_VOICE_CACHE_LOCK = threading.RLock()
+
+
+def _cache_voice_result(key: str, result: tuple[bytes, str]) -> None:
+    """缓存小型语音转码结果，避免同一媒体向私聊/群聊重复转码。"""
+    global _VOICE_CACHE_BYTES
+    with _VOICE_CACHE_LOCK:
+        size = len(result[0])
+        if size > 4 * 1024 * 1024:
+            return
+        old = _VOICE_CACHE.pop(key, None)
+        if old:
+            _VOICE_CACHE_BYTES -= len(old[0])
+        _VOICE_CACHE[key] = result
+        _VOICE_CACHE_BYTES += size
+        while _VOICE_CACHE and _VOICE_CACHE_BYTES > _VOICE_CACHE_LIMIT:
+            _, removed = _VOICE_CACHE.popitem(last=False)
+            _VOICE_CACHE_BYTES -= len(removed[0])
+
+
+def _transcode_audio_to_silk(content: bytes, filename: str) -> tuple[bytes, str] | None:
+    """把标准音频转为 QQ Bot 语音使用的 SILK；失败时返回 None。"""
+    if not content:
+        return None
+    if _looks_like_silk(content):
+        return content, _safe_media_filename(filename, "record").rsplit(".", 1)[0] + _QQ_VOICE_EXTENSION
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        log_all("ℹ️ 官方 QQ Bot 音频未转码：未找到 ffmpeg，将按命名音频附件降级", is_debug=True)
+        return None
+    try:
+        import pysilk  # type: ignore[import-not-found]
+    except ImportError:
+        log_all("ℹ️ 官方 QQ Bot 音频未转码：未安装 silk-python，将按命名音频附件降级", is_debug=True)
+        return None
+
+    key = hashlib.sha256(content).hexdigest()
+    with _VOICE_CACHE_LOCK:
+        cached = _VOICE_CACHE.get(key)
+        if cached:
+            _VOICE_CACHE.move_to_end(key)
+            return cached
+
+        return _transcode_audio_to_silk_uncached(content, filename, pysilk, ffmpeg, key)
+
+
+def _transcode_audio_to_silk_uncached(
+    content: bytes,
+    filename: str,
+    pysilk: object,
+    ffmpeg: str,
+    key: str,
+) -> tuple[bytes, str] | None:
+    """在缓存锁内执行一次音频转码。"""
+
+    safe_name = _safe_media_filename(filename, "record")
+    stem = Path(safe_name).stem or "audio"
+    try:
+        with tempfile.TemporaryDirectory(prefix="qq-voice-") as tmp_dir:
+            src_path = os.path.join(tmp_dir, safe_name)
+            pcm_path = os.path.join(tmp_dir, "audio.pcm")
+            silk_path = os.path.join(tmp_dir, "audio.silk")
+            with open(src_path, "wb") as src_file:
+                src_file.write(content)
+
+            result = subprocess.run(  # nosec B603 - executable resolved via PATH
+                [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", src_path,
+                 "-vn", "-ar", "24000", "-ac", "1", "-f", "s16le", pcm_path],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+            if result.returncode != 0 or not os.path.exists(pcm_path) or os.path.getsize(pcm_path) == 0:
+                log_all(
+                    f"ℹ️ 官方 QQ Bot 音频转码失败（ffmpeg exit={result.returncode}），将按命名附件降级",
+                    is_debug=True,
+                )
+                return None
+
+            with open(pcm_path, "rb") as pcm_file, open(silk_path, "wb") as silk_file:
+                pysilk.encode(pcm_file, silk_file, 24000, 24000, tencent=True)  # type: ignore[attr-defined]
+            if not os.path.exists(silk_path) or os.path.getsize(silk_path) == 0:
+                log_all("ℹ️ 官方 QQ Bot 音频转码未生成有效 SILK，将按命名附件降级", is_debug=True)
+                return None
+            with open(silk_path, "rb") as silk_file:
+                converted = silk_file.read()
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError, TimeoutError) as ex:
+        log_all(f"ℹ️ 官方 QQ Bot 音频转码异常 ({type(ex).__name__})，将按命名附件降级", is_debug=True)
+        return None
+    except Exception as ex:  # 第三方 pysilk 可能抛出自定义 C 扩展异常
+        log_all(f"ℹ️ 官方 QQ Bot 音频编码器异常 ({type(ex).__name__})，将按命名附件降级", is_debug=True)
+        return None
+
+    result = (converted, f"{stem}{_QQ_VOICE_EXTENSION}")
+    _cache_voice_result(key, result)
+    return result
 
 
 def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 1024)) -> bytes:
@@ -330,6 +567,8 @@ class QQOfficialBot:
         if not await self.ensure_access_token():
             return None
 
+        media_type = _resolve_media_type(media_type, filename, content)
+        filename = _safe_media_filename(filename, media_type)
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
         openid = target_openid or self.target_openid
         size_bytes = len(content)
@@ -343,7 +582,7 @@ class QQOfficialBot:
         prep_payload = {
             "file_type": file_type,
             "file_size": str(size_bytes),
-            "file_name": filename or f"media_{int(time.time())}.mp4",
+            "file_name": filename,
             "md5": f_md5,
             "sha1": f_sha1,
             "md5_10m": f_md5_10m,
@@ -408,7 +647,7 @@ class QQOfficialBot:
         merge_payload = {
             "file_type": file_type,
             "upload_id": upload_id,
-            "file_name": filename or f"media_{int(time.time())}.mp4",
+            "file_name": filename,
             "srv_send_msg": False,
         }
         merge_resp = await self._post_json(merge_url, merge_payload)
@@ -428,9 +667,15 @@ class QQOfficialBot:
 
     async def _upload_media(self, media_type: str, content: bytes,
                             *, scope: str = "users", target_openid: str | None = None,
-                            filename: str = "") -> str | None:
+                            filename: str = "", mime_type: str = "") -> str | None:
         if not await self.ensure_access_token():
             return None
+
+        if not content:
+            return None
+
+        media_type = _resolve_media_type(media_type, filename, content, mime_type)
+        filename = _safe_media_filename(filename, media_type)
 
         size_bytes = len(content) if content else 0
 
@@ -457,22 +702,6 @@ class QQOfficialBot:
             elif media_type == "image":
                 content = _compress_image_if_needed(content)
                 size_bytes = len(content)
-
-        # 自动嗅探文件真实 Magic Number，防止文件名或 media_type 误标导致 850019 格式不支持
-        if content:
-            header = content[:32]
-            if header.startswith(b"\xff\xd8\xff") or header.startswith(b"\x89PNG\r\n\x1a\n") or header.startswith(b"GIF8") or (header.startswith(b"RIFF") and len(header) >= 12 and header[8:12] == b"WEBP"):
-                media_type = "image"
-                if filename and not filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
-                    filename = f"{Path(filename).stem}.jpg"
-            elif (len(header) >= 8 and (b"ftyp" in header[4:12] or header.startswith(b"\x00\x00\x00"))) or header.startswith(b"\x1a\x45\xdf\xa3"):
-                media_type = "video"
-                if filename and not filename.lower().endswith((".mp4", ".mov", ".webm", ".m4v")):
-                    filename = f"{Path(filename).stem}.mp4"
-            elif header.startswith(b"ID3") or header.startswith(b"\xff\xfb") or header.startswith(b"OggS") or (header.startswith(b"RIFF") and len(header) >= 12 and header[8:12] == b"WAVE"):
-                media_type = "record"
-                if filename and not filename.lower().endswith((".mp3", ".wav", ".ogg", ".silk")):
-                    filename = f"{Path(filename).stem}.mp3"
 
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
         size_bytes = len(content) if content else 0
@@ -510,19 +739,56 @@ class QQOfficialBot:
             return None
 
         file_info = data.get("file_info") or data.get("data", {}).get("file_info")
-        if not file_info:
-            err_code = data.get("code")
-            # 850031 超限 或 850019 格式不支持时，尝试降级为 file_type=4 (文件模式) 重试
-            if file_type != 4 and err_code in (850031, 850019):
-                log_all(f"ℹ️ 官方 QQ Bot [{self.name}] 媒体超软限制(code {err_code})，自动降级为文件类型重传...", is_debug=True)
-                payload["file_type"] = 4
-                resp2 = await self._post_json(url, payload, timeout=upload_timeout)
-                if resp2:
+        err_code = data.get("code")
+
+        # 先保留历史行为：按来源提供的原始音频（通常是 m4a/aac）直接以
+        # record 上传。不同 QQ Bot 环境对可接受的音频编码存在差异，只有
+        # 服务端明确返回 850019（格式不支持）时才进行 SILK 兜底转码，避免
+        # 每条语音都产生额外 CPU、延迟和一次有损重编码。
+        if not file_info and media_type == "record" and file_type == 3 and err_code == 850019:
+            log_all(
+                f"ℹ️ 官方 QQ Bot [{self.name}] 原格式语音上传被拒绝(code 850019)，尝试 SILK 语音重试",
+                is_debug=True,
+            )
+            voice_result = await asyncio.to_thread(_transcode_audio_to_silk, content, filename)
+            if voice_result:
+                voice_content, voice_filename = voice_result
+                voice_payload = {
+                    "file_type": 3,
+                    "file_data": base64.b64encode(voice_content).decode("ascii"),
+                    "srv_send_msg": False,
+                    "file_name": voice_filename,
+                }
+                voice_timeout = min(300.0, max(60.0, len(voice_content) / (100 * 1024)))
+                voice_resp = await self._post_json(url, voice_payload, timeout=voice_timeout)
+                if voice_resp is not None:
                     try:
-                        data2 = resp2.json()
-                        file_info = data2.get("file_info") or data2.get("data", {}).get("file_info")
+                        voice_data = voice_resp.json()
                     except ValueError:
-                        pass
+                        voice_data = {}
+                    file_info = voice_data.get("file_info") or voice_data.get("data", {}).get("file_info")
+                    if file_info:
+                        log_all(
+                            f"✅ 官方 QQ Bot [{self.name}] SILK 语音重试成功",
+                            is_debug=True,
+                        )
+                        return file_info
+
+        # 850031 超限或 850019 格式不支持且 SILK 兜底不可用时，保留一个
+        # 有原始文件名的普通附件，避免静默丢失媒体。
+        if not file_info and file_type != 4 and err_code in (850031, 850019):
+            log_all(
+                f"ℹ️ 官方 QQ Bot [{self.name}] 媒体上传降级为文件类型(code {err_code})",
+                is_debug=True,
+            )
+            payload["file_type"] = 4
+            resp2 = await self._post_json(url, payload, timeout=upload_timeout)
+            if resp2:
+                try:
+                    data2 = resp2.json()
+                    file_info = data2.get("file_info") or data2.get("data", {}).get("file_info")
+                except ValueError:
+                    pass
 
         if not file_info:
             log_all(
@@ -546,7 +812,7 @@ class QQOfficialBot:
 
     async def _send_chain(self, scope: str, target_openid: str, member: dict,
                           message_chain: list[dict],
-                          media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
+                          media_payloads: list[MediaPayload | tuple[str, bytes | None]] | None = None) -> bool:
         """共享的链式发送核心：文字 + 媒体。scope='users'|'groups'。"""
         async with self._send_limiter:
             if not await self.ensure_access_token():
@@ -561,24 +827,45 @@ class QQOfficialBot:
 
             if media_payloads is None:
                 media_payloads = await download_media_payloads(member, message_chain)
-            for media_type, content in media_payloads:
+            for raw_payload in media_payloads:
+                if isinstance(raw_payload, MediaPayload):
+                    media_type, content, filename = (
+                        raw_payload.media_type,
+                        raw_payload.content,
+                        raw_payload.filename,
+                    )
+                else:
+                    # 保持旧版二元组调用方兼容；三元组调用方也可直接提供文件名。
+                    media_type = raw_payload[0]
+                    content = raw_payload[1]
+                    filename = raw_payload[2] if len(raw_payload) > 2 else ""
+                    mime_type = raw_payload[3] if len(raw_payload) > 3 else ""
+                if isinstance(raw_payload, MediaPayload):
+                    mime_type = raw_payload.mime_type
                 if content is None:
                     ok = False
                     continue
-                file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid)
+                file_info = await self._upload_media(
+                    media_type,
+                    content,
+                    scope=scope,
+                    target_openid=target_openid,
+                    filename=str(filename or ""),
+                    mime_type=str(mime_type or ""),
+                )
                 if not file_info or not await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid):
                     ok = False
 
             return ok
 
     async def send_message_chain(self, member: dict, message_chain: list[dict],
-                                 media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
+                                 media_payloads: list[MediaPayload | tuple[str, bytes | None]] | None = None) -> bool:
         """向配置的目标 openid 发送单聊完整消息链。"""
         return await self._send_chain("users", self.target_openid, member, message_chain, media_payloads)
 
     async def send_message_chain_to_group(self, group_openid: str, member: dict,
                                           message_chain: list[dict],
-                                          media_payloads: list[tuple[str, bytes | None]] | None = None) -> bool:
+                                          media_payloads: list[MediaPayload | tuple[str, bytes | None]] | None = None) -> bool:
         """向指定群聊发送完整消息链。"""
         return await self._send_chain("groups", group_openid, member, message_chain, media_payloads)
 
@@ -606,14 +893,22 @@ class QQOfficialBot:
     _send_c2c_text = send_private_text
     _send_group_text = send_group_text
 
-    async def send_media_file(self, scope: str, target_openid: str, media_type: str, content: bytes, filename: str = "") -> bool:
-        """向指定用户/群聊发送单张图片或视频媒体文件。scope: 'users' | 'groups'。"""
+    async def send_media_file(self, scope: str, target_openid: str, media_type: str, content: bytes,
+                              filename: str = "", mime_type: str = "") -> bool:
+        """向指定用户/群聊发送单个图片、视频或音频媒体。scope: 'users' | 'groups'。"""
         if not content or not target_openid:
             return False
         async with self._send_limiter:
             if not await self.ensure_access_token():
                 return False
-            file_info = await self._upload_media(media_type, content, scope=scope, target_openid=target_openid, filename=filename)
+            file_info = await self._upload_media(
+                media_type,
+                content,
+                scope=scope,
+                target_openid=target_openid,
+                filename=filename,
+                mime_type=mime_type,
+            )
             if not file_info:
                 return False
             return await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid)
@@ -741,10 +1036,13 @@ async def _download_media(file_url: str, source_headers: dict[str, str]) -> byte
 
 
 async def download_media_payloads(member: dict,
-                                  message_chain: list[dict]) -> list[tuple[str, bytes | None]]:
-    """把消息链中的媒体段逐个下载为 (type, bytes|None)，None 表示该项下载失败。
-    优先复用本地已下载的归档素材，避免同一文件重复网络请求。"""
-    items = media_items(message_chain)
+                                  message_chain: list[dict]) -> list[MediaPayload]:
+    """把消息链中的媒体段下载为带文件名的载荷。
+
+    返回对象仍可按旧版二元组 ``(type, bytes|None)`` 解包；新增的
+    ``filename`` 属性用于 QQ Bot 上传时保留原始文件名。
+    """
+    items = _media_items_with_metadata(message_chain)
     if not items:
         return []
 
@@ -752,9 +1050,9 @@ async def download_media_payloads(member: dict,
 
     headers = get_source_headers_for_account(member.get("account_id", ""), member.get("group_type", ""))
     m_name = member.get("m_name") or member.get("name") or ""
-    payloads: list[tuple[str, bytes | None]] = []
+    payloads: list[MediaPayload] = []
 
-    for media_type, file_url in items:
+    for media_type, file_url, filename_hint, mime_type in items:
         # 1. 优先尝试从本地归档磁盘直接读取，零网络开销
         local_bytes = None
         if m_name:
@@ -766,10 +1064,22 @@ async def download_media_payloads(member: dict,
 
         if local_bytes is not None and len(local_bytes) > 0:
             log_all(f"📦 [官方Bot] 媒体直接复用本地归档 ({len(local_bytes)} 字节): {file_url[:60]}", is_debug=True)
-            payloads.append((media_type, local_bytes))
+            payloads.append(MediaPayload(
+                media_type=media_type,
+                content=local_bytes,
+                filename=_safe_media_filename(filename_hint or file_url, media_type, file_url),
+                mime_type=mime_type,
+                source_url=file_url,
+            ))
         else:
             downloaded = await _download_media(file_url, headers)
-            payloads.append((media_type, downloaded))
+            payloads.append(MediaPayload(
+                media_type=media_type,
+                content=downloaded,
+                filename=_safe_media_filename(filename_hint or file_url, media_type, file_url),
+                mime_type=mime_type,
+                source_url=file_url,
+            ))
     return payloads
 
 
@@ -884,6 +1194,23 @@ def media_items(message_chain: list[dict]) -> list[tuple[str, str]]:
         file_url = item.get("data", {}).get("file", "")
         if file_url:
             items.append((msg_type, file_url))
+    return items
+
+
+def _media_items_with_metadata(message_chain: list[dict]) -> list[tuple[str, str, str, str]]:
+    """内部版本：在不改变 ``media_items`` 旧返回结构的前提下保留文件名提示。"""
+    items: list[tuple[str, str, str, str]] = []
+    for item in message_chain:
+        msg_type = item.get("type")
+        if msg_type not in _MEDIA_FILE_TYPES:
+            continue
+        data = item.get("data") or {}
+        file_url = data.get("file", "")
+        if not file_url:
+            continue
+        filename = str(data.get("filename") or data.get("file_name") or data.get("name") or "")
+        mime_type = str(data.get("mime_type") or data.get("content_type") or "")
+        items.append((msg_type, file_url, filename, mime_type))
     return items
 
 

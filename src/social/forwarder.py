@@ -346,10 +346,19 @@ class SocialForwarder:
                                             m_bytes = mf.read()
                                         if m_bytes:
                                             m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
+                                            # QQ 官方 Bot 直传若不带 file_name，客户端会显示“未命名”。
+                                            # 使用已落地文件的 basename，上传层再负责安全清洗与扩展名补齐。
+                                            media_filename = os.path.basename(fp)
                                             if sp and b.target_openid:
-                                                await b.send_media_file("users", b.target_openid, m_type, m_bytes)
+                                                await b.send_media_file(
+                                                    "users", b.target_openid, m_type, m_bytes,
+                                                    filename=media_filename,
+                                                )
                                             if sg and getattr(b, "group_openid", None):
-                                                await b.send_media_file("groups", b.group_openid, m_type, m_bytes)
+                                                await b.send_media_file(
+                                                    "groups", b.group_openid, m_type, m_bytes,
+                                                    filename=media_filename,
+                                                )
                                     except (OSError, ValueError) as ex:
                                         log_all(f"⚠️ QQ 官方 Bot 发送媒体失败: {type(ex).__name__}", is_error=True)
                                         return False

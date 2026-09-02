@@ -41,8 +41,13 @@ def test_social_url_parser_routing():
 def test_instagram_story_mocked(monkeypatch):
     from unittest.mock import MagicMock
     import requests
+    from src.social import ig_session
 
     parser = SocialUrlParser()
+    # Story is intentionally an authenticated-only path; provide a synthetic
+    # session so this API fixture exercises the parser rather than the auth
+    # boundary.
+    monkeypatch.setattr(ig_session, "resolve_cookies", lambda *args: {"sessionid": "test-session"})
 
     # Mock user id lookup
     def mock_get(self, url, *args, **kwargs):
@@ -103,4 +108,3 @@ def test_instagram_story_mocked(monkeypatch):
     assert post.media[1].url == "https://ig.cdn/img2.jpg"
     assert post.media[2].url == "https://ig.cdn/img3.jpg"
     assert post.extra.get("story_count") == 3
-

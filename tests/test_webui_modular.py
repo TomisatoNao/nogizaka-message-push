@@ -360,6 +360,129 @@ def test_blog_list_endpoint_returns_summary_dto_without_full_body(monkeypatch):
     assert detail.payload["post"]["body_html"] == "<p>正文</p>"
 
 
+def test_blog_delete_translation_endpoint_clears_translation(monkeypatch):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.execute(
+        """CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY, author TEXT, title TEXT,
+            translation TEXT, content_json TEXT, translation_model TEXT
+        )"""
+    )
+    db.execute(
+        """INSERT INTO blog_posts
+           (id, author, title, translation, content_json, translation_model)
+           VALUES (1, '冨里 奈央', '夏のブログ', '译文', '[{"zh":"翻译"}]', 'gemini-test')"""
+    )
+    db.commit()
+    monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
+    monkeypatch.setattr(archive_handlers, "record_event", lambda *args, **kwargs: None)
+
+    class Handler(_ResponseHandler):
+        def __init__(self, command="POST"):
+            super().__init__()
+            self.command = command
+            self.path = "/api/archive/blogs/delete_translation"
+            self.payload = None
+            self.code = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+            self.code = code
+
+    handler = Handler()
+    archive_handlers.handle_archive(
+        handler,
+        "blogs/delete_translation",
+        lambda **kwargs: kwargs.get("need_admin") is True,
+        lambda: {"id": 1},
+    )
+    assert handler.code == 200
+    assert handler.payload == {"ok": True, "id": 1, "msg": "已清除该博客的翻译"}
+    row = db.execute(
+        "SELECT translation, content_json, translation_model FROM blog_posts WHERE id=1"
+    ).fetchone()
+    assert row == (None, None, None)
+
+    missing = Handler()
+    archive_handlers.handle_archive(
+        missing,
+        "blogs/delete_translation",
+        lambda **_: True,
+        lambda: {"id": 999},
+    )
+    assert missing.code == 404
+    assert missing.payload["msg"] == "未找到该博客"
+
+    invalid = Handler()
+    archive_handlers.handle_archive(
+        invalid,
+        "blogs/delete_translation",
+        lambda **_: True,
+        lambda: {"id": "not-a-number"},
+    )
+    assert invalid.code == 400
+    assert "正整数" in invalid.payload["msg"]
+
+
+def test_blog_translate_endpoint_persists_structured_translation(monkeypatch):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute(
+        """CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY, group_key TEXT, author TEXT, title TEXT,
+            body_html TEXT, translation TEXT, content_json TEXT, translation_model TEXT
+        )"""
+    )
+    db.execute(
+        """INSERT INTO blog_posts
+           (id, group_key, author, title, body_html, translation, content_json, translation_model)
+           VALUES (1, 'nogizaka', '冨里 奈央', '夏のブログ', '<p>こんにちは</p>', NULL, NULL, NULL)"""
+    )
+    db.commit()
+    monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
+
+    async def fake_translate(*_args, **_kwargs):
+        return ([{"type": "text", "jp": "こんにちは", "zh": "你好"}], "test-model")
+
+    from src import translator
+    monkeypatch.setattr(translator, "translate_blog_structured", fake_translate)
+
+    class Handler(_ResponseHandler):
+        command = "POST"
+        path = "/api/archive/blogs/translate"
+
+        def __init__(self):
+            super().__init__()
+            self.payload = None
+            self.code = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+            self.code = code
+
+    handler = Handler()
+    archive_handlers.handle_archive(
+        handler,
+        "blogs/translate",
+        lambda **_: True,
+        lambda: {"id": 1},
+    )
+
+    assert handler.code == 200
+    assert handler.payload["ok"] is True
+    assert handler.payload["translation_model"] == "test-model"
+    row = db.execute(
+        "SELECT translation, content_json, translation_model FROM blog_posts WHERE id=1"
+    ).fetchone()
+    assert row[0] == "<em>こんにちは</em><br><span>你好</span>"
+    assert '"zh": "你好"' in row[1]
+    assert row[2] == "test-model"
+
+
 def test_archive_home_cache_is_single_flight(monkeypatch):
     import threading
 

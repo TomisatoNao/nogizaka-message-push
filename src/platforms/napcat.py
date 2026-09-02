@@ -49,7 +49,14 @@ def build_message_chain(
     if file_url:
         media_type = cfg.MEDIA_TYPE_MAP.get(msg.get("type", ""))
         if media_type:
-            chain.append({"type": media_type, "data": {"file": file_url}})
+            media_data = {"file": file_url}
+            # 部分上游会额外提供文件名/MIME；保留这些提示供 QQ 官方 Bot
+            # 上传层生成正确的 file_name，旧版消息没有这些字段时行为不变。
+            for key in ("filename", "file_name", "name", "mime_type", "content_type"):
+                value = msg.get(key)
+                if value:
+                    media_data[key] = value
+            chain.append({"type": media_type, "data": media_data})
         else:
             log_all(f"⚠️ 未知媒体类型 '{msg.get('type')}'，跳过媒体段")
 

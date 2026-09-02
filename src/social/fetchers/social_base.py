@@ -54,6 +54,16 @@ class SocialFetcher(BaseFetcher):
         """当前平台配置（每次读取，配置热更新即时生效）。"""
         return platform_settings(self._config, self.platform_name)
 
+    def ytdlp_config(self) -> dict:
+        """返回带平台标识的 yt-dlp 配置副本。
+
+        下载器需要知道 cookies 属于哪个平台，避免把 Instagram 会话误
+        注入 TikTok/X 请求；使用副本也不会污染热重载配置。
+        """
+        cfg = dict(self.cfg)
+        cfg["_platform"] = self.platform_name
+        return cfg
+
     @property
     def is_enabled(self) -> bool:
         return bool(self.cfg.get("enabled"))

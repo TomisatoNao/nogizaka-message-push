@@ -845,7 +845,172 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
         })
         return
 
-    # 13. 博客振假名
+    # 13. 手动翻译博客
+    if sub == "blogs/translate":
+        if not guard_fn(need_admin=True):
+            return
+        if handler.command != "POST":
+            _send_json_resp(handler, {"ok": False, "msg": "Method not allowed"}, 405)
+            return
+
+        body = read_body_json_fn()
+        if body is None:
+            return
+        if not isinstance(body, dict):
+            _send_json_resp(handler, {"ok": False, "msg": "请求体必须是 JSON 对象"}, 400)
+            return
+
+        raw_id = body.get("id")
+        try:
+            if isinstance(raw_id, bool):
+                raise ValueError
+            blog_id = int(raw_id)
+        except (TypeError, ValueError):
+            _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
+            return
+        if blog_id <= 0:
+            _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
+            return
+
+        try:
+            db = get_blog_db()
+            row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (blog_id,)).fetchone()
+            if row is None:
+                _send_json_resp(handler, {"ok": False, "msg": "未找到该博客"}, 404)
+                return
+            row = dict(row)
+
+            # 结构化译文已存在时直接返回，避免重复调用模型。
+            cached_translation = str(row.get("translation") or "")
+            cached_blocks = str(row.get("content_json") or "")
+            if cached_translation.strip() and cached_blocks not in ("", "[]", "{}"):
+                _send_json_resp(handler, {
+                    "ok": True,
+                    "id": blog_id,
+                    "html": cached_translation,
+                    "content_json": cached_blocks,
+                    "translation_model": row.get("translation_model") or "",
+                })
+                return
+
+            body_html = str(row.get("body_html") or "")
+            if not body_html.strip():
+                _send_json_resp(handler, {"ok": False, "msg": "该博客没有可翻译的正文"}, 422)
+                return
+
+            import asyncio
+            import httpx
+            from src import translator
+            from src.logger import log_all
+
+            log_all(f"🔄 网页端请求手动翻译博客 | id={blog_id} | author={row.get('author', '')}")
+
+            async def _do_translate():
+                async with httpx.AsyncClient(timeout=120) as temp_client:
+                    return await translator.translate_blog_structured(
+                        body_html,
+                        row.get("author", ""),
+                        row.get("group_key", ""),
+                        custom_client=temp_client,
+                    )
+
+            structured, model_name = asyncio.run(_do_translate())
+            if not structured:
+                log_all(f"⚠️ 网页端手动翻译未生成结果 | id={blog_id}", is_error=True)
+                _send_json_resp(handler, {"ok": False, "msg": "翻译失败，请检查 API Key 配置与网络连接"})
+                return
+
+            translated = translator.blocks_to_html(structured)
+            content_json = json.dumps(structured, ensure_ascii=False)
+            translation_model = model_name or ""
+            db.execute(
+                "UPDATE blog_posts SET translation = ?, content_json = ?, translation_model = ? WHERE id = ?",
+                (translated, content_json, translation_model, blog_id),
+            )
+            db.commit()
+            log_all(f"✅ 网页端手动翻译完成 | id={blog_id} | model={translation_model or 'unknown'}")
+            _send_json_resp(handler, {
+                "ok": True,
+                "id": blog_id,
+                "html": translated,
+                "content_json": content_json,
+                "translation_model": translation_model,
+            })
+        except (sqlite3.Error, OSError, ValueError, TypeError, RuntimeError) as exc:
+            _send_json_resp(handler, {"ok": False, "msg": f"翻译失败：{exc}"}, 500)
+        return
+
+    # 14. 删除博客译文
+    if sub == "blogs/delete_translation":
+        # 删除译文会修改博客数据库，必须由管理员执行。
+        if not guard_fn(need_admin=True):
+            return
+        if handler.command != "POST":
+            _send_json_resp(handler, {"ok": False, "msg": "Method not allowed"}, 405)
+            return
+
+        body = read_body_json_fn()
+        if body is None:
+            return
+        if not isinstance(body, dict):
+            _send_json_resp(handler, {"ok": False, "msg": "请求体必须是 JSON 对象"}, 400)
+            return
+
+        raw_id = body.get("id")
+        try:
+            # bool 是 int 的子类，但不应被当作博客 ID 接受。
+            if isinstance(raw_id, bool):
+                raise ValueError
+            blog_id = int(raw_id)
+        except (TypeError, ValueError):
+            _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
+            return
+        if blog_id <= 0:
+            _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
+            return
+
+        try:
+            db = get_blog_db()
+            row = db.execute(
+                "SELECT author, title FROM blog_posts WHERE id = ?",
+                (blog_id,),
+            ).fetchone()
+            if row is None:
+                _send_json_resp(handler, {"ok": False, "msg": "未找到该博客"}, 404)
+                return
+
+            db.execute(
+                "UPDATE blog_posts "
+                "SET translation = NULL, content_json = NULL, translation_model = NULL "
+                "WHERE id = ?",
+                (blog_id,),
+            )
+            db.commit()
+        except (sqlite3.Error, OSError) as exc:
+            _send_json_resp(handler, {"ok": False, "msg": f"删除翻译失败：{exc}"}, 500)
+            return
+
+        from src.logger import log_all
+        log_all(f"🗑️ 管理员删除博客翻译缓存 | id={blog_id}")
+        try:
+            current_user_fn = getattr(handler, "_current_user", None)
+            user = current_user_fn() if callable(current_user_fn) else {}
+            source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
+            record_event(
+                "archive.blog_translation.delete",
+                outcome="success",
+                actor=user.get("username"),
+                source_ip=source_ip,
+                target=str(blog_id),
+                details={"author": row[0] or "", "title": row[1] or ""},
+            )
+        except Exception:
+            # 审计失败不应影响已经完成的删除操作。
+            pass
+        _send_json_resp(handler, {"ok": True, "id": blog_id, "msg": "已清除该博客的翻译"})
+        return
+
+    # 15. 博客振假名
     if sub == "blogs/furigana":
         if handler.command != "POST":
             _send_json_resp(handler, {"ok": False, "msg": "Method not allowed"}, 405)
@@ -892,7 +1057,7 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             _send_json_resp(handler, {"ok": False, "msg": f"生成振假名异常: {e}"}, 500)
         return
 
-    # 14. 媒体流服务
+    # 16. 媒体流服务
     if sub.startswith("blog_media/"):
         rel_str = unquote(sub[len("blog_media/"):].replace("\\", "/"))
         rel = Path(rel_str)
@@ -924,7 +1089,7 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
         serve_file_range(handler, full)
         return
 
-    # 15. 首页仪表盘聚合数据
+    # 17. 首页仪表盘聚合数据
     if sub == "home":
         global _home_cache, _home_cache_key
         cache_key = _home_cache_key_for_request()

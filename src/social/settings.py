@@ -68,6 +68,10 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
         "download_dir": "data/social_media/instagram",
         "max_items_per_poll": 3,          # 单轮少取一些，减少请求
         "first_run_skip": True,
+        # 单条公开帖子/ Reel 的匿名 Embed 回退；不读取 Instagram 登录态。
+        "public_embed_enabled": True,
+        "public_embed_timeout_seconds": 25,
+        "public_embed_max_media": 20,
         # 风控防护（详见 social/ig_safety.py）
         "safety": {
             "enabled": True,
