@@ -161,3 +161,12 @@ def test_status_page_exposes_startup_state():
     )
     assert 'id="stStartup"' in html
     assert 'startup.state' in html
+
+
+def test_initial_admin_banner_is_emitted_once():
+    banner = app._initial_admin_banner("admin", "test-password", 46047)
+
+    assert banner.count("已为您自动创建初始管理员账号") == 1
+    assert banner.count("=" * 70) == 2
+    assert banner.count("初始密码: test-password") == 1
+    assert banner.endswith("=" * 70 + "\n")

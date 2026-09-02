@@ -114,6 +114,23 @@ def _has_configured_workload() -> bool:
     )
 
 
+def _initial_admin_banner(admin_user: str, admin_pw: str, web_port: int) -> str:
+    """生成一次性的初始管理员提示，避免隐式字符串拼接造成重复输出。"""
+    return "\n".join([
+        "",
+        "=" * 70,
+        "🔑 系统首次运行：已为您自动创建初始管理员账号！",
+        f"   • 用户名:   {admin_user}",
+        f"   • 初始密码: {admin_pw}",
+        f"   • Web 管理端: http://127.0.0.1:{web_port}/",
+        "",
+        "⚠️ 请妥善保存初始密码！若遗忘，可在终端执行：",
+        f"   python tools/manage_users.py passwd {admin_user}",
+        "=" * 70,
+        "",
+    ])
+
+
 async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     """
     启动时检查：
@@ -1019,15 +1036,10 @@ async def main() -> None:
     from src import auth
     created, admin_user, admin_pw = auth.ensure_initial_admin()
     if created:
-        banner = (
-            "\n" + "=" * 70 + "\n"
-            "🔑 系统首次运行：已为您自动创建初始管理员账号！\n"
-            f"   • 用户名:   {admin_user}\n"
-            f"   • 初始密码: {admin_pw}\n"
-            f"   • Web 管理端: http://127.0.0.1:{getattr(cfg, 'WEB_ADMIN_PORT', 46046)}/\n\n"
-            "⚠️ 请妥善保存初始密码！若遗忘，可在终端执行：\n"
-            f"   python tools/manage_users.py passwd {admin_user}\n"
-            "=" * 70 + "\n"
+        banner = _initial_admin_banner(
+            admin_user,
+            admin_pw,
+            int(getattr(cfg, "WEB_ADMIN_PORT", 46046)),
         )
         print(banner, flush=True)
         log_all("🔑 系统首次运行：已初始化创建 admin 账号（初始密码已输出至控制台）")
