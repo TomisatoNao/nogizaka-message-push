@@ -69,7 +69,10 @@ def _file_to_base64(filepath: Path) -> str:
             with open(filepath, "rb") as f:
                 data = base64.b64encode(f.read()).decode("utf-8")
                 suffix = filepath.suffix.lower()
-                mime = "image/png" if suffix == ".png" else "image/jpeg"
+                mime = {
+                    ".png": "image/png",
+                    ".svg": "image/svg+xml",
+                }.get(suffix, "image/jpeg")
                 return f"data:{mime};base64,{data}"
         except Exception:  # nosec B110
             pass
@@ -214,6 +217,16 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     else:
         initial = author[:1] if author else "🌸"
         avatar_html = f'<div class="author-avatar-fallback">{initial}</div>'
+
+    # 卡片与 Web 归档首页使用同一套品牌图标。博客卡片是独立渲染的图片，
+    # 不能依赖浏览器访问 /static 路径，因此将仓库内 SVG 内嵌为 data URI。
+    archive_icon_path = Path(__file__).resolve().parent / "webui_static" / "archive_icon.svg"
+    archive_icon_b64 = _file_to_base64(archive_icon_path)
+    footer_brand_icon = (
+        f'<img src="{archive_icon_b64}" class="footer-brand-icon" alt="" />'
+        if archive_icon_b64
+        else ""
+    )
 
     html_code = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -437,6 +450,14 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     font-weight: 600;
     color: #94a3b8;
   }}
+  .footer-brand-icon {{
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    object-fit: cover;
+    flex: 0 0 auto;
+    box-shadow: 0 2px 8px rgba(192, 132, 252, 0.28);
+  }}
   .footer-right {{
     font-size: 14.5px;
     color: #475569;
@@ -468,7 +489,7 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
   </div>
 
   <div class="card-footer">
-    <div class="footer-brand">🌸 坂道联合监控系统 · 自动推送归档</div>
+    <div class="footer-brand">{footer_brand_icon}坂道联合监控系统 · 自动推送归档</div>
     <div class="footer-right">写真共 {valid_images_count} 张 · 官方原图无损呈现</div>
   </div>
 </div>

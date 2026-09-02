@@ -40,6 +40,9 @@ async def test_blog_card_html_generation():
     assert "テストブログ" in html
     assert "GLM-4-Flash" in html
     assert "author-avatar" in html
+    assert 'class="footer-brand-icon"' in html
+    assert "data:image/svg+xml;base64," in html
+    assert "🌸 坂道联合监控系统" not in html
 
     # 测试未知作者优雅降级为文字头像
     mock_unknown = {
