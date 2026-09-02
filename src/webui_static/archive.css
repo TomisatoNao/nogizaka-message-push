@@ -957,9 +957,8 @@ html.view-blog #blogGrid { display: block !important; }
     transform: translate(2px, -2px);
   }
 
-  /* 聚合动态流与时光隧道（现代 2-Column 严格对齐网格） */
-  .portal-feed-grid,
-  .portal-tunnel-grid {
+  /* 聚合动态流（现代 2-Column 严格对齐网格） */
+  .portal-feed-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
@@ -967,8 +966,7 @@ html.view-blog #blogGrid { display: block !important; }
     align-items: stretch;
   }
   @media (max-width: 768px) {
-    .portal-feed-grid,
-    .portal-tunnel-grid {
+    .portal-feed-grid {
       grid-template-columns: 1fr;
     }
   }
@@ -1092,15 +1090,6 @@ html.view-blog #blogGrid { display: block !important; }
     box-shadow: var(--shadow-md);
     border-color: var(--border);
   }
-  .home-msg-card.tunnel {
-    background: repeating-linear-gradient(
-      -45deg,
-      transparent,
-      transparent 14px,
-      color-mix(in srgb, var(--card-soft) 60%, transparent 40%) 14px,
-      color-mix(in srgb, var(--card-soft) 60%, transparent 40%) 15px
-    ), var(--card);
-  }
   .hmc-header {
     display: flex;
     align-items: center;
@@ -1125,14 +1114,6 @@ html.view-blog #blogGrid { display: block !important; }
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-soft);
-    padding: 1px 7px;
-    border-radius: 5px;
-  }
-  .hmc-tunnel-badge {
-    font-size: 11px;
-    font-weight: 600;
-    color: #d49a37;
-    background: rgba(212, 154, 55, 0.12);
     padding: 1px 7px;
     border-radius: 5px;
   }

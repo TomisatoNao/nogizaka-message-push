@@ -1540,7 +1540,6 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             "blog_groups": blog_groups,
             "recent_pics": agg_pics,
             "recent_feed": recent_feed,
-            "time_tunnel": recent_feed[:6],
         }
         _home_cache = result
         _home_cache_key = cache_key

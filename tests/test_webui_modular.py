@@ -584,10 +584,24 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260902_2" in html
-    assert "/static/archive.css?v=20260902_2" in html
-    assert "/static/archive.js?v=20260902_2" in perf
-    assert "/static/archive.css?v=20260902_2" in perf
+    assert "/static/archive.js?v=20260902_3" in html
+    assert "/static/archive.css?v=20260902_3" in html
+    assert "/static/archive.js?v=20260902_3" in perf
+    assert "/static/archive.css?v=20260902_3" in perf
+
+
+def test_archive_home_omits_duplicate_history_section():
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    styles = (_ROOT / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    handler = (_ROOT / "src" / "webui_modules" / "archive_handlers.py").read_text(encoding="utf-8")
+
+    for content in (html, script, styles):
+        assert "homeTimeTunnel" not in content
+        assert "portal-tunnel-grid" not in content
+        assert "hmc-tunnel-badge" not in content
+    assert "往昔时光 · 历史回顾" not in html
+    assert '"time_tunnel"' not in handler
 
 
 def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():

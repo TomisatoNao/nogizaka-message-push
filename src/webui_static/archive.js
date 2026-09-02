@@ -2944,13 +2944,6 @@ function fmtDate(utc) {
     String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
 }
 
-function fmtDateFull(utc) {
-  const d = parseDateSafe(utc);
-  if (!d) return String(utc || "").slice(0, 16);
-  return d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日 " +
-    String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-}
-
 function fmtDateShort(utc) {
   const d = parseDateSafe(utc);
   if (!d) return String(utc || "").slice(0, 10);
@@ -3074,7 +3067,6 @@ function renderHome(data) {
   const blogGroups = data.blog_groups || [];
   const recentPics = data.recent_pics || [];
   const recentFeed = data.recent_feed || [];
-  const timeTunnel = data.time_tunnel || [];
 
   // 1. Portal Hero 顶级数字看板
   const heroDiv = $("portalHero");
@@ -3418,63 +3410,6 @@ function renderHome(data) {
     feedDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px;grid-column:1/-1;">暂无最新动态</div>';
   }
 
-  // 5. 时光隧道 (Message + Blog 双列网格排版，严格对齐)
-  const tunnelDiv = $("homeTimeTunnel");
-  // 保证偶数个卡片，使双列底部完美平齐
-  const evenTimeTunnel = timeTunnel && timeTunnel.length ? (timeTunnel.length % 2 === 0 ? timeTunnel : timeTunnel.slice(0, timeTunnel.length - 1)) : [];
-  if (evenTimeTunnel.length) {
-    let cardsHTML = '';
-    evenTimeTunnel.forEach((item, i) => {
-      let cardHTML = '';
-      const dateStr = fmtDateFull(item.published_at);
-      const d = parseDateSafe(item.published_at);
-      const year = d ? d.getFullYear() : (item.year || '');
-      const thisYear = new Date().getFullYear();
-      const yearsAgo = thisYear - (year || thisYear);
-      const agoTag = yearsAgo > 0 ? (yearsAgo + '年前 · ' + year + '年') : (year + '年');
-
-      if (item.type === "blog") {
-        cardHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" onclick="openBlogReaderById(\'' + item.id + '\')">';
-        cardHTML += '<div class="hmc-header">';
-        cardHTML += '<div class="hmc-meta-left">';
-        cardHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
-        cardHTML += '<span class="hmc-mem-badge" style="background:rgba(167,139,250,0.12);color:#a78bfa;">' + esc(item.member_display) + '</span>';
-        cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
-        cardHTML += '</div>';
-        cardHTML += '<span class="hmc-jump">阅读博客 ↗</span>';
-        cardHTML += '</div>';
-        cardHTML += '<div class="hmc-text" style="font-weight:600;">' + esc(item.text) + '</div>';
-        if (item.translation) {
-          cardHTML += '<div class="hmc-trans" style="color:var(--text);">' + formatCardText(item.translation) + '</div>';
-        }
-        cardHTML += '</div>';
-      } else {
-        cardHTML += '<div class="home-msg-card tunnel" style="animation-delay:' + (i * .04) + 's" data-member="' + esc(item.member) + '" data-year="' + item.year + '" data-month="' + item.month + '" data-id="' + item.id + '">';
-        cardHTML += '<div class="hmc-header">';
-        cardHTML += '<div class="hmc-meta-left">';
-        cardHTML += '<span class="hmc-tunnel-badge">⏳ ' + agoTag + '</span>';
-        cardHTML += '<span class="hmc-mem-badge">' + esc(item.member_display) + '</span>';
-        cardHTML += '<span class="hmc-time">' + dateStr + '</span>';
-        cardHTML += '</div>';
-        cardHTML += '<span class="hmc-jump">跳转当日 →</span>';
-        cardHTML += '</div>';
-        cardHTML += '<div class="hmc-text">' + formatCardText(item.text) + '</div>';
-        if (item.translation) {
-          cardHTML += '<div class="hmc-trans">' + formatCardText(item.translation) + '</div>';
-        }
-        cardHTML += '</div>';
-      }
-      cardsHTML += cardHTML;
-    });
-    tunnelDiv.innerHTML = cardsHTML;
-    tunnelDiv.querySelectorAll('.home-msg-card[data-member]').forEach(el => {
-      el.addEventListener('click', () => {
-        jumpToMessage(el.dataset.member, el.dataset.year, el.dataset.month, el.dataset.id);
-      });
-    });
-  } else {
-    tunnelDiv.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px 10px;grid-column:1/-1;">暂无历史消息</div>';
-  }
   };
 
   const renderIfCurrent = (callback) => {
