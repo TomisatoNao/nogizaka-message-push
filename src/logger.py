@@ -90,10 +90,24 @@ def redact_sensitive(content: str) -> str:
     return safe
 
 
-def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> None:
+def log_all(
+    content: str,
+    *,
+    is_error: bool = False,
+    is_debug: bool = False,
+    is_warning: bool = False,
+) -> None:
+    """统一输出一条日志。
+
+    ``is_warning`` 用于“配置尚未完成/可稍后重试”的可恢复状态；这类状态
+    不应污染错误日志或触发故障告警。为兼容历史调用，仍保留两个布尔参数，
+    并按 ``ERROR > WARNING > DEBUG > INFO`` 的顺序处理同时传入的标记。
+    """
     ts = datetime.now().strftime("%H:%M:%S")
     if is_error:
         tag, color = "ERROR", "\033[31m"
+    elif is_warning:
+        tag, color = "WARN ", "\033[33m"
     elif is_debug:
         tag, color = "DEBUG", "\033[90m"
     else:
@@ -129,6 +143,8 @@ def log_all(content: str, *, is_error: bool = False, is_debug: bool = False) -> 
     elif not is_error and system_logger:
         if is_debug:
             system_logger.debug(safe_content)
+        elif is_warning:
+            system_logger.warning(safe_content)
         else:
             system_logger.info(safe_content)
 

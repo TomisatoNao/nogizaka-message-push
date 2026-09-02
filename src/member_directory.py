@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 
 import httpx
 
@@ -265,10 +266,13 @@ def is_member_active_subscription(account_id: str, member_id: str) -> bool | Non
 
 async def sync_all_accounts_subscriptions(
     client: httpx.AsyncClient | None = None, *, include_errors: bool = False,
+    account_ids: Iterable[str] | None = None,
 ) -> dict[str, int] | tuple[dict[str, int], dict[str, str]]:
     """同步各账号订阅状态；单个账号失败不阻塞其余账号。
 
     ``include_errors=True`` 时同时返回 ``{账号: 原因}``，供 WebUI 展示部分失败。
+    ``account_ids`` 用于启动阶段只同步当前监控项引用的账号；省略时保持原有
+    行为，遍历配置中的全部账号（供管理端手动同步使用）。
     """
     from config.credentials import is_account_fetch_available, validate_account_cred
     stats = {}
@@ -278,33 +282,34 @@ async def sync_all_accounts_subscriptions(
         client = httpx.AsyncClient(timeout=20)
         should_close = True
 
-    for acc_id in list(cfg.ACCOUNTS.keys()):
+    selected_ids = list(account_ids) if account_ids is not None else list(cfg.ACCOUNTS.keys())
+    for acc_id in selected_ids:
         fetch_available, refresh_reason = is_account_fetch_available(acc_id)
         if not fetch_available:
             errors[acc_id] = refresh_reason
-            log_all(f"⚠️ 订阅同步跳过账号 {acc_id}: {refresh_reason}", is_error=True)
+            log_all(f"⚠️ 订阅同步跳过账号 {acc_id}: {refresh_reason}", is_warning=True)
             continue
         try:
             ok, _ = validate_account_cred(acc_id)
         except Exception as exc:  # 最后一层隔离：第三方凭证模块异常不能中断其他账号。
             message = f"凭证检查异常: {type(exc).__name__}"
             errors[acc_id] = message
-            log_all(f"⚠️ 订阅同步账号 {acc_id} {message}", is_error=True)
+            log_all(f"⚠️ 订阅同步账号 {acc_id} {message}", is_warning=True)
             continue
         if not ok:
             errors[acc_id] = "凭证不可用或已过期"
-            log_all(f"⚠️ 订阅同步跳过账号 {acc_id}: 凭证不可用", is_error=True)
+            log_all(f"⚠️ 订阅同步跳过账号 {acc_id}: 凭证不可用", is_warning=True)
             continue
         try:
             groups, err = await fetch_member_directory(client, acc_id)
         except Exception as exc:  # 最后一层隔离：保留每账号上下文并继续后续同步。
             message = f"成员目录处理异常: {type(exc).__name__}"
             errors[acc_id] = message
-            log_all(f"⚠️ 订阅同步账号 {acc_id} {message}", is_error=True)
+            log_all(f"⚠️ 订阅同步账号 {acc_id} {message}", is_warning=True)
             continue
         if err:
             errors[acc_id] = err
-            log_all(f"⚠️ 订阅同步账号 {acc_id} 失败: {err}", is_error=True)
+            log_all(f"⚠️ 订阅同步账号 {acc_id} 失败: {err}", is_warning=True)
             continue
         stats[acc_id] = len(groups or [])
     if should_close:

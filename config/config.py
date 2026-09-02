@@ -89,7 +89,9 @@ _DEFAULTS: dict = {
     "day_interval":             [120, 180],
     "night_interval":           [1500, 1800],
     "enable_translation":       True,
-    "message_monitor_enabled":  True,
+    # 首次运行默认只启动管理端/归档基础设施；未明确配置前不触发账号握手、
+    # 成员轮询或推送，避免把“尚未配置”误报成启动故障。
+    "message_monitor_enabled":  False,
     "blog_card_mode":           "card_and_images",
     # 消息过滤
     "skip_publish_types":       ["birthday"],
@@ -131,7 +133,7 @@ _DEFAULTS: dict = {
     "qq_commands_allow":        [],
     # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
     "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
-    "enable_napcat_qq":         True,
+    "enable_napcat_qq":         False,
     "enable_qq_official_bot":   False,
     "enable_tg_bot":            False,
     "tg_bot_token":             "",  # legacy single bot token
@@ -172,7 +174,7 @@ def _normalize_config(raw: dict) -> dict:
     if not is_old:
         cfg = dict(raw)
         channels = cfg.pop("channels", {})
-        cfg["enable_napcat_qq"]       = channels.get("napcat", True)
+        cfg["enable_napcat_qq"]       = channels.get("napcat", False)
         cfg["enable_qq_official_bot"] = channels.get("qq_official", False)
         cfg["enable_tg_bot"]          = channels.get("tg", False)
         # tg_bot_token 由 _load_config 统一从 .env 读取（步骤 7），此处不重复赋值

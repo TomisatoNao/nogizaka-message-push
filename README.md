@@ -22,8 +22,9 @@
 ## 💡 为什么选择本项目？
 
 - 🔄 **全平台聚合监控**：支持乃木坂46、櫻坂46、日向坂46及 yodel（毕业成员/官方）Message 消息、官方博客、𝕏 (Twitter)、Instagram (Feed/Story/Reels)、TikTok 视频及 **TikTok Live 直播开播秒级探测与 ffmpeg 无损录制**；
-- 🤖 **AI 双引擎智能翻译**：Google Gemini 与 智谱清言（GLM-4-Flash 永久免费且国内免翻直连）**智能轮流调度与自动容灾**，呈现偶像口吻的地道中文；
+- 🤖 **AI 双引擎智能翻译**：Google Gemini 与智谱清言（GLM 系列）**智能轮流调度与自动容灾**，呈现偶像口吻的地道中文；
 - 📢 **全通道解耦分发**：支持 **QQ 群（NapCat OneBot11）**、**Telegram 频道（HTML 富文本）** 及 **QQ 官方开放平台机器人（个人/群聊/交互指令）**，支持独立备注与精细过滤；
+- 🔁 **失败目标补偿**：成员消息与社交动态按“内容 × 推送目标”记录投递状态；已成功的目标不会重复发送，失败目标会在后续巡查中自动补偿（博客完整投递队列仍属于后续增强项）；
 - 💾 **本地永久归档与全文检索**：全量多媒体（原图/语音/视频/粉丝信件）本地落盘；内置 **SQLite WAL + FTS5 全文索引** 与 **Gemini Vision 图片智能打标**；
 - 📱 **现代化响应式 Web 门户**：三坂便当卡大盘、时光隧道、三态双语博客阅读器、Message 时间线画廊，移动端原生 Action Sheet 深度适配，**全过程界面点选，无需修改任何代码或配置**。
 
@@ -40,7 +41,7 @@ flowchart TD
     end
 
     subgraph S3["🤖 AI 智能双语翻译引擎"]
-        AI["Google Gemini 3.7/3.6/3.5 Flash & 智谱清言 GLM-4<br/>双引擎智能交替轮巡调度 + 自动 Failover 故障切流"]
+        AI["Google Gemini Flash & 智谱清言 GLM 系列<br/>双引擎智能交替轮巡调度 + 自动 Failover 故障切流"]
     end
 
     subgraph S4["📢 解耦推送通道 (Pub/Sub)"]
@@ -131,6 +132,19 @@ flowchart TD
    ```
    在服务器本机打开浏览器访问 **`http://127.0.0.1:46046/`** 登录。需要远程访问时，请通过 HTTPS 反向代理公开该地址。常见的 Lucky、Nginx、Caddy 配置会自动适配同域访问；生产环境仍应将 `auth.cookie_secure` 设为 `true`。
 
+#### 已有 Docker 部署的升级
+
+`docker compose up -d` 不会保证重新拉取已经存在的镜像。升级前先拉取新镜像，再重建容器并检查健康状态：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+curl -fsS http://127.0.0.1:46046/api/health/status
+```
+
+生产环境建议将 `image` 固定到已通过 CI 的版本标签或镜像 digest，而不是长期依赖会漂移的 `latest`。
+
 ---
 
 ### 方式 B：原生 Python 环境运行
@@ -162,6 +176,8 @@ flowchart TD
    ```
 
 3. **打开浏览器**：访问 **`http://127.0.0.1:46046/`** 即可直接登录。
+
+首次运行在未配置监控账号、推送通道时属于正常的“等待配置”状态：控制台会保留启动、配置提示和初始密码，但不会把未启用功能打印成 ERROR，也不会对账号池预设发起续期或订阅请求。配置完成后，`/api/status` 会在 `startup.state` 显示 `READY`；未配置完整时显示 `SETUP_REQUIRED`，已启用任务发生真实外部故障时显示 `DEGRADED`。
 
 ---
 
@@ -200,15 +216,15 @@ flowchart LR
 
 #### 步骤 2：登录账号并复制 `signin` 请求 cURL
 1. 在网页上勾选服务条款与隐私政策，点击「开始」并完成你的第三方账号（Google / Apple / Sony 等）授权登录；
-2. 登录成功跳转后，在右侧 F12「网络」请求列表中找到名为 **`signin`** 的请求（或任意包含鉴权凭证的请求如 `profile` / `timeline`）；
-3. **右键点击 `signin` 请求** ➔ **「复制 (Copy)」** ➔ 选择 **「以 cURL (bash) 格式复制」** 或 **「以 cURL (cmd) 格式复制」**（也可以选择「复制请求标头」）。
+2. 登录成功跳转后，在右侧 F12「网络」请求列表中找到名为 **`signin`** 的请求；必须使用这条请求，因为登录会话的 `Set-Cookie` 只在该登录响应中完成，`profile` / `timeline` 等后续接口不能替代它；
+3. **右键点击 `signin` 请求** ➔ **「复制 (Copy)」** ➔ 选择 **「以 cURL (bash) 格式复制」** 或 **「以 cURL (cmd) 格式复制」**。复制结果必须包含请求 URL 与请求体。
 
 #### 步骤 3：粘贴至 Web 管理端，一键解析并自动握手
 1. 打开本系统 Web 管理后台（`http://127.0.0.1:46046/`）➔ 进入 **「👥 账号与成员」** 页面；
 2. 找到对应团体账号，点击 **「🔑 填写凭证」** 按钮；
 3. 点击展开 **「📋 智能一键解析」**，直接将刚才复制的整段 cURL 代码粘贴到文本框中，点击 **「🚀 解析并填充」**；
 4. 系统将瞬间自动提取并填入 `access_token`、`refresh_token`、`session` Cookie 及 `user_id` 等全部参数；
-5. 点击 **「🔐 保存并自动握手」**，系统将自动发起鉴权握手，并在后台开启**每小时全自动无感静默续期**，永不过期！
+5. 点击 **「🔐 保存并自动握手」**，系统会自动发起鉴权握手；在 session 与 refresh_token 仍有效时，巡查前会按 JWT 剩余寿命自动续期。若官方拒绝续期或凭据已经失效，需要重新粘贴新的 cURL。
 
 ---
 
@@ -321,7 +337,7 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 ```
 
 - **0 秒全套凭证捕获**：在浏览器开发者工具中，复制登录时 `signin` 请求的 cURL 并在 WebUI 粘贴，系统自动解构出 Token、User ID 与持久会话 Cookie；
-- **全自动无感续期**：每次巡查前严格校验 JWT `exp` 寿命，当 Token 剩余有效期不足 300 秒时，后台自动静默发起握手续期，实现永久有效、永不掉线。
+- **自动续期与失效保护**：每次巡查前严格校验 JWT `exp` 寿命，当 Token 剩余有效期不足 300 秒且会话仍有效时，后台自动静默发起握手续期；若 API 明确拒绝凭据，系统会停止该账号的抓取并提示重新配置，不承诺永久有效。
 
 ---
 
@@ -330,6 +346,8 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 管理端监听于 **`http://127.0.0.1:46046/`**。
 
 ### 1. 七大管理页签一览
+
+管理员可见 7 个页签；`viewer` 角色不显示「用户」页签，只能访问消息与博客归档。
 
 | 页签 | 功能概要与亮点 |
 |---|---|
@@ -507,7 +525,7 @@ INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 <details>
 <summary><b>Q6: 如何将 Message 归档免登录公开给同好浏览？</b></summary>
 
-在 Web 管理端「⚙️ 系统设置」中开启 `auth.archive_public: true` 并保存，此时管理后台仍然受密码保护，而 `/archive` 页面允许所有人匿名查阅。
+在 Web 管理端「🔑 用户」页签中开启「归档公开访问（游客免登录）」并保存（对应 `auth.archive_public: true`）。此时管理后台仍然受密码保护，而 `/archive` 页面允许所有人匿名查阅。
 </details>
 
 <details>
@@ -515,7 +533,13 @@ INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 
 1. **务必勾选「保留日志 (Preserve log)」**：第三方账号（Google/Apple/Sony）登录过程伴随多次 302 重定向，若未勾选保留日志，关键的 `signin` 请求会在页面跳转时被浏览器 DevTools 自动清空；
 2. **推荐使用无痕窗口 (Incognito)**：若浏览器已有持久缓存，直接访问可能会跳过 `signin` 授权请求。打开无痕窗口重新从 `/welcome` 页面点击登录即可完整捕获；
-3. **支持多种请求格式**：除了 `signin` 请求外，右键复制 `timeline` 或 `profile` 请求的 cURL，系统同样支持智能解析提取。
+3. **只能复制 `signin` 请求**：`profile` / `timeline` 即使包含访问令牌，也可能没有登录响应的 `Set-Cookie`，无法补齐完整会话。若找不到 `signin`，请清空网络记录后重新走一遍登录流程，不要用其它接口替代。
+</details>
+
+<details>
+<summary><b>Q8: 更新后如何确认运行的是新版本？</b></summary>
+
+Docker 部署请先执行 `docker compose pull && docker compose up -d`，再请求 `/api/health/status` 验证服务已恢复。若使用自定义部署脚本，应先确认脚本同步的 Git 提交，再执行同样的健康检查；不要只刷新浏览器页面判断版本是否更新。
 </details>
 
 ---

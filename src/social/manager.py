@@ -28,7 +28,7 @@ class _SocialLogBridge(logging.Handler):
             if record.levelno >= logging.ERROR:
                 log_all(f"{msg}", is_error=True)
             elif record.levelno >= logging.WARNING:
-                log_all(f"⚠️ {msg}")
+                log_all(f"⚠️ {msg}", is_warning=True)
             elif record.levelno >= logging.INFO:
                 log_all(f"{msg}")
             else:

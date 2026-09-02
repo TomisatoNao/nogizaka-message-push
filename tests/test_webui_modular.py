@@ -163,6 +163,12 @@ def test_admin_frontend_config_and_dark_select_contracts():
     assert 'channel === "qq_official" || channel === "official"' in html
     assert 'enabled.push(["qq_official", "QQ 官方 Bot"])' in html
     assert "color-scheme: dark" in html
+    # 完整 Web 会话必须从 signin 登录响应提取；后续 timeline/profile 请求没有 Set-Cookie。
+    assert "右键 signin 请求" in html
+    assert "任意 timeline 请求" not in html
+    assert "同一个 timeline 请求的 Request Headers" not in html
+    assert "必须包含 URL 与请求体" in html
+    assert "Request Headers 文本" not in html
 
 
 def test_system_handlers_smart_parse():

@@ -66,6 +66,11 @@ class HealthTracker:
         self._error_buffer: int = 50
         self._token_warn_seconds: int = 600
         self._next_cycle: dict | None = None   # {"at_epoch": float, "tag": str}
+        # 启动状态与运行时健康是两个维度：首次运行的“等待配置”不是故障，
+        # 但需要在管理端明确展示，避免只能从日志猜测系统当前阶段。
+        self._startup_state: str = "STARTING"
+        self._startup_reasons: list[str] = []
+        self._startup_updated_at: float = 0.0
 
     def initialize(self, summary_interval: int = 10, error_buffer: int = 50,
                    token_warn_seconds: int = 600) -> None:
@@ -73,6 +78,24 @@ class HealthTracker:
         self._error_buffer = error_buffer
         self._token_warn_seconds = token_warn_seconds
         self._start_time = time.monotonic()
+
+    def set_startup_state(self, state: str, reasons: list[str] | None = None) -> None:
+        """更新启动/配置状态（``READY``、``SETUP_REQUIRED`` 或 ``DEGRADED``）。"""
+        allowed = {"STARTING", "READY", "SETUP_REQUIRED", "DEGRADED"}
+        normalized = str(state or "STARTING").upper()
+        if normalized not in allowed:
+            normalized = "DEGRADED"
+        self._startup_state = normalized
+        self._startup_reasons = [str(item) for item in (reasons or []) if str(item).strip()]
+        self._startup_updated_at = time.time()
+
+    def startup_snapshot(self) -> dict:
+        """返回启动状态快照，供状态页和健康摘要复用。"""
+        return {
+            "state": self._startup_state,
+            "reasons": list(self._startup_reasons),
+            "updated_at": self._startup_updated_at or None,
+        }
 
     # ── 记录方法 ──────────────────────────────────────
 
@@ -128,6 +151,7 @@ class HealthTracker:
             "cycle_count": self._cycle_count,
             "uptime_seconds": (time.monotonic() - self._start_time) if self._start_time else 0,
             "next_cycle": self._next_cycle,
+            "startup": self.startup_snapshot(),
             "token_warn_seconds": self._token_warn_seconds,
             "channels": {
                 name: {"success": s.success, "total": s.total,

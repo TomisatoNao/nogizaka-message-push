@@ -82,22 +82,60 @@ def _message_cycle_summary(results: list[_MemberCycleResult], elapsed: float) ->
 # ──────────────────────────────────────────────
 # 改进 3：启动健康检查
 # ──────────────────────────────────────────────
+def _message_monitor_enabled() -> bool:
+    """读取 Message 监控开关；缺失时采用首次运行的安全默认值 False。"""
+    return bool(getattr(cfg, "MESSAGE_MONITOR_ENABLED", False))
+
+
+def _valid_monitors() -> list[dict]:
+    """返回具备账号与成员 ID 的有效 Message 监控项。"""
+    return [
+        member for member in getattr(cfg, "MONITOR_LIST", [])
+        if isinstance(member, dict) and member.get("account_id") and member.get("m_id")
+    ]
+
+
+def _required_account_ids() -> list[str]:
+    """返回当前有效监控项真正需要的账号，不把账号池预设当成已启用任务。"""
+    return sorted({str(member["account_id"]).strip() for member in _valid_monitors()})
+
+
+def _has_configured_workload() -> bool:
+    """判断是否至少配置了一项会实际工作的监控任务。"""
+    if _message_monitor_enabled() and _valid_monitors():
+        return True
+    blog_cfg = getattr(cfg, "BLOG_MONITOR", None) or {}
+    if isinstance(blog_cfg, dict) and blog_cfg.get("enabled", False):
+        return True
+    platforms = getattr(cfg, "PLATFORMS", None) or {}
+    return isinstance(platforms, dict) and any(
+        isinstance(item, dict) and item.get("enabled", False)
+        for item in platforms.values()
+    )
+
+
 async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     """
     启动时检查：
       1. 已启用的 QQ 推送通道是否可用
       2. MONITOR_LIST 里每个 account_id 是否都已加载凭证
 
-    任意一项失败都打印警告，但不阻止程序启动，
-    让运维人员能第一时间看到问题所在。
+    未配置项使用 INFO/WARN 表示等待配置；已启用服务的真实连通性故障
+    使用 ERROR 记录，但都不阻止程序启动，让运维人员能区分“未配置”和“故障”。
     """
     all_ok = True
+    setup_reasons: list[str] = []
+    degraded_reasons: list[str] = []
+    napcat_enabled = bool(getattr(cfg, "ENABLE_NAPCAT_QQ", False))
+    official_enabled = bool(getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False))
+    tg_enabled = bool(getattr(cfg, "ENABLE_TG_BOT", False))
 
-    if not cfg.ENABLE_NAPCAT_QQ and not cfg.ENABLE_QQ_OFFICIAL_BOT and not cfg.ENABLE_TG_BOT:
-        log_all("🟡 所有推送通道均未启用：成员消息会被抓取并记录，但不会推送", is_error=True)
+    if not napcat_enabled and not official_enabled and not tg_enabled:
+        log_all("🟡 推送通道尚未启用，等待配置（当前不会发送成员消息）")
+        setup_reasons.append("尚未启用推送通道")
 
     # ── 检查 NapCat 连通性 ────────────────────────────────
-    if cfg.ENABLE_NAPCAT_QQ:
+    if napcat_enabled:
         status_url = cfg.QQ_BOT_API.rsplit("/", 1)[0] + "/get_status"
         try:
             resp = await qq_client.get(status_url)
@@ -108,70 +146,111 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
                 log_all(f"🟡 NapCat QQ 返回 HTTP {resp.status_code}，可能运行异常", is_error=True)
                 health.get_tracker().record_channel("napcat", False, f"HTTP {resp.status_code}")
                 all_ok = False
+                degraded_reasons.append(f"NapCat 返回 HTTP {resp.status_code}")
         except Exception as e:
             log_all(f"🔴 NapCat QQ 无法连接 ({type(e).__name__})，请确认 napcat/lagrange 已启动", is_error=True)
             health.get_tracker().record_channel("napcat", False, "无法连接")
             all_ok = False
+            degraded_reasons.append("NapCat 无法连接")
     else:
-        log_all("⏸️ NapCat QQ 推送未启用")
+        log_all("⏸️ NapCat QQ 推送未启用", is_debug=True)
 
     # ── 检查官方 QQ Bot 凭证 ──────────────────────────────
-    if cfg.ENABLE_QQ_OFFICIAL_BOT:
-        if not await qq_official_health_check():
+    if official_enabled:
+        if not qq_official.has_bots():
+            log_all("⚠️ QQ 官方 Bot 已启用，但尚未配置有效 Bot", is_warning=True)
             all_ok = False
+            setup_reasons.append("QQ 官方 Bot 尚未配置")
+        elif not await qq_official_health_check():
+            all_ok = False
+            degraded_reasons.append("QQ 官方 Bot 凭证检查失败")
     else:
-        log_all("⏸️ 官方 QQ Bot 推送未启用")
+        log_all("⏸️ 官方 QQ Bot 推送未启用", is_debug=True)
 
     # ── 检查 TG Bot 连通性 ──────────────────────────────────
-    if cfg.ENABLE_TG_BOT:
-        if await tgbot.health_check():
+    if tg_enabled:
+        if not tgbot.get_configured_bots():
+            log_all("⚠️ Telegram Bot 已启用，但尚未配置有效 Bot", is_warning=True)
+            all_ok = False
+            setup_reasons.append("Telegram Bot 尚未配置")
+        elif await tgbot.health_check():
             health.get_tracker().record_channel("tg", True)
         else:
             health.get_tracker().record_channel("tg", False, "无法连接")
             all_ok = False
+            degraded_reasons.append("Telegram Bot 无法连接")
     else:
-        log_all("⏸️ TG Bot 推送未启用")
+        log_all("⏸️ TG Bot 推送未启用", is_debug=True)
 
     # ── 检查每个成员至少有一个可用推送目标 ──────────────────
     # 官方 Bot 推送的是全局 TARGET_OPENID、不区分成员，所以只要有可用的官方 Bot，
     # 所有成员都有推送目标，无需再看 groups / tg。
-    official_covers_all = cfg.ENABLE_QQ_OFFICIAL_BOT and qq_official.has_bots()
-    orphans = [] if official_covers_all else [
-        m["m_name"] for m in cfg.MONITOR_LIST
-        if not (cfg.ENABLE_NAPCAT_QQ and m.get("target_groups"))
-        and not (cfg.ENABLE_TG_BOT and (m.get("tg_chat_id") or "").strip())
-    ]
-    if orphans:
-        log_all(
-            f"🔴 以下成员没有任何可用推送目标（无生效的 QQ 群 / TG 频道 / 官方 Bot）："
-            f"{' · '.join(orphans)}",
-            is_error=True,
-        )
-        all_ok = False
+    if _message_monitor_enabled():
+        monitors = _valid_monitors()
+        if not monitors:
+            log_all("ℹ️ Message 监控已启用但尚未配置有效成员，等待配置")
+            setup_reasons.append("尚未配置监控成员")
+        else:
+            official_covers_all = official_enabled and qq_official.has_bots()
+            orphans = [] if official_covers_all else [
+                str(member.get("m_name") or member.get("m_id")) for member in monitors
+                if not (napcat_enabled and member.get("target_groups"))
+                and not (tg_enabled and (member.get("tg_chat_id") or "").strip())
+            ]
+            if orphans:
+                log_all(
+                    "⚠️ 以下成员尚未配置有效推送目标（可稍后在管理端补充）："
+                    f"{' · '.join(orphans)}",
+                    is_warning=True,
+                )
+                all_ok = False
+                setup_reasons.append(f"{len(orphans)} 个成员缺少推送目标")
 
-    # ── 检查所有账号凭证已加载且内容完整 ────────────────────
-    from config.credentials import ACCOUNT_CREDS, validate_account_cred
-    needed = {m["account_id"] for m in cfg.MONITOR_LIST if m.get("account_id")}
-    missing = needed - set(ACCOUNT_CREDS.keys())
-    if missing:
-        log_all(f"🔴 以下账号凭证缺失：{missing}", is_error=True)
-        all_ok = False
+            # ── 只检查当前有效监控项需要的账号凭证 ─────────────
+            from config.credentials import ACCOUNT_CREDS, validate_account_cred
+            needed = set(_required_account_ids())
+            missing = needed - set(ACCOUNT_CREDS.keys())
+            if missing:
+                log_all(f"⚠️ 以下监控账号尚未配置凭证：{'、'.join(sorted(missing))}", is_warning=True)
+                all_ok = False
+                setup_reasons.append(f"{len(missing)} 个监控账号缺少凭证")
 
-    invalid = []
-    for acc_id in sorted(needed - missing):
-        ok, reason = validate_account_cred(acc_id)
-        if not ok:
-            invalid.append(f"{acc_id}（{reason}）")
+            invalid = []
+            for acc_id in sorted(needed - missing):
+                ok, reason = validate_account_cred(acc_id)
+                if not ok:
+                    invalid.append(f"{acc_id}（{reason}）")
 
-    if invalid:
-        log_all(f"🔴 以下账号凭证不完整：{'；'.join(invalid)}", is_error=True)
-        all_ok = False
-    elif not missing:
-        log_all(f"🟢 账号凭证完整（{len(needed)} 个账号）")
-        for acc_id in sorted(needed):
-            remaining = get_token_remaining_seconds(acc_id)
-            if remaining is not None:
-                health.get_tracker().record_token(acc_id, max(0, remaining))
+            if invalid:
+                log_all(f"⚠️ 以下监控账号凭证尚未就绪：{'；'.join(invalid)}", is_warning=True)
+                all_ok = False
+                setup_reasons.append(f"{len(invalid)} 个监控账号凭证待完善")
+            elif not missing:
+                log_all(f"🟢 监控账号凭证完整（{len(needed)} 个账号）")
+                for acc_id in sorted(needed):
+                    remaining = get_token_remaining_seconds(acc_id)
+                    if remaining is not None:
+                        health.get_tracker().record_token(acc_id, max(0, remaining))
+    else:
+        log_all("ℹ️ Message 监控尚未启用，跳过账号握手、成员目标和凭证检查")
+        if not _has_configured_workload():
+            setup_reasons.append("尚未启用监控任务")
+
+    if degraded_reasons:
+        startup_state = "DEGRADED"
+        startup_reasons = degraded_reasons + setup_reasons
+    elif setup_reasons:
+        startup_state = "SETUP_REQUIRED"
+        startup_reasons = setup_reasons
+    else:
+        startup_state = "READY"
+        startup_reasons = []
+    health.get_tracker().set_startup_state(startup_state, startup_reasons)
+    log_all(
+        f"🚦 启动状态：{startup_state}"
+        + (f"（{'；'.join(startup_reasons)}）" if startup_reasons else ""),
+        is_warning=startup_state == "DEGRADED",
+    )
 
     return all_ok
 
@@ -512,7 +591,7 @@ def _next_interval() -> tuple[int, str]:
 async def _run_cycle() -> None:
     """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
     # ── Phase 1: Message 消息巡查 ──
-    if getattr(cfg, "MESSAGE_MONITOR_ENABLED", True):
+    if _message_monitor_enabled():
         message_cycle_started = time.monotonic()
         valid_monitors = [m for m in cfg.MONITOR_LIST if m.get("account_id") and m.get("m_id")]
 
@@ -591,7 +670,7 @@ async def _run_cycle() -> None:
 
     # ── 博客巡查 ──
     blog_cfg = cfg._config.get("blog_monitor") or {}
-    if blog_cfg.get("enabled", True) and cfg._config.get("blog_records") is not None:
+    if blog_cfg.get("enabled", False) and cfg._config.get("blog_records") is not None:
         try:
             new_posts = await blog_fetcher.run_blog_cycle(
                 _blog_client, _blog_db, cfg._config)
@@ -704,12 +783,17 @@ def _install_stop_handlers(stop_event: asyncio.Event) -> None:
 
 
 async def _init_accounts() -> None:
-    """启动时为所有账号并发执行初始 Token 刷新与握手。
+    """启动时为当前 Message 监控引用的账号并发执行初始 Token 刷新与握手。
     - mobile 账号：使用 refresh_token 换取初始 access_token
     - web 账号：若 Token 临期或需要握手，主动调用 refresh_token 获取并持久化 Set-Cookie
     若已有充足有效 Token 则跳过，避免第一轮抓取浪费在 401 上。"""
-    if not getattr(cfg, "MESSAGE_MONITOR_ENABLED", True):
-        log_all("⏸️ Message 监控已关闭，跳过账号初始握手", is_debug=True)
+    if not _message_monitor_enabled():
+        log_all("ℹ️ Message 监控尚未启用，跳过账号初始握手", is_debug=True)
+        return
+
+    needed = _required_account_ids()
+    if not needed:
+        log_all("ℹ️ Message 监控已启用但尚未配置有效成员，跳过账号初始握手")
         return
 
     async def _init_one(acc_id: str, acc_cfg: dict) -> None:
@@ -726,7 +810,15 @@ async def _init_accounts() -> None:
             log_all(f"🔑 Web 账号 {acc_id} 执行初始 Token 刷新与握手...")
             await refresh_token(acc_id, target_group)
 
-    await asyncio.gather(*[_init_one(acc_id, acc_cfg) for acc_id, acc_cfg in cfg.ACCOUNTS.items()])
+    tasks = []
+    for acc_id in needed:
+        acc_cfg = getattr(cfg, "ACCOUNTS", {}).get(acc_id)
+        if not isinstance(acc_cfg, dict):
+            log_all(f"⚠️ 监控账号 {acc_id} 未定义，跳过初始握手", is_warning=True)
+            continue
+        tasks.append(_init_one(acc_id, acc_cfg))
+    if tasks:
+        await asyncio.gather(*tasks)
 
 
 # 官方 Bot 指令监听：app_id → (client_secret, 任务)。
@@ -1011,12 +1103,21 @@ async def main() -> None:
     #    send_alert_message，此时 napcat._client / tgbot._bot 必须已就绪，否则告警静默丢失。
     await _init_accounts()
 
-    # 4.5 启动成员订阅状态同步（后台异步更新 SQLite 订阅状态缓存）
-    try:
-        from src.member_directory import sync_all_accounts_subscriptions
-        asyncio.create_task(sync_all_accounts_subscriptions(http_client))
-    except Exception as e:
-        log_all(f"⚠️ 初始同步账号订阅状态异常: {e}", is_debug=True)
+    # 4.5 启动成员订阅状态同步（后台异步更新 SQLite 订阅状态缓存）。
+    # 仅在 Message 监控确实有有效成员时执行；首次运行的账号预设没有凭证，
+    # 不应被当成已启用任务逐个请求并刷出“凭证不可用”错误。
+    if _message_monitor_enabled() and _valid_monitors():
+        try:
+            from src.member_directory import sync_all_accounts_subscriptions
+            asyncio.create_task(
+                sync_all_accounts_subscriptions(
+                    http_client, account_ids=_required_account_ids(),
+                )
+            )
+        except Exception as e:
+            log_all(f"⚠️ 初始同步账号订阅状态异常: {e}", is_warning=True)
+    else:
+        log_all("ℹ️ 未满足成员订阅同步条件，跳过初始订阅同步", is_debug=True)
 
     # 5. 启动健康检查（改进 3）
     await _health_check(qq_client)

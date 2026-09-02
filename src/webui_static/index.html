@@ -334,6 +334,7 @@
       </div>
     </div>
     <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; background:var(--card-soft); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-soft);">
+      <div><span style="font-size:12px; color:var(--muted); display:block;">启动状态</span><span id="stStartup" class="cred" style="font-weight:600; font-size:14px;">—</span></div>
       <div><span style="font-size:12px; color:var(--muted); display:block;">巡查周期</span><span id="stCycle" style="font-weight:600; font-size:14px;">—</span></div>
       <div><span style="font-size:12px; color:var(--muted); display:block;">下一次巡查倒计时</span><span id="stNext" style="font-weight:600; font-size:14px; color:var(--accent);">—</span></div>
       <span class="hint" id="pollFeedback" style="margin:0; font-size:13px;"></span>
@@ -1339,10 +1340,10 @@
 <div class="dialog-note" id="secretDialogHint"></div>
 <details class="help-box" id="secretSmartBox" style="margin-bottom: 14px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--card-soft);">
   <summary style="font-size: 13px; color: var(--accent); cursor: pointer; user-select: none; font-weight: 500;">
-    📋 智能一键解析（从 DevTools cURL / 请求标头快速提取）
+    📋 智能一键解析（从 DevTools `signin` cURL 提取）
   </summary>
   <div style="margin-top: 8px;">
-    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; resize: vertical; border-radius: var(--radius-sm); padding: 8px 10px; background: var(--field); color: var(--text); border: 1px solid var(--border);" placeholder="在浏览器 F12 Network 右键 signin 或 timeline 请求 → 复制为 cURL 或复制请求标头，粘贴到此处..."></textarea>
+    <textarea id="secretSmartInput" rows="3" style="width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; resize: vertical; border-radius: var(--radius-sm); padding: 8px 10px; background: var(--field); color: var(--text); border: 1px solid var(--border);" placeholder="在浏览器 F12 Network 右键 signin 请求 → 复制为 cURL（必须包含 URL 与请求体），粘贴到此处..."></textarea>
     <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted);">
       💡 提示：Web 账号自动续期必须包含 <code>session</code> Cookie 项。若手动填写，可在 F12 ➔ Application ➔ Cookies 中复制 <code>session</code> 的值。
     </div>
@@ -1855,6 +1856,20 @@ async function fetchStatus() {
   stClockDelta = data.now_epoch - Date.now() / 1000;
   stNextCycle = data.next_cycle;
   stCycleCount = data.cycle_count;
+  const startup = data.startup || {};
+  const startupBox = $("stStartup");
+  if (startupBox) {
+    const state = String(startup.state || "STARTING").toUpperCase();
+    const stateLabels = {
+      READY: "✓ READY",
+      SETUP_REQUIRED: "⚙️ 等待配置",
+      DEGRADED: "⚠️ DEGRADED",
+      STARTING: "⏳ 启动中",
+    };
+    startupBox.textContent = stateLabels[state] || state;
+    startupBox.className = "cred " + (state === "READY" ? "ok" : state === "DEGRADED" ? "miss" : "");
+    startupBox.title = (startup.reasons || []).join("；");
+  }
   $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
   $("stHint").textContent = data.embedded ? "" :
     "独立模式：主程序未在本进程运行，以下仅为可见信息；Token 剩余时间不可用。";
@@ -2722,7 +2737,7 @@ if ($("btnSecretSmartParse")) {
   $("btnSecretSmartParse").addEventListener("click", async () => {
     const raw = ($("secretSmartInput").value || "").trim();
     if (!raw) {
-      $("secretSmartFeedback").textContent = "⚠️ 请先粘贴 cURL 命令或 Request Headers 文本";
+      $("secretSmartFeedback").textContent = "⚠️ 请先粘贴 signin cURL（必须包含请求体）";
       $("secretSmartFeedback").style.color = "var(--warn, #f59e0b)";
       return;
     }
@@ -2911,12 +2926,12 @@ function openAccountCredDialog(accId) {
          help: "留空即可，保存后系统将自动用 Refresh Token 刷新获取。" }]
     : [{ env: prefix + "_TOKEN", label: "Token（JWT）", required: true, stripBearer: true,
          placeholder: "eyJ...",
-         help: "浏览器登录后 DevTools → Network → 任意 timeline 请求 → authorization（Bearer 后的内容）。" },
+         help: "浏览器登录时 DevTools → Network → signin 请求 → authorization（Bearer 后的内容）。不要用 profile / timeline 替代，后续接口不包含登录响应下发的完整会话。" },
        { env: prefix + "_COOKIE", label: "Cookie", required: true,
          placeholder: "session=xxx; S5SI=yyy...",
-         help: "同一个 timeline 请求的 Request Headers 中的 cookie（复制整串即可，系统保存后立即全自动调用 update_token 完成长期握手）。" }];
+         help: "优先使用 signin 登录响应下发的 Set-Cookie；如手动填写，请从 Application → Cookies 复制 session。不要用 profile / timeline 代替完整登录凭证。" }];
   openSecretDialog("填写账号凭证：" + accId,
-    "💡 <b>首次登录免等 1 小时自动握手</b>：只需把初次登录后 timeline 请求的 Token 与 Cookie 贴入（或使用上方一键解析），系统保存后<b>立刻全自动调用 update_token 完成握手</b>并永久持久化长期 Cookie！",
+    "💡 <b>首次登录免等 1 小时自动握手</b>：请使用初次登录流程中的 <code>signin</code> 请求提取 Token 与登录响应的 Set-Cookie（或手动从 Application → Cookies 复制 session）；不要使用 profile / timeline 代替。系统保存后会<b>立刻调用 update_token 完成握手</b>，但凭据失效时仍需重新配置。",
     fields, accId);
 }
 
