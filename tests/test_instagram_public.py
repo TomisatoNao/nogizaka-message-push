@@ -17,6 +17,10 @@ from src.social.store import SocialStore
 
 
 def test_public_post_uses_embed_after_private_api_rejection(monkeypatch, caplog):
+    # Keep the regression deterministic in CI, where no local SQLite session
+    # exists.  This case specifically verifies the private-API rejection
+    # fallback, so provide the session that makes that branch reachable.
+    monkeypatch.setattr(ig_session, "resolve_cookies", lambda *args: {"sessionid": "session"})
     parser = SocialUrlParser({"platforms": {"instagram": {}}})
     expected = Post(
         platform="instagram",
