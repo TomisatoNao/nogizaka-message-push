@@ -29,7 +29,7 @@ def main() -> None:
         ERROR_LOG_FILE, RESPONSE_LOG_FILE, SENT_IDS_MAX,
         DEBUG_LOG_RESPONSE, DEBUG_LOG_QQ_PAYLOAD,
         GEMINI_API_KEY, GEMINI_MODELS, GEMINI_MIN_INTERVAL,
-        TRANSLATE_MAX_LENGTH, TRANSLATE_TIMEOUT,
+        TRANSLATE_MAX_LENGTH, TRANSLATE_TIMEOUT, TRANSLATE_TOTAL_TIMEOUT,
     )
 
     # 类型断言
@@ -43,6 +43,7 @@ def main() -> None:
     assert isinstance(DAY_INTERVAL, tuple), "DAY_INTERVAL should be tuple"
     assert isinstance(NIGHT_INTERVAL, tuple), "NIGHT_INTERVAL should be tuple"
     assert isinstance(GEMINI_MODELS, list), "GEMINI_MODELS should be list"
+    assert isinstance(TRANSLATE_TOTAL_TIMEOUT, (int, float)) and TRANSLATE_TOTAL_TIMEOUT >= TRANSLATE_TIMEOUT
     assert isinstance(SENT_IDS_MAX, int), "SENT_IDS_MAX should be int"
     assert isinstance(QQ_BOT_API, str) and QQ_BOT_API, "QQ_BOT_API should be non-empty str"
 

@@ -9,7 +9,7 @@ src/webui_modules/archive_handlers.py — WebUI 归档数据路由与业务处�
   5. 媒体流服务：头像、博客图片与消息图片分发调度
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -17,6 +17,7 @@ import random
 import re
 import sqlite3
 import threading
+import uuid
 from urllib.parse import parse_qs, quote, unquote
 
 import config.config as cfg
@@ -33,6 +34,8 @@ _home_cache_key: tuple[float, float, str] | None = None
 _home_cache_condition = threading.Condition()
 _home_cache_building = False
 _archive_write_lock = threading.Lock()
+_blog_translation_locks: dict[int, threading.Lock] = {}
+_blog_translation_locks_guard = threading.Lock()
 
 ARCHIVE_TYPES = frozenset({"text", "picture", "image", "video", "voice"})
 
@@ -54,6 +57,61 @@ def get_blog_db() -> sqlite3.Connection:
     conn = init_blog_db()
     _blog_db_local.conn = conn
     return conn
+
+
+def _get_blog_translation_lock(blog_id: int) -> threading.Lock:
+    """返回博客级翻译锁，避免重复点击/多标签页并发覆盖译文。"""
+    with _blog_translation_locks_guard:
+        lock = _blog_translation_locks.get(blog_id)
+        if lock is None:
+            lock = threading.Lock()
+            _blog_translation_locks[blog_id] = lock
+        return lock
+
+
+def _blog_table_columns(db: sqlite3.Connection) -> set[str]:
+    """读取博客表列名，用于兼容尚未完成迁移的旧测试/旧数据库。"""
+    try:
+        return {str(row[1]) for row in db.execute("PRAGMA table_info(blog_posts)").fetchall()}
+    except (sqlite3.Error, OSError):
+        return set()
+
+
+def _set_blog_translation_state(
+    db: sqlite3.Connection,
+    blog_id: int,
+    *,
+    status: str,
+    error: str = "",
+    request_id: str = "",
+) -> None:
+    """尽力写入翻译状态；旧版数据库缺列时不影响主业务。"""
+    columns = _blog_table_columns(db)
+    updates: list[str] = []
+    values: list[str] = []
+    if "translation_status" in columns:
+        updates.append("translation_status = ?")
+        values.append(status)
+    if "translation_error" in columns:
+        updates.append("translation_error = ?")
+        values.append(error)
+    if "translation_request_id" in columns:
+        updates.append("translation_request_id = ?")
+        values.append(request_id)
+    if "translation_updated_at" in columns:
+        updates.append("translation_updated_at = ?")
+        values.append(datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    if not updates:
+        return
+    try:
+        db.execute(
+            f"UPDATE blog_posts SET {', '.join(updates)} WHERE id = ?",  # nosec B608
+            (*values, blog_id),
+        )
+        db.commit()
+    except (sqlite3.Error, OSError):
+        # 状态是辅助诊断信息，不能让翻译/删除结果变成失败。
+        return
 
 
 def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "") -> dict[str, int]:
@@ -872,6 +930,24 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
             return
 
+        request_id = f"manual-{uuid.uuid4().hex[:12]}"
+        translation_lock = _get_blog_translation_lock(blog_id)
+        if not translation_lock.acquire(blocking=False):
+            _send_json_resp(handler, {
+                "ok": False,
+                "id": blog_id,
+                "status": "running",
+                "request_id": request_id,
+                "msg": "该博客正在翻译，请稍后重试",
+            }, 409)
+            return
+
+        import asyncio
+        import httpx
+        from src import translator
+        from src.logger import log_all
+
+        db = None
         try:
             db = get_blog_db()
             row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (blog_id,)).fetchone()
@@ -883,61 +959,162 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             # 结构化译文已存在时直接返回，避免重复调用模型。
             cached_translation = str(row.get("translation") or "")
             cached_blocks = str(row.get("content_json") or "")
-            if cached_translation.strip() and cached_blocks not in ("", "[]", "{}"):
+            cached_status = str(row.get("translation_status") or "")
+            if (
+                cached_translation.strip()
+                and cached_blocks not in ("", "[]", "{}")
+                and cached_status not in {"partial", "failed", "running"}
+            ):
                 _send_json_resp(handler, {
                     "ok": True,
                     "id": blog_id,
                     "html": cached_translation,
                     "content_json": cached_blocks,
                     "translation_model": row.get("translation_model") or "",
+                    "translation_status": row.get("translation_status") or "succeeded",
+                    "request_id": request_id,
                 })
                 return
 
             body_html = str(row.get("body_html") or "")
             if not body_html.strip():
-                _send_json_resp(handler, {"ok": False, "msg": "该博客没有可翻译的正文"}, 422)
+                _set_blog_translation_state(
+                    db, blog_id, status="skipped", error="empty_body", request_id=request_id,
+                )
+                _send_json_resp(handler, {"ok": False, "msg": "该博客没有可翻译的正文", "request_id": request_id}, 422)
                 return
 
-            import asyncio
-            import httpx
-            from src import translator
-            from src.logger import log_all
-
-            log_all(f"🔄 网页端请求手动翻译博客 | id={blog_id} | author={row.get('author', '')}")
+            _set_blog_translation_state(db, blog_id, status="running", request_id=request_id)
+            log_all(
+                f"🔄 网页端博客翻译开始 | trace={request_id} | id={blog_id} | "
+                f"author={row.get('author', '')} | chars={len(body_html)}",
+            )
 
             async def _do_translate():
-                async with httpx.AsyncClient(timeout=120) as temp_client:
+                # 手动翻译运行在 WebUI 独立事件循环，不能复用主循环 client；
+                # 工厂会复刻定时任务的代理、重定向与连接池配置。
+                async with translator.create_client() as temp_client:
                     return await translator.translate_blog_structured(
                         body_html,
                         row.get("author", ""),
                         row.get("group_key", ""),
                         custom_client=temp_client,
+                        request_id=request_id,
+                        source="archive_manual",
                     )
 
             structured, model_name = asyncio.run(_do_translate())
             if not structured:
-                log_all(f"⚠️ 网页端手动翻译未生成结果 | id={blog_id}", is_error=True)
-                _send_json_resp(handler, {"ok": False, "msg": "翻译失败，请检查 API Key 配置与网络连接"})
+                error_code = "no_model_result"
+                _set_blog_translation_state(
+                    db, blog_id, status="failed", error=error_code, request_id=request_id,
+                )
+                log_all(
+                    f"⚠️ 网页端博客翻译无结果 | trace={request_id} | id={blog_id} | "
+                    f"error={error_code}",
+                    is_error=True,
+                )
+                _send_json_resp(handler, {
+                    "ok": False,
+                    "id": blog_id,
+                    "status": "failed",
+                    "request_id": request_id,
+                    "msg": "翻译失败，请检查 API Key、代理与网络连接",
+                }, 502)
                 return
 
             translated = translator.blocks_to_html(structured)
             content_json = json.dumps(structured, ensure_ascii=False)
             translation_model = model_name or ""
+            translated_count, total_count, complete = translator.blog_translation_stats(structured)
+            translation_status = "succeeded" if complete else "partial"
             db.execute(
                 "UPDATE blog_posts SET translation = ?, content_json = ?, translation_model = ? WHERE id = ?",
                 (translated, content_json, translation_model, blog_id),
             )
             db.commit()
-            log_all(f"✅ 网页端手动翻译完成 | id={blog_id} | model={translation_model or 'unknown'}")
+            _set_blog_translation_state(
+                db, blog_id, status=translation_status, request_id=request_id,
+            )
+            log_all(
+                f"✅ 网页端博客翻译完成 | trace={request_id} | id={blog_id} | "
+                f"model={translation_model or 'unknown'} | translated={translated_count}/{total_count} | "
+                f"complete={'yes' if complete else 'no'}",
+            )
             _send_json_resp(handler, {
                 "ok": True,
                 "id": blog_id,
                 "html": translated,
                 "content_json": content_json,
                 "translation_model": translation_model,
+                "translation_status": translation_status,
+                "translation_complete": complete,
+                "request_id": request_id,
             })
+        except asyncio.TimeoutError:
+            error_code = "timeout"
+            if db is not None:
+                _set_blog_translation_state(db, blog_id, status="failed", error=error_code, request_id=request_id)
+            log_all(
+                f"⏱️ 网页端博客翻译超时 | trace={request_id} | id={blog_id} | error={error_code}",
+                is_error=True,
+            )
+            _send_json_resp(handler, {
+                "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "msg": "翻译超时，请稍后重试（可在日志中按请求 ID 定位）",
+            }, 504)
+        except httpx.TimeoutException:
+            error_code = "timeout"
+            if db is not None:
+                _set_blog_translation_state(db, blog_id, status="failed", error=error_code, request_id=request_id)
+            log_all(
+                f"⏱️ 网页端博客翻译网络超时 | trace={request_id} | id={blog_id} | error={error_code}",
+                is_error=True,
+            )
+            _send_json_resp(handler, {
+                "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "msg": "翻译网络超时，请检查代理后重试",
+            }, 504)
+        except httpx.HTTPError as exc:
+            error_code = translator.describe_exception(exc)
+            if db is not None:
+                _set_blog_translation_state(db, blog_id, status="failed", error=error_code, request_id=request_id)
+            log_all(
+                f"⚠️ 网页端博客翻译网络失败 | trace={request_id} | id={blog_id} | error={error_code}",
+                is_error=True,
+            )
+            _send_json_resp(handler, {
+                "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "msg": "翻译网络请求失败，请检查代理与 API 配置",
+            }, 502)
         except (sqlite3.Error, OSError, ValueError, TypeError, RuntimeError) as exc:
-            _send_json_resp(handler, {"ok": False, "msg": f"翻译失败：{exc}"}, 500)
+            error_code = translator.describe_exception(exc)
+            if db is not None:
+                _set_blog_translation_state(db, blog_id, status="failed", error=error_code, request_id=request_id)
+            log_all(
+                f"⚠️ 网页端博客翻译失败 | trace={request_id} | id={blog_id} | error={error_code}",
+                is_error=True,
+            )
+            _send_json_resp(handler, {
+                "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "msg": "翻译失败，请稍后重试",
+            }, 500)
+        except Exception as exc:
+            # HTTP 边界必须保证客户端收到响应；具体模型/网络异常已在 translator
+            # 内部分类处理，这里只记录安全错误码，不泄露第三方 SDK 原文。
+            error_code = translator.describe_exception(exc)
+            if db is not None:
+                _set_blog_translation_state(db, blog_id, status="failed", error=error_code, request_id=request_id)
+            log_all(
+                f"⚠️ 网页端博客翻译未预期异常 | trace={request_id} | id={blog_id} | error={error_code}",
+                is_error=True,
+            )
+            _send_json_resp(handler, {
+                "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "msg": "翻译失败，请稍后重试",
+            }, 500)
+        finally:
+            translation_lock.release()
         return
 
     # 14. 删除博客译文
@@ -969,6 +1146,16 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
             _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
             return
 
+        translation_lock = _get_blog_translation_lock(blog_id)
+        if not translation_lock.acquire(blocking=False):
+            _send_json_resp(handler, {
+                "ok": False,
+                "id": blog_id,
+                "status": "running",
+                "msg": "该博客正在翻译，暂时不能删除译文",
+            }, 409)
+            return
+
         try:
             db = get_blog_db()
             row = db.execute(
@@ -979,6 +1166,16 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
                 _send_json_resp(handler, {"ok": False, "msg": "未找到该博客"}, 404)
                 return
 
+            body_html = ""
+            try:
+                body_row = db.execute(
+                    "SELECT body_html FROM blog_posts WHERE id = ?", (blog_id,)
+                ).fetchone()
+                body_html = str(body_row[0] or "") if body_row else ""
+            except (sqlite3.Error, OSError):
+                # 兼容极简旧数据库/测试表；删除本身仍可继续。
+                body_html = ""
+
             db.execute(
                 "UPDATE blog_posts "
                 "SET translation = NULL, content_json = NULL, translation_model = NULL "
@@ -986,9 +1183,15 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
                 (blog_id,),
             )
             db.commit()
+            _set_blog_translation_state(db, blog_id, status="pending", request_id="")
+
+            from src import translator
+            translator.invalidate_blog_cache(row[0] or "", body_html)
         except (sqlite3.Error, OSError) as exc:
             _send_json_resp(handler, {"ok": False, "msg": f"删除翻译失败：{exc}"}, 500)
             return
+        finally:
+            translation_lock.release()
 
         from src.logger import log_all
         log_all(f"🗑️ 管理员删除博客翻译缓存 | id={blog_id}")

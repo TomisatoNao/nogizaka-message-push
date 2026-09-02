@@ -51,6 +51,8 @@ _DEFAULTS: dict = {
     "gemini_min_interval":      7.0,
     "translate_max_length":     2500,
     "translate_timeout":        90,
+    # 单篇博客翻译总预算；独立于单模型请求超时，避免多模型 failover 无限串行等待
+    "translate_total_timeout":  180,
     # 图片打标签
     "enable_image_tagging":     False,
     "gemini_tag_models": [
@@ -568,6 +570,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "gemini_min_interval":          "GEMINI_MIN_INTERVAL",
     "translate_max_length":         "TRANSLATE_MAX_LENGTH",
     "translate_timeout":            "TRANSLATE_TIMEOUT",
+    "translate_total_timeout":      "TRANSLATE_TOTAL_TIMEOUT",
     "health_summary_interval":      "HEALTH_SUMMARY_INTERVAL",
     "health_error_buffer":          "HEALTH_ERROR_BUFFER",
     "health_token_warn_seconds":    "HEALTH_TOKEN_WARN_SECONDS",

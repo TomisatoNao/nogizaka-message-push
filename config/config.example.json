@@ -145,6 +145,7 @@
   ],
   "gemini_min_interval": 7,
   "translate_timeout": 90,
+  "translate_total_timeout": 180,
 
   // ── AI 图片打标签（默认关闭）──
   "image_tagging": false,

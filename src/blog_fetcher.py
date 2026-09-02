@@ -1,6 +1,8 @@
 """博客监控：三个坂道团体的官方博客拉取、水印对比、SQLite 归档。"""
 import json
 import sqlite3
+import time
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -107,6 +109,10 @@ def init_blog_db() -> sqlite3.Connection:
             translation TEXT,
             content_json TEXT,
             translation_model TEXT,
+            translation_status TEXT NOT NULL DEFAULT 'pending',
+            translation_error TEXT,
+            translation_request_id TEXT,
+            translation_updated_at TEXT,
             images_json TEXT,
             image_paths_json TEXT,
             raw_json TEXT NOT NULL,
@@ -124,7 +130,10 @@ def init_blog_db() -> sqlite3.Connection:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_date ON blog_posts(date DESC);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_url ON blog_posts(url);")
     # 增量升级：旧表可能没有这些列
-    for col in ["body_html", "body_text", "translation", "content_json", "translation_model", "image_paths_json"]:
+    for col in [
+        "body_html", "body_text", "translation", "content_json", "translation_model", "image_paths_json",
+        "translation_status", "translation_error", "translation_request_id", "translation_updated_at",
+    ]:
         try:
             conn.execute(f"ALTER TABLE blog_posts ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
@@ -189,6 +198,7 @@ async def _process_single_post(post: dict, key: str, group_name: str,
                                 client: httpx.AsyncClient, need_detail: bool,
                                 fetch_img_fn) -> dict:
     """并发抓取单篇博客的详情、图片与 AI 双语翻译。"""
+    import asyncio
     import json
     post["group_key"] = key
     post["group_name"] = group_name
@@ -222,29 +232,99 @@ async def _process_single_post(post: dict, key: str, group_name: str,
     translated_html = ""
     content_json = ""
     translation_model = ""
+    translation_status = "skipped"
+    translation_error = ""
+    translation_request_id = f"auto-{uuid.uuid4().hex[:12]}"
+    translation_started = time.monotonic()
     if post.get("body_html"):
+        translation_status = "running"
         try:
             from src import translator
             if getattr(translator, "_http_client", None) is None:
                 translator.initialize(client)
-            log_all(f"🔄 正在后台翻译博客: {post.get('author', '')} - {post.get('title', '')}")
+            log_all(
+                f"🔄 后台博客翻译开始 | trace={translation_request_id} | "
+                f"author={post.get('author', '')} | title={post.get('title', '')}",
+            )
             structured, model_name = await translator.translate_blog_structured(
                 post["body_html"],
                 post.get("author", ""),
-                key
+                key,
+                custom_client=client,
+                request_id=translation_request_id,
+                source="blog_auto",
             )
             if structured:
                 content_json = json.dumps(structured, ensure_ascii=False)
                 translated_html = translator.blocks_to_html(structured)
                 translation_model = model_name or ""
-                log_all(f"✅ 后台博客翻译完成（模型: {translation_model}）")
-        except Exception as e:
-            log_all(f"⚠️ 自动翻译博客失败: {e}", is_debug=True)
+                _, _, complete = translator.blog_translation_stats(structured)
+                translation_status = "succeeded" if complete else "partial"
+                log_all(
+                    f"✅ 后台博客翻译完成 | trace={translation_request_id} | "
+                    f"model={translation_model or 'unknown'} | complete={'yes' if complete else 'no'} | "
+                    f"elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                )
+            else:
+                translation_status = "failed"
+                translation_error = "no_model_result"
+                log_all(
+                    f"⚠️ 后台博客翻译无结果 | trace={translation_request_id} | "
+                    f"error={translation_error} | elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                    is_error=True,
+                )
+        except asyncio.TimeoutError:
+            translation_status = "failed"
+            translation_error = "timeout"
+            log_all(
+                f"⏱️ 后台博客翻译超时 | trace={translation_request_id} | "
+                f"error={translation_error} | elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                is_error=True,
+            )
+        except httpx.TimeoutException:
+            translation_status = "failed"
+            translation_error = "timeout"
+            log_all(
+                f"⏱️ 后台博客翻译网络超时 | trace={translation_request_id} | "
+                f"error={translation_error} | elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                is_error=True,
+            )
+        except httpx.HTTPError as exc:
+            from src import translator
+            translation_status = "failed"
+            translation_error = translator.describe_exception(exc)
+            log_all(
+                f"⚠️ 后台博客翻译网络失败 | trace={translation_request_id} | "
+                f"error={translation_error} | elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                is_error=True,
+            )
+        except (ValueError, TypeError) as exc:
+            from src import translator
+            translation_status = "failed"
+            translation_error = translator.describe_exception(exc)
+            log_all(
+                f"⚠️ 后台博客翻译响应无效 | trace={translation_request_id} | "
+                f"error={translation_error} | elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                is_error=True,
+            )
+        except Exception as exc:
+            from src import translator
+            translation_status = "failed"
+            translation_error = translator.describe_exception(exc)
+            log_all(
+                f"⚠️ 后台博客翻译异常 | trace={translation_request_id} | "
+                f"error={translation_error} | elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                is_error=True,
+            )
 
     post["image_paths"] = image_paths
     post["translation"] = translated_html
     post["content_json"] = content_json
     post["translation_model"] = translation_model
+    post["translation_status"] = translation_status
+    post["translation_error"] = translation_error
+    post["translation_request_id"] = translation_request_id
+    post["translation_updated_at"] = datetime.now(timezone.utc).isoformat()
     return post
 
 
@@ -339,11 +419,14 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
     # 汇总并安全写入 SQLite 归档
     for group_posts in results:
         for post in group_posts:
+            persisted = False
             try:
                 db.execute("""
                     INSERT OR IGNORE INTO blog_posts
-                    (group_key, author, title, url, date, body_html, body_text, translation, content_json, translation_model, images_json, image_paths_json, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (group_key, author, title, url, date, body_html, body_text, translation, content_json, translation_model,
+                     translation_status, translation_error, translation_request_id, translation_updated_at,
+                     images_json, image_paths_json, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     post.get("group_key", ""), post.get("author", ""), post.get("title", ""), post["url"],
                     _normalize_date(post.get("date", "")),
@@ -351,14 +434,30 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                     post.get("translation", ""),
                     post.get("content_json", ""),
                     post.get("translation_model", ""),
+                    post.get("translation_status", "skipped"),
+                    post.get("translation_error", ""),
+                    post.get("translation_request_id", ""),
+                    post.get("translation_updated_at", ""),
                     json.dumps(post.get("images") or [], ensure_ascii=False),
                     json.dumps(post.get("image_paths") or [], ensure_ascii=False),
                     json.dumps(post, ensure_ascii=False, default=str),
                 ))
                 db.commit()
+                persisted = True
             except Exception:  # nosec B110
-                pass
+                log_all(
+                    f"⚠️ 博客归档落库失败 | trace={post.get('translation_request_id', '') or '-'} | "
+                    f"url={post.get('url', '')[:80]}",
+                    is_error=True,
+                )
+            finally:
+                # 只在当前巡查批次内去重；落库后允许后续巡查正常处理新的 URL，
+                # 也避免一次 SQLite 异常把 URL 永久卡在内存集合中。
+                _in_flight_blogs.discard(post.get("url", ""))
 
+            if not persisted:
+                # 落库失败时不推进水印，下一轮才能自动重试，而不是静默丢失博客。
+                continue
             records[post.get("group_key", "")] = post["url"]
             new_posts.append(post)
 

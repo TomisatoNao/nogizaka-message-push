@@ -507,6 +507,11 @@
       "type": "integer",
       "minimum": 1
     },
+    "translate_total_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "单篇博客翻译允许的总耗时（秒），包含模型 failover 与补偿批次"
+    },
     "image_tagging": {
       "type": "boolean"
     },

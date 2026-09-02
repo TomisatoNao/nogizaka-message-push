@@ -6,6 +6,7 @@ import hashlib
 import html as html_lib
 import json
 import re
+import time
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup, NavigableString, Comment
 import httpx
@@ -22,6 +23,78 @@ _blog_cache: dict[tuple[str, str], str] = {}    # (member_name, html_hash) -> tr
 _blog_structured_cache: dict[tuple[str, str], tuple] = {}   # (member_name, html_hash) -> (结构化块列表, 模型名)
 _MAX_CACHE_SIZE = 1000
 _round_robin_counter: int = 0
+
+
+def _safe_float_config(name: str, default: float, minimum: float = 0.0) -> float:
+    """读取翻译运行参数并提供安全兜底。
+
+    配置文件支持热重载，运行时值可能来自用户编辑，不能假设一定是合法数字。
+    """
+    try:
+        value = float(getattr(cfg, name, default))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, value)
+
+
+def _model_timeout() -> float:
+    """单次模型 HTTP 请求超时（秒）。"""
+    return _safe_float_config("TRANSLATE_TIMEOUT", 90.0, minimum=1.0)
+
+
+def _blog_total_timeout() -> float:
+    """单篇博客翻译的总预算（秒）。
+
+    总预算独立于单模型超时，避免多个模型逐一等待后让 Web 请求无限期阻塞。
+    """
+    return _safe_float_config("TRANSLATE_TOTAL_TIMEOUT", 180.0, minimum=1.0)
+
+
+def create_client(timeout: float | None = None) -> httpx.AsyncClient:
+    """创建与主循环一致的翻译 HTTP 客户端。
+
+    WebUI 手动翻译运行在独立线程/事件循环中，不能直接复用主循环的
+    ``AsyncClient``。该工厂保证它仍使用相同的代理、重定向和连接池策略。
+    """
+    req_timeout = timeout if timeout is not None else _model_timeout()
+    proxy_url = getattr(cfg, "PROXY", "") or None
+    return httpx.AsyncClient(
+        timeout=req_timeout,
+        proxy=proxy_url,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+    )
+
+
+def invalidate_blog_cache(member_name: str = "", html: str = "") -> bool:
+    """使指定博客的结构化翻译缓存失效，返回是否删除了缓存项。"""
+    if not html:
+        return False
+    cache_key = (member_name, _get_text_hash(html))
+    removed = False
+    if _blog_structured_cache.pop(cache_key, None) is not None:
+        removed = True
+    if _blog_cache.pop(cache_key, None) is not None:
+        removed = True
+    return removed
+
+
+def describe_exception(exc: BaseException) -> str:
+    """将网络/模型异常归一化为不泄露凭据的可检索错误码。"""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return "timeout"
+    if isinstance(exc, httpx.ProxyError):
+        return "proxy_error"
+    if isinstance(exc, httpx.ConnectError):
+        return "connect_error"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        return f"http_{status}" if status else "http_error"
+    if isinstance(exc, httpx.HTTPError):
+        return "http_error"
+    if isinstance(exc, (json.JSONDecodeError, ValueError, TypeError)):
+        return "invalid_response"
+    return type(exc).__name__.lower() or "unknown_error"
 
 _GROUP_DISPLAY: dict[str, str] = {
     "nogizaka46": "乃木坂46",
@@ -89,7 +162,7 @@ async def _post_json(url: str, payload: dict, headers: dict | None = None, custo
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
-    req_timeout = timeout if timeout is not None else getattr(cfg, "TRANSLATE_TIMEOUT", 90)
+    req_timeout = timeout if timeout is not None else _model_timeout()
 
     if custom_client is not None and not custom_client.is_closed:
         return await custom_client.post(url, json=payload, headers=req_headers, timeout=req_timeout)
@@ -254,7 +327,15 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
             return ""
     return ""
 
-async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncClient = None) -> dict[str, str]:
+async def _call_model_json(
+    model: dict,
+    prompt: str,
+    custom_client: httpx.AsyncClient = None,
+    *,
+    request_id: str = "",
+    batch_index: int = 0,
+    attempt: int = 1,
+) -> dict[str, str]:
     """按 provider 规范请求结构化 JSON 字典/列表翻译。"""
     provider = model.get("provider", "gemini")
     if provider == "zhipu":
@@ -266,7 +347,13 @@ async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncC
             "temperature": 0.3,
             "max_tokens": 4096,
         }
-        resp = await _post_json(url, payload, headers=headers, custom_client=custom_client)
+        resp = await _post_json(
+            url,
+            payload,
+            headers=headers,
+            custom_client=custom_client,
+            timeout=_model_timeout(),
+        )
         if resp.status_code == 200:
             data = resp.json()
             choices = data.get("choices") or []
@@ -276,7 +363,12 @@ async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncC
         elif resp.status_code == 429:
             raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
         else:
-            log_all(f"⚠️ 智谱模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
+            log_all(
+                f"⚠️ 智谱模型请求失败 | trace={request_id or '-'} | "
+                f"batch={batch_index} | model={model['name']} | attempt={attempt} | "
+                f"status={resp.status_code}",
+                is_debug=True,
+            )
     else:
         url = model["url"]
         headers = {}
@@ -286,7 +378,13 @@ async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncC
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
         }
-        resp = await _post_json(url, payload, headers=headers if headers else None, custom_client=custom_client)
+        resp = await _post_json(
+            url,
+            payload,
+            headers=headers if headers else None,
+            custom_client=custom_client,
+            timeout=_model_timeout(),
+        )
         if resp.status_code == 200:
             raw_text = _extract_text_gemini(resp.json(), model["name"])
             if raw_text:
@@ -294,14 +392,24 @@ async def _call_model_json(model: dict, prompt: str, custom_client: httpx.AsyncC
         elif resp.status_code == 429:
             raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
         else:
-            log_all(f"⚠️ Gemini 模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
+            log_all(
+                f"⚠️ Gemini 模型请求失败 | trace={request_id or '-'} | "
+                f"batch={batch_index} | model={model['name']} | attempt={attempt} | "
+                f"status={resp.status_code}",
+                is_debug=True,
+            )
     return {}
 
 async def _do_translate_gemini_json(
     items: dict[str, str],
     member_name: str,
     group_type: str,
-    custom_client: httpx.AsyncClient = None
+    custom_client: httpx.AsyncClient = None,
+    *,
+    request_id: str = "",
+    batch_index: int = 0,
+    batch_total: int = 1,
+    deadline: float | None = None,
 ) -> tuple[dict[str, str], str]:
     """纯文本段落组批量整体翻译（日文前缀语义锚点绑定 + 双引擎智能轮流 Round-Robin + 自动 Failover 降级）。
 
@@ -312,6 +420,11 @@ async def _do_translate_gemini_json(
 
     try_models = _get_round_robin_models()
     if not try_models:
+        log_all(
+            f"⚠️ 博客翻译没有可用模型 | trace={request_id or '-'} | "
+            f"batch={batch_index}/{batch_total}",
+            is_debug=True,
+        )
         return {}, ""
 
     # 构建带 prefix 原文前缀字符锚点的结构化列表
@@ -340,20 +453,106 @@ async def _do_translate_gemini_json(
     async with _limiter:
         for model in try_models:
             for attempt in range(2):
+                if deadline is not None and time.monotonic() >= deadline:
+                    log_all(
+                        f"⏱️ 博客翻译预算耗尽 | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')}",
+                        is_debug=True,
+                    )
+                    return {}, ""
+                started = time.monotonic()
                 try:
-                    parsed_json = await _call_model_json(model, prompt, custom_client=custom_client)
+                    parsed_json = await _call_model_json(
+                        model,
+                        prompt,
+                        custom_client=custom_client,
+                        request_id=request_id,
+                        batch_index=batch_index,
+                        attempt=attempt + 1,
+                    )
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
                     if parsed_json:
+                        log_all(
+                            f"✅ 博客翻译模型成功 | trace={request_id or '-'} | "
+                            f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                            f"attempt={attempt + 1} | items={len(parsed_json)} | "
+                            f"耗时={elapsed_ms}ms",
+                            is_debug=True,
+                        )
                         return parsed_json, model["name"]
+                    log_all(
+                        f"⚠️ 博客翻译模型无有效 JSON | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                        f"attempt={attempt + 1} | 耗时={elapsed_ms}ms",
+                        is_debug=True,
+                    )
                     break  # 未返回有效 JSON，切换下一个模型
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 429:
-                        await asyncio.sleep((attempt + 1) * 2)
+                        wait_s = float((attempt + 1) * 2)
+                        if deadline is not None:
+                            wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
+                        log_all(
+                            f"⚠️ 博客翻译模型限流 | trace={request_id or '-'} | "
+                            f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                            f"attempt={attempt + 1} | retry_in={wait_s:.1f}s",
+                            is_debug=True,
+                        )
+                        if wait_s <= 0:
+                            return {}, ""
+                        await asyncio.sleep(wait_s)
                         continue
+                    log_all(
+                        f"⚠️ 博客翻译模型 HTTP 失败 | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                        f"status={e.response.status_code} | attempt={attempt + 1}",
+                        is_debug=True,
+                    )
+                    break
+                except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException) as e:
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    log_all(
+                        f"⏱️ 博客翻译模型超时 | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
+                        is_debug=True,
+                    )
+                    break
+                except httpx.HTTPError as e:
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    log_all(
+                        f"⚠️ 博客翻译模型网络失败 | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
+                        is_debug=True,
+                    )
+                    break
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    log_all(
+                        f"⚠️ 博客翻译模型响应无效 | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
+                        is_debug=True,
+                    )
                     break
                 except Exception as e:
-                    log_all(f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}", is_debug=True)
+                    # 最后一道防线保留，避免单个模型异常中断 failover；日志不输出异常原文，
+                    # 防止第三方 SDK 把请求头或 API Key 写入日志。
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    log_all(
+                        f"⚠️ 博客翻译模型异常 | trace={request_id or '-'} | "
+                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
+                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
+                        is_debug=True,
+                    )
                     break
 
+    log_all(
+        f"❌ 博客翻译模型全部失败 | trace={request_id or '-'} | "
+        f"batch={batch_index}/{batch_total} | candidates={len(try_models)}",
+        is_debug=True,
+    )
     return {}, ""
 
 async def translate_text_with_model(
@@ -563,7 +762,36 @@ def blocks_to_html(blocks: list[dict]) -> str:
     return "<br><br>".join(parts)
 
 
-async def translate_blog_structured(html: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None) -> tuple[list[dict], str]:
+def blog_translation_stats(blocks: list[dict]) -> tuple[int, int, bool]:
+    """统计结构化博客中「需翻译段落」的完成情况。
+
+    返回 ``(已翻译段数, 需翻译段数, 是否完整)``，供 WebUI 与定时归档统一判断
+    部分译文，避免把“只生成了部分段落”误标为完成并永久命中缓存。
+    """
+    total = 0
+    translated = 0
+    for block in blocks or []:
+        if block.get("type") != "text":
+            continue
+        jp = str(block.get("jp") or "")
+        if not jp or _is_already_chinese(jp):
+            continue
+        total += 1
+        zh = str(block.get("zh") or "").strip()
+        if zh and "[翻译失败]" not in zh:
+            translated += 1
+    return translated, total, bool(total and translated == total)
+
+
+async def translate_blog_structured(
+    html: str,
+    member_name: str = "",
+    group_type: str = "",
+    custom_client: httpx.AsyncClient = None,
+    *,
+    request_id: str = "",
+    source: str = "unknown",
+) -> tuple[list[dict], str]:
     """
     结构化博客翻译接口（解耦存储：绝不把日中文本硬拼接成单一文本）。
 
@@ -572,12 +800,23 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
        {"type": "img",  "src": "https://..."}]
     无 API key / 空输入 / 无需翻译时返回 ([], "")。
     """
+    started = time.monotonic()
+    trace_id = request_id or f"blog-{_get_text_hash(html or str(time.time()))[:12]}"
     if not html or (not getattr(cfg, "GEMINI_API_KEY", "") and not getattr(cfg, "ZHIPU_API_KEY", "")):
+        log_all(
+            f"⚠️ 博客翻译跳过 | trace={trace_id} | source={source} | "
+            f"reason={'empty_html' if not html else 'no_api_key'}",
+            is_debug=True,
+        )
         return [], ""
 
     cache_key = (member_name, _get_text_hash(html))
     if cache_key in _blog_structured_cache:
-        log_all(f"⚡ 命中博客结构化翻译内存缓存 ({member_name})", is_debug=True)
+        log_all(
+            f"⚡ 命中博客结构化翻译内存缓存 | trace={trace_id} | source={source} | "
+            f"member={member_name}",
+            is_debug=True,
+        )
         return _blog_structured_cache[cache_key]
 
     # 1. 节点化拆解：段落文本块 + 图片块（按原文顺序交替）
@@ -595,6 +834,11 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
             counter += 1
 
     if not items_to_translate:
+        log_all(
+            f"ℹ️ 博客无需翻译 | trace={trace_id} | source={source} | "
+            f"member={member_name} | blocks={len(blocks)} | 耗时={int((time.monotonic() - started) * 1000)}ms",
+            is_debug=True,
+        )
         return [], ""  # 无需翻译
 
     # 3. 动态自适应大批次（支持全篇单次吞吐，最大 5000 字符 / 60 段，兼顾全篇全局文脉与大模型高吞吐量）
@@ -616,10 +860,46 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
 
     translated_map: dict[str, str] = {}
     model_name = ""
+    total_timeout = _blog_total_timeout()
+    deadline = started + total_timeout
+    log_all(
+        f"🔄 博客翻译开始 | trace={trace_id} | source={source} | member={member_name or '未知成员'} | "
+        f"blocks={len(blocks)} | items={len(items_to_translate)} | batches={len(batches)} | "
+        f"budget={total_timeout:.0f}s",
+        is_debug=True,
+    )
 
-    for batch_keys in batches:
+    for batch_index, batch_keys in enumerate(batches, start=1):
         batch_items = {k: items_to_translate[k] for k in batch_keys}
-        res_map, mname = await _do_translate_gemini_json(batch_items, member_name, group_type, custom_client=custom_client)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            log_all(
+                f"⏱️ 博客翻译总预算耗尽 | trace={trace_id} | source={source} | "
+                f"batch={batch_index}/{len(batches)} | elapsed={int((time.monotonic() - started) * 1000)}ms",
+                is_error=True,
+            )
+            break
+        try:
+            res_map, mname = await asyncio.wait_for(
+                _do_translate_gemini_json(
+                    batch_items,
+                    member_name,
+                    group_type,
+                    custom_client=custom_client,
+                    request_id=trace_id,
+                    batch_index=batch_index,
+                    batch_total=len(batches),
+                    deadline=deadline,
+                ),
+                timeout=remaining,
+            )
+        except asyncio.TimeoutError:
+            log_all(
+                f"⏱️ 博客翻译批次超时 | trace={trace_id} | source={source} | "
+                f"batch={batch_index}/{len(batches)} | elapsed={int((time.monotonic() - started) * 1000)}ms",
+                is_error=True,
+            )
+            break
         translated_map.update(res_map)
         if not model_name and mname:
             model_name = mname
@@ -640,10 +920,31 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
 
     if missing:
         retry_items = {k: items_to_translate[k] for k in missing}
-        res_map, mname = await _do_translate_gemini_json(retry_items, member_name, group_type, custom_client=custom_client)
-        translated_map.update(res_map)
-        if not model_name and mname:
-            model_name = mname
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            try:
+                res_map, mname = await asyncio.wait_for(
+                    _do_translate_gemini_json(
+                        retry_items,
+                        member_name,
+                        group_type,
+                        custom_client=custom_client,
+                        request_id=trace_id,
+                        batch_index=len(batches) + 1,
+                        batch_total=len(batches) + 1,
+                        deadline=deadline,
+                    ),
+                    timeout=remaining,
+                )
+                translated_map.update(res_map)
+                if not model_name and mname:
+                    model_name = mname
+            except asyncio.TimeoutError:
+                log_all(
+                    f"⏱️ 博客翻译补偿批次超时 | trace={trace_id} | source={source} | "
+                    f"missing={len(missing)} | elapsed={int((time.monotonic() - started) * 1000)}ms",
+                    is_error=True,
+                )
 
     # 4. 组装结构化块（jp / zh 解耦，图片原位）
     structured: list[dict] = []
@@ -658,10 +959,34 @@ async def translate_blog_structured(html: str, member_name: str = "", group_type
         else:
             structured.append({"type": "text", "jp": content, "zh": ""})
 
+    translated_count = sum(
+        1 for key in items_to_translate if (translated_map.get(key) or "").strip()
+    )
+    complete = translated_count == len(items_to_translate)
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    if not model_name or translated_count == 0:
+        log_all(
+            f"❌ 博客翻译未生成译文 | trace={trace_id} | source={source} | "
+            f"member={member_name or '未知成员'} | translated=0/{len(items_to_translate)} | "
+            f"elapsed={elapsed_ms}ms",
+            is_error=True,
+        )
+        # 不缓存失败结果，下一次手动重试可以重新选择模型/网络路径。
+        return [], ""
+
     result = (structured, model_name)
-    if len(_blog_structured_cache) >= _MAX_CACHE_SIZE:
-        _blog_structured_cache.pop(next(iter(_blog_structured_cache)))
-    _blog_structured_cache[cache_key] = result
+    # 仅缓存完整结果；部分译文必须允许后续重试补齐缺失段落。
+    if complete:
+        if len(_blog_structured_cache) >= _MAX_CACHE_SIZE:
+            _blog_structured_cache.pop(next(iter(_blog_structured_cache)))
+        _blog_structured_cache[cache_key] = result
+    log_all(
+        f"✅ 博客翻译完成 | trace={trace_id} | source={source} | "
+        f"member={member_name or '未知成员'} | model={model_name or 'unknown'} | "
+        f"translated={translated_count}/{len(items_to_translate)} | complete={'yes' if complete else 'no'} | "
+        f"elapsed={elapsed_ms}ms",
+        is_debug=True,
+    )
     return result
 
 
