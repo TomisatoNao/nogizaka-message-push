@@ -296,6 +296,7 @@ class SocialService:
                 archived=archive,
                 completed=delivery.complete,
             )
+        from src.social.adapters import OfficialTarget
         normalized_scope = "groups" if scope == "groups" else "users"
         target = DeliveryTarget(
             channel="qq_official",
@@ -303,7 +304,12 @@ class SocialService:
             scope=normalized_scope,
             bot_name=str(getattr(bot, "name", "") or ""),
         ).bind_runtime(
-            bot,
+            OfficialTarget(
+                bot,
+                scope=normalized_scope,
+                target_id=str(target_id),
+                allow_missing_media=True,
+            ),
             route_id=f"official:direct:{normalized_scope}:{target_id}",
         )
         return await asyncio.to_thread(

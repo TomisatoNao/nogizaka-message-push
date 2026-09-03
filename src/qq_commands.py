@@ -335,6 +335,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             log_all("⚠️ [社媒解析] 未找到可用的 QQ 官方 Bot 实例", is_error=True)
             return
 
+        from src.social.adapters import OfficialTarget
         service = SocialService(raw_cfg)
         normalized_scope = "groups" if scope == "groups" else "users"
         target = DeliveryTarget(
@@ -343,7 +344,12 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             scope=normalized_scope,
             bot_name=str(getattr(target_bot, "name", "") or ""),
         ).bind_runtime(
-            target_bot,
+            OfficialTarget(
+                target_bot,
+                scope=normalized_scope,
+                target_id=str(target_id),
+                allow_missing_media=True,
+            ),
             route_id=f"official:direct:{normalized_scope}:{target_id}",
         )
         log_all(
@@ -398,7 +404,12 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
                     scope=normalized_scope,
                     bot_name=str(getattr(target_bot, "name", "") or ""),
                 ).bind_runtime(
-                    target_bot,
+                    OfficialTarget(
+                        target_bot,
+                        scope=normalized_scope,
+                        target_id=str(target_id),
+                        allow_missing_media=True,
+                    ),
                     route_id=f"official:error:{normalized_scope}:{target_id}",
                 )
                 sent = await SocialService(raw_cfg).delivery_service.deliver_text(

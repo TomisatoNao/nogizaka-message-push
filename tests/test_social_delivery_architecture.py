@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import pytest
 
 from src.social.adapters import DeliveryTarget
 from src.social.delivery_service import ArchiveService, DeliveryService
@@ -105,4 +106,52 @@ def test_delivery_service_returns_no_route_without_invoking_adapter():
     assert result.matched_routes == 0
     assert result.route_results == ()
     assert adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_qq_official_adapter_supports_direct_target_and_official_target():
+    from src.social.adapters import OfficialTarget, QQOfficialAdapter
+
+    class _MockBot:
+        def __init__(self):
+            self.sent_texts = []
+            self.sent_media = []
+
+        async def send_private_text(self, openid, text):
+            self.sent_texts.append(("users", openid, text))
+            return True
+
+        async def send_group_text(self, openid, text):
+            self.sent_texts.append(("groups", openid, text))
+            return True
+
+        async def send_media_file(self, scope, openid, media_type, content, filename=""):
+            self.sent_media.append((scope, openid, media_type, content, filename))
+            return True
+
+    adapter = QQOfficialAdapter()
+    bot = _MockBot()
+
+    # 1. 验证直接绑定 Bot 实例的 target 能正常解析出 scope 和 target_id 并发送
+    t1 = DeliveryTarget(
+        channel="qq_official",
+        target_id="user123",
+        scope="users",
+        bot_name="bot1",
+    ).bind_runtime(bot, route_id="t1")
+    assert await adapter.send_text(t1, "hello user") is True
+    assert bot.sent_texts == [("users", "user123", "hello user")]
+
+    # 2. 验证绑定 OfficialTarget 的 target
+    t2 = DeliveryTarget(
+        channel="qq_official",
+        target_id="group456",
+        scope="groups",
+        bot_name="bot1",
+    ).bind_runtime(
+        OfficialTarget(bot, scope="groups", target_id="group456"), route_id="t2"
+    )
+    assert await adapter.send_text(t2, "hello group") is True
+    assert bot.sent_texts[-1] == ("groups", "group456", "hello group")
+
 

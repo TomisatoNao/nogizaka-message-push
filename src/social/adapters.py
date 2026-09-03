@@ -205,24 +205,49 @@ class QQOfficialAdapter:
     @staticmethod
     def _targets(target: DeliveryTarget) -> list[tuple[str, str]]:
         descriptor = _target_value(target)
-        if not isinstance(descriptor, OfficialTarget):
-            return []
-        if descriptor.scope and descriptor.target_id:
-            return [(descriptor.scope, descriptor.target_id)]
+        if isinstance(descriptor, OfficialTarget):
+            if descriptor.scope and descriptor.target_id:
+                return [(descriptor.scope, descriptor.target_id)]
+            out = []
+            if descriptor.send_private and getattr(descriptor.bot, "target_openid", None):
+                out.append(("users", descriptor.bot.target_openid))
+            if descriptor.send_group and getattr(descriptor.bot, "group_openid", None):
+                out.append(("groups", descriptor.bot.group_openid))
+            return out
+
+        # 兜底：直接从 target 领域的 scope 与 target_id 读取
+        if target.scope and target.target_id:
+            return [(target.scope, target.target_id)]
+
+        # 兜底：descriptor 是 Bot 实例
+        bot = descriptor
         out = []
-        if descriptor.send_private and descriptor.bot.target_openid:
-            out.append(("users", descriptor.bot.target_openid))
-        if descriptor.send_group and getattr(descriptor.bot, "group_openid", None):
-            out.append(("groups", descriptor.bot.group_openid))
+        if getattr(bot, "target_openid", None):
+            out.append(("users", str(bot.target_openid)))
+        if getattr(bot, "group_openid", None):
+            out.append(("groups", str(bot.group_openid)))
         return out
 
     @staticmethod
     def _bot(target: DeliveryTarget) -> Any:
         descriptor = _target_value(target)
-        return descriptor.bot if isinstance(descriptor, OfficialTarget) else descriptor
+        if isinstance(descriptor, OfficialTarget):
+            return descriptor.bot
+        if descriptor is not None and descriptor is not target:
+            return descriptor
+        # 从 target.bot_name 查找已配置的 bot
+        from src.platforms import qq_official
+        bots = qq_official.get_configured_bots()
+        if target.bot_name:
+            for b in bots:
+                if getattr(b, "name", "") == target.bot_name:
+                    return b
+        return bots[0] if bots else None
 
     async def send_text(self, target: DeliveryTarget, text: str) -> bool:
         bot = self._bot(target)
+        if not bot:
+            return False
         targets = self._targets(target)
         if not targets:
             return False
@@ -239,8 +264,7 @@ class QQOfficialAdapter:
         if not path or not os.path.exists(path):
             descriptor = _target_value(target)
             return bool(
-                isinstance(descriptor, OfficialTarget)
-                and descriptor.allow_missing_media
+                getattr(descriptor, "allow_missing_media", False)
             )
         try:
             with open(path, "rb") as media_file:
@@ -248,6 +272,8 @@ class QQOfficialAdapter:
             if not content:
                 return False
             bot = self._bot(target)
+            if not bot:
+                return False
             targets = self._targets(target)
             if not targets:
                 return False
@@ -265,7 +291,7 @@ class QQOfficialAdapter:
                     )
                 )
             return all(results)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:
             self._log(
                 f"⚠️ QQ 官方 Bot 发送媒体失败: {type(exc).__name__}",
                 is_error=True,

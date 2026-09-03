@@ -298,6 +298,8 @@ class DeliveryService:
         else:
             outcome = "failed"
 
+        media_total = len(post.media)
+        media_sent = media_total if (success_routes > 0 or not pending) else 0
         return DeliveryResult(
             outcome=outcome,
             matched_routes=matched_routes,
@@ -307,6 +309,8 @@ class DeliveryService:
             skipped_routes=skipped_routes,
             errors=tuple(errors),
             route_results=tuple(attempt.ok for attempt in attempts),
+            media_sent=media_sent,
+            media_total=media_total,
         )
 
     def _log_summary(self, post: Post, result: DeliveryResult) -> None:
