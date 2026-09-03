@@ -154,6 +154,8 @@ class MediaDownloader:
         self._lock = threading.Lock()
         self._ytdlp_warned = False
         self._compat_warned = False
+        self._instagram_cookie_header = ""
+        self._instagram_cookie_at = 0.0
 
     def download(self, post) -> None:
         """为 Post 对象下载所有尚未下载的媒体（填充 local_path）。"""
@@ -205,12 +207,33 @@ class MediaDownloader:
                             mtype = classify_media(fpath)
                             post.media.append(MediaItem(type=mtype, url="", local_path=os.path.abspath(fpath)))
                     else:
-                        for idx, m in enumerate(post.media):
-                            if not (m.local_path and os.path.exists(m.local_path)):
-                                if idx < len(downloaded_files):
-                                    m.local_path = os.path.abspath(downloaded_files[idx])
-                                elif downloaded_files:
-                                    m.local_path = os.path.abspath(downloaded_files[0])
+                        unresolved_media = [
+                            m for m in post.media
+                            if not (m.local_path and os.path.exists(m.local_path))
+                        ]
+                        # ``download_via_ytdlp`` may return files already
+                        # attached by the direct-download pass when its
+                        # output directory had no newly-created files.  Do
+                        # not reuse those paths for unresolved media: doing
+                        # so silently sends the same photo multiple times.
+                        attached_paths = {
+                            os.path.normcase(os.path.abspath(m.local_path))
+                            for m in post.media
+                            if m.local_path and os.path.exists(m.local_path)
+                        }
+                        fallback_files = [
+                            os.path.abspath(fpath)
+                            for fpath in downloaded_files
+                            if os.path.normcase(os.path.abspath(fpath)) not in attached_paths
+                        ]
+                        for media_item, fpath in zip(unresolved_media, fallback_files):
+                            media_item.local_path = fpath
+                        if len(fallback_files) < len(unresolved_media):
+                            log.warning(
+                                "[download] 回退下载仍缺少 %s 个媒体，保留未下载状态，"
+                                "不会重复复用已有文件",
+                                len(unresolved_media) - len(fallback_files),
+                            )
             except Exception as e:
                 log.warning(f"[download] yt-dlp 兜底下载失败: {e}")
 
@@ -254,6 +277,57 @@ class MediaDownloader:
             or ""
         )
         return str(candidate).strip()
+
+    def _instagram_public_headers(self) -> dict[str, str]:
+        """预热匿名 Embed 会话，返回 CDN 直链所需的短期 cookies。
+
+        Instagram CDN 在部分出口 IP 上会拒绝没有站点匿名 cookies 的
+        ``requests`` 直链请求（HTTP 403），而同一 URL 在 Embed 浏览器
+        上下文中可以正常下载。Cookies 只保存在内存中，不写入配置、日志
+        或归档库；缓存十分钟以避免每个媒体重复访问 Instagram 首页。
+        """
+        now = time.monotonic()
+        with self._lock:
+            if self._instagram_cookie_header and now - self._instagram_cookie_at < 600:
+                return {
+                    "Cookie": self._instagram_cookie_header,
+                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                }
+
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": _UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7",
+        })
+        proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+        cookie_header = ""
+        try:
+            response = session.get(
+                "https://www.instagram.com/",
+                timeout=min(self.timeout, 15),
+                proxies=proxies,
+            )
+            try:
+                if response.status_code == 200:
+                    cookie_header = "; ".join(
+                        f"{name}={value}" for name, value in session.cookies.get_dict().items()
+                        if name and value
+                    )
+            finally:
+                response.close()
+        except (OSError, requests.RequestException) as exc:
+            log.debug("[download] Instagram 匿名会话预热失败: %s", type(exc).__name__)
+
+        if not cookie_header:
+            return {}
+        with self._lock:
+            self._instagram_cookie_header = cookie_header
+            self._instagram_cookie_at = now
+        return {
+            "Cookie": cookie_header,
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        }
 
     def ffmpeg_path(self) -> str | None:
         """ffmpeg 可执行文件路径（配置优先，其次 PATH）。"""
@@ -441,9 +515,14 @@ class MediaDownloader:
         if not tasks:
             return []
         results: list[str | None] = [None] * len(tasks)
+        extra_headers: dict[str, str] = {}
+        if referer.startswith("https://www.instagram.com/"):
+            # The caller already identified this as an Instagram media batch;
+            # warm one anonymous site session before the worker fan-out.
+            extra_headers = self._instagram_public_headers()
 
         def _one(idx: int, url: str, dest: str):
-            if self.download_direct(url, dest, referer=referer):
+            if self.download_direct(url, dest, referer=referer, headers=extra_headers):
                 results[idx] = dest
 
         workers = min(self.threads, len(tasks))

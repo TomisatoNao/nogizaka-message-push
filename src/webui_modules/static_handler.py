@@ -81,7 +81,15 @@ def _take_pending_headers(handler) -> tuple[list[tuple[str, str]], list[str]]:
 def send_json(handler, obj: dict, code: int = 200) -> None:
     """发送标准 JSON 响应。"""
     try:
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        try:
+            # Keep normal responses readable in the wire payload.  Some
+            # upstream pages, however, can expose an isolated UTF-16
+            # surrogate in captions/alt text.  Such a value is representable
+            # in JSON only when escaped; retrying with ``ensure_ascii=True``
+            # prevents a successful parse from turning into a 500 response.
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        except UnicodeEncodeError:
+            body = json.dumps(obj, ensure_ascii=True).encode("ascii")
         body, enc_headers = compress_if_supported(handler, body)
         pending_headers, pending_cookies = _take_pending_headers(handler)
         handler.send_response(code)

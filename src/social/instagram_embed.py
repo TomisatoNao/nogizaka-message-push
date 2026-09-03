@@ -150,16 +150,31 @@ def _read_embedded_string(text: str, start: int) -> tuple[str, int] | None:
     tolerant than attempting to parse the entire script, which is often
     wrapped in JavaScript assignments and HTML-escaped JSON.
     """
-    i = start
-    if i < len(text) and text[i] == "\\" and i + 1 < len(text) and text[i + 1] in {"\"", "'"}:
-        i += 1
-    if i >= len(text) or text[i] not in {"\"", "'"}:
+    # In the Embed bootstrap payload the *delimiters* themselves can be
+    # escaped (``:\"https:\\/\\/...\"``), while the URL still contains
+    # ordinary backslash escapes.  Treat the escaped quote as the delimiter
+    # in that mode; otherwise the scanner would consume the following JSON
+    # fields and produce a malformed URL containing ``display_resources``.
+    escaped_delimiter = (
+        start + 1 < len(text)
+        and text[start] == "\\"
+        and text[start + 1] in {"\"", "'"}
+    )
+    if escaped_delimiter:
+        quote = text[start + 1]
+        i = start + 2
+    else:
+        if start >= len(text) or text[start] not in {"\"", "'"}:
+            return None
+        quote = text[start]
+        i = start + 1
+    if quote not in {"\"", "'"}:
         return None
-    quote = text[i]
-    i += 1
     chars: list[str] = []
     while i < len(text):
         char = text[i]
+        if escaped_delimiter and char == "\\" and i + 1 < len(text) and text[i + 1] == quote:
+            return "".join(chars), i + 2
         if char == "\\" and i + 1 < len(text):
             chars.extend((char, text[i + 1]))
             i += 2

@@ -8,6 +8,7 @@ import urllib.request
 
 from src.social.instagram_embed import _extract_page_data
 from src.social.models import MediaItem, Post
+from src.webui_modules.static_handler import send_json
 from src.webui_modules import social_tool_handlers
 
 
@@ -68,6 +69,15 @@ def _payload(handler):
     return json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
+def test_send_json_escapes_isolated_surrogate_from_upstream_text():
+    handler = _ResponseHandler()
+
+    send_json(handler, {"ok": True, "text": "caption\ud800"})
+
+    assert handler.sent == 200
+    assert _payload(handler)["text"] == "caption\ud800"
+
+
 def test_instagram_carousel_structured_payload_deduplicates_seven_fields_to_six():
     urls = [f"https://scontent.cdninstagram.com/photo-{idx}.jpg" for idx in range(6)]
     # The final field is the same first photo with a different signed query,
@@ -91,6 +101,21 @@ def test_instagram_carousel_structured_payload_deduplicates_seven_fields_to_six(
     assert len(media) == 6
     assert [item.url for item in media] == urls
     assert all(item.type == "image" for item in media)
+
+
+def test_instagram_carousel_handles_escaped_json_field_delimiters():
+    urls = [f"https://scontent.cdninstagram.com/escaped-{idx}.jpg" for idx in range(2)]
+    fields = ",".join(
+        r'{\"node\":{\"display_url\":\"' + url.replace("/", r"\/") + r'\"}}'
+        for url in urls
+    )
+    script = r'{"GraphSidecar":true,"edge_sidecar_to_children":{"edges":[' + fields + r"]}}"
+
+    media, *_ = _extract_page_data(
+        _CarouselPage(script), max_media=20, shortcode="escaped"
+    )
+
+    assert [item.url for item in media] == urls
 
 
 def test_parse_post_handler_returns_structured_result(monkeypatch):
