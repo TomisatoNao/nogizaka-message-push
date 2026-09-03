@@ -9,11 +9,13 @@ from src.social.fetchers.tiktok_live_fetcher import TikTokLiveFetcher
 from src.social.fetchers.x_fetcher import XFetcher
 from src.social.forwarder import SocialForwarder
 from src.social.scheduler import SocialScheduler
+from src.social.service import SocialService
 from src.social.store import SocialStore
 
 _store: SocialStore | None = None
 _downloader: MediaDownloader | None = None
 _forwarder: SocialForwarder | None = None
+_service: SocialService | None = None
 _scheduler: SocialScheduler | None = None
 _shared_config: dict | None = None
 _lock = threading.Lock()
@@ -48,7 +50,7 @@ def _setup_social_logger() -> None:
 
 def start_social_service(config: dict) -> SocialScheduler | None:
     """初始化并启动社交媒体监控守护调度器。"""
-    global _store, _downloader, _forwarder, _scheduler, _shared_config
+    global _store, _downloader, _forwarder, _service, _scheduler, _shared_config
 
     with _lock:
         if _scheduler is not None:
@@ -59,6 +61,12 @@ def start_social_service(config: dict) -> SocialScheduler | None:
         _store = SocialStore()
         _downloader = MediaDownloader(config)
         _forwarder = SocialForwarder(config, _downloader, _store)
+        _service = SocialService(
+            config,
+            downloader=_downloader,
+            forwarder=_forwarder,
+            store=_store,
+        )
 
         # 实例化全部 Fetcher
         fetchers = [
@@ -75,8 +83,17 @@ def start_social_service(config: dict) -> SocialScheduler | None:
             outcome_counts: dict[str, int] = {}
             for p in posts:
                 try:
-                    completed = _forwarder.forward_post(p)
-                    result = _forwarder.last_delivery_result
+                    operation = _service.process_post(
+                        p,
+                        translate=True,
+                        # Fetcher 通常已经完成媒体下载；下载器会跳过已有文件，
+                        # 这里只补齐异常情况下仍缺失的媒体，
+                        # 避免监控与手动入口各自维护一套翻译/投递编排。
+                        download=True,
+                        archive=True,
+                    )
+                    completed = operation.completed
+                    result = operation.delivery
                     outcome = result.outcome if result is not None else (
                         "success" if completed else "error"
                     )
@@ -147,11 +164,12 @@ def reload_social_service(config: dict | None = None) -> None:
 
 def stop_social_service():
     """优雅停止社媒监控服务。"""
-    global _scheduler, _shared_config
+    global _scheduler, _shared_config, _service
     with _lock:
         if _scheduler:
             _scheduler.stop()
             _scheduler.join(timeout=5)
             _scheduler = None
+            _service = None
             _shared_config = None
             log_all("🛑 社交媒体监控服务已停止")

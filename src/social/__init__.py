@@ -18,6 +18,12 @@ social — 社交媒体监控模块（X / Instagram / TikTok / TikTok Live）
   scheduler.py      异步轮询调度器（每平台独立线程与间隔）
   config_watcher.py 配置热更新（修改 config.json 无需重启）
 
+投递链路：
+  preparation.py    翻译、Alt 文本和正文格式化
+  route_planner.py  通道/过滤器/目标路由规划
+  adapters.py       Telegram、NapCat、QQ 官方 Bot 发送适配器
+  delivery_service.py 统一投递、状态持久化与归档
+
 模块内部对 yt-dlp 的 import 全部是惰性的：即使未安装 yt-dlp，
 既有的 melink / showroom / youtube 功能也完全不受影响。
 """
@@ -28,11 +34,38 @@ from src.social.settings import (
     platform_settings,
     social_settings,
 )
+from src.social.contracts import DeliveryResult, DeliveryTarget
+from src.social.errors import (
+    SocialAuthRequired,
+    SocialDeliveryError,
+    SocialDownloadError,
+    SocialParseError,
+    SocialTranslationError,
+)
 from src.social.store import SocialStore
+from src.social.delivery_service import (
+    ArchiveService,
+    DeliveryService,
+    DeliveryStateRepository,
+)
+from src.social.preparation import MessagePreparationService
+from src.social.route_planner import RoutePlanner
 
 __all__ = [
     "SOCIAL_PLATFORMS",
     "SocialStore",
+    "ArchiveService",
+    "DeliveryResult",
+    "DeliveryService",
+    "DeliveryStateRepository",
+    "DeliveryTarget",
+    "MessagePreparationService",
+    "RoutePlanner",
+    "SocialAuthRequired",
+    "SocialDeliveryError",
+    "SocialDownloadError",
+    "SocialParseError",
+    "SocialTranslationError",
     "media_settings",
     "platform_settings",
     "social_settings",

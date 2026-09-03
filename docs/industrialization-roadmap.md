@@ -382,6 +382,37 @@ Telegram 路由不再提供“默认 Bot Token”。每个 `config.json` 的 `tg
 3. 观察所有 Bot 均完成 `getMe` 检查后，再移除 NAS `.env` 中旧的 `TG_BOT_TOKEN`。
 4. 若迁移期间出现问题，先停用 Telegram 通道或回滚代码；不要重新启用全局变量回退。
 
+## M5-Social：社交链路模块化改造（第三阶段）
+
+**状态：本地完整落地并通过质量门禁，待单独提交发布。**
+
+本阶段把社交动态链路拆成“准备 → 规划 → 投递 → 状态/归档”四个边界。通道开关
+与路由读取通过可注入的 `RuntimeConfig` 视图完成；WebUI 传入的 JSONC
+（`channels`）、应用规范化配置（`enable_*`）和旧调用方的全局 facade 有明确的
+兼容优先级。视图保留配置字典引用，因此 `reload_social_service` 原位更新后下一
+次投递即可生效。Telegram、NapCat、QQ 官方广播及 QQ Bot 单目标回复共用同一个
+`DeliveryService`，避免手动推送、定时监控和指令入口因读取不同配置来源而行为分叉。
+
+| 领域 | 已落地内容 | 验收结果 |
+| --- | --- | --- |
+| 配置依赖 | 新增 `src/social/settings.py::RuntimeConfig`，支持通道别名、布尔值规范化、路由列表校验和旧全局 facade 回退。 | 注入配置可覆盖全局值；`false` 不会被误判为真。 |
+| 消息准备 | `MessagePreparationService` 组合 `TranslationService`、`AltTextService`、`MessageFormatter`；准备结果由 `PreparedSocialPost` 复用。 | 定时、WebUI 预览/推送、QQ 指令不重复翻译或拼装正文。 |
+| 路由规划 | `RoutePlanner` 统一处理通道开关、目标选择、平台/成员/账号过滤，产出 `PlannedRoute`。 | 显式目标和广播目标使用相同匹配规则；规划层不执行网络请求。 |
+| 通道适配器 | `ChannelAdapter` 协议及 `TelegramAdapter`、`NapCatAdapter`、`QQOfficialAdapter`；适配器只负责发送。 | 文本/媒体调用边界统一；媒体文件名和音频类型沿用既有上传逻辑。 |
+| 投递与恢复 | `DeliveryService.deliver_post()` 负责并发投递、逐路由结果、成功状态持久化和部分成功结果；失败路由下轮单独重试。 | 已成功路由不会因其它目标失败而重复发送；结果明确区分完整/部分/全部失败/无路由/已投递。 |
+| 状态与归档 | `DeliveryStateRepository`、`SocialStoreDeliveryState`、`ArchiveService` 独立成可替换边界；QQ 直投共享服务但不污染广播状态。 | 单次操作只调用一次归档；WebUI 手动推送不再重复归档。 |
+| 兼容入口 | `SocialForwarder` 收薄为兼容门面，旧 `SocialDeliveryDispatcher`、`QQDirectDelivery` API 保留并委托新服务。 | 既有调用方无需迁移；新入口可直接注入 planner/adapter/state。 |
+| 直播通知 | `SocialForwarder.send_recording` 与广播共用同一 `RuntimeConfig` 视图（直播不是 `Post`，保留专用通知路径）。 | 热重载后直播通知与普通社媒投递保持一致。 |
+| 回归验证 | 新增准备/路由/投递状态契约测试及配置、服务兼容测试。 | 社交相关 25 项通过；全量 pytest 196 项、Ruff、导入检查通过。 |
+
+### 第三阶段边界
+
+平台 Bot 客户端注册表仍由 `src/platforms/*` 负责初始化和凭证热重载；本阶段通过
+provider 参数注入读取，不复制或重建其生命周期。直播录制完成通知仍是独立的
+非 `Post` 消息，不强行套用媒体动态投递协议。下一阶段若继续治理，可将客户端
+注册表本身改为显式生命周期对象，进一步减少进程级单例依赖；这不会改变当前
+配置语义或部署方式。
+
 ## 4.1 实施台账（截至 2026-09-03）
 
 下表记录已合并并部署的工作，而非目标描述；“部分完成”表示已上线的能力与仍需处理的边界都会明确列出。
@@ -393,7 +424,7 @@ Telegram 路由不再提供“默认 Bot Token”。每个 `config.json` 的 `tg
 | M2 版本化发布 | 未开始 | — | 仍使用源码同步后重启容器；需要按镜像 digest 发布、健康检查失败自动回滚。 |
 | M3 质量与供应链 | 部分完成 | 已有 Ruff、pytest 与基础 CI。 | 覆盖率门槛、pip-audit/Bandit、SBOM、镜像签名和容器集成测试尚未落地。 |
 | M4 可观测性与恢复 | 部分完成 | 管理端审计日志（脱敏、滚动）、审计日志查看、可校验备份/恢复演练命令、健康接口及既有通道告警已上线（`ba3ed0a`）；本批次补齐翻译元数据日志、Instagram Story 扫描/去重/下载/待转发链路日志、社媒路由结果和批次汇总，以及成员消息巡查成功路径降噪与统计摘要。 | 结构化请求/任务 ID、指标仪表盘、定时备份和恢复演练制度尚未落地。 |
-| M5 代码治理 | 持续进行 | 见下方已部署批次。 | 其余外部 API、博客/社交路径的异常分类，持久化补偿重试与并发故障注入仍需继续。 |
+| M5 代码治理 | 持续进行 | 见下方已部署批次；本地阶段 3 已完成社交准备、路由、适配器、投递、状态和归档边界。 | 其余外部 API、博客路径的异常分类，以及客户端注册表生命周期治理仍需继续。 |
 | P6 首页性能 | 已完成 | 数据库首页聚合已消除成员级 N+1，首页响应去除成员重复最新消息，Hero/写真优先渲染、动态流空闲延后、版本化静态资源长期缓存；完成 10 并发、浏览器回归、全量测试并部署 NAS。 | 后续可继续做真实冷启动的长期趋势监控。 |
 | P9 顶部栏吸顶 | 已完成 | 修复 `html/body overflow-x` 创建错误滚动容器导致的共用顶部栏 sticky 失效；同步资源版本并增加回归断言。 | 已推送 `bd0fbb7`、部署 NAS，归档页与管理页生产滚动验收通过。 |
 | P10 首次运行静默启动 | 已完成（运行态有外部通道告警） | 新增 WARN 与启动状态快照；未启用功能不再报错，账号/订阅请求按有效监控项门控；初始管理员横幅只输出一次；新增 8 项回归测试；已推送、CI 通过并部署 NAS，生产容器为 `healthy`。 | Telegram Bot 网络超时需按通道运维处理；真实首次运行环境的长期观测仍可作为后续运维项。 |
@@ -411,6 +442,7 @@ Telegram 路由不再提供“默认 Bot Token”。每个 `config.json` 的 `tg
 | `8d7508a` + `ca51f9c` | 博客手动翻译与定时追更统一使用结构化翻译传输、总预算和 trace 标识；Instagram 回退测试改为确定性回归，避免网络状态导致 CI 抖动。 | 博客翻译、Instagram 回退和全量测试通过。 |
 | `de4c9ae` | Instagram 公开帖子/Reel 在登录接口返回 403 时回退匿名 Embed；Feed、Story 和受限内容仍明确要求有效 Cookies。 | Instagram 公开媒体回归测试通过并已部署。 |
 | `d38192b` | Token 续期区分网络/认证/响应/持久化失败；网络型失败按账号指数退避并阻止旧 Token 继续抓取；续期请求使用独立连接池并限制并发；凭据轮换后自动解除熔断。 | `PoolTimeout` 故障注入、续期去重和“续期失败不发 timeline”回归测试通过；全量 pytest 通过；已部署 NAS，HTTPS 健康检查返回 `200`。 |
+| `本地阶段 3（待提交）` | 社交链路拆分为 `MessagePreparationService`、`RoutePlanner`、`ChannelAdapter`、`DeliveryService`、`DeliveryStateRepository` 与 `ArchiveService`；旧 Forwarder/Dispatcher/QQ 直投 API 保持兼容；广播和 QQ 指令入口共享统一投递服务。 | 新增架构契约测试；全量 pytest 196 项、Ruff、导入检查通过；尚未推送远端或部署 NAS。 |
 
 ### 当前行为边界
 

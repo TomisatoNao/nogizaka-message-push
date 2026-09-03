@@ -9,7 +9,6 @@ and gives both actions the same validation/error contract.
 from __future__ import annotations
 
 import os
-import re
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -18,10 +17,6 @@ from src.webui_modules.static_handler import send_json
 
 _MAX_URL_LENGTH = 4096
 _MAX_CHANNELS = 64
-_CHANNEL_RE = re.compile(
-    r"^(?:tg(?::[-A-Za-z0-9_.]{1,128})?|napcat(?::\d{1,32})?|"
-    r"qq_official|official:[A-Za-z0-9_.-]{1,128}(?::(?:private|group))?)$"
-)
 _SOCIAL_HOSTS = frozenset({
     "instagram.com", "www.instagram.com",
     "x.com", "www.x.com", "twitter.com", "www.twitter.com",
@@ -71,7 +66,12 @@ def _validate_url(value) -> str:
     return url
 
 
-def _validate_channels(value) -> list[str] | None:
+def _validate_channels(value):
+    from src.social.targeting import (
+        DeliveryTargetInputError,
+        normalize_delivery_targets,
+    )
+
     if value is None:
         return None
     if not isinstance(value, list):
@@ -80,14 +80,11 @@ def _validate_channels(value) -> list[str] | None:
         raise SocialToolRequestError("请至少选择一个推送目标通道")
     if len(value) > _MAX_CHANNELS:
         raise SocialToolRequestError("推送目标通道数量过多")
-    channels: list[str] = []
-    for raw in value:
-        target = str(raw or "").strip()
-        if not target or not _CHANNEL_RE.fullmatch(target):
-            raise SocialToolRequestError(f"不支持的推送目标标识: {target or '（空）'}")
-        if target not in channels:
-            channels.append(target)
-    return channels
+    try:
+        normalize_delivery_targets(value, allow_legacy=True)
+        return value
+    except DeliveryTargetInputError as exc:
+        raise SocialToolRequestError(str(exc)) from exc
 
 
 def _as_bool(value, default: bool = True) -> bool:
@@ -149,8 +146,18 @@ def _delivery_payload(result) -> dict | None:
 
 
 def _handle_exception(handler, request_id: str, action: str, exc: BaseException) -> bool:
-    """Map known parser failures without leaking URLs, cookies, or internals."""
+    """Map typed social failures without leaking URLs, cookies, or internals."""
+    from src.social.errors import (
+        SocialAuthRequired,
+        SocialDeliveryError,
+        SocialDownloadError,
+        SocialParseError,
+        SocialTranslationError,
+    )
+
     try:
+        # 兼容尚未迁移的第三方解析器；SocialService 会在核心边界先将
+        # 这些异常转换为统一类型。
         from src.social.single_fetcher import InstagramAuthRequired
         from src.social.instagram_embed import InstagramEmbedUnavailable
         known_auth = InstagramAuthRequired
@@ -161,14 +168,26 @@ def _handle_exception(handler, request_id: str, action: str, exc: BaseException)
 
     if isinstance(exc, SocialToolRequestError):
         return _error(handler, request_id, str(exc), code=400, error_code="invalid_request")
-    if isinstance(exc, known_auth):
+    if isinstance(exc, (SocialAuthRequired, known_auth)):
         return _error(handler, request_id, "Instagram 内容需要有效登录 Cookies（Story 不支持匿名解析）", code=422,
                       error_code="instagram_auth_required")
+    if isinstance(exc, SocialParseError):
+        return _error(handler, request_id, "Instagram 公开内容暂时无法解析，请稍后重试或检查链接权限", code=502,
+                      error_code="instagram_unavailable")
     if isinstance(exc, known_embed):
         return _error(handler, request_id, "Instagram 公开内容暂时无法解析，请稍后重试或检查链接权限", code=502,
                       error_code="instagram_unavailable")
     if isinstance(exc, (TimeoutError,)):  # explicit before the generic runtime mapping
         return _error(handler, request_id, "社媒解析超时，请稍后重试", code=504, error_code="upstream_timeout")
+    if isinstance(exc, SocialDownloadError):
+        return _error(handler, request_id, "社媒媒体下载失败，请稍后重试", code=502,
+                      error_code="download_failed")
+    if isinstance(exc, SocialTranslationError):
+        return _error(handler, request_id, "社媒翻译服务暂时不可用，请稍后重试", code=502,
+                      error_code="translation_failed")
+    if isinstance(exc, SocialDeliveryError):
+        return _error(handler, request_id, "社媒推送服务暂时不可用，请稍后重试", code=502,
+                      error_code="delivery_failed")
     if isinstance(exc, OSError):
         return _error(handler, request_id, "社媒媒体服务暂时不可用，请查看系统日志", code=502,
                       error_code="upstream_unavailable")
@@ -194,14 +213,14 @@ def handle_parse_post(handler, body, *, load_raw_config) -> bool:
         if not isinstance(raw_config, dict):
             raise RuntimeError("配置不是对象")
 
-        from src.social.forwarder import SocialForwarder
-        from src.social.single_fetcher import SocialUrlParser
+        from src.social.service import SocialService
 
         log_all(f"🔎 [社媒工具] 开始解析 | request_id={request_id}", is_debug=True)
-        post = SocialUrlParser(raw_config).parse(url)
+        service = SocialService(raw_config)
+        post = service.parse_url(url, request_id=request_id)
+        # 解析接口严格只负责 URL → Post；翻译/下载在 manual_push 的
+        # process_url 流程中完成，避免预览请求隐式触发准备副作用。
         translation = None
-        if _as_bool(body.get("translate"), True) and getattr(post, "text", ""):
-            translation = SocialForwarder(raw_config)._translate(post.text)
         payload = _post_payload(post, url, translation)
         payload["request_id"] = request_id
         log_all(
@@ -222,7 +241,7 @@ def handle_manual_push(handler, body, *, load_raw_config) -> bool:
         if not isinstance(body, dict):
             raise SocialToolRequestError("请求体必须是 JSON 对象")
         url = _validate_url(body.get("url"))
-        channels = _validate_channels(body.get("channels"))
+        targets = _validate_channels(body.get("channels"))
         raw_config = load_raw_config()
         if not isinstance(raw_config, dict):
             raise RuntimeError("配置不是对象")
@@ -230,13 +249,23 @@ def handle_manual_push(handler, body, *, load_raw_config) -> bool:
         from src.social.single_fetcher import manual_push_social_url
 
         log_all(f"🚀 [社媒工具] 开始手动推送 | request_id={request_id}", is_debug=True)
-        result = manual_push_social_url(
-            url,
-            raw_config,
-            target_channels=channels,
-            translate=_as_bool(body.get("translate"), True),
-            archive=_as_bool(body.get("archive"), True),
-        )
+        try:
+            result = manual_push_social_url(
+                url,
+                raw_config,
+                targets,
+                _as_bool(body.get("translate"), True),
+                _as_bool(body.get("archive"), True),
+                request_id=request_id,
+            )
+        except TypeError:
+            result = manual_push_social_url(
+                url,
+                raw_config,
+                targets,
+                _as_bool(body.get("translate"), True),
+                _as_bool(body.get("archive"), True),
+            )
         if not isinstance(result, dict):
             raise RuntimeError("推送器返回格式无效")
         result = dict(result)

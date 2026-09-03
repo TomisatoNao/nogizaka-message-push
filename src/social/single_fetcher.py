@@ -12,8 +12,6 @@ from typing import Any
 
 import requests
 
-from src.social.downloader import MediaDownloader
-from src.social.forwarder import SocialForwarder
 from src.social import ig_session
 from src.social.instagram_embed import InstagramEmbedUnavailable, fetch_public_post
 from src.social.models import MediaItem, Post
@@ -821,43 +819,35 @@ class SocialUrlParser:
 def manual_push_social_url(
     url: str,
     config: dict,
-    target_channels: list[str] | None = None,
+    targets=None,
     translate: bool = True,
     archive: bool = True,
+    *,
+    target_channels=None,
+    request_id: str = "",
 ) -> dict:
     """全流程：解析链接 → AI 翻译 → 媒体下载 → 通道分发 → 归档。"""
-    parser = SocialUrlParser(config)
-    post = parser.parse(url)
+    from src.social.service import SocialService, delivery_to_dict
+    from src.social.targeting import normalize_delivery_targets
 
-    # 1. 媒体下载（如为直链）
-    downloader = MediaDownloader(config)
-    downloader.download(post)
+    # 这是旧函数的输入兼容边界；进入 SocialService 前必须转换为领域目标。
+    if targets is not None and target_channels is not None:
+        raise ValueError("targets 和 target_channels 不能同时传入")
+    # 旧函数调用（第三个位置参数或 target_channels 关键字）只在这里
+    # 转换一次；核心 SocialService 从未接收过字符串通道。
+    raw_targets = targets if targets is not None else target_channels
+    targets = normalize_delivery_targets(raw_targets, allow_legacy=True)
 
-    # 2. 调度转发器分发
-    forwarder = SocialForwarder(config, downloader)
-
-    # 翻译
-    translated_text = None
-    if not translate:
-        post.extra["_skip_translate"] = True
-    elif post.text:
-        translated_text = forwarder._translate(post.text)
-        if translated_text:
-            post.extra["_translated"] = translated_text
-
-    # 若指定了通道则定向推，否则走标准 forward_post。除了兼容原有的
-    # ``ok`` 字段，再把每条路由的汇总结果返回给 WebUI，避免“请求完成”
-    # 被误解为“所有目标都已送达”。
-    forwarded = forwarder.forward_post(post, target_channels=target_channels)
-    delivery = forwarder.last_delivery_result
-
-    # 归档到 SQLite（若开启）
-    if archive:
-        try:
-            from src.social.archive import get_archive
-            get_archive().add_post(post)
-        except Exception as e:
-            log.warning("[社媒归档] 保存失败: %s", e)
+    operation = SocialService(config).process_url(
+        url,
+        targets=targets,
+        translate=translate,
+        archive=archive,
+        request_id=request_id,
+    )
+    post = operation.post
+    translated_text = operation.prepared.translated if operation.prepared else None
+    delivery = operation.delivery
 
     media_preview = [
         {
@@ -868,23 +858,13 @@ def manual_push_social_url(
         for m in post.media
     ]
 
-    delivery_payload = None
-    if delivery is not None:
-        delivery_payload = {
-            "outcome": delivery.outcome,
-            "matched_routes": delivery.matched_routes,
-            "attempted_routes": delivery.attempted_routes,
-            "success_routes": delivery.success_routes,
-            "failed_routes": delivery.failed_routes,
-            "skipped_routes": delivery.skipped_routes,
-            "errors": list(delivery.errors),
-        }
+    delivery_payload = delivery_to_dict(delivery)
 
     return {
         # 保持函数原有语义：解析/下载流程本身完成即返回 ok，调用方可
         # 通过 delivery.outcome 判断是否有路由失败。
         "ok": True,
-        "forwarded": bool(forwarded),
+        "forwarded": operation.completed,
         "platform": post.platform,
         "author": post.author,
         "text": post.text,

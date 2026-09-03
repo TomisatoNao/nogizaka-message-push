@@ -2,6 +2,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.social.contracts import DeliveryResult, DeliveryTarget, SocialDeliveryResult
+
 
 @dataclass
 class MediaItem:
@@ -9,6 +11,15 @@ class MediaItem:
     url: str           # original remote URL
     local_path: str = ""  # absolute local path after download
     alt_text: str = "" # image description / alt text (e.g. from X)
+
+
+@dataclass(frozen=True)
+class PreparedSocialPost:
+    """准备阶段产物，供多个投递入口复用。"""
+
+    translated: str | None
+    alt_translations: dict[int, str]
+    full_text: str
 
 
 @dataclass
@@ -20,3 +31,15 @@ class Post:
     media: list[MediaItem] = field(default_factory=list)
     timestamp: str = ""  # human-readable time string
     extra: dict[str, Any] = field(default_factory=dict)  # platform-specific metadata
+    # 统一链路标识；旧构造调用不传入时保持空字符串。
+    request_id: str = ""
+
+
+__all__ = [
+    "DeliveryResult",
+    "DeliveryTarget",
+    "MediaItem",
+    "Post",
+    "PreparedSocialPost",
+    "SocialDeliveryResult",
+]

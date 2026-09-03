@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import config.config as cfg
 
@@ -298,47 +298,17 @@ def allowed_senders() -> set[str]:
 async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "users", app_id: str = ""):
     """后台任务：解析社媒链接、下载多媒体、AI 翻译并回复（支持单聊与群聊）。"""
     from src.logger import log_all
+    request_id = f"qq-{uuid4().hex[:12]}"
+    raw_cfg = {}
+    target_bot = None
     try:
-        from src.social.single_fetcher import SocialUrlParser
-        from src.social.downloader import MediaDownloader
-        from src.social.forwarder import build_post_message, collect_alts
+        from src.social.service import SocialService
+        from src.social.contracts import DeliveryTarget
         from src.platforms import qq_official
 
         raw_cfg = cfg._load_config() if hasattr(cfg, "_load_config") else {}
-        parser = SocialUrlParser(raw_cfg)
 
-        # 1. 解析动态。解析器包含 requests/yt-dlp/Playwright 等同步 I/O，
-        # 放到线程中避免阻塞 Bot 事件循环（Playwright 同步 API 也不能
-        # 直接在已有 asyncio loop 的线程里启动）。
-        post = await asyncio.to_thread(parser.parse, url)
-
-        # 2. 并发执行：媒体多线程下载 与 异步 AI 智能翻译（带 10s 快速超时）
-        downloader = MediaDownloader(raw_cfg)
-
-        async def _do_translate_async():
-            t_res = None
-            if post.text:
-                try:
-                    from src import translator
-                    t_res = await asyncio.wait_for(translator.translate_text(post.text, "社媒", "偶像"), timeout=40.0)
-                    if t_res and t_res.strip() != post.text.strip():
-                        post.extra["_translated"] = t_res.strip()
-                except Exception as ex:
-                    log_all(f"⚠️ [社媒翻译] AI 翻译跳过/超时: {type(ex).__name__} {ex}".strip(), is_debug=True)
-            return t_res
-
-        download_task = asyncio.to_thread(downloader.download, post)
-        translate_task = _do_translate_async()
-        _, translated = await asyncio.gather(download_task, translate_task)
-
-        alt_zh: dict = {}
-        alts = collect_alts(post)
-        if alts:
-            post.extra["_alt_texts"] = {str(i): t for i, t in alts}
-
-        full_text = build_post_message(post, translated, alt_zh)
-
-        # 4. 获取目标 Bot
+        # 先选择 Bot，再把解析、下载、翻译、定向回复与归档交给统一服务层。
         bots = qq_official.get_configured_bots()
         target_bot = None
         if app_id:
@@ -365,54 +335,88 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             log_all("⚠️ [社媒解析] 未找到可用的 QQ 官方 Bot 实例", is_error=True)
             return
 
-        # 5. 回复正文（包含标题、原帖正文与双语翻译）
-        log_all(f"📤 [社媒解析] 开始向 {scope}:{target_id[:8]}… 发送动态正文与 {len(post.media)} 个媒体附件...")
-        if scope == "groups":
-            await target_bot.send_group_text(target_id, full_text)
+        service = SocialService(raw_cfg)
+        normalized_scope = "groups" if scope == "groups" else "users"
+        target = DeliveryTarget(
+            channel="qq_official",
+            target_id=str(target_id),
+            scope=normalized_scope,
+            bot_name=str(getattr(target_bot, "name", "") or ""),
+        ).bind_runtime(
+            target_bot,
+            route_id=f"official:direct:{normalized_scope}:{target_id}",
+        )
+        log_all(
+            f"📤 [社媒解析] 开始向 {scope}:{target_id[:8]}… 处理社媒动态 "
+            f"| request_id={request_id}"
+        )
+        operation = await asyncio.to_thread(
+            service.process_url,
+            url,
+            targets=[target],
+            translate=True,
+            archive=True,
+            request_id=request_id,
+        )
+        result = operation.delivery
+        media_ok = result.media_sent if result else 0
+        media_total = result.media_total if result else len(operation.post.media)
+        if operation.completed:
+            log_all(
+                f"✅ [社媒解析] 成功向 {scope}:{target_id[:8]}… 回复 "
+                f"{operation.post.platform} 动态: {operation.post.author} "
+                f"(发送 {media_ok}/{media_total} 个媒体) | request_id={request_id}"
+            )
         else:
-            await target_bot.send_private_text(target_id, full_text)
+            log_all(
+                f"⚠️ [社媒解析] 向 {scope}:{target_id[:8]}… 回复未完整送达 "
+                f"({result.outcome if result else 'error'}，发送 {media_ok}/{media_total} 个媒体) "
+                f"| request_id={request_id}",
+                is_error=True,
+            )
 
-        # 6. 回复所有高清图片 / 视频媒体附件
-        media_ok = 0
-        for m in post.media:
-            fp = m.local_path
-            if fp and os.path.exists(fp):
-                try:
-                    with open(fp, "rb") as mf:
-                        m_bytes = mf.read()
-                    if m_bytes:
-                        m_type = "image" if m.type == "image" else "video" if m.type == "video" else "record" if m.type == "audio" else "image"
-                        fname = os.path.basename(fp)
-                        sent = await target_bot.send_media_file(scope, target_id, m_type, m_bytes, filename=fname)
-                        if sent:
-                            media_ok += 1
-                        else:
-                            log_all(f"⚠️ [社媒解析] 媒体附件 {fname} 发送未成功 (API 返回 None)", is_error=True)
-                except Exception as ex:
-                    log_all(f"⚠️ [社媒解析] 发送媒体附件异常: {ex}", is_error=True)
-
-        # 7. 归档至数据库
+    except Exception as exc:
+        # 入口只记录类型和 request_id，避免把 URL、Cookie 或第三方响应写入
+        # 日志；失败回复也必须走统一 DeliveryService，而不是直接调用 Bot API。
+        error_name = type(exc).__name__
+        log_all(
+            f"⚠️ [社媒解析] 失败 | request_id={request_id} | error={error_name}",
+            is_error=True,
+        )
         try:
-            from src.social.archive import get_archive
-            get_archive().add_post(post)
-        except Exception as ex:
-            log_all(f"⚠️ [社媒归档] 保存失败: {ex}", is_error=True)
-
-        log_all(f"✅ [社媒解析] 成功向 {scope}:{target_id[:8]}… 回复 {post.platform} 动态: {post.author} (发送 {media_ok}/{len(post.media)} 个媒体)")
-
-    except Exception as e:
-        log_all(f"⚠️ [社媒解析] 失败: {e}", is_error=True)
-        try:
+            from src.social.contracts import DeliveryTarget
+            from src.social.service import SocialService
             from src.platforms import qq_official
-            bots = qq_official.get_configured_bots()
-            if bots:
-                err_msg = f"❌ 社媒链接解析失败: {e}"
-                if scope == "groups":
-                    await bots[0].send_group_text(target_id, err_msg)
-                else:
-                    await bots[0].send_private_text(target_id, err_msg)
-        except Exception:  # nosec B110
-            pass
+            if target_bot is None:
+                bots = qq_official.get_configured_bots()
+                target_bot = bots[0] if bots else None
+            if target_bot is not None:
+                normalized_scope = "groups" if scope == "groups" else "users"
+                fallback_target = DeliveryTarget(
+                    channel="qq_official",
+                    target_id=str(target_id),
+                    scope=normalized_scope,
+                    bot_name=str(getattr(target_bot, "name", "") or ""),
+                ).bind_runtime(
+                    target_bot,
+                    route_id=f"official:error:{normalized_scope}:{target_id}",
+                )
+                sent = await SocialService(raw_cfg).delivery_service.deliver_text(
+                    fallback_target,
+                    f"❌ 社媒链接解析失败（{error_name}，request_id={request_id}）",
+                )
+                if not sent:
+                    log_all(
+                        f"⚠️ [社媒解析] 失败提示未送达 | request_id={request_id} "
+                        f"| route_id={fallback_target.route_id}",
+                        is_error=True,
+                    )
+        except Exception as fallback_exc:  # nosec B110 - best-effort error path
+            log_all(
+                f"⚠️ [社媒解析] 失败提示异常 | request_id={request_id} "
+                f"| error={type(fallback_exc).__name__}",
+                is_error=True,
+            )
 
 
 _recent_social_tasks: dict[str, float] = {}
@@ -519,4 +523,3 @@ def _clip_reply(text: str) -> str:
     if len(text) <= MAX_REPLY_CHARS:
         return text
     return text[:MAX_REPLY_CHARS - 30] + "\n\n…（内容过长已截断）"
-

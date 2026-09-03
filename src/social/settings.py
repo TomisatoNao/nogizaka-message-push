@@ -15,6 +15,11 @@ social/settings.py — 社交模块配置读取助手
 因此老配置文件（没有这些字段）可以直接运行，完全向后兼容。
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 # 本模块管辖的平台名（sync_manager 用它判断走哪套推送格式）
 SOCIAL_PLATFORMS = ("x", "instagram", "tiktok", "tiktok_live")
 
@@ -154,6 +159,136 @@ _SOCIAL_DEFAULTS = {
     "error_backoff_seconds": 60,      # 单平台异常后的退避基数
     "error_backoff_max": 900,         # 退避上限
 }
+
+
+# ── 运行时通道配置视图 ─────────────────────────────────────
+#
+# 社交监控器会持有 config.json 的可变字典，以便 manager 热重载时原位更新。
+# 投递适配器不应再直接读取 config.config 的模块级变量：那会让测试无法隔离，
+# 也会让 WebUI 传入的临时配置与实际投递结果不一致。RuntimeConfig 以注入的
+# 字典为第一优先级，旧代码没有传入对应字段时再回退到全局 facade，保证旧
+# 配置文件和已有调用方继续工作。
+
+_MISSING = object()
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    """把 JSON/.env 常见值转换为布尔值，不把字符串 ``"false"`` 当真。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "off", "none", "null"}:
+            return False
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+    return bool(value)
+
+
+class RuntimeConfig:
+    """提供社交投递所需的最小配置读取接口。
+
+    ``raw_config`` 可以是 WebUI 读取的 JSONC（含 ``channels``）或应用启动
+    后的规范化字典（含 ``enable_*``）。对象只保存字典引用而不复制内容，
+    因此 ``manager.reload_social_service`` 原位更新配置后，下一次投递立即
+    使用新值。
+    """
+
+    _ALIASES: dict[str, tuple[str, ...]] = {
+        "ENABLE_TG_BOT": ("enable_tg_bot", "tg_enabled"),
+        "ENABLE_NAPCAT_QQ": ("enable_napcat_qq", "napcat_enabled"),
+        "ENABLE_QQ_OFFICIAL_BOT": (
+            "enable_qq_official_bot",
+            "qq_official_enabled",
+        ),
+        "NAPCAT_ROUTES": ("napcat_routes",),
+    }
+    _CHANNEL_KEYS = {
+        "tg": "ENABLE_TG_BOT",
+        "telegram": "ENABLE_TG_BOT",
+        "napcat": "ENABLE_NAPCAT_QQ",
+        "qq": "ENABLE_NAPCAT_QQ",
+        "qq_official": "ENABLE_QQ_OFFICIAL_BOT",
+        "official": "ENABLE_QQ_OFFICIAL_BOT",
+    }
+    _CHANNEL_ALIASES = {
+        "tg": ("tg", "telegram"),
+        "telegram": ("tg", "telegram"),
+        "napcat": ("napcat", "qq"),
+        "qq": ("napcat", "qq"),
+        "qq_official": ("qq_official", "official"),
+        "official": ("qq_official", "official"),
+    }
+
+    def __init__(self, raw_config: Mapping[str, Any] | None = None):
+        self._raw: Mapping[str, Any] = (
+            raw_config if isinstance(raw_config, Mapping) else {}
+        )
+
+    @property
+    def raw_config(self) -> Mapping[str, Any]:
+        """返回当前注入的配置视图（只读语义，不复制）。"""
+        return self._raw
+
+    def _raw_value(self, name: str) -> Any:
+        """读取注入配置，未提供时返回哨兵。"""
+        if name in self._raw:
+            return self._raw[name]
+        canonical = str(name).upper()
+        for alias in self._ALIASES.get(canonical, (str(name).lower(),)):
+            if alias in self._raw:
+                return self._raw[alias]
+        return _MISSING
+
+    def value(self, name: str, default: Any = None) -> Any:
+        """读取值：注入字典优先，兼容地回退至 config facade。"""
+        value = self._raw_value(name)
+        if value is not _MISSING:
+            return value
+        try:
+            import config.config as cfg
+            canonical = str(name).upper()
+            return getattr(cfg, canonical, getattr(cfg, name, default))
+        except (ImportError, AttributeError):
+            return default
+
+    def channel_enabled(self, channel: str) -> bool:
+        """返回 Telegram/NapCat/QQ 官方通道是否启用。"""
+        normalized = str(channel or "").strip().lower()
+        key = self._CHANNEL_KEYS.get(normalized)
+        if key is None:
+            return False
+
+        # JSONC 的公开格式优先使用 channels；它比旧版遗留的 enable_* 更
+        # 接近用户实际编辑的配置，且能明确用 false 覆盖全局默认值。允许
+        # 少量历史别名，避免临时配置使用 ``telegram``/``official`` 时失效。
+        channels = self._raw.get("channels")
+        if isinstance(channels, Mapping):
+            for alias in self._CHANNEL_ALIASES.get(normalized, (normalized,)):
+                if alias in channels:
+                    return _as_bool(channels[alias])
+
+        value = self._raw_value(key)
+        if value is not _MISSING:
+            return _as_bool(value)
+        return _as_bool(self.value(key, False))
+
+    def enabled(self, channel: str) -> bool:
+        """``channel_enabled`` 的简短别名，供适配器调用。"""
+        return self.channel_enabled(channel)
+
+    def list(self, name: str, default: Sequence[Any] = ()) -> list[Any]:
+        """读取路由等列表配置，避免把错误类型传给投递适配器。"""
+        value = self.value(name, default)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, (tuple, set)):
+            return list(value)
+        return list(default)
 
 
 def _merged(defaults: dict, raw: dict | None) -> dict:

@@ -304,6 +304,12 @@ flowchart LR
 - **全渠道备注支持**：每个群、每个 Bot 均支持直观备注（如 `乃木坂主群`、`5期生频道`），管理端与弹窗清晰展示；
 - **独立过滤与订阅开关**：各通道可独立勾选接收的内容类型，并设置 `member_filter`、`blog_filter`、`social_filter`。
 
+社媒动态的事件总线由四个可替换边界组成：`MessagePreparationService` 负责翻译、
+Alt 文本和正文格式化；`RoutePlanner` 负责过滤器与目标路由；`DeliveryService`
+负责并发投递、逐路由补偿重试和统一结果；`ArchiveService` 与
+`DeliveryStateRepository` 分别负责幂等归档和投递状态。Telegram、NapCat、QQ
+官方 Bot 通过 `ChannelAdapter` 接入，定时监控、WebUI 和 QQ 指令共享同一投递服务。
+
 ### 2. 单次鉴权下载流水线 (Single-Download Flow)
 
 针对坂道 Message 托管在 CloudFront 上的私有鉴权媒体，系统采用单次流水线架构：
