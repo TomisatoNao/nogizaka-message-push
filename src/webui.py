@@ -370,7 +370,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({
                 "ok": True, "config": raw,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
-                "env_status": _env_status(),
+                "env_status": _env_status(raw),
                 # 只返回稳定的逻辑名称，避免暴露容器内绝对路径。
                 "config_path": CONFIG_PATH.name,
                 "auth_required": bool(os.getenv("WEB_ADMIN_TOKEN", "")),
@@ -695,13 +695,14 @@ class _Handler(BaseHTTPRequestHandler):
                 for key in remove:
                     os.environ.pop(key, None)
                 reloaded = _trigger_reload()
+            raw = None
             try:
                 raw = _load_raw_config()
                 status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
             except Exception:
                 status = {}
             self._audit("secrets.remove", details={"keys": ",".join(sorted(remove)), "reloaded": reloaded})
-            self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove), "env_status": _env_status(), **status})
+            self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove), "env_status": _env_status(raw), **status})
             return
 
         values = body.get("values")
@@ -735,6 +736,7 @@ class _Handler(BaseHTTPRequestHandler):
                 _rotate_account_creds(account)
             reloaded = _trigger_reload()
 
+        raw = None
         try:
             raw = _load_raw_config()
             status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
@@ -742,7 +744,7 @@ class _Handler(BaseHTTPRequestHandler):
             status = {}
         self._audit("secrets.update", target=str(account or ""),
                     details={"keys": ",".join(sorted(values)), "reloaded": reloaded})
-        self._send_json({"ok": True, "reloaded": reloaded, "updated": sorted(values), "env_status": _env_status(), **status})
+        self._send_json({"ok": True, "reloaded": reloaded, "updated": sorted(values), "env_status": _env_status(raw), **status})
 
     def log_message(self, fmt: str, *args) -> None:
         pass

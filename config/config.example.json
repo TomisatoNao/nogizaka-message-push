@@ -14,6 +14,7 @@
   "napcat_routes": [],
 
   // ── Telegram Bot 路由配置 ──
+  // 每个 Bot 的凭证放在 .env：名称 tg_bot1 对应 TG_BOT1_TOKEN
   "tg_bots": [],
 
   // ── 网页管理端（Docker 默认仅发布到宿主机 localhost）──

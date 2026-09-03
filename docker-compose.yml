@@ -13,7 +13,7 @@ services:
       # 可直接在此处注入密钥（或写入挂载的 .env 文件）：
       # - WEB_ADMIN_TOKEN=your_admin_token
       # - GEMINI_API_KEY=AIzaSy...
-      # - TG_BOT_TOKEN=123456:ABC-DEF...
+      # - TG_BOT1_TOKEN=123456:ABC-DEF...  # 对应 config.json 的 tg_bot1
     volumes:
       - ./config:/app/config
       - ./data:/app/data

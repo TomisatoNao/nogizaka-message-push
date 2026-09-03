@@ -127,7 +127,9 @@ def enabled_channels() -> list[str]:
         channels.append("napcat")
     if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False) and has_bots():
         channels.append("official")
-    if getattr(cfg, "ENABLE_TG_BOT", False) and getattr(cfg, "TG_BOTS", []):
+    # 只有成功初始化且具备专属 Token 的 Bot 才算可用通道；
+    # 声明了路由但凭证缺失时不能把 Telegram 误报为已启用。
+    if getattr(cfg, "ENABLE_TG_BOT", False) and tgbot.get_configured_bots():
         channels.append("tg")
     return channels
 

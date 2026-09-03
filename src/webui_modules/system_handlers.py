@@ -45,16 +45,42 @@ def tail_file(path: Path, max_lines: int) -> list[str]:
     return [ln[:2000] for ln in lines[-max_lines:]]
 
 
-def env_status() -> dict:
-    """返回常用环境变量的配置状态（只报有无，不报值）。"""
-    return {
+def env_status(raw_config: dict | None = None) -> dict:
+    """返回环境变量配置状态（只报有无，不报值）。
+
+    Telegram 凭证按 ``config.json`` 中的 Bot 名称逐项报告，避免再提供一个
+    看似可继承的全局 Token 状态。旧版 ``TG_BOT_TOKEN`` 仅作为迁移提示暴露
+    布尔值，运行时不会读取它。
+    """
+    status = {
         "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
         "ZHIPU_API_KEY": bool(os.getenv("ZHIPU_API_KEY")),
-        "TG_BOT_TOKEN": bool(os.getenv("TG_BOT_TOKEN")),
         "INSTAGRAM_SESSIONID": bool(os.getenv("INSTAGRAM_SESSIONID")),
         "X_AUTH_TOKEN": bool(os.getenv("X_AUTH_TOKEN")),
         "TIKTOK_SESSIONID": bool(os.getenv("TIKTOK_SESSIONID")),
     }
+
+    # 延迟导入，避免 WebUI 模块导入阶段改变配置加载顺序。
+    from config.config import tg_token_env_key
+
+    tg_status: dict[str, dict[str, str | bool]] = {}
+    declared = raw_config.get("tg_bots", []) if isinstance(raw_config, dict) else []
+    if isinstance(declared, list):
+        for bot in declared:
+            if not isinstance(bot, dict):
+                continue
+            name = str(bot.get("name", "")).strip()
+            env_key = tg_token_env_key(name)
+            if not name:
+                continue
+            tg_status[name] = {
+                "env_key": env_key,
+                "configured": bool(env_key and os.getenv(env_key, "").strip()),
+            }
+    status["tg_bots"] = tg_status
+    # 仅用于提示旧配置需要迁移，不代表可用凭证，也不允许前端填写它。
+    status["legacy_tg_token"] = bool(os.getenv("TG_BOT_TOKEN", "").strip())
+    return status
 
 
 def handle_status(handler, on_poll_cb=None) -> None:

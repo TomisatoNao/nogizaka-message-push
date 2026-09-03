@@ -7,6 +7,7 @@
 import copy as _copy
 import json as _json
 import os as _os
+import re as _re
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -136,7 +137,6 @@ _DEFAULTS: dict = {
     "enable_napcat_qq":         False,
     "enable_qq_official_bot":   False,
     "enable_tg_bot":            False,
-    "tg_bot_token":             "",  # legacy single bot token
     "tg_bots":                  [],
     "napcat_routes":            [],
     "proxy":                    "",
@@ -177,8 +177,6 @@ def _normalize_config(raw: dict) -> dict:
         cfg["enable_napcat_qq"]       = channels.get("napcat", False)
         cfg["enable_qq_official_bot"] = channels.get("qq_official", False)
         cfg["enable_tg_bot"]          = channels.get("tg", False)
-        # tg_bot_token 由 _load_config 统一从 .env 读取（步骤 7），此处不重复赋值
-
         if "napcat_api" in cfg:
             cfg["qq_bot_api"] = cfg.pop("napcat_api")
 
@@ -296,7 +294,8 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["tg_bots"] = []
                 for i, (chat_id, members) in enumerate(legacy_tg_chats.items()):
                     # Create one bot configuration per unique chat id to mimic old behavior
-                    # The token will fallback to the global TG_BOT_TOKEN
+                    # 每个自动生成的路由仍需手动配置对应的专属 Token。
+                    # 这里不再隐式继承旧版全局 TG_BOT_TOKEN。
                     cfg["tg_bots"].append({
                         "name": f"tg_bot_{i+1}",
                         "target_chat": chat_id,
@@ -455,11 +454,30 @@ def _build_qq_official_bots(cfg: dict) -> dict:
     return cfg
 
 
+def tg_token_env_key(name: str) -> str:
+    """返回 Bot 名称对应的专属 Token 环境变量名。
+
+    例如 ``tg_bot1`` → ``TG_BOT1_TOKEN``。Bot 名称允许在管理端编辑，
+    因此这里与前端保持同一套安全的环境变量名归一化规则；空名称返回空字符串。
+    """
+    normalized = _re.sub(r"[^A-Z0-9_]", "_", str(name or "").strip().upper())
+    normalized = _re.sub(r"_+", "_", normalized).strip("_")
+    if not normalized:
+        return ""
+    if not normalized[0].isalpha():
+        normalized = f"TG_BOT_{normalized}"
+    # 避免名称 ``tg_bot`` 恰好生成已废弃的全局变量名。
+    if normalized == "TG_BOT":
+        normalized = "TG_BOT_INSTANCE"
+    return f"{normalized}_TOKEN"
+
+
 def _build_tg_bots(cfg: dict) -> dict:
-    """构建多 TG Bot 列表。
-    
-    从 config.json 的 tg_bots 读取，token 按 {NAME大写}_TOKEN 从 .env 匹配；
-    如果未找到，回退使用全局 TG_BOT_TOKEN。
+    """构建多 TG Bot 列表，每个 Bot 只读取自己的专属 Token。
+
+    ``config.json`` 只声明 Bot 与路由，凭证按 ``<Bot 名称大写>_TOKEN``
+    从 ``.env`` 读取。缺少专属变量时保留空凭证，交由运行时明确跳过，
+    绝不回退到旧版全局 ``TG_BOT_TOKEN``。
     """
     if not cfg.get("enable_tg_bot"):
         cfg["tg_bots"] = []
@@ -467,15 +485,17 @@ def _build_tg_bots(cfg: dict) -> dict:
 
     declared = cfg.get("tg_bots") or []
     bots = []
-    global_token = _env("TG_BOT_TOKEN", "")
     
     for b in declared:
-        prefix = str(b.get("name", "")).upper()
-        token = _env(f"{prefix}_TOKEN", "") or global_token
+        name = str(b.get("name", "")).strip()
+        token_env = tg_token_env_key(name)
+        token = _env(token_env, "") if token_env else ""
         bots.append({
             "name":           b.get("name", ""),
             "remark":         b.get("remark", ""),
             "token":          token,
+            "token_env":      token_env,
+            "token_configured": bool(token),
             "target_chat":    str(b.get("target_chat", "")).strip(),
             "push_message":   bool(b.get("push_message", True)),
             "push_blog":      bool(b.get("push_blog", False)),
@@ -511,7 +531,6 @@ _KEY_TO_VAR: dict[str, str] = {
     "enable_napcat_qq":             "ENABLE_NAPCAT_QQ",
     "enable_qq_official_bot":       "ENABLE_QQ_OFFICIAL_BOT",
     "enable_tg_bot":               "ENABLE_TG_BOT",
-    "tg_bot_token":                "TG_BOT_TOKEN",
     "qq_bot_api":                   "QQ_BOT_API",
     "qq_user_agent":                "QQ_USER_AGENT",
     "qq_official_token_url":        "QQ_OFFICIAL_TOKEN_URL",
@@ -757,7 +776,6 @@ def _load_config() -> dict:
     # 7. 从 .env 补充密钥（覆盖 config.json 中的 $ENV: 占位符）
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
     cfg["zhipu_api_key"]  = _env("ZHIPU_API_KEY", "")
-    cfg["tg_bot_token"]   = _env("TG_BOT_TOKEN", "")
     cfg["proxy"]          = (cfg.get("proxy") or "").strip() or _env("HTTP_PROXY") or _env("HTTPS_PROXY") or _env("ALL_PROXY") or _env("PROXY", "")
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
@@ -867,14 +885,13 @@ def reload() -> bool:
 
         # 重新应用环境变量覆盖
         global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD, \
-               ENABLE_TG_BOT, TG_BOT_TOKEN
+               ENABLE_TG_BOT
         ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)
         ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT)
         DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)
 
-        # 补回 TG Bot 热重载环境变量覆盖
+        # TG Bot 的专属 Token 会在 _load_config → _build_tg_bots 中重新读取。
         ENABLE_TG_BOT  = _env_bool("ENABLE_TG_BOT", ENABLE_TG_BOT)
-        TG_BOT_TOKEN   = _env("TG_BOT_TOKEN", TG_BOT_TOKEN)
 
         return True
     except SystemExit as e:

@@ -599,16 +599,7 @@
   <!-- Block 4: Telegram Bot 模块 -->
   <div class="card">
     <h2>✈️ Telegram Bots (独立解耦，凭证存 .env)</h2>
-    <div style="margin-bottom: 14px; padding: 12px 16px; background: var(--card-soft); border-radius: var(--radius-sm); border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-        <span style="font-size: 13px; font-weight: 500;">默认 TG Bot Token (.env):</span>
-        <span id="tgTokenStatus"></span>
-      </div>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn small" id="btnFillTgToken" type="button">填写</button>
-        <button class="btn small danger" id="btnClearTgToken" type="button" style="display:none;">清空</button>
-      </div>
-    </div>
+    <div id="tgTokenMigrationNotice" class="hint" hidden style="margin-bottom: 14px; padding: 10px 14px; color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-radius: var(--radius-sm);"></div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -632,7 +623,7 @@
         ℹ️ Telegram Bot 配置与多 Bot / 多频道分发说明
       </summary>
       <div class="hint" style="margin-top: 8px; line-height: 1.65;">
-        • <b>默认与专属 Token</b>：上方设置全局「默认 TG Bot Token」；若某个 Bot 需要独立的机器人 Token，可在表格中点击「填写」存入 <code>.env</code>（变量名如 <code>TG_BOT2_TOKEN</code>）。未单独配置的 Bot 自动继承默认 Token。<br/>
+        • <b>每个 Bot 使用独立 Token</b>：在对应行点击「填写」，凭证会写入 <code>.env</code>。变量名由 Bot 名称生成（例如 <code>tg_bot1</code> → <code>TG_BOT1_TOKEN</code>）；未配置专属 Token 的 Bot 不会注册或推送。<br/>
         • <b>Target Chat ID 格式</b>：个人用户填 numeric ID（如 <code>12345678</code>）；群组/频道填 <code>-100</code> 开头的群 ID。<br/>
         • <b>多目标路由推送</b>：通过添加多行配置，将不同成员的消息分发给不同的 TG 群组或频道。
       </div>
@@ -1464,7 +1455,7 @@
 let config = null;        // 当前编辑中的配置对象（新格式）
 let credStatus = {};      // 账号凭证状态
 let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
-let envStatus = {};       // GEMINI_API_KEY / TG_BOT_TOKEN 是否已配置
+let envStatus = {};       // 常用凭证与每个 Telegram Bot 专属 Token 的配置状态
 let dirty = false;
 // 清理旧版保存在 localStorage 中的静态 Token；Token 模式改用 HttpOnly 会话 Cookie。
 try { localStorage.removeItem("webAdminToken"); } catch (_) {}
@@ -2230,12 +2221,18 @@ function renderGeneral() {
   }).filter((x) => x && x.openid);
   renderCmdOpenids();
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
-  $("tgTokenStatus").innerHTML = envBadge(envStatus.TG_BOT_TOKEN);
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
-  if ($("btnClearTgToken")) $("btnClearTgToken").style.display = envStatus.TG_BOT_TOKEN ? "inline-block" : "none";
   if ($("btnClearGeminiKey")) $("btnClearGeminiKey").style.display = envStatus.GEMINI_API_KEY ? "inline-block" : "none";
   if ($("btnClearZhipuKey")) $("btnClearZhipuKey").style.display = envStatus.ZHIPU_API_KEY ? "inline-block" : "none";
+  const tgNotice = $("tgTokenMigrationNotice");
+  if (tgNotice) {
+    const legacy = !!envStatus.legacy_tg_token;
+    tgNotice.hidden = !legacy;
+    tgNotice.textContent = legacy
+      ? "⚠️ 检测到旧版 TG_BOT_TOKEN。该变量已废弃且不会被使用，请在下方为每个 Bot 填写专属 Token。"
+      : "";
+  }
   if ($("sysProxy")) $("sysProxy").value = config.proxy || "";
   renderQqBots();
   renderSocialPushTargets();
@@ -2953,17 +2950,12 @@ async function clearEnvSecret(envKey, name) {
     if (data.env_status) envStatus = data.env_status;
     renderGeneral();
     renderSocial();
+    if (typeof renderChannels === "function") renderChannels();
     msg(`✅ 已成功清空 ${name}` + (data.reloaded ? "（热重载已生效）" : ""), data.reloaded ? "ok" : "err");
   } catch (e) {
     msg("清空失败：" + e.message, "err");
   }
 }
-
-$("btnFillTgToken").addEventListener("click", () => openSecretDialog(
-  "填写 TG Bot Token", "⚠️ TG Bot 实例在启动时创建，保存后需点右上角「⟳ 重启主程序」生效。",
-  [{ env: "TG_BOT_TOKEN", label: "Bot Token", required: true, placeholder: "123456:ABC-DEF...",
-     help: "Telegram 找 @BotFather → /newbot 创建后获得，格式如 123456789:AAE0abc...。" }], null));
-if ($("btnClearTgToken")) $("btnClearTgToken").addEventListener("click", () => clearEnvSecret("TG_BOT_TOKEN", "TG Bot Token"));
 
 $("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
   "填写 Gemini API Key", "保存并热重载后立即生效（翻译每次调用时读取最新值）。",
@@ -3737,6 +3729,18 @@ function renderChannels() {
   if (typeof renderQqBots === 'function') renderQqBots();
 }
 
+// 与 config.config.tg_token_env_key 保持一致：Bot 名称决定唯一的专属 Token 变量。
+function tgTokenEnvKey(name) {
+  let normalized = String(name || "").trim().toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!normalized) return "";
+  if (!/^[A-Z]/.test(normalized)) normalized = "TG_BOT_" + normalized;
+  if (normalized === "TG_BOT") normalized = "TG_BOT_INSTANCE";
+  return normalized + "_TOKEN";
+}
+
 function collectChannels() {
   // Config collected on save button click or dialog save. 
   // Arrays are manipulated in place.
@@ -3793,12 +3797,13 @@ function renderTGBots() {
   const tbody = $("tgBotRows");
   tbody.innerHTML = "";
   const bots = config.tg_bots || [];
-  
+  const statusByName = (envStatus && envStatus.tg_bots) || {};
+
   bots.forEach((b, idx) => {
     const tr = document.createElement("tr");
     
     const tdName = document.createElement("td");
-    tdName.appendChild(mkInput(b.name || "", (v) => { 
+    tdName.appendChild(mkInput(b.name || "", (v) => {
       b.name = v.trim().toLowerCase(); 
       markDirty();
     }, "tg_main", "width:110px"));
@@ -3812,37 +3817,55 @@ function renderTGBots() {
     }, "例如：频道A", "width:120px"));
     
     const tdChat = document.createElement("td");
-    tdChat.appendChild(mkInput(b.target_chat || "", (v) => { 
+    tdChat.appendChild(mkInput(b.target_chat || "", (v) => {
       b.target_chat = v.trim(); 
       markDirty();
     }, "-10012345678", "width:130px"));
     
-    const secretVar = (b.name || "").toUpperCase() + "_TOKEN";
+    const secretVar = tgTokenEnvKey(b.name);
     const tdSecret = document.createElement("td");
     tdSecret.style.whiteSpace = "nowrap";
-    const isCustom = !!envStatus[secretVar];
-    const isDefault = !!envStatus.TG_BOT_TOKEN;
-    
+    const tokenState = statusByName[b.name] || {};
+    const isConfigured = !!tokenState.configured;
+    const keyHint = document.createElement("div");
+    keyHint.className = "hint";
+    keyHint.style.cssText = "font-size:11px; margin-bottom:4px; white-space:nowrap;";
+    keyHint.textContent = secretVar || "先填写有效 Bot 名称";
+    tdSecret.appendChild(keyHint);
+
     const secBtn = document.createElement("button");
-    secBtn.className = "btn-secret-status " + (isCustom ? "configured" : (isDefault ? "configured" : "unconfigured"));
+    secBtn.className = "btn-secret-status " + (isConfigured ? "configured" : "unconfigured");
     secBtn.type = "button";
-    if (isCustom) {
+    secBtn.disabled = !secretVar;
+    if (isConfigured) {
       secBtn.innerHTML = '<span class="secret-dot"></span><span>✓ 专属 Token</span><span class="secret-action">修改</span>';
-    } else if (isDefault) {
-      secBtn.innerHTML = '<span class="secret-dot" style="background:#60a5fa"></span><span style="color:#93c5fd">🌐 继承默认</span><span class="secret-action">设置专属</span>';
     } else {
       secBtn.innerHTML = '<span class="secret-dot"></span><span>✗ 未配置</span><span class="secret-action">填写</span>';
     }
     secBtn.onclick = (e) => {
       e.preventDefault();
+      if (!secretVar) return;
       openSecretDialog(
         "填写 TG Bot Token：" + (b.name || "未命名"),
-        "写入 <code>" + esc(secretVar) + "</code>（专属 Token）或在上方设置「默认 TG Bot Token」，保存后重启生效。",
-        [{ env: secretVar, label: "专属 Bot Token", required: false, placeholder: "123456:ABC-DEF...",
-           help: "若填写则该 Bot 使用独立专属 Token；若留空则自动回退使用默认 TG Bot Token。" }],
+        "写入 <code>" + esc(secretVar) + "</code>（该 Bot 的唯一凭证），保存后重启生效。",
+        [{ env: secretVar, label: "专属 Bot Token", required: true, placeholder: "123456:ABC-DEF...",
+           help: "Telegram 找 @BotFather → /newbot 创建后获得。每个 Bot 必须填写自己的 Token，不会继承其他 Bot 的凭证。" }],
         null, { onDone: () => { renderTGBots(); } });
     };
     tdSecret.appendChild(secBtn);
+    if (isConfigured) {
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "btn small danger";
+      clearBtn.type = "button";
+      clearBtn.style.cssText = "margin-left:6px; padding:3px 7px; font-size:11px;";
+      clearBtn.textContent = "清空";
+      clearBtn.onclick = async (e) => {
+        e.preventDefault();
+        await clearEnvSecret(secretVar, "TG Bot " + (b.name || "Token"));
+        renderTGBots();
+      };
+      tdSecret.appendChild(clearBtn);
+    }
 
     const tdSub = document.createElement("td");
     const bLabel = b.remark ? `${b.remark} (${b.name || '#' + (idx + 1)})` : (b.name || "#" + (idx + 1));

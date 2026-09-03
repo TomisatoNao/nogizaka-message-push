@@ -2,6 +2,7 @@
 # tgbot.py — Telegram Bot 推送（HTML 格式化，支持多 Bot 实例）
 # ============================================================
 import asyncio
+import os
 import re
 
 import config.config as cfg
@@ -307,34 +308,50 @@ def initialize() -> None:
     """在事件循环内调用，初始化所有配置的 TG Bot 实例。"""
     global _bots
     _bots = []
-    
-    if getattr(cfg, "ENABLE_TG_BOT", False) and getattr(cfg, "TG_BOTS", []):
-        for bot_cfg in cfg.TG_BOTS:
-            if not bot_cfg.get("token"):
-                continue
-            
-            bot = TGBot(
-                name=bot_cfg.get("name", "tg_unnamed"),
-                remark=bot_cfg.get("remark", ""),
-                token=bot_cfg.get("token", ""),
-                target_chat=bot_cfg.get("target_chat", ""),
-                member_filter=bot_cfg.get("member_filter") or [],
-                blog_filter=bot_cfg.get("blog_filter") or [],
-                social_filter=bot_cfg.get("social_filter") or [],
-                push_message=bool(bot_cfg.get("push_message", True)),
-                push_blog=bool(bot_cfg.get("push_blog", False)),
-                push_x=bool(bot_cfg.get("push_x", True)),
-                push_instagram=bool(bot_cfg.get("push_instagram", True)),
-                push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
-                push_live=bool(bot_cfg.get("push_live", True)),
-                push_alert=bool(bot_cfg.get("push_alert", False)),
-                blog_card_mode=bot_cfg.get("blog_card_mode", "card_and_images")
+
+    if not getattr(cfg, "ENABLE_TG_BOT", False):
+        return
+
+    # 仅用于迁移提示：旧变量存在时也不会参与凭证解析或 Bot 初始化。
+    if os.getenv("TG_BOT_TOKEN", "").strip():
+        log_all(
+            "⚠️ 检测到已废弃的 TG_BOT_TOKEN；该变量不会被使用，"
+            "请为每个 Bot 配置对应的专属 <Bot名称大写>_TOKEN",
+            is_warning=True,
+        )
+
+    for bot_cfg in getattr(cfg, "TG_BOTS", []):
+        if not bot_cfg.get("token"):
+            name = str(bot_cfg.get("name") or "未命名 Bot")
+            token_env = bot_cfg.get("token_env") or "<Bot名称大写>_TOKEN"
+            log_all(
+                f"⚠️ TG Bot [{name}] 未配置专属 Token（需要 {token_env}），已跳过",
+                is_warning=True,
             )
-            bot.initialize()
-            if bot._bot:
-                _bots.append(bot)
-                display_name = f"{bot.name} ({bot.remark})" if bot.remark else bot.name
-                log_all(f"📝 注册 TG Bot: {display_name}")
+            continue
+
+        bot = TGBot(
+            name=bot_cfg.get("name", "tg_unnamed"),
+            remark=bot_cfg.get("remark", ""),
+            token=bot_cfg.get("token", ""),
+            target_chat=bot_cfg.get("target_chat", ""),
+            member_filter=bot_cfg.get("member_filter") or [],
+            blog_filter=bot_cfg.get("blog_filter") or [],
+            social_filter=bot_cfg.get("social_filter") or [],
+            push_message=bool(bot_cfg.get("push_message", True)),
+            push_blog=bool(bot_cfg.get("push_blog", False)),
+            push_x=bool(bot_cfg.get("push_x", True)),
+            push_instagram=bool(bot_cfg.get("push_instagram", True)),
+            push_tiktok=bool(bot_cfg.get("push_tiktok", True)),
+            push_live=bool(bot_cfg.get("push_live", True)),
+            push_alert=bool(bot_cfg.get("push_alert", False)),
+            blog_card_mode=bot_cfg.get("blog_card_mode", "card_and_images")
+        )
+        bot.initialize()
+        if bot._bot:
+            _bots.append(bot)
+            display_name = f"{bot.name} ({bot.remark})" if bot.remark else bot.name
+            log_all(f"📝 注册 TG Bot: {display_name}")
 
 def get_configured_bots() -> list[TGBot]:
     return _bots
@@ -389,7 +406,11 @@ def _retry_wait(exc: Exception) -> float:
 async def health_check() -> bool:
     """验证所有 Bot Token 有效性。"""
     if getattr(cfg, "ENABLE_TG_BOT", False) and not _bots:
-        log_all("🔴 TG Bot 未初始化（TG_BOTS 配置缺失或 python-telegram-bot 未安装）", is_error=True)
+        log_all(
+            "⚠️ Telegram Bot 已启用，但没有配置可用的专属 Token，"
+            "请检查每个 Bot 的 <Bot名称大写>_TOKEN",
+            is_warning=True,
+        )
         return False
         
     any_ok = False

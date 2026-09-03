@@ -96,6 +96,30 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
             errors.append(f"官方 Bot 名称重复: {name!r}")
         bot_names.add(name)
 
+    # Telegram Bot 名称会映射到 .env 变量；重复或归一化后冲突会导致
+    # 两个路由意外共用同一凭证，因此在保存前直接阻止。
+    from config.config import tg_token_env_key
+    tg_names: set[str] = set()
+    tg_env_keys: dict[str, str] = {}
+    for b in raw.get("tg_bots", []):
+        name = str(b.get("name", "")).strip()
+        if not name:
+            errors.append("Telegram Bot 名称不能为空")
+            continue
+        if name in tg_names:
+            errors.append(f"Telegram Bot 名称重复: {name!r}")
+        tg_names.add(name)
+        env_key = tg_token_env_key(name)
+        if not env_key:
+            errors.append(f"Telegram Bot 名称无法生成有效凭证变量: {name!r}")
+            continue
+        previous = tg_env_keys.get(env_key)
+        if previous is not None and previous != name:
+            errors.append(
+                f"Telegram Bot 名称映射到同一凭证变量 {env_key}: {previous!r} 与 {name!r}"
+            )
+        tg_env_keys[env_key] = name
+
     return errors
 
 
@@ -104,7 +128,7 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
 # ================================================================
 
 _SECTIONS: list[tuple[str, list[str]]] = [
-    ("── 推送通道 ──",  ["channels", "napcat_api", "qq_official_bots"]),
+    ("── 推送通道 ──",  ["channels", "napcat_api", "napcat_routes", "tg_bots", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 消息归档 ──",  ["archive"]),
     ("── 每日摘要 ──",  ["daily_summary"]),
@@ -127,7 +151,8 @@ def _render_value(key: str, val) -> str:
     if key == "accounts" and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
-    if key in ("monitor", "gemini_models", "qq_official_bots") and isinstance(val, list) and val:
+    if key in ("monitor", "gemini_models", "qq_official_bots", "napcat_routes", "tg_bots") \
+            and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
     if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands") \
@@ -272,7 +297,9 @@ _SECRET_KEY_RE = re.compile(
     r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID|SESSIONID|USER_ID)"
     r"|GEMINI_API_KEY|ZHIPU_API_KEY|INSTAGRAM_SESSIONID|INSTAGRAM_DS_USER_ID|X_AUTH_TOKEN|TIKTOK_SESSIONID)$"
 )
-_FORBIDDEN_ENV_KEYS = {"WEB_ADMIN_TOKEN"}
+# 管理端令牌不能从网页写入；旧版全局 TG Token 也只保留迁移检测，
+# 防止新配置继续产生“默认 Bot”语义。
+_FORBIDDEN_ENV_KEYS = {"WEB_ADMIN_TOKEN", "TG_BOT_TOKEN"}
 
 
 def _quote_env(val: str) -> str:

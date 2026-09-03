@@ -187,9 +187,13 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     # ── 检查 TG Bot 连通性 ──────────────────────────────────
     if tg_enabled:
         if not tgbot.get_configured_bots():
-            log_all("⚠️ Telegram Bot 已启用，但尚未配置有效 Bot", is_warning=True)
+            log_all(
+                "⚠️ Telegram Bot 已启用，但没有配置可用的专属 Token，"
+                "请在每个 Bot 的环境变量中填写 <Bot名称大写>_TOKEN",
+                is_warning=True,
+            )
             all_ok = False
-            setup_reasons.append("Telegram Bot 尚未配置")
+            setup_reasons.append("Telegram Bot 专属凭证未配置")
         elif await tgbot.health_check():
             health.get_tracker().record_channel("tg", True)
         else:
@@ -209,10 +213,11 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
             setup_reasons.append("尚未配置监控成员")
         else:
             official_covers_all = official_enabled and qq_official.has_bots()
+            tg_ready = tg_enabled and bool(tgbot.get_configured_bots())
             orphans = [] if official_covers_all else [
                 str(member.get("m_name") or member.get("m_id")) for member in monitors
                 if not (napcat_enabled and member.get("target_groups"))
-                and not (tg_enabled and (member.get("tg_chat_id") or "").strip())
+                and not (tg_ready and (member.get("tg_chat_id") or "").strip())
             ]
             if orphans:
                 log_all(

@@ -475,10 +475,15 @@ Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env
 ```bash
 GEMINI_API_KEY=AIzaSy...               # Google Gemini API Key
 ZHIPU_API_KEY=df488cc9...              # 智谱开放平台 API Key
-TG_BOT_TOKEN=123456:ABC...             # Telegram Bot Token
+TG_BOT1_TOKEN=123456:ABC...            # config.json 中 tg_bot1 的专属 Token
+# TG_BOT2_TOKEN=123456:XYZ...           # config.json 中 tg_bot2 的专属 Token
 WEB_ADMIN_TOKEN=your_token             # Web 管理端外部 API 调用 Token (可选)
 INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 ```
+
+Telegram 每个 Bot 必须配置独立的 `<Bot 名称大写>_TOKEN` 环境变量（例如
+`tg_bot1` 对应 `TG_BOT1_TOKEN`）。旧版全局 `TG_BOT_TOKEN` 已废弃，即使仍存在也不会
+被读取；未配置专属 Token 的 Bot 会在启动时明确跳过。
 
 > Instagram 单条公开帖子通常无需登录：解析器会在私有接口被拒后自动打开
 > `/p/<code>/embed/captioned/`，提取公开 CDN 图片或视频，再由下载器直下。
