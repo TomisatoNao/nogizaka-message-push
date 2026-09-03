@@ -100,6 +100,10 @@ from src.webui_modules.social_handlers import (
     handle_subscriptions as _social_handle_subscriptions,
     handle_subscriptions_sync as _social_handle_subscriptions_sync,
 )
+from src.webui_modules.social_tool_handlers import (
+    handle_manual_push as _social_tool_handle_manual_push,
+    handle_parse_post as _social_tool_handle_parse_post,
+)
 
 __all__ = [
     "CONFIG_PATH",
@@ -503,6 +507,18 @@ class _Handler(BaseHTTPRequestHandler):
                 mutation_lock=_mutation_lock,
             ):
                 self._audit("social.ig_session.clear")
+            return
+
+        if path in ("/api/social/parse_post", "/api/social/manual_push"):
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            if path.endswith("/parse_post"):
+                _social_tool_handle_parse_post(self, body, load_raw_config=_load_raw_config)
+            else:
+                _social_tool_handle_manual_push(self, body, load_raw_config=_load_raw_config)
             return
 
         # 2. 配置与密钥管理

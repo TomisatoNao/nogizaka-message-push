@@ -845,8 +845,11 @@ def manual_push_social_url(
         if translated_text:
             post.extra["_translated"] = translated_text
 
-    # 若指定了通道则定向推，否则走标准 forward_post
-    forwarder.forward_post(post, target_channels=target_channels)
+    # 若指定了通道则定向推，否则走标准 forward_post。除了兼容原有的
+    # ``ok`` 字段，再把每条路由的汇总结果返回给 WebUI，避免“请求完成”
+    # 被误解为“所有目标都已送达”。
+    forwarded = forwarder.forward_post(post, target_channels=target_channels)
+    delivery = forwarder.last_delivery_result
 
     # 归档到 SQLite（若开启）
     if archive:
@@ -865,8 +868,23 @@ def manual_push_social_url(
         for m in post.media
     ]
 
+    delivery_payload = None
+    if delivery is not None:
+        delivery_payload = {
+            "outcome": delivery.outcome,
+            "matched_routes": delivery.matched_routes,
+            "attempted_routes": delivery.attempted_routes,
+            "success_routes": delivery.success_routes,
+            "failed_routes": delivery.failed_routes,
+            "skipped_routes": delivery.skipped_routes,
+            "errors": list(delivery.errors),
+        }
+
     return {
+        # 保持函数原有语义：解析/下载流程本身完成即返回 ok，调用方可
+        # 通过 delivery.outcome 判断是否有路由失败。
         "ok": True,
+        "forwarded": bool(forwarded),
         "platform": post.platform,
         "author": post.author,
         "text": post.text,
@@ -875,4 +893,6 @@ def manual_push_social_url(
         "media": media_preview,
         "timestamp": post.timestamp,
         "post_id": post.post_id,
+        "extra": {"url": url, "source": post.extra.get("source", "")},
+        "delivery": delivery_payload,
     }

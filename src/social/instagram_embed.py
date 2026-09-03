@@ -14,6 +14,8 @@ callers should keep their authenticated/API and yt-dlp fallbacks around.
 from __future__ import annotations
 
 import asyncio
+import html
+import json
 import logging
 import re
 import threading
@@ -90,6 +92,20 @@ def _is_media_url(value: str) -> bool:
     return host not in {"instagram.com", "www.instagram.com", "i.instagram.com"}
 
 
+def _media_key(value: str) -> str:
+    """Return a stable identity for alternate renditions of one CDN asset.
+
+    Embed data includes both the root media and its sidecar child.  They can
+    point at the same path with different signed resize/query parameters, so
+    comparing the complete URL would incorrectly count one photo twice.
+    """
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if host.endswith(".cdninstagram.com") or host.endswith(".fbcdn.net"):
+        return parsed.path.lower() or value
+    return value
+
+
 def _author_from_links(links: list[dict]) -> tuple[str, str]:
     """Infer username/display name from links rendered by the Embed page."""
     for link in links:
@@ -119,7 +135,154 @@ def _timestamp_from_value(value: str) -> str:
         return ""
 
 
-def _extract_page_data(page, *, max_media: int) -> tuple[list[MediaItem], str, str, str, str]:
+_STRUCTURED_FIELD_RE = re.compile(
+    r"\\?[\"'](?P<field>display_url|video_url)\\?[\"']\s*:\s*",
+    re.IGNORECASE,
+)
+
+
+def _read_embedded_string(text: str, start: int) -> tuple[str, int] | None:
+    """Read one JSON/JS string beginning at ``start``.
+
+    Instagram currently embeds the carousel payload in an inert ``script``
+    node.  Depending on the Embed revision the quotation mark is either a
+    normal JSON quote or itself escaped (``\"``).  A small scanner is more
+    tolerant than attempting to parse the entire script, which is often
+    wrapped in JavaScript assignments and HTML-escaped JSON.
+    """
+    i = start
+    if i < len(text) and text[i] == "\\" and i + 1 < len(text) and text[i + 1] in {"\"", "'"}:
+        i += 1
+    if i >= len(text) or text[i] not in {"\"", "'"}:
+        return None
+    quote = text[i]
+    i += 1
+    chars: list[str] = []
+    while i < len(text):
+        char = text[i]
+        if char == "\\" and i + 1 < len(text):
+            chars.extend((char, text[i + 1]))
+            i += 2
+            continue
+        if char == quote:
+            return "".join(chars), i + 1
+        chars.append(char)
+        i += 1
+    return None
+
+
+def _decode_embedded_string(value: str) -> str:
+    """Decode one escaped URL from Instagram's structured payload."""
+    raw = str(value or "")
+    decoded = raw
+    # The value can be escaped once by the JSON payload and once more by the
+    # JavaScript string containing that payload.  Decode at most three layers
+    # so ``\\u00253D`` and ``\\u00253D`` converge to the same signed URL while
+    # still treating the input as data (never as executable JavaScript).
+    for _ in range(3):
+        try:
+            candidate = json.loads(f'"{decoded}"')
+        except (TypeError, ValueError, json.JSONDecodeError):
+            break
+        if candidate == decoded:
+            break
+        decoded = candidate
+    decoded = str(decoded or "").replace(r"\/", "/")
+    decoded = re.sub(
+        r"\\u([0-9a-fA-F]{4})",
+        lambda match: chr(int(match.group(1), 16)),
+        decoded,
+    )
+    decoded = decoded.replace(r'\"', '"').replace(r"\\", "\\")
+    # A second escaping layer can remain after decoding (the response may
+    # contain a JSON string inside a JavaScript string).  Removing only the
+    # JSON slash escape is safe for URLs and makes both ``\/`` and
+    # ``\\\/`` representations converge without evaluating script content.
+    return html.unescape(str(decoded or "")).replace(r"\/", "/").strip()
+
+
+def _structured_media_from_script(text: str) -> list[MediaItem]:
+    """Extract ordered ``display_url``/``video_url`` values from one script.
+
+    This is intentionally an inert-field extractor: it never executes or
+    deserializes the surrounding script.  The surrounding page is selected by
+    :func:`_structured_media_from_page`, which limits extraction to the post's
+    GraphSidecar payload whenever Instagram exposes one.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    text = html.unescape(text)
+    media: list[MediaItem] = []
+    seen: set[str] = set()
+    for match in _STRUCTURED_FIELD_RE.finditer(text):
+        parsed = _read_embedded_string(text, match.end())
+        if parsed is None:
+            continue
+        raw_value, _ = parsed
+        value = _normalise_url(_decode_embedded_string(raw_value))
+        key = _media_key(value)
+        if not _is_media_url(value) or key in seen:
+            continue
+        seen.add(key)
+        kind = "video" if match.group("field").lower() == "video_url" else "image"
+        media.append(MediaItem(type=kind, url=value))
+    return media
+
+
+def _structured_media_from_page(page, *, shortcode: str = "", max_media: int) -> list[MediaItem]:
+    """Read carousel media from inert script nodes, if present.
+
+    The rendered Embed DOM often contains only the active slide (or a handful
+    of lazy-loaded slides).  ``GraphSidecar.edge_sidecar_to_children`` keeps
+    the complete carousel, so it is preferred when available and the DOM
+    remains the fallback for older Embed revisions.
+    """
+    try:
+        scripts = page.locator("script").evaluate_all(
+            """els => els.map(el => el.textContent || el.innerText || '')"""
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return []
+    if not isinstance(scripts, list):
+        return []
+    candidates = [
+        s for s in scripts
+        if isinstance(s, str) and ("display_url" in s or "video_url" in s)
+    ]
+    if not candidates:
+        return []
+
+    # Prefer the script carrying this post's sidecar payload.  A few Embed
+    # versions omit the shortcode in the script, so retain a conservative
+    # marker fallback before considering all display_url scripts.
+    shortcode_lower = str(shortcode or "").lower()
+    focused = [
+        s for s in candidates
+        if (shortcode_lower and shortcode_lower in s.lower())
+        or "edge_sidecar_to_children" in s
+        or "graphsidecar" in s.lower()
+    ]
+    selected = focused or candidates
+    media: list[MediaItem] = []
+    seen: set[str] = set()
+    for script in selected:
+        for item in _structured_media_from_script(script):
+            key = _media_key(item.url)
+            if key in seen or len(media) >= max_media:
+                continue
+            seen.add(key)
+            media.append(item)
+        if len(media) >= max_media:
+            break
+    return media
+
+
+def _extract_page_data(
+    page,
+    *,
+    max_media: int,
+    shortcode: str = "",
+) -> tuple[list[MediaItem], str, str, str, str]:
     """Extract media and lightweight metadata from a Playwright page."""
     # Evaluate only DOM attributes, never page-provided scripts.  CDN links
     # are returned as plain strings and are downloaded later by MediaDownloader.
@@ -145,41 +308,61 @@ def _extract_page_data(page, *, max_media: int) -> tuple[list[MediaItem], str, s
 
     def add(kind: str, value: str, alt: str = "") -> None:
         value = _normalise_url(value)
-        if not _is_media_url(value) or value in seen or len(media) >= max_media:
+        key = _media_key(value)
+        if not _is_media_url(value) or key in seen or len(media) >= max_media:
             return
-        seen.add(value)
+        seen.add(key)
         media.append(MediaItem(type=kind, url=value, alt_text=alt))
 
-    for item in videos or []:
-        if not isinstance(item, dict):
-            continue
-        sources = item.get("sources") or []
-        source = item.get("src") or (sources[0] if sources else "")
-        if source:
-            add("video", source)
-        elif item.get("poster"):
-            # A video without a source is not downloadable; the poster is a
-            # useful, honest fallback rather than an empty post.
-            add("image", item["poster"])
+    # The structured payload is the only reliable source for all carousel
+    # slides.  Add it before DOM media so the returned order follows
+    # Instagram's sidecar order and DOM fallback cannot displace a slide.
+    structured_media = _structured_media_from_page(
+        page,
+        shortcode=shortcode,
+        max_media=max_media,
+    )
+    for item in structured_media:
+        add(item.type, item.url, item.alt_text)
 
-    # Newer Embed builds mark the active media as ``EmbeddedMediaImage``;
-    # older builds also keep carousel slides as hidden ``img`` nodes.  Include
-    # both, while filtering profile avatars and 100/150px recommendation
-    # thumbnails that otherwise look like valid CDN media.
-    for item in images or []:
-        if not isinstance(item, dict):
-            continue
-        src_value = _best_srcset(item.get("srcset") or "") or item.get("src") or ""
-        class_name = str(item.get("className") or "")
-        is_primary = "embeddedmediaimage" in class_name.lower()
-        small_variant = bool(re.search(r"s(?:100|150)x(?:100|150)", src_value.lower()))
-        small_dimensions = 0 < int(item.get("width") or 0) <= 200 and 0 < int(item.get("height") or 0) <= 200
-        if not is_primary and (small_variant or small_dimensions):
-            continue
-        add("image", src_value, str(item.get("alt") or ""))
+    # A complete GraphSidecar is authoritative.  Its DOM counterpart often
+    # exposes a different rendition of the active slide, which would create a
+    # false extra attachment after URL-based deduplication.  Only use DOM
+    # extraction when structured data is absent (older Embed revisions).
+    dom_media_count = 0
+    if not structured_media:
+        dom_media_start = len(media)
+        for item in videos or []:
+            if not isinstance(item, dict):
+                continue
+            sources = item.get("sources") or []
+            source = item.get("src") or (sources[0] if sources else "")
+            if source:
+                add("video", source)
+            elif item.get("poster"):
+                # A video without a source is not downloadable; the poster is
+                # a useful, honest fallback rather than an empty post.
+                add("image", item["poster"])
+
+        # Newer Embed builds mark the active media as ``EmbeddedMediaImage``;
+        # older builds also keep carousel slides as hidden ``img`` nodes.
+        # Include both, while filtering profile avatars and tiny thumbnails.
+        for item in images or []:
+            if not isinstance(item, dict):
+                continue
+            src_value = _best_srcset(item.get("srcset") or "") or item.get("src") or ""
+            class_name = str(item.get("className") or "")
+            is_primary = "embeddedmediaimage" in class_name.lower()
+            small_variant = bool(re.search(r"s(?:100|150)x(?:100|150)", src_value.lower()))
+            small_dimensions = 0 < int(item.get("width") or 0) <= 200 and 0 < int(item.get("height") or 0) <= 200
+            if not is_primary and (small_variant or small_dimensions):
+                continue
+            add("image", src_value, str(item.get("alt") or ""))
+        dom_media_count = len(media) - dom_media_start
 
     # OG metadata is useful when the Embed renderer lazy-loads the first image
     # after our selector timeout.  It is deliberately a last resort.
+
     if not media:
         for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
             try:
@@ -223,6 +406,12 @@ def _extract_page_data(page, *, max_media: int) -> tuple[list[MediaItem], str, s
         ) or ""
     except Exception:  # pragma: no cover - browser-specific DOM race
         pass
+    log.debug(
+        "[single_fetcher] Instagram Embed 媒体候选 | structured=%d | dom=%d | unique=%d",
+        len(structured_media),
+        dom_media_count,
+        len(media),
+    )
     return media, author, username, caption, _timestamp_from_value(published)
 
 
@@ -272,7 +461,7 @@ def _fetch_public_post_sync(url: str, *, proxy: str, timeout: float, max_media: 
                     # networkidle (Instagram keeps analytics sockets open).
                     page.wait_for_timeout(250)
                     media, author, username, caption, timestamp = _extract_page_data(
-                        page, max_media=max_media
+                        page, max_media=max_media, shortcode=shortcode
                     )
                 finally:
                     context.close()
