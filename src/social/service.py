@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from src.logger import log_all
 from src.social.contracts import DeliveryResult, DeliveryTarget
 from src.social.delivery_service import DeliveryService
 from src.social.downloader import MediaDownloader
@@ -71,8 +72,10 @@ class SocialService:
         store=None,
         preparation: MessagePreparationService | None = None,
         delivery_service: DeliveryService | None = None,
+        logger=None,
     ):
         self._config = config
+        self._log = logger or log_all
         self._parser = parser
         self._downloader = downloader or getattr(forwarder, "_dl", None) or MediaDownloader(config)
         self._preparation = preparation or getattr(
@@ -102,12 +105,30 @@ class SocialService:
     def preparation_service(self) -> MessagePreparationService:
         return self._preparation
 
+    @staticmethod
+    def _attach_context(
+        exc: SocialError,
+        *,
+        request_id: str = "",
+        post_id: str = "",
+    ) -> SocialError:
+        """补齐下游异常缺失的链路标识，不改写其业务类型。"""
+        if request_id and not exc.request_id:
+            exc.request_id = request_id
+        if post_id and not exc.post_id:
+            exc.post_id = post_id
+        return exc
+
     @property
     def delivery_service(self) -> DeliveryService:
         return self._delivery_service
 
     def parse_url(self, url: str, *, request_id: str = "") -> Post:
         """只解析单条社媒链接，不下载、翻译或投递。"""
+        self._log(
+            f"🔎 [社媒服务] 开始解析 | request_id={request_id or '-'}",
+            is_debug=True,
+        )
         parser = self._parser
         if parser is None:
             from src.social.single_fetcher import SocialUrlParser
@@ -115,7 +136,8 @@ class SocialService:
             parser = SocialUrlParser(self._config)
         try:
             post = parser.parse(url)
-        except SocialError:
+        except SocialError as exc:
+            self._attach_context(exc, request_id=request_id)
             raise
         except Exception as exc:
             name = type(exc).__name__
@@ -131,12 +153,28 @@ class SocialService:
                 "解析器返回了无效动态对象", request_id=request_id
             )
         post.request_id = request_id or post.request_id
+        self._log(
+            f"✅ [社媒服务] 解析完成 | request_id={post.request_id or '-'} "
+            f"| post_id={post.post_id} | platform={post.platform} "
+            f"| media={len(post.media)}",
+            is_debug=True,
+        )
         return post
 
     def _download_post(self, post: Post) -> None:
+        self._log(
+            f"📥 [社媒服务] 开始下载 | request_id={post.request_id or '-'} "
+            f"| post_id={post.post_id}",
+            is_debug=True,
+        )
         try:
             self._downloader.download(post)
-        except SocialError:
+        except SocialError as exc:
+            self._attach_context(
+                exc,
+                request_id=post.request_id,
+                post_id=post.post_id,
+            )
             raise
         except Exception as exc:
             raise SocialDownloadError(
@@ -144,6 +182,11 @@ class SocialService:
                 request_id=post.request_id,
                 post_id=post.post_id,
             ) from exc
+        self._log(
+            f"✅ [社媒服务] 下载完成 | request_id={post.request_id or '-'} "
+            f"| post_id={post.post_id} | media={len(post.media)}",
+            is_debug=True,
+        )
 
     def _prepare_details(
         self,
@@ -151,6 +194,11 @@ class SocialService:
         *,
         translate: bool,
     ) -> PreparedSocialPost:
+        self._log(
+            f"🧩 [社媒服务] 开始准备 | request_id={post.request_id or '-'} "
+            f"| post_id={post.post_id} | translate={str(translate).lower()}",
+            is_debug=True,
+        )
         if self._legacy_forwarder is not None and hasattr(
             self._legacy_forwarder, "prepare_post"
         ):
@@ -160,7 +208,12 @@ class SocialService:
         else:
             try:
                 prepared = self._preparation.prepare(post, translate=translate)
-            except SocialError:
+            except SocialError as exc:
+                self._attach_context(
+                    exc,
+                    request_id=post.request_id,
+                    post_id=post.post_id,
+                )
                 raise
             except Exception as exc:
                 raise SocialTranslationError(
@@ -170,6 +223,12 @@ class SocialService:
                 ) from exc
         # 格式化正文属于 Post 的准备结果，供所有投递目标复用一次。
         post.extra["_social_full_text"] = prepared.full_text
+        self._log(
+            f"✅ [社媒服务] 准备完成 | request_id={post.request_id or '-'} "
+            f"| post_id={post.post_id} | translated={str(bool(prepared.translated)).lower()} "
+            f"| text_len={len(prepared.full_text)}",
+            is_debug=True,
+        )
         return prepared
 
     def prepare_post(self, post: Post, *, translate: bool = True) -> Post:

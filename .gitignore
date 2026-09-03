@@ -32,9 +32,8 @@ backups/
 # Git worktrees
 .worktrees/
 
-# AI 设计与开发过程文档（仅跟踪已审阅的生产路线图）
-docs/*
-!docs/industrialization-roadmap.md
+# 设计、审计与过程文档（仅保留在本地，不推送到版本库）
+docs/
 scratch/
 
 # 测试与覆盖率

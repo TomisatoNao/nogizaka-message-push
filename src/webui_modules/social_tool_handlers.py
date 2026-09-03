@@ -168,6 +168,14 @@ def _handle_exception(handler, request_id: str, action: str, exc: BaseException)
 
     if isinstance(exc, SocialToolRequestError):
         return _error(handler, request_id, str(exc), code=400, error_code="invalid_request")
+    # ``SocialService`` wraps parser/download timeouts in a typed exception so
+    # callers keep the domain contract.  Inspect only the exception class of
+    # the cause (never its message) to retain the dedicated 504 response.
+    if isinstance(exc, TimeoutError) or (
+        isinstance(exc, (SocialParseError, SocialDownloadError, SocialDeliveryError))
+        and isinstance(exc.__cause__, TimeoutError)
+    ):
+        return _error(handler, request_id, "社媒上游请求超时，请稍后重试", code=504, error_code="upstream_timeout")
     if isinstance(exc, (SocialAuthRequired, known_auth)):
         return _error(handler, request_id, "Instagram 内容需要有效登录 Cookies（Story 不支持匿名解析）", code=422,
                       error_code="instagram_auth_required")
@@ -177,8 +185,6 @@ def _handle_exception(handler, request_id: str, action: str, exc: BaseException)
     if isinstance(exc, known_embed):
         return _error(handler, request_id, "Instagram 公开内容暂时无法解析，请稍后重试或检查链接权限", code=502,
                       error_code="instagram_unavailable")
-    if isinstance(exc, (TimeoutError,)):  # explicit before the generic runtime mapping
-        return _error(handler, request_id, "社媒解析超时，请稍后重试", code=504, error_code="upstream_timeout")
     if isinstance(exc, SocialDownloadError):
         return _error(handler, request_id, "社媒媒体下载失败，请稍后重试", code=502,
                       error_code="download_failed")

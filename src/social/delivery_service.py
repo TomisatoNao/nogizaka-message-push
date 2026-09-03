@@ -328,7 +328,9 @@ class DeliveryService:
 
         if result.outcome == "no_route":
             self._log(
-                f"⏭️ [社媒推送] {post.platform} 动态跳过 | 无匹配路由 | {post_ref}"
+                f"⏭️ [社媒推送] {post.platform} 动态跳过 | 无匹配路由 | "
+                f"{post_ref} | {context}",
+                is_debug=True,
             )
         elif result.outcome == "already_delivered":
             self._log(
@@ -390,15 +392,17 @@ class DeliveryService:
             )
         except SocialDeliveryError:
             raise
-        except Exception as exc:  # 规划/事件循环级故障转为稳定结果
-            result = DeliveryResult(
-                outcome="error",
-                matched_routes=0,
-                attempted_routes=0,
-                success_routes=0,
-                failed_routes=0,
-                errors=(type(exc).__name__,),
+        except Exception as exc:  # 规划/事件循环级故障转为领域异常
+            self._log(
+                f"⚠️ [社媒推送] 编排异常 | request_id={post.request_id or '-'} "
+                f"| post_id={post.post_id} | error={type(exc).__name__}",
+                is_error=True,
             )
+            raise SocialDeliveryError(
+                "社媒投递编排失败",
+                request_id=post.request_id,
+                post_id=post.post_id,
+            ) from exc
 
         self._log_summary(post, result)
         if archive:

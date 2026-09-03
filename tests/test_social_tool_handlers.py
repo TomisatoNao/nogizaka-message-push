@@ -8,6 +8,13 @@ import urllib.request
 
 from src.social.instagram_embed import _extract_page_data
 from src.social.models import MediaItem, Post
+from src.social.errors import (
+    SocialAuthRequired,
+    SocialDownloadError,
+    SocialParseError,
+    SocialTranslationError,
+    SocialDeliveryError,
+)
 from src.webui_modules.static_handler import send_json
 from src.webui_modules import social_tool_handlers
 
@@ -168,6 +175,28 @@ def test_parse_post_handler_rejects_unknown_domain_without_calling_parser(monkey
     assert handler.sent == 400
     assert payload["error_code"] == "invalid_request"
     assert not called
+
+
+def test_typed_social_errors_map_to_stable_http_codes():
+    cases = [
+        (SocialAuthRequired("auth"), 422, "instagram_auth_required"),
+        (SocialParseError("parse"), 502, "instagram_unavailable"),
+        (SocialDownloadError("download"), 502, "download_failed"),
+        (SocialTranslationError("translation"), 502, "translation_failed"),
+        (SocialDeliveryError("delivery"), 502, "delivery_failed"),
+        (SocialParseError("timeout"), 504, "upstream_timeout"),
+    ]
+    # The final case models the typed wrapper used by SocialService.
+    cases[-1][0].__cause__ = TimeoutError("upstream")
+    for exc, expected_code, expected_error in cases:
+        handler = _ResponseHandler()
+        assert not social_tool_handlers._handle_exception(
+            handler, "req-typed", "test", exc
+        )
+        payload = _payload(handler)
+        assert handler.sent == expected_code
+        assert payload["error_code"] == expected_error
+        assert payload["request_id"] == "req-typed"
 
 
 def test_manual_push_handler_reports_delivery_summary(monkeypatch):

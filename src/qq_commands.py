@@ -391,6 +391,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
         )
         try:
             from src.social.contracts import DeliveryTarget
+            from src.social.adapters import OfficialTarget
             from src.social.service import SocialService
             from src.platforms import qq_official
             if target_bot is None:
