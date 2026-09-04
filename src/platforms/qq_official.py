@@ -6,7 +6,7 @@ import httpx
 import config.config as cfg
 from src.logger import log_all
 
-# 导入所有媒体转码、压缩与载荷处理逻辑（向下兼容 re-export）
+from src.platforms import qq_official_media
 from src.platforms.qq_official_media import (
     MediaPayload,
     _AUDIO_EXTENSIONS,
@@ -270,6 +270,7 @@ def initialize(client: httpx.AsyncClient) -> None:
     """初始化所有配置的官方 Bot 实例。"""
     global _bots, _client
     _client = client
+    qq_official_media.initialize(client)
     _bots = []
     for i, bot_cfg in enumerate(cfg.QQ_OFFICIAL_BOTS):
         if not bot_cfg.get("app_id"):

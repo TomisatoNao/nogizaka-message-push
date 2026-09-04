@@ -1,27 +1,8 @@
 """
 src/app_modules — 主应用解耦子模块包
 """
+from typing import Any
 
-from src.app_modules.bootstrap import (
-    _alert_group_for_account,
-    _command_listeners,
-    _has_configured_workload,
-    _health_check,
-    _init_accounts,
-    _initial_admin_banner,
-    _install_stop_handlers,
-    _last_command_status,
-    _message_monitor_enabled,
-    _on_config_reload,
-    _required_account_ids,
-    _sync_command_listeners,
-    _valid_monitors,
-    get_command_listeners,
-    get_main_loop,
-    handle_openid_action,
-    handle_test_push,
-    set_main_loop,
-)
 from src.app_modules.daily_summary import (
     DISK_WARN_BYTES,
     SUMMARY_MAX_ATTEMPTS,
@@ -50,8 +31,17 @@ from src.app_modules.process_lock import (
     _is_pid_running,
     _is_python_process,
     _kill_pid,
+    _release_instance_lock,
     _stop_requested,
 )
+
+
+def __getattr__(name: str) -> Any:
+    import src.app as app
+    if hasattr(app, name):
+        return getattr(app, name)
+    raise AttributeError(f"module 'src.app_modules' has no attribute '{name}'")
+
 
 __all__ = [
     # process_lock
@@ -61,6 +51,7 @@ __all__ = [
     "_is_python_process",
     "_kill_pid",
     "_acquire_instance_lock",
+    "_release_instance_lock",
     "_stop_requested",
     # daily_summary
     "DISK_WARN_BYTES",
@@ -81,23 +72,4 @@ __all__ = [
     "_wait_or_trigger",
     "_run_cycle",
     "_run_loop",
-    # bootstrap
-    "_message_monitor_enabled",
-    "_valid_monitors",
-    "_required_account_ids",
-    "_has_configured_workload",
-    "_initial_admin_banner",
-    "_alert_group_for_account",
-    "_health_check",
-    "_install_stop_handlers",
-    "_init_accounts",
-    "_command_listeners",
-    "_last_command_status",
-    "set_main_loop",
-    "get_main_loop",
-    "get_command_listeners",
-    "_sync_command_listeners",
-    "_on_config_reload",
-    "handle_test_push",
-    "handle_openid_action",
 ]

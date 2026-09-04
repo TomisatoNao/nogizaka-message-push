@@ -13,7 +13,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess  # nosec B404 - controlled local ffmpeg invocation
-import sys
 import tempfile
 import threading
 from typing import Iterator
@@ -342,6 +341,15 @@ def _compress_image_if_needed(content: bytes, max_bytes: int = int(2.8 * 1024 * 
         return content
 
 
+_client: httpx.AsyncClient | None = None
+
+
+def initialize(client: httpx.AsyncClient) -> None:
+    """注入共享的 AsyncClient 实例供媒体下载复用。"""
+    global _client
+    _client = client
+
+
 async def _download_media(file_url: str, source_headers: dict[str, str]) -> bytes | None:
     """下载 message 私有媒体资源。用独立的媒体超时 —— 25MB 视频跑不进 API 的 15s。"""
     try:
@@ -350,9 +358,6 @@ async def _download_media(file_url: str, source_headers: dict[str, str]) -> byte
         curr_loop = None
 
     client_to_use = None
-    qq_mod = sys.modules.get("src.platforms.qq_official")
-    _client = getattr(qq_mod, "_client", None) if qq_mod else None
-
     if _client is not None and not getattr(_client, "is_closed", False) and curr_loop is not None and curr_loop.is_running():
         client_to_use = _client
 
@@ -425,10 +430,7 @@ def _media_items_with_metadata(message_chain: list[dict]) -> list[tuple[str, str
 async def download_media_payloads(member: dict,
                                   message_chain: list[dict]) -> list[MediaPayload]:
     """把消息链中的媒体段下载为带文件名的载荷。"""
-    qq_mod = sys.modules.get("src.platforms.qq_official")
-    meta_fn = getattr(qq_mod, "_media_items_with_metadata", _media_items_with_metadata) if qq_mod else _media_items_with_metadata
-
-    items = meta_fn(message_chain)
+    items = _media_items_with_metadata(message_chain)
     if not items:
         return []
 
@@ -438,8 +440,7 @@ async def download_media_payloads(member: dict,
     m_name = member.get("m_name") or member.get("name") or ""
     payloads: list[MediaPayload] = []
 
-    # 支持 monkeypatch 的 _download_media
-    download_fn = getattr(qq_mod, "_download_media", _download_media) if qq_mod else _download_media
+    download_fn = _download_media
 
     for media_type, file_url, filename_hint, mime_type in items:
         local_bytes = None

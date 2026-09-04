@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.platforms import qq_official
+from src.platforms import qq_official, qq_official_client, qq_official_media
 from src import archive
 
 
@@ -42,7 +42,7 @@ async def test_download_media_payload_preserves_filename(monkeypatch: pytest.Mon
     async def fake_download(*args, **kwargs):
         return b"m4a-bytes"
 
-    monkeypatch.setattr(qq_official, "_download_media", fake_download)
+    monkeypatch.setattr(qq_official_media, "_download_media", fake_download)
     monkeypatch.setattr(
         "config.credentials.get_source_headers_for_account",
         lambda *_args, **_kwargs: {},
@@ -90,7 +90,7 @@ async def test_upload_record_prefers_original_audio_without_transcoding(monkeypa
         return b"\x02#!SILK_V3", "voice.amr"
 
     monkeypatch.setattr(
-        qq_official,
+        qq_official_client,
         "_transcode_audio_to_silk",
         unexpected_transcode,
     )
@@ -114,7 +114,7 @@ async def test_upload_record_transcodes_only_after_format_rejection(monkeypatch:
     bot = qq_official.QQOfficialBot("test", "app", "secret", "user")
     monkeypatch.setattr(bot, "ensure_access_token", _async_true)
     monkeypatch.setattr(
-        qq_official,
+        qq_official_client,
         "_transcode_audio_to_silk",
         lambda _content, _filename: (b"\x02#!SILK_V3", "voice.amr"),
     )
@@ -143,7 +143,7 @@ async def test_upload_record_transcodes_only_after_format_rejection(monkeypatch:
 async def test_upload_record_keeps_named_file_when_silk_fallback_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     bot = qq_official.QQOfficialBot("test", "app", "secret", "user")
     monkeypatch.setattr(bot, "ensure_access_token", _async_true)
-    monkeypatch.setattr(qq_official, "_transcode_audio_to_silk", lambda _content, _filename: None)
+    monkeypatch.setattr(qq_official_client, "_transcode_audio_to_silk", lambda _content, _filename: None)
     calls: list[dict] = []
     responses = iter([
         SimpleNamespace(status_code=400, json=lambda: {"code": 850019, "message": "unsupported audio"}),

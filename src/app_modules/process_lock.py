@@ -102,6 +102,20 @@ def _acquire_instance_lock() -> None:
         log_all(f"⚠️ 写入当前 PID 文件异常: {ex}", is_debug=True)
 
 
+def _release_instance_lock() -> None:
+    """释放当前进程持有的 PID 锁文件。"""
+    app_mod = sys.modules.get("src.app")
+    pid_file_target = getattr(app_mod, "PID_FILE", PID_FILE) if app_mod else PID_FILE
+    pid_path = Path(pid_file_target)
+    try:
+        if pid_path.exists():
+            content = pid_path.read_text(encoding="utf-8").strip()
+            if content == str(os.getpid()):
+                pid_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _stop_requested() -> bool:
     """外部是否请求停止（存在停止信号文件）。"""
     app_mod = sys.modules.get("src.app")
@@ -119,5 +133,6 @@ __all__ = [
     "_is_python_process",
     "_kill_pid",
     "_acquire_instance_lock",
+    "_release_instance_lock",
     "_stop_requested",
 ]

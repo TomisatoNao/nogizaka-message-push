@@ -20,13 +20,6 @@ from src.platforms.qq_official_media import (
 from src.utils import RateLimiter
 
 
-def _get_helper(name: str, default):
-    import sys
-    mod = sys.modules.get("src.platforms.qq_official")
-    if mod and hasattr(mod, name):
-        return getattr(mod, name)
-    return default
-
 
 class QQOfficialClient:
     """QQ 官方 OpenAPI 底层客户端，独立管理凭证刷新、限速、请求重试与富媒体文件上传。"""
@@ -198,10 +191,8 @@ class QQOfficialClient:
         if not await self.ensure_access_token():
             return None
 
-        resolve_media_type = _get_helper("_resolve_media_type", _resolve_media_type)
-        safe_media_filename = _get_helper("_safe_media_filename", _safe_media_filename)
-        media_type = resolve_media_type(media_type, filename, content)
-        filename = safe_media_filename(filename, media_type)
+        media_type = _resolve_media_type(media_type, filename, content)
+        filename = _safe_media_filename(filename, media_type)
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
         openid = target_openid or self.target_openid
         size_bytes = len(content)
@@ -306,21 +297,15 @@ class QQOfficialClient:
         if not content:
             return None
 
-        resolve_media_type = _get_helper("_resolve_media_type", _resolve_media_type)
-        safe_media_filename = _get_helper("_safe_media_filename", _safe_media_filename)
-        compress_image_if_needed = _get_helper("_compress_image_if_needed", _compress_image_if_needed)
-        compress_video_if_needed = _get_helper("_compress_video_if_needed", _compress_video_if_needed)
-        transcode_audio_to_silk = _get_helper("_transcode_audio_to_silk", _transcode_audio_to_silk)
-
-        media_type = resolve_media_type(media_type, filename, content, mime_type)
-        filename = safe_media_filename(filename, media_type)
+        media_type = _resolve_media_type(media_type, filename, content, mime_type)
+        filename = _safe_media_filename(filename, media_type)
 
         size_bytes = len(content) if content else 0
 
         # 直传大小限制检查与自适应压缩：
         # 腾讯 QQ 开放平台直接 Base64 接口 (/files) 针对图片直传有 ~3MB 严格限制 (超出报 40093011 上传文件大小超过限制)
         if media_type == "image" and size_bytes > int(2.8 * 1024 * 1024):
-            compressed = compress_image_if_needed(content, max_bytes=int(2.8 * 1024 * 1024))
+            compressed = _compress_image_if_needed(content, max_bytes=int(2.8 * 1024 * 1024))
             if len(compressed) < size_bytes:
                 log_all(f"📦 官方 QQ Bot [{self.name}] 图片超出直传限制 ({size_bytes/1024/1024:.2f}MB)，已自动高保真压缩至 {len(compressed)/1024/1024:.2f}MB", is_debug=True)
                 content = compressed
@@ -335,10 +320,10 @@ class QQOfficialClient:
                 return file_info
             log_all(f"⚠️ 官方 QQ Bot [{self.name}] 分片上传未成功，降级尝试压制后直传", is_debug=True)
             if media_type == "video":
-                content = compress_video_if_needed(content)
+                content = _compress_video_if_needed(content)
                 size_bytes = len(content)
             elif media_type == "image":
-                content = compress_image_if_needed(content)
+                content = _compress_image_if_needed(content)
                 size_bytes = len(content)
 
         file_type = _MEDIA_FILE_TYPES.get(media_type, 1)
@@ -385,7 +370,7 @@ class QQOfficialClient:
                 f"ℹ️ 官方 QQ Bot [{self.name}] 原格式语音上传被拒绝(code 850019)，尝试 SILK 语音重试",
                 is_debug=True,
             )
-            voice_result = await asyncio.to_thread(transcode_audio_to_silk, content, filename)
+            voice_result = await asyncio.to_thread(_transcode_audio_to_silk, content, filename)
             if voice_result:
                 voice_content, voice_filename = voice_result
                 voice_payload = {
