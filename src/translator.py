@@ -363,11 +363,8 @@ async def _call_model_json(
         elif resp.status_code == 429:
             raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
         else:
-            log_all(
-                f"⚠️ 智谱模型请求失败 | trace={request_id or '-'} | "
-                f"batch={batch_index} | model={model['name']} | attempt={attempt} | "
-                f"status={resp.status_code}",
-                is_debug=True,
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code}", request=resp.request, response=resp
             )
     else:
         url = model["url"]
@@ -392,11 +389,8 @@ async def _call_model_json(
         elif resp.status_code == 429:
             raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
         else:
-            log_all(
-                f"⚠️ Gemini 模型请求失败 | trace={request_id or '-'} | "
-                f"batch={batch_index} | model={model['name']} | attempt={attempt} | "
-                f"status={resp.status_code}",
-                is_debug=True,
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code}", request=resp.request, response=resp
             )
     return {}
 
@@ -451,13 +445,17 @@ async def _do_translate_gemini_json(
         _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
 
     async with _limiter:
-        for model in try_models:
+        for model_idx, model in enumerate(try_models):
+            curr_model_name = model.get("name", "?")
+            has_next_model = (model_idx + 1 < len(try_models))
+            next_model_name = try_models[model_idx + 1].get("name", "?") if has_next_model else ""
+
             for attempt in range(2):
                 if deadline is not None and time.monotonic() >= deadline:
                     log_all(
                         f"⏱️ 博客翻译预算耗尽 | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')}",
-                        is_debug=True,
+                        f"batch={batch_index}/{batch_total} | model={curr_model_name}",
+                        is_warning=True,
                     )
                     return {}, ""
                 started = time.monotonic()
@@ -470,22 +468,23 @@ async def _do_translate_gemini_json(
                         batch_index=batch_index,
                         attempt=attempt + 1,
                     )
-                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    elapsed_s = round(time.monotonic() - started, 1)
                     if parsed_json:
                         log_all(
-                            f"✅ 博客翻译模型成功 | trace={request_id or '-'} | "
-                            f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                            f"attempt={attempt + 1} | items={len(parsed_json)} | "
-                            f"耗时={elapsed_ms}ms",
-                            is_debug=True,
+                            f"📦 [第 {batch_index}/{batch_total} 批 · {len(parsed_json)}段] 翻译成功（耗时 {elapsed_s}s，采用 {curr_model_name}）",
                         )
                         return parsed_json, model["name"]
-                    log_all(
-                        f"⚠️ 博客翻译模型无有效 JSON | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                        f"attempt={attempt + 1} | 耗时={elapsed_ms}ms",
-                        is_debug=True,
-                    )
+
+                    if has_next_model:
+                        log_all(
+                            f"🔄 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 未能解析出有效段落，自动切换备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 未能解析出有效段落，无后续备用模型",
+                            is_warning=True,
+                        )
                     break  # 未返回有效 JSON，切换下一个模型
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 429:
@@ -493,65 +492,82 @@ async def _do_translate_gemini_json(
                         if deadline is not None:
                             wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
                         log_all(
-                            f"⚠️ 博客翻译模型限流 | trace={request_id or '-'} | "
-                            f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                            f"attempt={attempt + 1} | retry_in={wait_s:.1f}s",
-                            is_debug=True,
+                            f"⏳ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 频控限流 (429)，等待 {wait_s:.1f}s 后重试",
+                            is_warning=True,
                         )
                         if wait_s <= 0:
                             return {}, ""
                         await asyncio.sleep(wait_s)
                         continue
-                    log_all(
-                        f"⚠️ 博客翻译模型 HTTP 失败 | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                        f"status={e.response.status_code} | attempt={attempt + 1}",
-                        is_debug=True,
-                    )
+
+                    if has_next_model:
+                        log_all(
+                            f"🔄 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 暂时不可用 ({e.response.status_code})，自动降级切换至备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 服务不可用 ({e.response.status_code})，无后续备用模型",
+                            is_warning=True,
+                        )
                     break
-                except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException) as e:
-                    elapsed_ms = int((time.monotonic() - started) * 1000)
-                    log_all(
-                        f"⏱️ 博客翻译模型超时 | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
-                        is_debug=True,
-                    )
+                except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException):
+                    elapsed_s = round(time.monotonic() - started, 1)
+                    if has_next_model:
+                        log_all(
+                            f"⏱️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 响应超时 ({elapsed_s}s)，自动切换备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"⏱️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 响应超时 ({elapsed_s}s)，无后续备用模型",
+                            is_warning=True,
+                        )
                     break
                 except httpx.HTTPError as e:
-                    elapsed_ms = int((time.monotonic() - started) * 1000)
-                    log_all(
-                        f"⚠️ 博客翻译模型网络失败 | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
-                        is_debug=True,
-                    )
+                    elapsed_s = round(time.monotonic() - started, 1)
+                    if has_next_model:
+                        log_all(
+                            f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 网络连接失败，自动切换备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 网络连接失败 ({describe_exception(e)})",
+                            is_warning=True,
+                        )
                     break
                 except (ValueError, TypeError, json.JSONDecodeError) as e:
-                    elapsed_ms = int((time.monotonic() - started) * 1000)
-                    log_all(
-                        f"⚠️ 博客翻译模型响应无效 | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
-                        is_debug=True,
-                    )
+                    elapsed_s = round(time.monotonic() - started, 1)
+                    if has_next_model:
+                        log_all(
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 响应格式异常，自动切换备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 响应格式异常 ({describe_exception(e)})",
+                            is_warning=True,
+                        )
                     break
                 except Exception as e:
-                    # 最后一道防线保留，避免单个模型异常中断 failover；日志不输出异常原文，
-                    # 防止第三方 SDK 把请求头或 API Key 写入日志。
-                    elapsed_ms = int((time.monotonic() - started) * 1000)
-                    log_all(
-                        f"⚠️ 博客翻译模型异常 | trace={request_id or '-'} | "
-                        f"batch={batch_index}/{batch_total} | model={model.get('name', '?')} | "
-                        f"attempt={attempt + 1} | elapsed={elapsed_ms}ms | error={describe_exception(e)}",
-                        is_debug=True,
-                    )
+                    elapsed_s = round(time.monotonic() - started, 1)
+                    if has_next_model:
+                        log_all(
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 内部异常，自动切换备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 内部异常 ({describe_exception(e)})",
+                            is_warning=True,
+                        )
                     break
 
     log_all(
-        f"❌ 博客翻译模型全部失败 | trace={request_id or '-'} | "
+        f"❌ 博客翻译批次全部模型尝试失败 | trace={request_id or '-'} | "
         f"batch={batch_index}/{batch_total} | candidates={len(try_models)}",
-        is_debug=True,
+        is_error=True,
     )
     return {}, ""
 
@@ -863,10 +879,7 @@ async def translate_blog_structured(
     total_timeout = _blog_total_timeout()
     deadline = started + total_timeout
     log_all(
-        f"🔄 博客翻译开始 | trace={trace_id} | source={source} | member={member_name or '未知成员'} | "
-        f"blocks={len(blocks)} | items={len(items_to_translate)} | batches={len(batches)} | "
-        f"budget={total_timeout:.0f}s",
-        is_debug=True,
+        f"🌐 博客翻译开始：{member_name or '成员'}（共 {len(items_to_translate)} 段 · 分 {len(batches)} 批）",
     )
 
     for batch_index, batch_keys in enumerate(batches, start=1):
@@ -963,12 +976,10 @@ async def translate_blog_structured(
         1 for key in items_to_translate if (translated_map.get(key) or "").strip()
     )
     complete = translated_count == len(items_to_translate)
-    elapsed_ms = int((time.monotonic() - started) * 1000)
+    elapsed_s = round(time.monotonic() - started, 1)
     if not model_name or translated_count == 0:
         log_all(
-            f"❌ 博客翻译未生成译文 | trace={trace_id} | source={source} | "
-            f"member={member_name or '未知成员'} | translated=0/{len(items_to_translate)} | "
-            f"elapsed={elapsed_ms}ms",
+            f"❌ 博客翻译失败：{member_name or '未知成员'} 未能生成有效译文（耗时 {elapsed_s}s）",
             is_error=True,
         )
         # 不缓存失败结果，下一次手动重试可以重新选择模型/网络路径。
@@ -980,12 +991,11 @@ async def translate_blog_structured(
         if len(_blog_structured_cache) >= _MAX_CACHE_SIZE:
             _blog_structured_cache.pop(next(iter(_blog_structured_cache)))
         _blog_structured_cache[cache_key] = result
+
+    status_desc = "100% 完整" if complete else f"部分完成 ({translated_count}/{len(items_to_translate)}段)"
+    icon = "🎉" if complete else "⚠️"
     log_all(
-        f"✅ 博客翻译完成 | trace={trace_id} | source={source} | "
-        f"member={member_name or '未知成员'} | model={model_name or 'unknown'} | "
-        f"translated={translated_count}/{len(items_to_translate)} | complete={'yes' if complete else 'no'} | "
-        f"elapsed={elapsed_ms}ms",
-        is_debug=True,
+        f"{icon} 博客翻译结束：{member_name or '成员'}（{status_desc}，总耗时 {elapsed_s}s，主用模型: {model_name or '未知'}）",
     )
     return result
 

@@ -421,6 +421,7 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             log_all(
                 f"🔄 网页端博客翻译开始 | trace={request_id} | id={blog_id} | "
                 f"author={row.get('author', '')} | chars={len(body_html)}",
+                is_debug=True,
             )
 
             async def _do_translate():
@@ -471,6 +472,7 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 f"✅ 网页端博客翻译完成 | trace={request_id} | id={blog_id} | "
                 f"model={translation_model or 'unknown'} | translated={translated_count}/{total_count} | "
                 f"complete={'yes' if complete else 'no'}",
+                is_debug=True,
             )
             _send_json_resp(handler, {
                 "ok": True,

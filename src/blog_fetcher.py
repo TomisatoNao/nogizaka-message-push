@@ -245,6 +245,7 @@ async def _process_single_post(post: dict, key: str, group_name: str,
             log_all(
                 f"🔄 后台博客翻译开始 | trace={translation_request_id} | "
                 f"author={post.get('author', '')} | title={post.get('title', '')}",
+                is_debug=True,
             )
             structured, model_name = await translator.translate_blog_structured(
                 post["body_html"],
@@ -264,6 +265,7 @@ async def _process_single_post(post: dict, key: str, group_name: str,
                     f"✅ 后台博客翻译完成 | trace={translation_request_id} | "
                     f"model={translation_model or 'unknown'} | complete={'yes' if complete else 'no'} | "
                     f"elapsed={int((time.monotonic() - translation_started) * 1000)}ms",
+                    is_debug=True,
                 )
             else:
                 translation_status = "failed"
