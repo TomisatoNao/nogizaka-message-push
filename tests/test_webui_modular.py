@@ -8,6 +8,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from src.webui_modules.archive import common as archive_common, home as archive_home  # noqa: E402
 from src.webui_modules import (  # noqa: E402
     archive_handlers,
     auth_handlers,
@@ -273,6 +274,7 @@ def test_blog_calendar_endpoint_filters_group_author_and_invalid_dates(monkeypat
         ],
     )
     db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
 
     class Handler(_ResponseHandler):
@@ -332,6 +334,7 @@ def test_blog_list_endpoint_returns_summary_dto_without_full_body(monkeypatch):
         ("正文 " * 400, '["https://cdn.test/cover.jpg"]', '["nogizaka/1/cover.jpg"]'),
     )
     db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
 
     class Handler(_ResponseHandler):
@@ -382,6 +385,7 @@ def test_blog_delete_translation_endpoint_clears_translation(monkeypatch):
            VALUES (1, '冨里 奈央', '夏のブログ', '译文', '[{"zh":"翻译"}]', 'gemini-test')"""
     )
     db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "record_event", lambda *args, **kwargs: None)
 
@@ -449,6 +453,7 @@ def test_blog_translate_endpoint_persists_structured_translation(monkeypatch):
            VALUES (1, 'nogizaka', '冨里 奈央', '夏のブログ', '<p>こんにちは</p>', NULL, NULL, NULL)"""
     )
     db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
 
     async def fake_translate(*_args, **_kwargs):
@@ -493,10 +498,10 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
     import threading
 
     cache_key = (1.0, 2.0, "2026-09-01")
-    monkeypatch.setattr(archive_handlers, "_home_cache", None)
-    monkeypatch.setattr(archive_handlers, "_home_cache_key", None)
-    monkeypatch.setattr(archive_handlers, "_home_cache_building", False)
-    monkeypatch.setattr(archive_handlers, "_home_cache_key_for_request", lambda: cache_key)
+    monkeypatch.setattr(archive_home, "_home_cache", None)
+    monkeypatch.setattr(archive_home, "_home_cache_key", None)
+    monkeypatch.setattr(archive_home, "_home_cache_building", False)
+    monkeypatch.setattr(archive_home, "_home_cache_key_for_request", lambda: cache_key)
 
     started = threading.Event()
     release = threading.Event()
@@ -506,9 +511,9 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
         calls.append(handler)
         started.set()
         if release.wait(2):
-            archive_handlers._home_cache = {"ok": True, "source": "builder"}
-            archive_handlers._home_cache_key = cache_key
-            handler._send_json(archive_handlers._home_cache)
+            archive_home._home_cache = {"ok": True, "source": "builder"}
+            archive_home._home_cache_key = cache_key
+            handler._send_json(archive_home._home_cache)
 
     monkeypatch.setattr(archive_handlers, "_handle_archive_impl", fake_impl)
 
@@ -531,7 +536,7 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
 
     assert len(calls) == 1
     assert first.payload == second.payload == {"ok": True, "source": "builder"}
-    assert archive_handlers._home_cache_building is False
+    assert archive_home._home_cache_building is False
 
 
 def test_archive_home_latest_messages_use_one_window_query():

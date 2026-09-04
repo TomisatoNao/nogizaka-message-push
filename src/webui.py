@@ -402,7 +402,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if not _HISTORY_NAME_RE.match(name):
                     self._send_json({"ok": False, "errors": [f"非法快照文件名: {name!r}"]}, 400)
                     return
-                src = _history_dir() / name
+                src = _history_dir(CONFIG_PATH) / name
                 if not src.is_file():
                     self._send_json({"ok": False, "errors": [f"快照文件不存在: {name!r}"]}, 404)
                     return
@@ -412,7 +412,7 @@ class _Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self._send_json({"ok": False, "errors": [f"读取快照失败: {e}"]}, 500)
                 return
-            self._send_json({"ok": True, "history": list_config_history()})
+            self._send_json({"ok": True, "history": list_config_history(CONFIG_PATH)})
             return
 
         # 5. 归档与媒体
@@ -546,7 +546,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not _HISTORY_NAME_RE.match(filename):
                 self._send_json({"ok": False, "errors": [f"非法快照文件名: {filename!r}"]}, 400)
                 return
-            src = _history_dir() / filename
+            src = _history_dir(CONFIG_PATH) / filename
             if not src.is_file():
                 self._send_json({"ok": False, "errors": [f"快照文件不存在: {filename!r}"]}, 404)
                 return
@@ -559,7 +559,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             with _mutation_lock:
                 try:
-                    save_config(raw)
+                    save_config(raw, path=CONFIG_PATH)
                 except Exception as e:
                     self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
                     return
@@ -644,13 +644,13 @@ class _Handler(BaseHTTPRequestHandler):
             raw = self._read_body_json()
             if raw is None:
                 return
-            errors = validate_config(raw)
+            errors = validate_config(raw, schema_path=SCHEMA_PATH)
             if errors:
                 self._send_json({"ok": False, "errors": errors}, 400)
                 return
             with _mutation_lock:
                 try:
-                    save_config(raw)
+                    save_config(raw, path=CONFIG_PATH)
                 except Exception as e:
                     self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
                     return
@@ -704,7 +704,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             with _mutation_lock:
                 try:
-                    update_env_file({}, remove=remove)
+                    update_env_file({}, remove=remove, path=ENV_PATH)
                 except Exception as e:
                     self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
                     return
@@ -742,7 +742,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         with _mutation_lock:
             try:
-                update_env_file(values)
+                update_env_file(values, path=ENV_PATH)
             except Exception as e:
                 self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
                 return
@@ -790,6 +790,7 @@ def start_webui(
     """启动网页管理端（后台守护线程）。"""
     global _on_reload_cb, _on_restart_cb, _on_poll_cb, _on_test_push_cb, _on_openid_cb, _enforce_host_check
     _on_reload_cb = on_reload
+    set_on_reload_callback(on_reload)
     _on_restart_cb = on_restart
     _on_poll_cb = on_poll
     _on_test_push_cb = on_test_push

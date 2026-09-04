@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from src import translator  # noqa: E402
 from src.webui_modules import archive_handlers  # noqa: E402
+from src.webui_modules.archive import common as archive_common  # noqa: E402
 
 
 def test_translation_client_uses_global_proxy(monkeypatch):
@@ -92,6 +93,7 @@ class _Handler:
 
 def test_manual_translation_records_trace_and_state(monkeypatch):
     db = _translation_db()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
 
     async def fake_translate(*_args, **kwargs):
@@ -120,6 +122,7 @@ def test_manual_translation_records_trace_and_state(monkeypatch):
 
 def test_manual_translation_duplicate_request_is_rejected(monkeypatch):
     db = _translation_db()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
     lock = archive_handlers._get_blog_translation_lock(1)
     assert lock.acquire(blocking=False)
@@ -140,6 +143,7 @@ def test_manual_translation_duplicate_request_is_rejected(monkeypatch):
 
 def test_manual_translation_failure_is_persisted_for_retry(monkeypatch):
     db = _translation_db()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
 
     async def fake_translate(*_args, **_kwargs):
@@ -166,6 +170,7 @@ def test_manual_translation_failure_is_persisted_for_retry(monkeypatch):
 
 def test_partial_translation_is_not_treated_as_final_cache(monkeypatch):
     db = _translation_db()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
     calls = []
 
@@ -201,6 +206,7 @@ def test_delete_translation_invalidates_structured_cache(monkeypatch):
         ("译文", '[{"zh":"你好"}]', "test-model"),
     )
     db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
     monkeypatch.setattr(archive_handlers, "record_event", lambda *args, **kwargs: None)
     html = "<p>こんにちは</p>"

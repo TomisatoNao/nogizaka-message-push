@@ -10,40 +10,30 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-import sys
 import threading
 from urllib.parse import parse_qs, unquote
 import uuid
 
 import httpx
+from src.webui_modules.archive import common as _archive_common
 from src.webui_modules.archive.common import (
     BLOG_IMAGE_DIR,
     _blog_media_url,
     _blog_table_columns,
     _send_json_resp,
-    get_blog_db,
 )
+from src.audit import record_event
 from src.webui_modules.media_service import serve_file_range
 
 _blog_translation_locks: dict[int, threading.Lock] = {}
 _blog_translation_locks_guard = threading.Lock()
 
 
-def _get_facade():
-    return sys.modules.get("src.webui_modules.archive_handlers")
-
-
 def _get_db() -> sqlite3.Connection:
-    facade = _get_facade()
-    if facade and hasattr(facade, "get_blog_db"):
-        return facade.get_blog_db()
-    return get_blog_db()
+    return _archive_common.get_blog_db()
 
 
 def _get_translation_lock(blog_id: int) -> threading.Lock:
-    facade = _get_facade()
-    if facade and hasattr(facade, "_get_blog_translation_lock"):
-        return facade._get_blog_translation_lock(blog_id)
     return _get_blog_translation_lock(blog_id)
 
 
@@ -55,26 +45,11 @@ def _set_state(
     error: str = "",
     request_id: str = "",
 ) -> None:
-    facade = _get_facade()
-    if facade and hasattr(facade, "_set_blog_translation_state"):
-        facade._set_blog_translation_state(db, blog_id, status=status, error=error, request_id=request_id)
-        return
     _set_blog_translation_state(db, blog_id, status=status, error=error, request_id=request_id)
 
 
 def _cal_days(db: sqlite3.Connection, group: str, author: str = "") -> dict[str, int]:
-    facade = _get_facade()
-    if facade and hasattr(facade, "_blog_calendar_days"):
-        return facade._blog_calendar_days(db, group, author)
     return _blog_calendar_days(db, group, author)
-
-
-def _record_audit_event(*args, **kwargs):
-    facade = _get_facade()
-    if facade and hasattr(facade, "record_event"):
-        return facade.record_event(*args, **kwargs)
-    from src.audit import record_event
-    return record_event(*args, **kwargs)
 
 
 def _get_blog_translation_lock(blog_id: int) -> threading.Lock:
@@ -653,7 +628,7 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             current_user_fn = getattr(handler, "_current_user", None)
             user = current_user_fn() if callable(current_user_fn) else {}
             source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
-            _record_audit_event(
+            record_event(
                 "archive.blog_translation.delete",
                 outcome="success",
                 actor=user.get("username"),

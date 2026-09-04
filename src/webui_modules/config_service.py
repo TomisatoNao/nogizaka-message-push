@@ -12,39 +12,33 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
-import sys
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 DEFAULT_CONFIG_PATH = _BASE_DIR / "config" / "config.json"
 DEFAULT_ENV_PATH = _BASE_DIR / ".env"
 
+CONFIG_PATH = DEFAULT_CONFIG_PATH
+SCHEMA_PATH = DEFAULT_SCHEMA_PATH
+ENV_PATH = DEFAULT_ENV_PATH
+
 
 def _get_config_path(custom: Path | None = None) -> Path:
     if custom is not None:
         return custom
-    mod = sys.modules.get("src.webui")
-    if mod and hasattr(mod, "CONFIG_PATH"):
-        return getattr(mod, "CONFIG_PATH")
-    return DEFAULT_CONFIG_PATH
+    return CONFIG_PATH
 
 
 def _get_schema_path(custom: Path | None = None) -> Path:
     if custom is not None:
         return custom
-    mod = sys.modules.get("src.webui")
-    if mod and hasattr(mod, "SCHEMA_PATH"):
-        return getattr(mod, "SCHEMA_PATH")
-    return DEFAULT_SCHEMA_PATH
+    return SCHEMA_PATH
 
 
 def _get_env_path(custom: Path | None = None) -> Path:
     if custom is not None:
         return custom
-    mod = sys.modules.get("src.webui")
-    if mod and hasattr(mod, "ENV_PATH"):
-        return getattr(mod, "ENV_PATH")
-    return DEFAULT_ENV_PATH
+    return ENV_PATH
 
 
 # ================================================================
@@ -279,8 +273,7 @@ def _trigger_reload() -> bool:
     from src.logger import log_all
 
     ok = _reload()
-    mod = sys.modules.get("src.webui")
-    cb = getattr(mod, "_on_reload_cb", None) or _on_reload_cb
+    cb = _on_reload_cb
     if cb is not None:
         try:
             cb(ok)
@@ -383,12 +376,14 @@ def _rotate_account_creds(account_id: str) -> None:
             cred_file.unlink(missing_ok=True)
         except OSError:
             pass
-    creds_mod = sys.modules.get("config.credentials")
-    if creds_mod is not None:
+    try:
+        from config import credentials as creds_mod
         creds_mod.ACCOUNT_CREDS.pop(account_id, None)
         clear_state = getattr(creds_mod, "clear_refresh_state", None)
         if clear_state is not None:
             clear_state(account_id)
+    except Exception:
+        pass
 
 
 # ================================================================

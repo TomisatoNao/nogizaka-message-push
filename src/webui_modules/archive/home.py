@@ -9,16 +9,16 @@ import json
 from pathlib import Path
 import random
 import sqlite3
-import sys
 import threading
 from urllib.parse import quote
 
 import config.config as cfg
 from src import archive as _archive
-from src.webui_modules.archive.common import (
-    _send_json_resp,
-    get_blog_db,
-)
+from src.webui_modules.archive import common as _archive_common
+from src.webui_modules.archive.common import _send_json_resp
+
+def get_blog_db() -> sqlite3.Connection:
+    return _archive_common.get_blog_db()
 
 _home_cache: dict | None = None
 _home_cache_key: tuple[float, float, str] | None = None
@@ -26,15 +26,6 @@ _home_cache_condition = threading.Condition()
 _home_cache_building = False
 
 
-def _get_facade():
-    return sys.modules.get("src.webui_modules.archive_handlers")
-
-
-def _get_db() -> sqlite3.Connection:
-    facade = _get_facade()
-    if facade and hasattr(facade, "get_blog_db"):
-        return facade.get_blog_db()
-    return get_blog_db()
 
 
 def _message_media_totals(members: list[dict]) -> dict[str, int]:
@@ -153,16 +144,13 @@ def _load_latest_text_by_member(
 
 def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     """处理首页聚合请求。"""
-    facade = _get_facade()
-    cache_key_fn = getattr(facade, "_home_cache_key_for_request", _home_cache_key_for_request)
-    cache_key = cache_key_fn()
+    global _home_cache, _home_cache_key
+    cache_key = _home_cache_key_for_request()
     today_str = cache_key[2]
 
-    # 检查门面上的 _home_cache
-    facade_cache = getattr(facade, "_home_cache", None)
-    facade_cache_key = getattr(facade, "_home_cache_key", None)
-    if facade_cache is not None and facade_cache_key == cache_key:
-        _send_json_resp(handler, facade_cache)
+    # 检查本地 _home_cache
+    if _home_cache is not None and _home_cache_key == cache_key:
+        _send_json_resp(handler, _home_cache)
         return
 
     random.seed(today_str)
@@ -185,8 +173,6 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     months_by_member: dict[str, list[dict]] = {}
     types_by_member: dict[str, dict[str, int]] = {}
     latest_msgs_by_member: dict[str, list[dict]] = {}
-
-    load_text_fn = getattr(facade, "_load_latest_text_by_member", _load_latest_text_by_member)
 
     if db:
         try:
@@ -214,7 +200,7 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                 md, mtype, cnt = r_tc[0], r_tc[1] or "text", r_tc[2]
                 types_by_member.setdefault(md, {})[mtype] = cnt
 
-            latest_msgs_by_member = load_text_fn(db, archive_members, limit=4)
+            latest_msgs_by_member = _load_latest_text_by_member(db, archive_members, limit=4)
         except Exception:
             pass
 
@@ -271,7 +257,7 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         encoded_parts = [quote(p) for p in parts]
         return "/api/archive/blog_media/" + "/".join(encoded_parts)
 
-    blog_db = _get_db()
+    blog_db = get_blog_db()
     if blog_db:
         try:
             total_blogs = blog_db.execute("SELECT COUNT(*) FROM blog_posts").fetchone()[0]
@@ -378,8 +364,7 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
 
     recent_feed = sorted(agg_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:8]
     total_messages = sum(m["stats"]["total"] for m in members)
-    totals_fn = getattr(facade, "_message_media_totals", _message_media_totals)
-    media_totals = totals_fn(members)
+    media_totals = _message_media_totals(members)
     first_dates = [m["stats"]["first_date"] for m in members if m["stats"]["first_date"]] + [g["first_date"] for g in blog_groups if g["first_date"]]
     last_dates = [m["stats"]["last_date"] for m in members if m["stats"]["last_date"]] + [g["last_date"] for g in blog_groups if g["last_date"]]
 
@@ -408,9 +393,8 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
         "recent_pics": agg_pics,
         "recent_feed": recent_feed,
     }
-    if facade is not None:
-        facade._home_cache = result
-        facade._home_cache_key = cache_key
+    _home_cache = result
+    _home_cache_key = cache_key
     _send_json_resp(handler, result)
 
 

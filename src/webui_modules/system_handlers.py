@@ -17,7 +17,6 @@ import asyncio
 import os
 from pathlib import Path
 import re
-import sys
 import time
 from urllib.parse import parse_qs
 
@@ -88,8 +87,8 @@ def handle_status(handler, on_poll_cb=None) -> None:
     from src.health import get_tracker
     snap = get_tracker().snapshot()
 
-    creds_mod = sys.modules.get("config.credentials")
-    if creds_mod is not None:
+    try:
+        from config import credentials as creds_mod
         import config.config as cfg
         live = {}
         for acc_id in cfg.ACCOUNTS:
@@ -98,6 +97,8 @@ def handle_status(handler, on_poll_cb=None) -> None:
                 live[acc_id] = {"remaining": max(0.0, remaining), "healthy": remaining > 0}
         if live:
             snap["tokens"] = live
+    except Exception:
+        pass
 
     snap["ok"] = True
     snap["now_epoch"] = time.time()
