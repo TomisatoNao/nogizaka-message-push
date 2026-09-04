@@ -400,9 +400,9 @@ def _save_mobile_cred(account_id: str, access_token: str, refresh_token: str) ->
 # ──────────────────────────────────────────────
 # 公开 API — 移动端
 # ──────────────────────────────────────────────
-def get_mobile_headers(account_id: str) -> dict[str, str]:
+def get_mobile_headers(account_id: str, account_cfg: dict | None = None) -> dict[str, str]:
     """构建 iOS 端请求头（无 Cookie，仅 Bearer Token + X-Talk-App-ID）。"""
-    acc_cfg = cfg.ACCOUNTS.get(account_id, {})
+    acc_cfg = account_cfg if account_cfg is not None else cfg.ACCOUNTS.get(account_id, {})
     mg_key = _resolve_mobile_group(acc_cfg)
     mg = _MOBILE_GROUP_CONFIG[mg_key]
     headers = {
@@ -419,9 +419,9 @@ def get_mobile_headers(account_id: str) -> dict[str, str]:
     return headers
 
 
-def get_mobile_api_base(account_id: str) -> str:
+def get_mobile_api_base(account_id: str, account_cfg: dict | None = None) -> str:
     """获取移动端 API 基础 URL（优先使用显式 api_base 配置，否则用 glastonr.net）。"""
-    acc_cfg = cfg.ACCOUNTS.get(account_id, {})
+    acc_cfg = account_cfg if account_cfg is not None else cfg.ACCOUNTS.get(account_id, {})
     if acc_cfg.get("api_base"):
         return acc_cfg["api_base"]
     mg_key = _resolve_mobile_group(acc_cfg)

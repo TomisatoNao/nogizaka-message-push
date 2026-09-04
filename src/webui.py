@@ -280,9 +280,40 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
 
-        # 0. 健康探针（免鉴权放行）
+        # 0. 健康与就绪探针（免鉴权放行）
         if path in ("/api/health", "/api/health/status"):
-            self._send_json({"ok": True, "status": "healthy"})
+            if _on_poll_cb is None:
+                # 独立运行/单测模式：WebUI 自身正常即判定为 healthy
+                self._send_json({
+                    "ok": True,
+                    "status": "healthy",
+                    "startup_state": "STANDALONE",
+                    "ready": True,
+                }, 200)
+                return
+
+            from src.health import get_tracker
+            snap = get_tracker().startup_snapshot()
+            state = snap.get("state", "READY")
+            # 嵌入 app 运行模式：只有启动自检完成（非 STARTING）才判定为业务就绪
+            if state == "STARTING":
+                self._send_json({
+                    "ok": False,
+                    "status": "starting",
+                    "startup_state": "STARTING",
+                    "ready": False,
+                    "reasons": snap.get("reasons", []),
+                }, 503)
+                return
+
+            is_healthy = state in ("READY", "SETUP_REQUIRED")
+            self._send_json({
+                "ok": True,
+                "status": "healthy" if is_healthy else "degraded",
+                "startup_state": state,
+                "ready": True,
+                "reasons": snap.get("reasons", []),
+            }, 200)
             return
 
         # 1. 静态页面与资产

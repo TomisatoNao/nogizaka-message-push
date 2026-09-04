@@ -170,3 +170,43 @@ def test_initial_admin_banner_is_emitted_once():
     assert banner.count("=" * 70) == 2
     assert banner.count("初始密码: test-password") == 1
     assert banner.endswith("=" * 70 + "\n")
+
+
+def test_health_probe_distinguishes_starting_from_ready():
+    """验证 /api/health/status 在启动中返回 503 未就绪，自检通过后返回 200 已就绪。"""
+    import json
+    import urllib.error
+    import urllib.request
+    from src import webui
+
+    health.initialize()
+    health.get_tracker().set_startup_state("STARTING")
+
+    # 启动带有 on_poll 回调的嵌入式 WebUI
+    server = webui.start_webui(host="127.0.0.1", port=0, on_poll=lambda: None)
+    assert server is not None
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        # 1. 状态为 STARTING 时，探针应返回 503 且 ready=False
+        try:
+            with urllib.request.urlopen(base + "/api/health/status", timeout=5) as resp:
+                raise AssertionError(f"STARTING 状态应返回 503，实际返回 {resp.status}")
+        except urllib.error.HTTPError as e:
+            assert e.code == 503
+            body = json.loads(e.read().decode("utf-8"))
+            assert body["ok"] is False
+            assert body["ready"] is False
+            assert body["status"] == "starting"
+
+        # 2. 状态转换为 READY 后，探针应返回 200 且 ready=True
+        health.get_tracker().set_startup_state("READY")
+        with urllib.request.urlopen(base + "/api/health/status", timeout=5) as resp:
+            assert resp.status == 200
+            body = json.loads(resp.read().decode("utf-8"))
+            assert body["ok"] is True
+            assert body["ready"] is True
+            assert body["status"] == "healthy"
+    finally:
+        server.shutdown()
+

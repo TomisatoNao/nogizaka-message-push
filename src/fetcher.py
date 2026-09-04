@@ -39,9 +39,19 @@ def initialize(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> None:
     _semaphore   = semaphore
 
 
-async def fetch_member_messages(member: dict):
+async def fetch_member_messages(
+    member: dict,
+    account_cfg: dict | None = None,
+    backtrack_hours: int | None = None,
+    skip_publish_types: tuple | list | set | None = None,
+):
     """公开接口：抓取单个成员消息。"""
-    return await _fetch_member_messages(member)
+    return await _fetch_member_messages(
+        member,
+        account_cfg=account_cfg,
+        backtrack_hours=backtrack_hours,
+        skip_publish_types=skip_publish_types,
+    )
 
 
 async def push_member_messages(member: dict, new_msgs: list,
@@ -126,7 +136,12 @@ async def _handle_message(member: dict, msg: dict,
 # ──────────────────────────────────────────────
 # 单成员轮询
 # ──────────────────────────────────────────────
-async def _fetch_member_messages(member: dict):
+async def _fetch_member_messages(
+    member: dict,
+    account_cfg: dict | None = None,
+    backtrack_hours: int | None = None,
+    skip_publish_types: tuple | list | set | None = None,
+):
     """
     Phase 1（并发抓取）：读取时间戳 → API 请求（含 401 续期/重试）→ 排序过滤。
     返回 (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock) 或 None。
@@ -181,8 +196,9 @@ async def _fetch_member_messages(member: dict):
     is_first_fetch = False
     if not l_time:
         is_first_fetch = True
+        effective_backtrack = backtrack_hours if backtrack_hours is not None else cfg.BACKTRACK_HOURS
         l_time = (
-            datetime.now(timezone.utc) - timedelta(hours=cfg.BACKTRACK_HOURS)
+            datetime.now(timezone.utc) - timedelta(hours=effective_backtrack)
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # ── 订阅感知优化：未订阅/已离线成员跳过日常实时抓取 ──
@@ -202,12 +218,12 @@ async def _fetch_member_messages(member: dict):
 
     for attempt in range(1, MAX_FETCH_ATTEMPTS + 1):
         try:
-            acc_cfg = cfg.ACCOUNTS.get(account_id, {})
+            acc_cfg = account_cfg if account_cfg is not None else cfg.ACCOUNTS.get(account_id, {})
             is_mobile = acc_cfg.get("auth_method") == "mobile"
 
             # ── URL 构建 ──
             if is_mobile:
-                base = acc_cfg.get("api_base") or get_mobile_api_base(account_id)
+                base = acc_cfg.get("api_base") or get_mobile_api_base(account_id, account_cfg=acc_cfg)
             elif acc_cfg.get("api_base"):
                 base = acc_cfg["api_base"]
             elif group_type.lower() == "yodel":
@@ -223,7 +239,7 @@ async def _fetch_member_messages(member: dict):
 
             # ── Header 构建 ──
             if is_mobile:
-                headers = get_mobile_headers(account_id)
+                headers = get_mobile_headers(account_id, account_cfg=acc_cfg)
             else:
                 cookie_str = "; ".join(f"{k}={v}" for k, v in (cred.get("cookies") or {}).items())
                 headers = get_web_headers(
@@ -275,12 +291,13 @@ async def _fetch_member_messages(member: dict):
                     except Exception as e:  # 可选历史补偿不可阻断实时抓取，但必须可追踪。
                         log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] past_messages 未处理异常: {type(e).__name__}: {e}", is_error=True)
 
+                effective_skip_types = skip_publish_types if skip_publish_types is not None else cfg.SKIP_PUBLISH_TYPES
                 new_msgs = sorted(
                     [
                         m for m in msgs
                         if m.get("updated_at")
                         and m.get("updated_at") >= l_time_ref[0]
-                        and m.get("publish_type") not in cfg.SKIP_PUBLISH_TYPES
+                        and m.get("publish_type") not in effective_skip_types
                     ],
                     key=lambda x: x["updated_at"],
                 )

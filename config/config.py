@@ -5,10 +5,12 @@
 # 敏感值不再使用 $ENV:VAR 占位符 — 账号凭证按命名约定自动从 .env 匹配。
 # ============================================================
 import copy as _copy
+from dataclasses import dataclass as _dataclass
 import json as _json
 import os as _os
 import re as _re
 import sys as _sys
+import threading as _threading
 from pathlib import Path as _Path
 
 # ── 加载 .env（如已安装 python-dotenv）────────────────────────
@@ -792,20 +794,23 @@ def _load_config() -> dict:
 
 def _mutate_container(old, new):
     """将 new 的值原位写入 old 容器（保持引用不变，供热重载使用）。
+       采用无间隙增量更新与安全修剪，杜绝 clear() 导致的瞬时空状态与多线程竞态撕裂。
        支持 dict → dict / list → list / set → set / tuple → list 的原地更新。"""
     if isinstance(old, dict) and isinstance(new, dict):
-        old.clear()
         old.update(new)
+        for k in list(old.keys()):
+            if k not in new:
+                del old[k]
     elif isinstance(old, list) and isinstance(new, (list, set, tuple)):
-        old.clear()
-        old.extend(new)
+        old[:] = list(new)
     elif isinstance(old, set) and isinstance(new, (list, set, tuple)):
-        old.clear()
         old.update(new)
+        to_remove = [item for item in old if item not in new]
+        for item in to_remove:
+            old.discard(item)
     elif isinstance(old, list) and isinstance(new, tuple):
-        # tuple → list: 清空后扩展（DAY_INTERVAL 存为 list 方便热重载）
-        old.clear()
-        old.extend(new)
+        # tuple → list: 切片替换（DAY_INTERVAL 存为 list 方便热重载）
+        old[:] = list(new)
 
 
 def _apply_config(cfg: dict) -> None:
@@ -868,6 +873,49 @@ DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOA
 # 公开 API
 # ================================================================
 
+_config_lock = _threading.RLock()
+
+
+@_dataclass(frozen=True)
+class CycleSnapshot:
+    """本轮巡查周期的配置不可变快照（小范围试点）。
+
+    在巡查周期开始时生成一次，确保该周期内跨成员并发抓取读取到一致的配置视图，
+    避免中途热重载导致配置撕裂或瞬时状态不一致。
+    """
+
+    monitor_list: tuple[dict, ...]
+    accounts: dict[str, dict]
+    backtrack_hours: int
+    skip_publish_types: tuple[str, ...]
+    day_interval: tuple[int, int]
+    night_interval: tuple[int, int]
+    day_start_hour: int
+    night_start_hour: int
+    sleep_start_hour: int
+    sleep_end_hour: int
+    message_monitor_enabled: bool
+
+
+def get_cycle_snapshot() -> CycleSnapshot:
+    """获取当前配置的不可变周期快照（线程安全）。"""
+    with _config_lock:
+        mod = _sys.modules[__name__]
+        return CycleSnapshot(
+            monitor_list=tuple(_copy.deepcopy(getattr(mod, "MONITOR_LIST", []))),
+            accounts=_copy.deepcopy(getattr(mod, "ACCOUNTS", {})),
+            backtrack_hours=int(getattr(mod, "BACKTRACK_HOURS", 24)),
+            skip_publish_types=tuple(_copy.deepcopy(getattr(mod, "SKIP_PUBLISH_TYPES", ()))),
+            day_interval=tuple(getattr(mod, "DAY_INTERVAL", (30, 60))),
+            night_interval=tuple(getattr(mod, "NIGHT_INTERVAL", (120, 300))),
+            day_start_hour=int(getattr(mod, "DAY_START_HOUR", 8)),
+            night_start_hour=int(getattr(mod, "NIGHT_START_HOUR", 23)),
+            sleep_start_hour=int(getattr(mod, "SLEEP_START_HOUR", 2)),
+            sleep_end_hour=int(getattr(mod, "SLEEP_END_HOUR", 6)),
+            message_monitor_enabled=bool(getattr(mod, "MESSAGE_MONITOR_ENABLED", False)),
+        )
+
+
 def reload() -> bool:
     """手动热重载 config.json。
        - 容器类型变量（MONITOR_LIST / ACCOUNTS / GEMINI_MODELS 等）
@@ -877,32 +925,33 @@ def reload() -> bool:
          （Python 限制），需通过 import config.config 后访问
          config.config.VAR 才能看到新值。
        - 校验失败时保留旧配置并返回 False。"""
-    try:
-        new_cfg = _load_config()
-        global _config
-        _mutate_container(_config, new_cfg)
-        _apply_config(new_cfg)
+    with _config_lock:
+        try:
+            new_cfg = _load_config()
+            global _config
+            _mutate_container(_config, new_cfg)
+            _apply_config(new_cfg)
 
-        # 重新应用环境变量覆盖
-        global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD, \
-               ENABLE_TG_BOT
-        ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)
-        ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT)
-        DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)
+            # 重新应用环境变量覆盖
+            global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD, \
+                   ENABLE_TG_BOT
+            ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)
+            ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT)
+            DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)
 
-        # TG Bot 的专属 Token 会在 _load_config → _build_tg_bots 中重新读取。
-        ENABLE_TG_BOT  = _env_bool("ENABLE_TG_BOT", ENABLE_TG_BOT)
+            # TG Bot 的专属 Token 会在 _load_config → _build_tg_bots 中重新读取。
+            ENABLE_TG_BOT  = _env_bool("ENABLE_TG_BOT", ENABLE_TG_BOT)
 
-        return True
-    except SystemExit as e:
-        # _load_config 在致命错误时调用 sys.exit(message)，拦截并把原因打出来
-        # （不能 import src.logger —— 会形成循环依赖，用 print）
-        print(f"🚨 配置重载失败（保留旧配置）: {e.code}")
-        return False
-    except Exception:
-        import traceback as _tb
-        print(f"🚨 配置重载失败（保留旧配置）:\n{_tb.format_exc()}")
-        return False
+            return True
+        except SystemExit as e:
+            # _load_config 在致命错误时调用 sys.exit(message)，拦截并把原因打出来
+            # （不能 import src.logger —— 会形成循环依赖，用 print）
+            print(f"🚨 配置重载失败（保留旧配置）: {e.code}")
+            return False
+        except Exception:
+            import traceback as _tb
+            print(f"🚨 配置重载失败（保留旧配置）:\n{_tb.format_exc()}")
+            return False
 
 
 def get(key: str):

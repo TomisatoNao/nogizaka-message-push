@@ -116,14 +116,18 @@ def _alert_group_for_account(acc_id: str) -> int:
 
 
 async def _run_cycle() -> None:
-    """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
+    """单轮巡查：获取周期快照 → 主动续期 → 并发抓取 → 串行推送。"""
     app_mod = sys.modules.get("src.app")
     cycle_summary_fn = getattr(app_mod, "_message_cycle_summary", _message_cycle_summary) if app_mod else _message_cycle_summary
+
+    # 小范围试点：获取本轮巡查不可变快照，保持本轮巡查期间配置视图一致
+    snapshot = cfg.get_cycle_snapshot() if hasattr(cfg, "get_cycle_snapshot") else None
 
     # ── Phase 1: Message 消息巡查 ──
     if _is_message_monitor_enabled():
         message_cycle_started = time.monotonic()
-        valid_monitors = [m for m in cfg.MONITOR_LIST if m.get("account_id") and m.get("m_id")]
+        source_monitors = snapshot.monitor_list if snapshot else cfg.MONITOR_LIST
+        valid_monitors = [m for m in source_monitors if m.get("account_id") and m.get("m_id")]
 
         # 每个账号取一个 target_group 作为报警目标
         account_target_groups: dict[str, int] = {
@@ -144,9 +148,21 @@ async def _run_cycle() -> None:
         random.shuffle(shuffled)
 
         if shuffled:
-            # Phase 1: 并发抓取所有成员的消息
+            # Phase 1: 并发抓取所有成员的消息（传入快照中的账号配置、回溯时间和过滤类型）
+            def _build_fetch_coro(m: dict):
+                acc_id = m.get("account_id") or ""
+                acc_cfg = snapshot.accounts.get(acc_id) if snapshot else None
+                bt_hours = snapshot.backtrack_hours if snapshot else None
+                skip_types = snapshot.skip_publish_types if snapshot else None
+                return fetcher.fetch_member_messages(
+                    m,
+                    account_cfg=acc_cfg,
+                    backtrack_hours=bt_hours,
+                    skip_publish_types=skip_types,
+                )
+
             fetch_results = await asyncio.gather(
-                *[fetcher.fetch_member_messages(m) for m in shuffled],
+                *[_build_fetch_coro(m) for m in shuffled],
                 return_exceptions=True,
             )
 
