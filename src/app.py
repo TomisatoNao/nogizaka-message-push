@@ -3,80 +3,58 @@
 # ============================================================
 import asyncio
 import os
-import random
 import signal
 import sys
-import time
 import traceback
-from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
 
-from src import archive
-from src import fetcher
-from src import tagger
-from src import translator
-from src.platforms import napcat
-from src.platforms import qq_official
-from src.platforms import tgbot
-from src import health
-from src import blog_fetcher
-from src.social.manager import start_social_service, stop_social_service
-from src.platforms.qq_official import health_check as qq_official_health_check
 import config.config as cfg
 from config.credentials import (
+    get_token_remaining_seconds,
     initialize as init_credentials,
-    load_all_accounts, proactive_refresh_if_expiring,
-    refresh_token, refresh_mobile_token, get_token_remaining_seconds,
+    load_all_accounts,
+    refresh_mobile_token,
+    refresh_token,
 )
 from config.watcher import start_watcher
+from src import archive, blog_fetcher, fetcher, health, tagger, translator
+from src.app_modules import (
+    DISK_WARN_BYTES,
+    PID_FILE,
+    STOP_FILE,
+    SUMMARY_MAX_ATTEMPTS,
+    SUMMARY_RETRY_SECONDS,
+    _MemberCycleResult,
+    _acquire_instance_lock,
+    _build_daily_summary,
+    _calc_sleep_seconds,
+    _daily_summary_loop,
+    _dir_size,
+    _get_jst_now,
+    _is_pid_running,
+    _is_python_process,
+    _kill_pid,
+    _message_cycle_summary,
+    _next_interval,
+    _run_cycle,
+    _run_loop,
+    _send_summary_with_retry,
+    _stop_requested,
+    _storage_line,
+    _to_jst_date,
+    _wait_or_trigger,
+)
 from src.logger import init_loggers, log_all
+from src.platforms import napcat, qq_official, tgbot
+from src.platforms.qq_official import health_check as qq_official_health_check
+from src.social.manager import start_social_service, stop_social_service
 from src.webui import start_webui
-from src.utils import in_hour_range
 
 # ---- 博客状态 ----
 _blog_db: object = None
 _blog_client: httpx.AsyncClient | None = None
-
-
-@dataclass(frozen=True)
-class _MemberCycleResult:
-    """单个成员在本轮消息巡查中的结果，用于生成低噪声汇总日志。"""
-
-    name: str
-    fetch_ok: bool = False
-    skipped: bool = False
-    new_count: int = 0
-    push_ok: bool | None = None
-
-    @property
-    def failed(self) -> bool:
-        """是否需要在本轮汇总中作为异常成员突出显示。"""
-        return not self.skipped and (not self.fetch_ok or self.push_ok is False)
-
-
-def _message_cycle_summary(results: list[_MemberCycleResult], elapsed: float) -> tuple[str, bool]:
-    """生成消息巡查摘要，返回 ``(文本, 是否有异常)``。"""
-    total = len(results)
-    fetch_ok = sum(result.fetch_ok for result in results)
-    skipped = sum(result.skipped for result in results)
-    new_count = sum(result.new_count for result in results)
-    processed_count = sum(
-        result.new_count for result in results if result.push_ok is True
-    )
-    error_members = [result.name for result in results if result.failed]
-    has_errors = bool(error_members)
-
-    summary = (
-        f"🔍 消息巡查完毕 | 成员 {total} | 请求成功 {fetch_ok} | "
-        f"新增 {new_count} | 处理完成 {processed_count} | "
-        f"异常 {len(error_members)} | 跳过 {skipped} | 耗时 {elapsed:.1f}s"
-    )
-    if has_errors:
-        summary += f" | 异常成员: {' · '.join(error_members)}"
-    return summary, has_errors
 
 
 # ──────────────────────────────────────────────
@@ -286,506 +264,6 @@ def _alert_group_for_account(acc_id: str) -> int:
     return 0
 
 
-def _get_jst_now() -> datetime:
-    return datetime.now(timezone(timedelta(hours=9)))
-
-
-# ──────────────────────────────────────────────
-# 每日运行摘要（同时是"死人开关"：哪天没收到摘要 = 系统挂了）
-# ──────────────────────────────────────────────
-# 停止信号文件：外部（部署脚本）创建它即可让主程序优雅退出。
-# 计划任务 / systemd 启动的进程往往需要管理员权限才能杀，用文件信号
-# 就绕开了权限问题，也保证走完整的清理流程。
-STOP_FILE = Path(__file__).resolve().parent.parent / "logs" / "service.stop"
-
-DISK_WARN_BYTES = 10 * 1024 ** 3   # 磁盘剩余低于此值在摘要里标红
-SUMMARY_MAX_ATTEMPTS = 3
-SUMMARY_RETRY_SECONDS = 1800       # 失败后 30 分钟补发
-
-def _build_daily_summary() -> str:
-    """生成全量每日运行摘要（整合 Message、三团博客、社交媒体、通道健康与存储监控）。"""
-    from config.credentials import get_token_remaining_seconds
-
-    jst = _get_jst_now()
-    today_str = jst.strftime("%Y-%m-%d")
-    lines = [
-        f"📅 每日运行摘要 · {today_str}（JST）",
-        "─" * 20,
-    ]
-
-    # ── 1. Message 消息模块 ──
-    lines.append("💌 【Message 消息】")
-    if cfg.ARCHIVE_ENABLED:
-        msg_db = Path(cfg.ARCHIVE_DIR) / "archive.db"
-        member_map = {}
-        month_total = 0
-        if msg_db.exists():
-            try:
-                import sqlite3
-                conn = sqlite3.connect(msg_db)
-                c = conn.cursor()
-                c.execute("""
-                    SELECT member_name, type, COUNT(*)
-                    FROM messages
-                    WHERE substr(datetime(published_at, '+9 hours'), 1, 10) = ?
-                       OR substr(datetime(updated_at, '+9 hours'), 1, 10) = ?
-                    GROUP BY member_name, type
-                """, (today_str, today_str))
-                for m_name, m_type, cnt in c.fetchall():
-                    clean_name = m_name.replace(" ", "")
-                    if clean_name not in member_map:
-                        member_map[clean_name] = {"total": 0, "types": {}}
-                    member_map[clean_name]["total"] += cnt
-                    member_map[clean_name]["types"][m_type] = cnt
-
-                c.execute("""
-                    SELECT COUNT(*) FROM messages
-                    WHERE substr(datetime(published_at, '+9 hours'), 1, 7) = ?
-                       OR substr(datetime(updated_at, '+9 hours'), 1, 7) = ?
-                """, (today_str[:7], today_str[:7]))
-                month_total = (c.fetchone() or [0])[0]
-                conn.close()
-            except (sqlite3.Error, OSError, ValueError) as ex:
-                log_all(f"⚠️ 今日汇总 SQLite 查询跳过: {ex}", is_debug=True)
-
-        # 回退从 load_month 统计（兼容无 archive.db 的情况）
-        if not member_map:
-            for m in cfg.MONITOR_LIST:
-                clean_name = m["m_name"].replace(" ", "")
-                msgs = archive.load_month(m["m_name"], jst.year, jst.month)
-                today_msgs = [
-                    msg for msg in msgs
-                    if (_to_jst_date(msg.get("published_at") or msg.get("updated_at", ""))) == today_str
-                ]
-                if today_msgs:
-                    member_map[clean_name] = {"total": len(today_msgs), "types": {}}
-                    for msg in today_msgs:
-                        t = msg.get("type", "text")
-                        member_map[clean_name]["types"][t] = member_map[clean_name]["types"].get(t, 0) + 1
-
-        if member_map:
-            type_icons = {"text": "📝", "picture": "📸", "image": "📸", "voice": "🎙️", "video": "🎬"}
-            for m_name, data in member_map.items():
-                type_str_list = []
-                for t_name, t_cnt in data["types"].items():
-                    icon = type_icons.get(t_name, "📄")
-                    type_str_list.append(f"{icon}{t_cnt}")
-                types_formatted = f" ({' '.join(type_str_list)})" if type_str_list else ""
-                lines.append(f"  • {m_name} {data['total']} 条{types_formatted}")
-            if month_total:
-                lines.append(f"  • 当月累计接收: {month_total} 条")
-        else:
-            lines.append("  • 今日无新消息")
-    else:
-        lines.append("  • 消息归档未启用")
-
-    # ── 2. 官方博客模块 ──
-    lines.append("\n📝 【官方博客】")
-    blog_db = Path("data/archive/blogs.db")
-    if blog_db.exists():
-        try:
-            import sqlite3
-            conn = sqlite3.connect(blog_db)
-            c = conn.cursor()
-            c.execute("""
-                SELECT group_key, author, title
-                FROM blog_posts
-                WHERE substr(date, 1, 10) = ?
-                   OR substr(datetime(created_at, '+9 hours'), 1, 10) = ?
-                ORDER BY id ASC
-            """, (today_str, today_str))
-            b_rows = c.fetchall()
-            conn.close()
-
-            if b_rows:
-                group_labels = {"nogizaka": "乃木坂46", "sakurazaka": "樱坂46", "hinatazaka": "日向坂46"}
-                group_posts = {}
-                for gkey, author, _ in b_rows:
-                    group_posts.setdefault(gkey, []).append(author)
-
-                lines.append(f"  • 今日更新 {len(b_rows)} 篇:")
-                for gkey, authors in group_posts.items():
-                    g_label = group_labels.get(gkey, gkey)
-                    seen = []
-                    for a in authors:
-                        if a and a not in seen:
-                            seen.append(a)
-                    author_preview = "、".join(seen[:3])
-                    if len(seen) > 3:
-                        author_preview += f" 等 {len(seen)} 人"
-                    author_suffix = f" ({author_preview})" if author_preview else ""
-                    lines.append(f"    - {g_label}: {len(authors)} 篇{author_suffix}")
-            else:
-                lines.append("  • 今日三团官网暂无新博客")
-        except Exception as e:
-            lines.append(f"  • 博客统计异常: {e}")
-    else:
-        lines.append("  • 博客模块运行中")
-
-    # ── 3. 社交媒体与直播 ──
-    lines.append("\n🌐 【社交媒体 & 直播】")
-    social_db = Path("data/archive.db")
-    if social_db.exists():
-        try:
-            import sqlite3
-            conn = sqlite3.connect(social_db)
-            c = conn.cursor()
-            c.execute("""
-                SELECT platform, kind, COUNT(*)
-                FROM posts
-                WHERE substr(datetime(ts, 'unixepoch', '+9 hours'), 1, 10) = ?
-                   OR substr(datetime(archived_at, 'unixepoch', '+9 hours'), 1, 10) = ?
-                GROUP BY platform, kind
-            """, (today_str, today_str))
-            s_rows = c.fetchall()
-            conn.close()
-
-            if s_rows:
-                plat_map = {}
-                for plat, kind, cnt in s_rows:
-                    plat_map.setdefault(plat, {})[kind or "post"] = cnt
-
-                plat_labels = {"x": "X", "instagram": "Instagram", "tiktok": "TikTok", "tiktok_live": "TikTok直播"}
-                summary_parts = []
-                for p_key, kinds in plat_map.items():
-                    p_name = plat_labels.get(p_key, p_key)
-                    total_cnt = sum(kinds.values())
-                    if p_key == "instagram" and "story" in kinds:
-                        stories = kinds["story"]
-                        posts = total_cnt - stories
-                        summary_parts.append(f"{p_name} {total_cnt} 条 ({posts} 贴文 / {stories} Story)")
-                    else:
-                        summary_parts.append(f"{p_name} {total_cnt} 条")
-                lines.append("  • 今日动态: " + " · ".join(summary_parts))
-            else:
-                lines.append("  • 今日暂无新增社媒动态")
-        except Exception as e:
-            lines.append(f"  • 社媒统计异常: {e}")
-    else:
-        lines.append("  • 社媒模块运行中")
-
-    # ── 4. 通道与系统健康 ──
-    lines.append("\n🤖 【通道与系统健康】")
-    snap = health.get_tracker().snapshot()
-    uptime_h = int(snap["uptime_seconds"] // 3600)
-    uptime_m = int((snap["uptime_seconds"] % 3600) // 60)
-    lines.append(f"  • 巡查状态: 连续运行 {uptime_h}h {uptime_m}m · 第 {snap['cycle_count']} 轮")
-
-    token_parts = []
-    for acc_id in cfg.ACCOUNTS:
-        remaining = get_token_remaining_seconds(acc_id)
-        if remaining is None:
-            token_parts.append(f"{acc_id} 未知")
-        elif remaining <= 0:
-            token_parts.append(f"{acc_id} 失效🔴")
-        else:
-            token_parts.append(f"{acc_id} 正常")
-    if token_parts:
-        lines.append("  • 凭证Token: " + " · ".join(token_parts))
-
-    t_models = []
-    if getattr(cfg, "GEMINI_API_KEY", ""):
-        t_models.append(f"Gemini ({getattr(cfg, 'GEMINI_MODEL', 'gemini-3.7-flash')})")
-    if getattr(cfg, "ZHIPU_API_KEY", ""):
-        t_models.append(f"智谱 ({getattr(cfg, 'ZHIPU_MODEL', 'glm-4-flash')})")
-    if t_models:
-        lines.append("  • 翻译引擎: " + " · ".join(t_models))
-
-    persistent = [e for e in snap["errors"] if e["tier"] == "PERSISTENT"]
-    if persistent:
-        lines.append(f"  • 待处理错误: ⚠️ {len(persistent)} 条（最新: {persistent[-1]['msg'][:40]}）")
-    else:
-        lines.append("  • 异常状态: 正常（无待处理错误）")
-
-    # ── 5. 存储空间概况 ──
-    lines.append("\n💾 【存储与磁盘空间】")
-    storage = _storage_line()
-    if storage:
-        lines.append(f"  • {storage}")
-
-    lines.append("─" * 20)
-    lines.append("（收到本摘要即代表系统在正常运行 · 反向心跳守候中）")
-    return "\n".join(lines)
-
-
-def _dir_size(path: Path) -> int:
-    total = 0
-    for p in path.rglob("*"):
-        try:
-            if p.is_file():
-                total += p.stat().st_size
-        except OSError:
-            continue
-    return total
-
-
-def _storage_line() -> str:
-    """存储占用细分 + 磁盘剩余。"""
-    from src.utils import get_storage_breakdown
-    try:
-        sb = get_storage_breakdown()
-        cats = sb.get("categories", {})
-        msg_h = cats.get("message_media", {}).get("human", "0 B")
-        blog_h = cats.get("blog_images", {}).get("human", "0 B")
-        social_h = cats.get("social_media", {}).get("human", "0 B")
-        live_h = cats.get("live_recordings", {}).get("human", "0 B")
-        app_total_h = sb.get("app_total", {}).get("human", "0 B")
-        free_h = sb.get("disk", {}).get("free_human", "0 B")
-        free_b = sb.get("disk", {}).get("free_bytes", 0)
-
-        warn = " ⚠️ 磁盘空间不足" if free_b < DISK_WARN_BYTES else ""
-        return (f"存储: 归档占用 {app_total_h} (消息 {msg_h} · 博客 {blog_h} · 社媒 {social_h} · 录像 {live_h}) · "
-                f"磁盘剩余 {free_h}{warn}")
-    except Exception:
-        return ""
-
-
-def _to_jst_date(utc_str: str) -> str:
-    try:
-        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
-    except ValueError:
-        return ""
-
-
-async def _send_summary_with_retry() -> None:
-    """发送每日摘要，失败后重试 —— 摘要本身是死人开关，
-    它自己静默失败的话，就等于监控失灵了。"""
-    from src.notifier import send_report_message
-
-    for attempt in range(1, SUMMARY_MAX_ATTEMPTS + 1):
-        try:
-            if await send_report_message(_build_daily_summary()):
-                log_all("📅 每日摘要已发送" if attempt == 1
-                        else f"📅 每日摘要已发送（第 {attempt} 次尝试）")
-                return
-            reason = "所有通道均未成功"
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            reason = "异常"
-            log_all(f"⚠️ 每日摘要异常:\n{traceback.format_exc()}", is_error=True)
-
-        if attempt < SUMMARY_MAX_ATTEMPTS:
-            log_all(f"⚠️ 每日摘要发送失败（{reason}），{SUMMARY_RETRY_SECONDS // 60} 分钟后重试"
-                    f"（{attempt}/{SUMMARY_MAX_ATTEMPTS}）", is_error=True)
-            await asyncio.sleep(SUMMARY_RETRY_SECONDS)
-        else:
-            log_all(f"🚨 每日摘要连续 {SUMMARY_MAX_ATTEMPTS} 次发送失败，本次放弃", is_error=True)
-            health.get_tracker().record_error("每日摘要发送失败", health.ErrorTier.PERSISTENT)
-
-
-async def _daily_summary_loop() -> None:
-    while True:
-        jst = _get_jst_now()
-        target = jst.replace(hour=cfg.DAILY_SUMMARY_HOUR, minute=0, second=0, microsecond=0)
-        if target <= jst:
-            target += timedelta(days=1)
-        await asyncio.sleep((target - jst).total_seconds())
-        await _send_summary_with_retry()
-
-
-def _calc_sleep_seconds() -> int:
-    """若当前在休眠时段内，返回距离休眠结束的秒数；否则返回 0。
-    支持跨午夜休眠窗口（如 SLEEP_START=22, SLEEP_END=6）。"""
-    jst = _get_jst_now()
-    if in_hour_range(jst.hour, cfg.SLEEP_START_HOUR, cfg.SLEEP_END_HOUR):
-        wake = jst.replace(hour=cfg.SLEEP_END_HOUR, minute=0, second=0, microsecond=0)
-        if wake <= jst:
-            wake += timedelta(days=1)
-        return int((wake - jst).total_seconds())
-    return 0
-
-
-def _next_interval() -> tuple[int, str]:
-    jst = _get_jst_now()
-    if in_hour_range(jst.hour, cfg.NIGHT_START_HOUR, cfg.DAY_START_HOUR):
-        base = random.randint(*cfg.NIGHT_INTERVAL)  # nosec B311
-        tag = "🌙 深夜低速"
-    else:
-        base = random.randint(*cfg.DAY_INTERVAL)  # nosec B311
-        tag = "☀️ 日间巡查"
-    # ±10% 抖动，最低不低于 1s
-    jitter = int(base * random.uniform(-0.1, 0.1))  # nosec B311
-    return max(1, base + jitter), tag
-
-
-async def _run_cycle() -> None:
-    """单轮巡查：主动续期 → 并发抓取 → 串行推送。"""
-    # ── Phase 1: Message 消息巡查 ──
-    if _message_monitor_enabled():
-        message_cycle_started = time.monotonic()
-        valid_monitors = [m for m in cfg.MONITOR_LIST if m.get("account_id") and m.get("m_id")]
-
-        # 每个账号取一个 target_group 作为报警目标
-        account_target_groups: dict[str, int] = {
-            m["account_id"]: _alert_group_for_account(m["account_id"])
-            for m in valid_monitors
-            if m.get("account_id")
-        }
-
-        # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
-        if account_target_groups:
-            await asyncio.gather(*[
-                proactive_refresh_if_expiring(acc_id, grp)
-                for acc_id, grp in account_target_groups.items()
-            ])
-
-        # ── 改进 4：随机打乱成员轮询顺序 ──
-        shuffled = list(valid_monitors)
-        random.shuffle(shuffled)
-
-        if shuffled:
-            # Phase 1: 并发抓取所有成员的消息
-            fetch_results = await asyncio.gather(
-                *[fetcher.fetch_member_messages(m) for m in shuffled],
-                return_exceptions=True,
-            )
-
-            # Phase 2: 多成员并发流水线推送（各成员内部保持时间顺序，跨成员完全并发）
-            async def _push_one_member(i: int, result) -> _MemberCycleResult:
-                member = shuffled[i]
-                name = member['m_name'].replace(" ", "")
-
-                if isinstance(result, Exception):
-                    log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
-                    return _MemberCycleResult(name=name)
-
-                if result is None:
-                    acc_id = member.get("account_id") or ""
-                    mid = str(member.get("m_id") or "")
-                    from src.member_directory import is_member_active_subscription
-                    if not acc_id or not mid or is_member_active_subscription(acc_id, mid) is False:
-                        # 纯社媒/博客或未订阅/离线成员，跳过是正常调度，不作为巡查异常
-                        return _MemberCycleResult(name=name, skipped=True)
-                    return _MemberCycleResult(name=name)
-
-                new_msgs, id_list, id_set, l_time_ref, time_file, file_lock = result
-                new_count = sum(
-                    1 for msg in new_msgs
-                    if str(msg.get("id") or msg.get("updated_at", "")) not in id_set
-                )
-                try:
-                    ok = await fetcher.push_member_messages(
-                        member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
-                    )
-                except Exception:
-                    log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
-                    health.get_tracker().record_member_push(name, False)
-                    return _MemberCycleResult(
-                        name=name, fetch_ok=True, new_count=new_count, push_ok=False
-                    )
-
-                return _MemberCycleResult(
-                    name=name, fetch_ok=True, new_count=new_count, push_ok=ok
-                )
-
-            member_results = await asyncio.gather(
-                *[_push_one_member(i, res) for i, res in enumerate(fetch_results)]
-            )
-            summary, has_errors = _message_cycle_summary(
-                member_results, time.monotonic() - message_cycle_started
-            )
-            log_all(summary, is_error=has_errors)
-    else:
-        log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
-
-    # ── 博客巡查 ──
-    blog_cfg = cfg._config.get("blog_monitor") or {}
-    if blog_cfg.get("enabled", False) and cfg._config.get("blog_records") is not None:
-        try:
-            new_posts = await blog_fetcher.run_blog_cycle(
-                _blog_client, _blog_db, cfg._config)
-            health.get_tracker().record_member_fetch("博客 (全局)", True)
-            if new_posts:
-                from src.notifier import send_blog_post
-                log_all(f"📝 博客更新：{len(new_posts)} 篇")
-                for post in new_posts:
-                    try:
-                        ok = await send_blog_post(post)
-                        if ok:
-                            log_all(f"✅ 博客 [{post.get('title', '无题')}] 推送完成")
-                        else:
-                            log_all(f"⚠️ 博客 [{post.get('title', '无题')}] 推送失败（无可用通道）", is_error=True)
-                    except Exception as e:
-                        log_all(f"💥 博客推送异常: {e}", is_error=True)
-                        health.get_tracker().record_member_push("博客 (全局)", False)
-                    await asyncio.sleep(0.5)
-            health.get_tracker().record_member_push("博客 (全局)", True)
-            
-        except Exception as e:
-            health.get_tracker().record_member_fetch("博客 (全局)", False, health.ErrorTier.TRANSIENT, str(e))
-            log_all(f"⚠️ 博客巡查异常: {e}", is_error=True)
-
-
-def _stop_requested() -> bool:
-    """外部是否请求停止（存在停止信号文件）。"""
-    try:
-        return STOP_FILE.exists()
-    except OSError:
-        return False
-
-
-async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
-    """等待 timeout 秒；期间事件被置位（网页「立即巡查」）则提前返回 True。"""
-    try:
-        await asyncio.wait_for(event.wait(), timeout=timeout)
-        event.clear()
-        return True
-    except asyncio.TimeoutError:
-        return False
-
-
-async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
-                    stop_event: asyncio.Event | None = None) -> None:
-    while True:
-        if _stop_requested():
-            log_all("🛑 检测到停止信号文件，优雅退出")
-            if stop_event is not None:
-                stop_event.set()
-            return
-        try:
-            # ── 改进 3：休眠时段暂停轮询（手动触发可唤醒）──
-            sleep_sec = _calc_sleep_seconds()
-            if sleep_sec > 0:
-                jst = _get_jst_now()
-                log_all(
-                    f"😴 休眠时段（{cfg.SLEEP_START_HOUR}:00-{cfg.SLEEP_END_HOUR}:00 JST），"
-                    f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
-                    is_debug=True,
-                )
-                health.get_tracker().record_next_cycle(time.time() + sleep_sec, "😴 休眠")
-                if not await _wait_or_trigger(poll_event, sleep_sec):
-                    continue
-                log_all("⏩ 休眠时段手动触发巡查", is_debug=True)
-
-            await _run_cycle()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # 任何未预料的异常都不该终止长驻循环：记录后照常等待下一轮
-            log_all(f"💥 巡查轮次异常，跳过本轮:\n{traceback.format_exc()}", is_error=True)
-            health.get_tracker().record_error("巡查轮次异常", health.ErrorTier.TRANSIENT)
-
-        summary = health.get_tracker().cycle_complete()
-        if summary:
-            log_all(summary)
-
-        wait_time, tag = _next_interval()
-        health.get_tracker().record_next_cycle(time.time() + wait_time, tag)
-        log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
-        # 长等待期间也要能及时响应停止信号，切成小段轮询
-        waited = 0.0
-        while waited < wait_time:
-            slice_s = min(10.0, wait_time - waited)
-            if await _wait_or_trigger(poll_event, slice_s):
-                log_all("⏩ 手动触发巡查", is_debug=True)
-                break
-            waited += slice_s
-            if _stop_requested():
-                break
-
-
 def _install_stop_handlers(stop_event: asyncio.Event) -> None:
     """注册 SIGTERM / SIGINT → 优雅停止。
 
@@ -930,93 +408,6 @@ def _on_config_reload(success: bool) -> None:
     # 指令监听要跟着新配置走，否则在管理端新加的 Bot 得等到下次重启才会上线
     if _main_loop is not None:
         _main_loop.call_soon_threadsafe(_sync_command_listeners)
-
-
-PID_FILE = Path("data/app.pid")
-
-
-def _is_pid_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if sys.platform == "win32":
-        import ctypes
-        PROCESS_QUERY_INFORMATION = 0x0400
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
-        if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        return False
-    else:
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
-
-
-def _is_python_process(pid: int) -> bool:
-    """确认目标 PID 是否确属 Python 运行进程，避免机器重启后 PID 循环重用误杀其他无关系统进程。"""
-    if pid <= 0:
-        return False
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if not h_proc:
-                return False
-            buf = ctypes.create_unicode_buffer(1024)
-            size = wintypes.DWORD(len(buf))
-            ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size))
-            ctypes.windll.kernel32.CloseHandle(h_proc)
-            if ok:
-                exe_name = buf.value.lower()
-                return "python" in exe_name
-            return False
-        except Exception:  # nosec B110
-            return False
-    else:
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
-                cmd = f.read().decode("utf-8", "replace").lower()
-                return "python" in cmd or "main.py" in cmd
-        except Exception:  # nosec B110
-            return True
-
-
-def _kill_pid(pid: int) -> None:
-    try:
-        if sys.platform == "win32":
-            import subprocess  # nosec B404
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)  # nosec B607, B603
-        else:
-            import signal
-            os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError) as ex:
-        log_all(f"⚠️ 终止进程 {pid} 跳过: {ex}", is_debug=True)
-
-
-def _acquire_instance_lock() -> None:
-    """确保全机只有一个主程序实例在运行，若存在历史遗留孤儿进程则自动清理接管。"""
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    my_pid = os.getpid()
-    if PID_FILE.exists():
-        try:
-            old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-            if old_pid != my_pid and _is_pid_running(old_pid):
-                if _is_python_process(old_pid):
-                    log_all(f"⚠️ 检测到已存在运行中的主程序旧实例 (PID: {old_pid})，正在接管并终止旧实例...")
-                    _kill_pid(old_pid)
-                    time.sleep(1.0)
-                else:
-                    log_all(f"ℹ️ 检测到历史 PID 文件记录 ({old_pid}) 已失效（非 Python 进程），自动接管覆盖。")
-        except (OSError, ValueError) as ex:
-            log_all(f"⚠️ 读取旧 PID 文件异常: {ex}", is_debug=True)
-    try:
-        PID_FILE.write_text(str(my_pid), encoding="utf-8")
-    except OSError as ex:
-        log_all(f"⚠️ 写入当前 PID 文件异常: {ex}", is_debug=True)
 
 
 async def main() -> None:
@@ -1335,6 +726,53 @@ async def main() -> None:
             os._exit(0)
         else:
             os.execv(sys.executable, [sys.executable] + sys.argv)  # nosec B606
+
+
+__all__ = [
+    # 核心主入口与生命周期
+    "main",
+    "_blog_db",
+    "_blog_client",
+    "_message_monitor_enabled",
+    "_valid_monitors",
+    "_required_account_ids",
+    "_has_configured_workload",
+    "_initial_admin_banner",
+    "_health_check",
+    "_alert_group_for_account",
+    "_install_stop_handlers",
+    "_init_accounts",
+    "_sync_command_listeners",
+    "_on_config_reload",
+    # 子模块 re-export（向下兼容外部及单测测试钩子）
+    # process_lock
+    "PID_FILE",
+    "STOP_FILE",
+    "_is_pid_running",
+    "_is_python_process",
+    "_kill_pid",
+    "_acquire_instance_lock",
+    "_stop_requested",
+    # daily_summary
+    "DISK_WARN_BYTES",
+    "SUMMARY_MAX_ATTEMPTS",
+    "SUMMARY_RETRY_SECONDS",
+    "_get_jst_now",
+    "_to_jst_date",
+    "_dir_size",
+    "_storage_line",
+    "_build_daily_summary",
+    "_send_summary_with_retry",
+    "_daily_summary_loop",
+    # message_worker
+    "_MemberCycleResult",
+    "_message_cycle_summary",
+    "_calc_sleep_seconds",
+    "_next_interval",
+    "_wait_or_trigger",
+    "_run_cycle",
+    "_run_loop",
+]
 
 
 if __name__ == "__main__":
