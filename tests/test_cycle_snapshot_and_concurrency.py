@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import FrozenInstanceError
 import threading
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -64,18 +64,29 @@ def test_mutate_container_list_and_set():
 
 
 def test_get_cycle_snapshot_immutability():
+    from collections.abc import Mapping
     snapshot = get_cycle_snapshot()
     assert isinstance(snapshot, CycleSnapshot)
     assert isinstance(snapshot.monitor_list, tuple)
-    assert isinstance(snapshot.accounts, dict)
+    assert isinstance(snapshot.accounts, Mapping)
     assert isinstance(snapshot.skip_publish_types, tuple)
 
+    # 1. 顶层字段 frozen 保护
     with pytest.raises(FrozenInstanceError):
         snapshot.backtrack_hours = 99  # type: ignore[misc]
 
+    # 2. 嵌套字典深度只读保护（避免直接修改内部映射）
+    if snapshot.accounts:
+        first_key = next(iter(snapshot.accounts.keys()))
+        with pytest.raises(TypeError):
+            snapshot.accounts[first_key]["api_base"] = "malicious_mutation"  # type: ignore[index]
+    if snapshot.monitor_list:
+        with pytest.raises(TypeError):
+            snapshot.monitor_list[0]["account_id"] = "malicious_mutation"  # type: ignore[index]
+
+    # 3. 隔离副本：全局修改不污染已生成的快照
     orig_accounts = snapshot.accounts
-    with patch.dict(cfg.ACCOUNTS,
-{'temp_test_acc': {'dummy': 123}}, clear=False):
+    with patch.dict(cfg.ACCOUNTS, {'temp_test_acc': {'dummy': 123}}, clear=False):
         new_snap = get_cycle_snapshot()
         assert 'temp_test_acc' in new_snap.accounts
         assert 'temp_test_acc' not in orig_accounts
@@ -156,7 +167,8 @@ async def test_message_worker_run_cycle_passes_snapshot(monkeypatch):
 
     monkeypatch.setattr(cfg, 'get_cycle_snapshot', lambda: test_snapshot)
     monkeypatch.setattr(message_worker, '_is_message_monitor_enabled', lambda: True)
-    monkeypatch.setattr(message_worker, 'proactive_refresh_if_expiring', AsyncMock())
+    mock_proactive = AsyncMock()
+    monkeypatch.setattr(message_worker, 'proactive_refresh_if_expiring', mock_proactive)
 
     passed_kwargs = {}
 
@@ -169,6 +181,74 @@ async def test_message_worker_run_cycle_passes_snapshot(monkeypatch):
 
     await message_worker._run_cycle()
 
+    # 1. 验证抓取链路接收快照配置
     assert passed_kwargs.get('account_cfg') == {'api_base': 'https://snapshot-api.test'}
     assert passed_kwargs.get('backtrack_hours') == 12
     assert passed_kwargs.get('skip_publish_types') == ('skip_me',)
+
+    # 2. 验证主动续期链路接收同一份快照账号配置
+    assert mock_proactive.called
+    proactive_kwargs = mock_proactive.call_args[1]
+    assert proactive_kwargs.get('account_cfg') == {'api_base': 'https://snapshot-api.test'}
+
+
+@pytest.mark.asyncio
+async def test_401_retry_uses_snapshot_account_cfg_consistently(monkeypatch):
+    """验证遇到 401 时的续期重试路径同样强制使用快照传入的配置，即使全局配置已变动。"""
+    snapshot_account = {
+        'auth_method': 'web',
+        'group_type': 'nogizaka46',
+        'api_base': 'https://snapshot-web-api.example.com',
+        'app_tag': 'snap_tag',
+        'web_origin': 'https://snapshot-web-api.example.com',
+    }
+    member = {
+        'account_id': 'renew_account',
+        'group_type': 'nogizaka46',
+        'm_id': '999',
+        'm_name': '续期测试成员',
+        'target_groups': [12345],
+    }
+
+    # 模拟全局配置已被热重载为另一套完全不同的配置（如账号已被删除或变更为新地址）
+    monkeypatch.setattr(cfg, 'ACCOUNTS', {'renew_account': {'api_base': 'https://MODIFIED-GLOBAL-API.com'}})
+
+    mock_client = AsyncMock()
+    # 第一次返回 401，第二次返回 200
+    resp_401 = MagicMock()
+    resp_401.status_code = 401
+    resp_401.text = '{"error": "unauthorized"}'
+
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = {'messages': []}
+    resp_200.text = '{"messages": []}'
+
+    mock_client.get.side_effect = [resp_401, resp_200]
+
+    renewal_received_account_cfg = None
+
+    async def fake_refresh_token(account_id, target_group, old_token=None, account_cfg=None):
+        nonlocal renewal_received_account_cfg
+        renewal_received_account_cfg = account_cfg
+        return True
+
+    monkeypatch.setattr('src.fetcher.refresh_token', fake_refresh_token)
+
+    with patch.dict(fetcher.ACCOUNT_CREDS, {'renew_account': {'token': 'old_tok', 'cookies': {'sess': 'abc'}}}), \
+         patch('src.fetcher.is_account_fetch_available', return_value=(True, '')), \
+         patch('src.archive.get_timeline_watermark', return_value='2026-09-01T00:00:00Z'), \
+         patch('src.member_directory.is_member_active_subscription', return_value=True), \
+         patch.object(fetcher, '_semaphore', asyncio.Semaphore(1)), \
+         patch.object(fetcher, '_http_client', mock_client):
+
+        res = await fetcher.fetch_member_messages(
+            member,
+            account_cfg=snapshot_account,
+        )
+
+        assert res is not None
+        # 核心断言：401 续期收到的配置必须是快照中的 snapshot_account，而不是被修改的全局配置
+        assert renewal_received_account_cfg == snapshot_account
+        assert renewal_received_account_cfg.get('api_base') == 'https://snapshot-web-api.example.com'
+

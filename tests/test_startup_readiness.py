@@ -199,7 +199,21 @@ def test_health_probe_distinguishes_starting_from_ready():
             assert body["ready"] is False
             assert body["status"] == "starting"
 
-        # 2. 状态转换为 READY 后，探针应返回 200 且 ready=True
+        # 2. 状态为 DEGRADED 时，探针必须返回 503 且 ready=False，阻止部署脚本判定为就绪
+        health.get_tracker().set_startup_state("DEGRADED", ["Telegram 连接超时"])
+        try:
+            with urllib.request.urlopen(base + "/api/health/status", timeout=5) as resp:
+                raise AssertionError(f"DEGRADED 状态应返回 503，实际返回 {resp.status}")
+        except urllib.error.HTTPError as e:
+            assert e.code == 503
+            body = json.loads(e.read().decode("utf-8"))
+            assert body["ok"] is False
+            assert body["ready"] is False
+            assert body["status"] == "degraded"
+            assert body["startup_state"] == "DEGRADED"
+            assert "Telegram 连接超时" in body["reasons"]
+
+        # 3. 状态转换为 READY 后，探针应返回 200 且 ready=True
         health.get_tracker().set_startup_state("READY")
         with urllib.request.urlopen(base + "/api/health/status", timeout=5) as resp:
             assert resp.status == 200
@@ -207,6 +221,14 @@ def test_health_probe_distinguishes_starting_from_ready():
             assert body["ok"] is True
             assert body["ready"] is True
             assert body["status"] == "healthy"
+
+        # 4. 状态为 SETUP_REQUIRED 时（初次安装等待配置），探针返回 200 且 ready=True
+        health.get_tracker().set_startup_state("SETUP_REQUIRED", ["等待配置"])
+        with urllib.request.urlopen(base + "/api/health/status", timeout=5) as resp:
+            assert resp.status == 200
+            body = json.loads(resp.read().decode("utf-8"))
+            assert body["ok"] is True
+            assert body["ready"] is True
     finally:
         server.shutdown()
 

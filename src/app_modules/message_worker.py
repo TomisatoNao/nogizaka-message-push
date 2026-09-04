@@ -139,7 +139,11 @@ async def _run_cycle() -> None:
         # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
         if account_target_groups:
             await asyncio.gather(*[
-                proactive_refresh_if_expiring(acc_id, grp)
+                proactive_refresh_if_expiring(
+                    acc_id,
+                    grp,
+                    account_cfg=snapshot.accounts.get(acc_id) if snapshot else None,
+                )
                 for acc_id, grp in account_target_groups.items()
             ])
 

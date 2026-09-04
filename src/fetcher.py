@@ -329,14 +329,18 @@ async def _fetch_member_messages(
                     is_error=True,
                 )
                 if is_mobile:
-                    if not await refresh_mobile_token(account_id, target_group, old_token=cred.get("token")):
+                    if not await refresh_mobile_token(
+                        account_id, target_group, old_token=cred.get("token"), account_cfg=acc_cfg
+                    ):
                         log_all(f"🔥 {m_name} 账号移动端刷新失败，放弃本次轮询", is_error=True)
                         state = get_refresh_state(account_id)
                         tier = ErrorTier.PERSISTENT if state.get("kind") == "credential_invalid" else ErrorTier.TRANSIENT
                         _health_tracker().record_member_fetch(m_name, False, tier, "移动端 Token 刷新失败")
                         return None
                 else:
-                    if not await refresh_token(account_id, target_group, old_token=cred["token"]):
+                    if not await refresh_token(
+                        account_id, target_group, old_token=cred["token"], account_cfg=acc_cfg
+                    ):
                         log_all(f"🔥 {m_name} 账号刷新失败，放弃本次轮询", is_error=True)
                         state = get_refresh_state(account_id)
                         tier = ErrorTier.PERSISTENT if state.get("kind") == "credential_invalid" else ErrorTier.TRANSIENT

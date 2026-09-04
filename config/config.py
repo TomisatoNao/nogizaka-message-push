@@ -11,6 +11,8 @@ import os as _os
 import re as _re
 import sys as _sys
 import threading as _threading
+from types import MappingProxyType as _MappingProxyType
+from typing import Any as _Any, Mapping as _Mapping
 from pathlib import Path as _Path
 
 # ── 加载 .env（如已安装 python-dotenv）────────────────────────
@@ -876,16 +878,27 @@ DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOA
 _config_lock = _threading.RLock()
 
 
+def _deep_freeze(obj: _Any) -> _Any:
+    """递归将 dict 转换为只读 MappingProxyType，list 转换为 tuple，set 转换为 frozenset。"""
+    if isinstance(obj, dict):
+        return _MappingProxyType({k: _deep_freeze(v) for k, v in obj.items()})
+    elif isinstance(obj, (list, tuple)):
+        return tuple(_deep_freeze(v) for v in obj)
+    elif isinstance(obj, set):
+        return frozenset(_deep_freeze(v) for v in obj)
+    return obj
+
+
 @_dataclass(frozen=True)
 class CycleSnapshot:
-    """本轮巡查周期的配置不可变快照（小范围试点）。
+    """本轮巡查周期的配置隔离只读快照（小范围试点）。
 
-    在巡查周期开始时生成一次，确保该周期内跨成员并发抓取读取到一致的配置视图，
-    避免中途热重载导致配置撕裂或瞬时状态不一致。
+    在巡查周期开始时生成一份深层冻结的只读隔离副本，包含递归冻结的嵌套映射，
+    供主循环与抓取/续期链路消费，避免执行中途热重载导致配置撕裂或瞬时状态不一致。
     """
 
-    monitor_list: tuple[dict, ...]
-    accounts: dict[str, dict]
+    monitor_list: tuple[_Mapping[str, _Any], ...]
+    accounts: _Mapping[str, _Mapping[str, _Any]]
     backtrack_hours: int
     skip_publish_types: tuple[str, ...]
     day_interval: tuple[int, int]
@@ -898,14 +911,14 @@ class CycleSnapshot:
 
 
 def get_cycle_snapshot() -> CycleSnapshot:
-    """获取当前配置的不可变周期快照（线程安全）。"""
+    """获取当前配置的隔离只读周期快照（线程安全，递归深度只读）。"""
     with _config_lock:
         mod = _sys.modules[__name__]
         return CycleSnapshot(
-            monitor_list=tuple(_copy.deepcopy(getattr(mod, "MONITOR_LIST", []))),
-            accounts=_copy.deepcopy(getattr(mod, "ACCOUNTS", {})),
+            monitor_list=_deep_freeze(getattr(mod, "MONITOR_LIST", [])),
+            accounts=_deep_freeze(getattr(mod, "ACCOUNTS", {})),
             backtrack_hours=int(getattr(mod, "BACKTRACK_HOURS", 24)),
-            skip_publish_types=tuple(_copy.deepcopy(getattr(mod, "SKIP_PUBLISH_TYPES", ()))),
+            skip_publish_types=tuple(getattr(mod, "SKIP_PUBLISH_TYPES", ())),
             day_interval=tuple(getattr(mod, "DAY_INTERVAL", (30, 60))),
             night_interval=tuple(getattr(mod, "NIGHT_INTERVAL", (120, 300))),
             day_start_hour=int(getattr(mod, "DAY_START_HOUR", 8)),

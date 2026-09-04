@@ -429,7 +429,8 @@ def get_mobile_api_base(account_id: str, account_cfg: dict | None = None) -> str
 
 
 async def refresh_mobile_token(account_id: str, target_group: int,
-                               old_token: str | None = None) -> bool:
+                               old_token: str | None = None,
+                               account_cfg: dict | None = None) -> bool:
     """
     刷新移动端账号的 Token（使用 refresh_token 交换新 access_token）。
     与 web 端关键区别：
@@ -456,7 +457,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
             log_all(f"⏸️ 账号 {account_id} 移动端续期处于冷却状态，跳过重复请求：{reason}", is_debug=True)
             return False
 
-        acc_cfg = cfg.ACCOUNTS.get(account_id)
+        acc_cfg = account_cfg if account_cfg is not None else cfg.ACCOUNTS.get(account_id)
         if not acc_cfg:
             log_all(f"🚨 账号 {account_id} 缺少配置，无法执行移动端续期", is_error=True)
             _record_refresh_failure(account_id, "credential_invalid", "账号配置缺失")
@@ -467,8 +468,8 @@ async def refresh_mobile_token(account_id: str, target_group: int,
             _record_refresh_failure(account_id, "credential_invalid", "refresh_token 缺失")
             return False
 
-        url = f"{get_mobile_api_base(account_id)}/v2/update_token"
-        headers = get_mobile_headers(account_id)
+        url = f"{get_mobile_api_base(account_id, account_cfg=acc_cfg)}/v2/update_token"
+        headers = get_mobile_headers(account_id, account_cfg=acc_cfg)
         headers.pop("Authorization", None)  # 移动端刷新时不含旧 Auth
 
         try:
@@ -795,7 +796,9 @@ def validate_account_cred(account_id: str) -> tuple[bool, str]:
     return True, "web 凭证完整"
 
 
-async def refresh_token(account_id: str, target_group: int, old_token: str | None = None) -> bool:
+async def refresh_token(account_id: str, target_group: int,
+                        old_token: str | None = None,
+                        account_cfg: dict | None = None) -> bool:
     """
     刷新指定账号的 Token。
     - 若其他协程已抢先刷新（token 已变），直接返回 True。
@@ -820,7 +823,7 @@ async def refresh_token(account_id: str, target_group: int, old_token: str | Non
             log_all(f"⏸️ 账号 {account_id} Web 续期处于冷却状态，跳过重复请求：{reason}", is_debug=True)
             return False
 
-        acc_cfg = cfg.ACCOUNTS.get(account_id)
+        acc_cfg = account_cfg if account_cfg is not None else cfg.ACCOUNTS.get(account_id)
         if not acc_cfg:
             log_all(f"🚨 账号 {account_id} 缺少配置，无法执行 Web 续期", is_error=True)
             _record_refresh_failure(account_id, "credential_invalid", "账号配置缺失")
@@ -953,7 +956,8 @@ def get_token_remaining_seconds(account_id: str) -> float | None:
     return exp - datetime.now(timezone.utc).timestamp()
 
 
-async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> bool:
+async def proactive_refresh_if_expiring(account_id: str, target_group: int,
+                                       account_cfg: dict | None = None) -> bool:
     """
     每轮巡查前调用。
     若 Token 剩余时间 <= cfg.TOKEN_REFRESH_BEFORE_SECONDS，主动刷新，
@@ -970,15 +974,15 @@ async def proactive_refresh_if_expiring(account_id: str, target_group: int) -> b
         log_all(f"⚠️ 无法解析 {account_id} 的 Token 过期时间，跳过主动刷新", is_debug=True)
         return True
     if remaining <= cfg.TOKEN_REFRESH_BEFORE_SECONDS:
-        acc_cfg = cfg.ACCOUNTS.get(account_id, {})
+        acc_cfg = account_cfg if account_cfg is not None else cfg.ACCOUNTS.get(account_id, {})
         log_all(
             f"🔄 {account_id} Token 剩余 {int(remaining)}s"
             f"（阈值 {cfg.TOKEN_REFRESH_BEFORE_SECONDS}s），主动刷新...",
         )
         if acc_cfg.get("auth_method") == "mobile":
-            return await refresh_mobile_token(account_id, target_group)
+            return await refresh_mobile_token(account_id, target_group, account_cfg=acc_cfg)
         else:
-            return await refresh_token(account_id, target_group)
+            return await refresh_token(account_id, target_group, account_cfg=acc_cfg)
     else:
         log_all(
             f"✅ {account_id} Token 剩余 {int(remaining // 60)}min，无需刷新",

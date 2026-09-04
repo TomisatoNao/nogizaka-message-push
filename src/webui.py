@@ -295,7 +295,8 @@ class _Handler(BaseHTTPRequestHandler):
             from src.health import get_tracker
             snap = get_tracker().startup_snapshot()
             state = snap.get("state", "READY")
-            # 嵌入 app 运行模式：只有启动自检完成（非 STARTING）才判定为业务就绪
+            # 嵌入 app 运行模式：
+            # 1. 启动自检未完成：返回 503 且 ready=False
             if state == "STARTING":
                 self._send_json({
                     "ok": False,
@@ -306,14 +307,26 @@ class _Handler(BaseHTTPRequestHandler):
                 }, 503)
                 return
 
-            is_healthy = state in ("READY", "SETUP_REQUIRED")
+            # 2. 启动自检出现通道/凭证故障（降级）：返回 503 且 ready=False，阻止部署脚本误判就绪
+            if state == "DEGRADED":
+                self._send_json({
+                    "ok": False,
+                    "status": "degraded",
+                    "startup_state": "DEGRADED",
+                    "ready": False,
+                    "reasons": snap.get("reasons", []),
+                }, 503)
+                return
+
+            # 3. 正常就绪或等待初次网页配置 (READY / SETUP_REQUIRED)
+            is_ready = state in ("READY", "SETUP_REQUIRED")
             self._send_json({
-                "ok": True,
-                "status": "healthy" if is_healthy else "degraded",
+                "ok": is_ready,
+                "status": "healthy" if is_ready else "unknown",
                 "startup_state": state,
-                "ready": True,
+                "ready": is_ready,
                 "reasons": snap.get("reasons", []),
-            }, 200)
+            }, 200 if is_ready else 503)
             return
 
         # 1. 静态页面与资产
