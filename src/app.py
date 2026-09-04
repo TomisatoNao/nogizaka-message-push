@@ -398,7 +398,6 @@ def _on_config_reload(success: bool = True) -> None:
     init_loggers()
     try:
         load_all_accounts()
-        init_credentials()
     except Exception:
         log_all(f"🚨 热重载后加载账号凭证失败:\n{traceback.format_exc()}", is_error=True)
 

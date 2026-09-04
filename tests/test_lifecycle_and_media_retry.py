@@ -68,7 +68,6 @@ def test_on_config_reload_reloads_components_and_schedules_listener_sync(monkeyp
     reloaded: list[str] = []
 
     monkeypatch.setattr(app, "load_all_accounts", lambda: reloaded.append("accounts"))
-    monkeypatch.setattr(app, "init_credentials", lambda: reloaded.append("credentials"))
     monkeypatch.setattr("src.platforms.tgbot.initialize", lambda: reloaded.append("tgbot"))
     monkeypatch.setattr("src.platforms.qq_official.reload", lambda: reloaded.append("qq_official"))
     monkeypatch.setattr("src.social.manager.reload_social_service", lambda: reloaded.append("social"))
@@ -87,7 +86,6 @@ def test_on_config_reload_reloads_components_and_schedules_listener_sync(monkeyp
         # success=True 应完整触发各组件重载
         app._on_config_reload(success=True)
         assert "accounts" in reloaded
-        assert "credentials" in reloaded
         assert "tgbot" in reloaded
         assert "qq_official" in reloaded
         assert "social" in reloaded
@@ -104,7 +102,6 @@ def test_on_config_reload_isolates_subsystem_errors(monkeypatch: pytest.MonkeyPa
         raise ValueError("TG 凭证解析失败")
 
     monkeypatch.setattr(app, "load_all_accounts", lambda: reloaded.append("accounts"))
-    monkeypatch.setattr(app, "init_credentials", lambda: reloaded.append("credentials"))
     monkeypatch.setattr("src.platforms.tgbot.initialize", failing_tgbot)
     monkeypatch.setattr("src.platforms.qq_official.reload", lambda: reloaded.append("qq_official"))
     monkeypatch.setattr("src.social.manager.reload_social_service", lambda: reloaded.append("social"))
@@ -257,3 +254,16 @@ async def test_upload_media_compresses_large_images_and_videos(monkeypatch: pyte
     res_vid = await client._upload_media("video", big_vid, filename="video.mp4")
     assert res_vid == "COMPRESSED_OK"
     assert video_compressed is True
+
+
+def test_credentials_initialize_tolerance():
+    """验证 credentials.initialize 兼容无参调用，且不会被 None 冲掉已有 client。"""
+    from config import credentials
+
+    fake_client = object()
+    credentials.initialize(fake_client)
+    assert credentials._http_client is fake_client
+
+    # 容错：无参调用不应报错，且不能把已初始化的 client 置为 None
+    credentials.initialize()
+    assert credentials._http_client is fake_client

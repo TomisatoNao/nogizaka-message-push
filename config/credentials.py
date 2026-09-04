@@ -56,7 +56,7 @@ def _get_file_lock(filepath: str) -> asyncio.Lock:
 
 
 def initialize(
-    client: httpx.AsyncClient,
+    client: httpx.AsyncClient | None = None,
     *,
     auth_client: httpx.AsyncClient | None = None,
 ) -> None:
@@ -66,8 +66,10 @@ def initialize(
     请求占满普通连接池。单独运行工具时未传入则回退到 ``client``。
     """
     global _http_client, _auth_http_client
-    _http_client = client
-    _auth_http_client = auth_client
+    if client is not None:
+        _http_client = client
+    if auth_client is not None:
+        _auth_http_client = auth_client
 
 
 def _get_refresh_semaphore() -> asyncio.Semaphore:
