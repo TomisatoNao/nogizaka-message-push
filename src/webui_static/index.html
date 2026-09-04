@@ -3003,7 +3003,7 @@ async function renderIgSessionUI() {
   } else {
     igStatusEl.innerHTML = '<span class="cred miss">✗ 未配置</span>';
     if (igDetailEl) {
-      igDetailEl.textContent = "未配置 Cookies，Instagram 限制匿名访问，图集与 Story 可能受限";
+      igDetailEl.textContent = "未配置 Cookies。当前为匿名模式，单帖链接可正常解析，但主页定时巡查易触发官方 429 限流。";
     }
     if (btnClear) btnClear.style.display = "none";
     if (btnCheck) btnCheck.style.display = "none";

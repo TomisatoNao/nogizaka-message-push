@@ -98,6 +98,15 @@ class InstagramFetcher(SocialFetcher):
         # 账号名 → 数字 ID（Story 接口需要，解析一次即缓存）
         self._uid_cache: dict[str, str] = {}
 
+    @property
+    def has_cookies(self) -> bool:
+        """当前是否具备任何有效配置的登录态（cookies_file、浏览器复用或 sessionid）。"""
+        return bool(
+            self._session.cookies.get("sessionid")
+            or (self.cfg.get("cookies_file") or "").strip()
+            or (self.cfg.get("cookies_from_browser") or "").strip()
+        )
+
     # ── 会话准备 ─────────────────────────────────────────
 
     def _warm_session(self) -> None:
@@ -275,21 +284,28 @@ class InstagramFetcher(SocialFetcher):
                 return posts
             except Exception as e:
                 self._note_risk(e)
-                log.warning("[instagram] @%s Feed 检查失败: %s", account,
-                            str(e).replace("\n", " ")[:200])
+                if not self.has_cookies and "429" in str(e):
+                    # 匿名模式下遇到 IP 级 429：由 _note_risk 触发全局退避并提示，此处不再警告刷屏
+                    pass
+                else:
+                    log.warning("[instagram] @%s Feed 检查失败: %s", account,
+                                str(e).replace("\n", " ")[:200])
 
-        # Story 是强登录态接口，审查更严 —— 单独用更低的频率
+        # Story 是强登录态接口，审查更严 —— 未配置 Cookies 时直接跳过，避免无效 401/403
         if cfg.get("include_stories", True) and self._story_due(account):
-            try:
-                posts.extend(self._fetch_stories(account))
-                guard.record_ok()
-                self._story_checked[account] = time.time()
-            except Blocked as e:
-                log.info("[instagram] ⏸ Story：%s", e)
-            except Exception as e:
-                self._note_risk(e)
-                log.warning("[instagram] @%s Story 检查失败: %s", account,
-                            str(e).replace("\n", " ")[:200])
+            if not self.has_cookies:
+                log.debug("[instagram] @%s 未配置 Cookies，跳过 Story 抓取", account)
+            else:
+                try:
+                    posts.extend(self._fetch_stories(account))
+                    guard.record_ok()
+                    self._story_checked[account] = time.time()
+                except Blocked as e:
+                    log.info("[instagram] ⏸ Story：%s", e)
+                except Exception as e:
+                    self._note_risk(e)
+                    log.warning("[instagram] @%s Story 检查失败: %s", account,
+                                str(e).replace("\n", " ")[:200])
         return posts
 
     def _story_due(self, account: str) -> bool:
@@ -335,16 +351,17 @@ class InstagramFetcher(SocialFetcher):
         """
         from src.social.ig_safety import get_guard
         msg = str(e)
+        has_session = self.has_cookies
         for code in (401, 403):
             if str(code) in msg:
-                get_guard().record_failure(self._config, code)
+                get_guard().record_failure(self._config, code, has_session=has_session)
                 self._session_failed(f"接口返回 HTTP {code}，登录态已失效")
                 return
         if "429" in msg:
-            # 只计入熔断（降低访问频率），不判定登录态失效
-            if get_guard().record_failure(self._config, 429):
-                log.warning("[instagram] 连续限流已触发熔断 —— "
-                            "这是频率问题，登录态未必失效")
+            if get_guard().record_failure(self._config, 429, has_session=has_session):
+                if has_session:
+                    log.warning("[instagram] 连续限流已触发熔断 —— "
+                                "这是频率问题，登录态未必失效")
             return
 
     # ── Feed ─────────────────────────────────────────────
@@ -543,7 +560,7 @@ class InstagramFetcher(SocialFetcher):
         from src.social.ig_safety import get_guard
         self._warm_session()
         get_guard().check(self._config, what="web_profile_info")
-        hdrs = {"Referer": USER_URL.format(account=account)}
+        hdrs = {"Referer": USER_URL.format(account=account), "X-IG-App-ID": _IG_APP_ID}
         r = self._session.get(WEB_PROFILE.format(account=account),
                               headers=hdrs, timeout=self._dl.timeout)
         if r.status_code in (401, 403):

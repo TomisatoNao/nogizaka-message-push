@@ -223,3 +223,31 @@ def test_scheduled_feed_uses_embed_when_detail_extraction_fails(tmp_path, monkey
     assert post.text == "caption"
     assert len(post.media) == 1
     assert post.media[0].local_path and Path(post.media[0].local_path).exists()
+
+
+def test_instagram_anonymous_429_graceful_handling(tmp_path: Path):
+    from src.social.ig_safety import get_guard
+    guard = get_guard()
+    guard.reset()
+
+    config = {
+        "platforms": {
+            "instagram": {
+                "safety": {"failure_threshold": 3, "rate_limit_cooldown_seconds": 600}
+            }
+        }
+    }
+
+    # 1. 验证匿名模式（has_session=False）遇到 429 时，立即触发静默退避（返回 True），不需要连撞 3 次
+    triggered = guard.record_failure(config, 429, has_session=False)
+    assert triggered is True
+    assert guard.status(config)["blocked"] is True
+    assert "匿名限流" in guard._block_reason
+
+    guard.reset()
+
+    # 2. 验证有会话模式（has_session=True）遇到 429 时，仍需达到阈值 (3 次)
+    assert guard.record_failure(config, 429, has_session=True) is False
+    assert guard.record_failure(config, 429, has_session=True) is False
+    assert guard.record_failure(config, 429, has_session=True) is True
+    assert guard.status(config)["blocked"] is True

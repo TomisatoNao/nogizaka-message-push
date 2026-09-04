@@ -161,27 +161,62 @@ class IgSafety:
         with self._lock:
             self._fail_streak = 0
 
-    def record_failure(self, config: dict, status: int, detail: str = "") -> bool:
-        """记录一次鉴权/限流失败。返回 True 表示**刚刚触发熔断**。"""
+    def record_failure(
+        self,
+        config: dict,
+        status: int,
+        detail: str = "",
+        *,
+        has_session: bool = True,
+    ) -> bool:
+        """记录一次鉴权/限流失败。返回 True 表示**刚刚触发熔断/暂停**。"""
         s = settings(config)
         with self._lock:
             self._fail_streak += 1
             threshold = int(s.get("failure_threshold", 3))
+
+            # 匿名模式下遇到 429：说明当前节点 IP 匿名访问已被 Meta 官方限流。
+            # 无需反复撞后续账号累加至 3 次，立刻进入限流冷却，避免无意义的日志刷屏与请求轰炸。
+            if status == 429 and not has_session:
+                cooldown = float(s.get("rate_limit_cooldown_seconds", 1800))
+                self._blocked_until = time.time() + cooldown
+                self._block_reason = "节点 IP 匿名限流 429"
+                self._fail_streak = 0
+                log.info(
+                    "[instagram] ⏸ 节点 IP 匿名访问主页被 Instagram 限流 (HTTP 429)，"
+                    "已自动静默退避 %.1f 小时。提示：单帖链接仍可正常匿名解析；如需主页定时监控，建议在管理面板配置小号 Cookies。",
+                    cooldown / 3600,
+                )
+                return True
+
             if self._fail_streak < threshold:
-                log.warning("[instagram] 风控信号 %s（连续 %s 次，达到 %s 次将熔断）",
-                            status, self._fail_streak, threshold)
+                log.warning(
+                    "[instagram] 风控信号 %s（连续 %s 次，达到 %s 次将熔断）",
+                    status, self._fail_streak, threshold
+                )
                 return False
+
             # 区分 401/403 (登录态失效) vs 429 (临时限流)
             if status == 429:
                 cooldown = float(s.get("rate_limit_cooldown_seconds", 1800))
+                self._blocked_until = time.time() + cooldown
+                self._block_reason = f"连续 {self._fail_streak} 次 {status}{detail}"
+                self._fail_streak = 0
+                log.warning(
+                    "[instagram] 🛑 已暂停主页巡查 %.1f 小时（%s）。"
+                    "这是 Instagram 接口频率限制保护，请适当调大日间轮询间隔。",
+                    cooldown / 3600, self._block_reason,
+                )
             else:
                 cooldown = float(s.get("cooldown_seconds", 7200))
-            self._blocked_until = time.time() + cooldown
-            self._block_reason = f"连续 {self._fail_streak} 次 {status}{detail}"
-            self._fail_streak = 0
-        log.error("[instagram] 🛑 已熔断 %.1f 小时以保护账号（%s）。"
-                  "期间完全不访问 Instagram —— 请到后台检查登录态是否失效。",
-                  cooldown / 3600, self._block_reason)
+                self._blocked_until = time.time() + cooldown
+                self._block_reason = f"连续 {self._fail_streak} 次 {status}{detail}"
+                self._fail_streak = 0
+                log.error(
+                    "[instagram] 🛑 已熔断 %.1f 小时以保护账号（%s）。"
+                    "期间完全不访问 Instagram —— 请到后台检查登录态是否失效。",
+                    cooldown / 3600, self._block_reason,
+                )
         return True
 
     def reset(self) -> None:
