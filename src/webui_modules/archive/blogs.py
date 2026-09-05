@@ -629,7 +629,8 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         try:
             current_user_fn = getattr(handler, "_current_user", None)
             user = current_user_fn() if callable(current_user_fn) else {}
-            source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
+            from src.webui_modules.auth_handlers import get_client_ip
+            source_ip = get_client_ip(handler)
             record_event(
                 "archive.blog_translation.delete",
                 outcome="success",

@@ -296,9 +296,9 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 json.dump(msgs, f, ensure_ascii=False, indent=2)
             os.replace(tmp, json_path)
         try:
-            from src.webui_modules.auth_handlers import current_user
+            from src.webui_modules.auth_handlers import current_user, get_client_ip
             user = current_user(handler) or {}
-            source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
+            source_ip = get_client_ip(handler)
             record_event("archive.custom_tags", outcome="success", actor=user.get("username"),
                          source_ip=source_ip, target=f"{member}/{year:04d}-{month:02d}/{msg_id}",
                          details={"tag_count": len([tag for tag in tags.split(",") if tag.strip()])})

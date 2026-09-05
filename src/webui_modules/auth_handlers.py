@@ -30,7 +30,7 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 def _audit(handler, event: str, outcome: str, *, actor: str | None = None,
            target: str | None = None, details: dict | None = None) -> None:
     """记录管理端安全事件；绝不传入请求体、密码或 Token。"""
-    source_ip = handler.client_address[0] if getattr(handler, "client_address", None) else "?"
+    source_ip = get_client_ip(handler)
     record_event(event, outcome=outcome, actor=actor, source_ip=source_ip,
                  target=target, details=details)
 
@@ -119,7 +119,35 @@ def _normalise_origin(value: str) -> tuple[str, str, int] | None:
 
 def _first_forwarded_value(handler, name: str) -> str:
     """取得逗号分隔代理头中的第一个值。"""
-    return handler.headers.get(name, "").split(",", 1)[0].strip()
+    headers = getattr(handler, "headers", None)
+    if not headers:
+        return ""
+    return headers.get(name, "").split(",", 1)[0].strip()
+
+
+def get_client_ip(handler) -> str:
+    """提取客户端真实 IP：优先读取反向代理/穿透传入的 X-Forwarded-For 与 X-Real-IP，回退到底层套接字地址。"""
+    # 1. 优先读取 X-Forwarded-For（最左侧为原始客户端 IP）
+    xff = _first_forwarded_value(handler, "X-Forwarded-For")
+    if xff:
+        if ":" in xff and not xff.startswith("[") and xff.count(":") == 1:
+            xff = xff.split(":", 1)[0].strip()
+        if xff:
+            return xff
+    # 2. 读取 X-Real-IP（Nginx / Lucky / Caddy 等反向代理常用）
+    headers = getattr(handler, "headers", None)
+    if headers:
+        x_real = headers.get("X-Real-IP", "").strip()
+        if x_real:
+            if ":" in x_real and not x_real.startswith("[") and x_real.count(":") == 1:
+                x_real = x_real.split(":", 1)[0].strip()
+            if x_real:
+                return x_real
+    # 3. 回退到底层 TCP 套接字来源
+    client_addr = getattr(handler, "client_address", None)
+    if client_addr and len(client_addr) > 0:
+        return str(client_addr[0])
+    return "?"
 
 
 def _proxy_scheme(handler) -> str | None:
@@ -339,7 +367,7 @@ def handle_login(handler, body: dict) -> None:
     if not getattr(cfg, "AUTH_ENABLED", False):
         send_json(handler, {"ok": False, "errors": ["账号系统未启用"]}, 400)
         return
-    ip = handler.client_address[0] if handler.client_address else "?"
+    ip = get_client_ip(handler)
     locked = _auth.is_locked_out(ip)
     if locked > 0:
         _audit(handler, "auth.login", "rate_limited", target="login")

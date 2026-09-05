@@ -62,6 +62,7 @@ from src.webui_modules.auth_handlers import (
     cookie_refresh_token,
     cookie_token,
     current_user,
+    get_client_ip,
     guard,
     handle_auth_me,
     handle_api_token_session,
@@ -215,7 +216,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _audit(self, event: str, outcome: str = "success", *, target: str = "", details: dict | None = None) -> None:
         user = self._current_user() or {}
-        source_ip = self.client_address[0] if self.client_address else "?"
+        source_ip = get_client_ip(self)
         record_event(event, outcome=outcome, actor=user.get("username"), source_ip=source_ip,
                      target=target, details=details)
 

@@ -212,6 +212,36 @@ def main() -> None:
         assert auth.is_locked_out(ip) == 0, "成功登录应清除锁定"
         print("✅ Test 4 通过\n")
 
+        # ── Test 4.5: 客户端真实 IP 解析 ───────────────
+        print("=== Test 4.5: 客户端真实 IP 代理穿透解析 ===")
+        from src.webui_modules.auth_handlers import get_client_ip
+
+        class DummyHandler:
+            def __init__(self, headers=None, client_address=None):
+                self.headers = headers or {}
+                self.client_address = client_address
+
+        # X-Forwarded-For 列表
+        h1 = DummyHandler(headers={"X-Forwarded-For": "203.0.113.195, 70.41.3.18"}, client_address=("172.20.0.1", 50000))
+        assert get_client_ip(h1) == "203.0.113.195", f"XFF 解析失败: {get_client_ip(h1)}"
+
+        # X-Forwarded-For 带端口
+        h2 = DummyHandler(headers={"X-Forwarded-For": "203.0.113.195:8080"}, client_address=("172.20.0.1", 50000))
+        assert get_client_ip(h2) == "203.0.113.195", f"XFF 带端口解析失败: {get_client_ip(h2)}"
+
+        # X-Real-IP
+        h3 = DummyHandler(headers={"X-Real-IP": "198.51.100.22"}, client_address=("172.20.0.1", 50000))
+        assert get_client_ip(h3) == "198.51.100.22", f"X-Real-IP 解析失败: {get_client_ip(h3)}"
+
+        # 回退套接字地址
+        h4 = DummyHandler(client_address=("192.168.1.50", 12345))
+        assert get_client_ip(h4) == "192.168.1.50", f"套接字回退失败: {get_client_ip(h4)}"
+
+        # 空兜底
+        h5 = DummyHandler()
+        assert get_client_ip(h5) == "?", f"空兜底失败: {get_client_ip(h5)}"
+        print("✅ Test 4.5 通过\n")
+
         # ── Test 5: 路由守卫 ────────────────────────────
         print("=== Test 5: 路由守卫 ===")
         from src import webui
