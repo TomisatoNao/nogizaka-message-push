@@ -189,10 +189,14 @@
   .chip { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
           background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; }
   .chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .btn.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
   #logView { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
              padding: 10px 12px; height: 62vh; overflow-y: auto;
-             font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.55; }
-  #logView div { white-space: pre-wrap; word-break: break-all; }
+             font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+             cursor: text; user-select: text; -webkit-user-select: text; }
+  #logView div { white-space: pre-wrap; word-break: break-all; user-select: text; -webkit-user-select: text; border-radius: 2px; }
+  #logView div:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  #logView ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; }
   #logView .lg-ERROR { color: var(--err); }
   #logView .lg-DEBUG { color: var(--muted); }
   dialog .grid { grid-template-columns: 1fr 1fr; }
@@ -977,7 +981,11 @@
   <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
       <h2 style="margin:0;">📟 控制台实时运行日志</h2>
-      <button class="btn small" id="btnClearLog" type="button">🗑️ 清空显示</button>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button class="btn small" id="btnPauseLog" type="button" title="暂停/恢复日志轮询">⏸ 暂停刷新</button>
+        <button class="btn small" id="btnCopyLog" type="button" title="复制选中的日志内容，若未选则复制当前全部显示日志">📋 复制日志</button>
+        <button class="btn small" id="btnClearLog" type="button">🗑️ 清空显示</button>
+      </div>
     </div>
     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
       <div class="chips" id="logSourceChips"></div>
@@ -4478,12 +4486,56 @@ let logTimer = null;
 let logEntries = [];   // live 源累积（未过滤，供筛选重渲染）
 let logLines = [];     // 文件源当前内容
 let logErrOnly = false, logKeyword = "";
+let logPaused = false;
+let isSelectingLog = false;
+let logNeedsFullRender = false;
+let lastRenderedFileKey = "";
+
+function hasLogSelection() {
+  const view = $("logView");
+  if (!view) return false;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  const anchorNode = sel.anchorNode;
+  const focusNode = sel.focusNode;
+  return (anchorNode && view.contains(anchorNode)) || (focusNode && view.contains(focusNode));
+}
+
+function isUserBusyWithLog() {
+  return isSelectingLog || hasLogSelection();
+}
+
+function flashBtn(btn, text, ms = 1800) {
+  if (!btn) return;
+  const orig = btn.dataset.origText || btn.textContent;
+  btn.dataset.origText = orig;
+  btn.textContent = text;
+  setTimeout(() => {
+    btn.textContent = orig;
+  }, ms);
+}
+
+function updateLogFilterInfo(shown, total) {
+  const filterPart = (logErrOnly || logKeyword) ? `显示 ${shown} / ${total} 条` : "";
+  const pausePart = logPaused ? "⏸ 刷新已暂停" : "";
+  if (filterPart && pausePart) {
+    $("logFilterInfo").textContent = `${filterPart}（${pausePart}）`;
+  } else if (filterPart) {
+    $("logFilterInfo").textContent = filterPart;
+  } else if (pausePart) {
+    $("logFilterInfo").textContent = pausePart;
+  } else {
+    $("logFilterInfo").textContent = "";
+  }
+}
 
 function setLogSource(src) {
   logSource = src;
   logSeq = 0;
   logEntries = [];
   logLines = [];
+  lastRenderedFileKey = "";
+  logNeedsFullRender = false;
   $("logView").innerHTML = "";
   $("logSourceChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.src === src));
   if ($("btnClearLog")) {
@@ -4492,43 +4544,184 @@ function setLogSource(src) {
   fetchLogs();
 }
 
-function renderLogs() {
+function createLogDiv(text, cls) {
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = text;
+  return div;
+}
+
+function fullRenderLogs() {
   const view = $("logView");
   const kw = logKeyword.toLowerCase();
+  const wasNearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) <= 60;
   view.innerHTML = "";
   let shown = 0, total = 0;
-  const push = (text, cls) => {
-    const div = document.createElement("div");
-    if (cls) div.className = cls;
-    div.textContent = text;
-    view.appendChild(div);
-    shown++;
-  };
+
   if (logSource === "live") {
     total = logEntries.length;
     for (const e of logEntries) {
       if (logErrOnly && e.level !== "ERROR") continue;
       const line = e.ts + " [" + e.level + "] " + e.text;
       if (kw && !line.toLowerCase().includes(kw)) continue;
-      push(line, "lg-" + e.level);
+      view.appendChild(createLogDiv(line, "lg-" + e.level));
+      shown++;
     }
   } else {
     total = logLines.length;
     for (const line of logLines) {
       if (logErrOnly && !line.includes("ERROR")) continue;
       if (kw && !line.toLowerCase().includes(kw)) continue;
-      push(line, line.includes("ERROR") ? "lg-ERROR" : "");
+      view.appendChild(createLogDiv(line, line.includes("ERROR") ? "lg-ERROR" : ""));
+      shown++;
     }
   }
-  $("logFilterInfo").textContent = (logErrOnly || kw) ? "显示 " + shown + " / " + total + " 条" : "";
-  if ($("logFollow").checked) view.scrollTop = view.scrollHeight;
+
+  updateLogFilterInfo(shown, total);
+  if ($("logFollow").checked && (wasNearBottom || view.scrollTop === 0)) {
+    view.scrollTop = view.scrollHeight;
+  }
 }
-$("logErrOnly").addEventListener("change", () => { logErrOnly = $("logErrOnly").checked; renderLogs(); });
-$("logKeyword").addEventListener("input", () => { logKeyword = $("logKeyword").value.trim(); renderLogs(); });
+
+function appendLiveEntries(newEntries) {
+  const view = $("logView");
+  const kw = logKeyword.toLowerCase();
+  const wasNearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) <= 60;
+
+  for (const e of newEntries) {
+    if (logErrOnly && e.level !== "ERROR") continue;
+    const line = e.ts + " [" + e.level + "] " + e.text;
+    if (kw && !line.toLowerCase().includes(kw)) continue;
+    view.appendChild(createLogDiv(line, "lg-" + e.level));
+  }
+
+  while (view.childElementCount > 600) {
+    view.removeChild(view.firstElementChild);
+  }
+
+  const total = logEntries.length;
+  const shown = view.childElementCount;
+  updateLogFilterInfo(shown, total);
+
+  if ($("logFollow").checked && wasNearBottom) {
+    view.scrollTop = view.scrollHeight;
+  }
+}
+
+function renderLogs(forceFull = false) {
+  if (forceFull || logSource !== "live") {
+    fullRenderLogs();
+  }
+}
+
+$("logErrOnly").addEventListener("change", () => {
+  logErrOnly = $("logErrOnly").checked;
+  fullRenderLogs();
+});
+
+$("logKeyword").addEventListener("input", () => {
+  logKeyword = $("logKeyword").value.trim();
+  fullRenderLogs();
+});
+
+$("logFollow").addEventListener("change", () => {
+  if ($("logFollow").checked) {
+    $("logView").scrollTop = $("logView").scrollHeight;
+  }
+});
+
+const logViewEl = $("logView");
+if (logViewEl) {
+  logViewEl.addEventListener("mousedown", () => {
+    isSelectingLog = true;
+  });
+}
+
+window.addEventListener("mouseup", () => {
+  if (isSelectingLog) {
+    isSelectingLog = false;
+    setTimeout(() => {
+      if (!hasLogSelection() && logNeedsFullRender) {
+        logNeedsFullRender = false;
+        fullRenderLogs();
+      }
+    }, 100);
+  }
+});
+
+document.addEventListener("selectionchange", () => {
+  if (!isSelectingLog && !hasLogSelection() && logNeedsFullRender) {
+    logNeedsFullRender = false;
+    fullRenderLogs();
+  }
+});
+
+if ($("btnPauseLog")) {
+  $("btnPauseLog").addEventListener("click", () => {
+    logPaused = !logPaused;
+    if (logPaused) {
+      $("btnPauseLog").textContent = "▶ 继续刷新";
+      $("btnPauseLog").classList.add("active");
+    } else {
+      $("btnPauseLog").textContent = "⏸ 暂停刷新";
+      $("btnPauseLog").classList.remove("active");
+      fetchLogs();
+    }
+    updateLogFilterInfo($("logView").childElementCount, logSource === "live" ? logEntries.length : logLines.length);
+  });
+}
+
+if ($("btnCopyLog")) {
+  $("btnCopyLog").addEventListener("click", async () => {
+    const view = $("logView");
+    const sel = window.getSelection();
+    let textToCopy = "";
+    let isSel = false;
+
+    if (sel && !sel.isCollapsed && hasLogSelection()) {
+      textToCopy = sel.toString();
+      isSel = true;
+    } else {
+      const divs = view.querySelectorAll("div");
+      if (divs.length === 0) {
+        flashBtn($("btnCopyLog"), "⚠️ 无可复制内容", 1500);
+        return;
+      }
+      textToCopy = Array.from(divs).map(d => d.textContent).join("\n");
+    }
+
+    if (!textToCopy) {
+      flashBtn($("btnCopyLog"), "⚠️ 无可复制内容", 1500);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      const msg = isSel ? `已复制选中 (${textToCopy.length}字)` : `已复制全部 (${textToCopy.split("\n").length}行)`;
+      flashBtn($("btnCopyLog"), "✅ " + msg, 1800);
+    } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = textToCopy;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        flashBtn($("btnCopyLog"), "✅ 已复制到剪贴板", 1800);
+      } catch (err) {
+        flashBtn($("btnCopyLog"), "❌ 复制失败，请手动 Ctrl+C", 2000);
+      }
+      document.body.removeChild(ta);
+    }
+  });
+}
+
 if ($("btnClearLog")) {
   $("btnClearLog").addEventListener("click", () => {
     if (logSource === "live") {
       logEntries = [];
+      logNeedsFullRender = false;
       $("logView").innerHTML = "";
       $("logFilterInfo").textContent = "已清空实时视图（仅展示后续新日志）";
     }
@@ -4550,6 +4743,7 @@ function initLogChips() {
 }
 
 async function fetchLogs() {
+  if (logPaused) return;
   if (document.hidden) {
     $("logHint").textContent = "⏸ 页面在后台，已暂停刷新（回到前台自动恢复）";
     return;
@@ -4562,20 +4756,48 @@ async function fetchLogs() {
     data = await api(url);
   } catch (e) { return; }        // 主程序重启间隙等场景，静默跳过这轮
   if (!data.ok) return;
+
   if (logSource === "live") {
-    if (data.entries.length) {
-      logEntries.push(...data.entries);
-      if (logEntries.length > 600) logEntries = logEntries.slice(-600);  // 防内存无限膨胀
-    }
+    const newItems = data.entries || [];
     logSeq = data.seq;
+
+    if (newItems.length > 0) {
+      logEntries.push(...newItems);
+      if (logEntries.length > 600) logEntries = logEntries.slice(-600);  // 防内存无限膨胀
+
+      if (isUserBusyWithLog()) {
+        logNeedsFullRender = true;
+      } else if (logNeedsFullRender) {
+        logNeedsFullRender = false;
+        fullRenderLogs();
+      } else {
+        appendLiveEntries(newItems);
+      }
+    } else if (logNeedsFullRender && !isUserBusyWithLog()) {
+      logNeedsFullRender = false;
+      fullRenderLogs();
+    }
+
     $("logHint").textContent = logEntries.length ? "" :
       "（暂无实时日志。独立模式下这里只有管理端进程自己的输出，主程序日志请切换到「系统日志文件」或「错误日志文件」。）";
   } else {
-    logLines = data.lines;
-    $("logHint").textContent = !data.lines.length ? "（日志文件为空或不存在）"
+    logLines = data.lines || [];
+    const currentKey = logLines.length + ":" + (logLines[logLines.length - 1] || "");
+    const changed = (currentKey !== lastRenderedFileKey);
+    lastRenderedFileKey = currentKey;
+
+    $("logHint").textContent = !logLines.length ? "（日志文件为空或不存在）"
       : (data.file ? "文件: " + data.file + "（末尾 300 行）" : "");
+
+    if (changed || logNeedsFullRender) {
+      if (isUserBusyWithLog()) {
+        logNeedsFullRender = true;
+      } else {
+        logNeedsFullRender = false;
+        fullRenderLogs();
+      }
+    }
   }
-  renderLogs();
 }
 
 function startLogPolling() {

@@ -595,10 +595,10 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260902_3" in html
-    assert "/static/archive.css?v=20260902_3" in html
-    assert "/static/archive.js?v=20260902_3" in perf
-    assert "/static/archive.css?v=20260902_3" in perf
+    assert "/static/archive.js?v=20260905_1" in html
+    assert "/static/archive.css?v=20260905_1" in html
+    assert "/static/archive.js?v=20260905_1" in perf
+    assert "/static/archive.css?v=20260905_1" in perf
 
 
 def test_archive_home_omits_duplicate_history_section():
@@ -628,8 +628,8 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260902_3" in archive
-    assert "/static/theme.css?v=20260902_3" in admin
+    assert "/static/theme.css?v=20260905_1" in archive
+    assert "/static/theme.css?v=20260905_1" in admin
 
 
 def test_admin_mobile_member_and_openid_layout_guards_are_present():
@@ -745,3 +745,14 @@ def test_subscription_sync_reports_partial_failure(monkeypatch):
     payload = json.loads(handler.wfile.getvalue())
     assert payload["ok"] and payload["partial"]
     assert payload["warnings"] == {"expired": "凭证不可用或已过期"}
+
+
+def test_admin_log_view_controls_and_selection_guards():
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="btnPauseLog"' in html
+    assert 'id="btnCopyLog"' in html
+    assert "hasLogSelection" in html
+    assert "isUserBusyWithLog" in html
+    assert "appendLiveEntries" in html
+    assert "user-select: text" in html
+
