@@ -648,6 +648,13 @@ def test_mobile_header_2row_layout_and_actions_guard():
     assert "justify-content: safe flex-end;" in theme
     assert "flex: 0 0 100%;" in theme
 
+    archive = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    admin = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    # 用户相关操作（改密、登出）紧密相邻，跨系统跳转按钮置于最右侧
+    assert archive.index('id="changePwBtn"') < archive.index('id="logoutBtn"') < archive.index('id="adminLink"')
+    assert admin.index('id="btnChangePw"') < admin.index('id="btnLogout"') < admin.index('id="archiveLink"')
+
 
 def test_admin_mobile_member_and_openid_layout_guards_are_present():
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
