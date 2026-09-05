@@ -126,6 +126,11 @@ def test_instagram_post_url_patterns():
     ]
 
     for url, exp_kind, exp_code in urls:
+        m_re = _SHORTCODE_RE.search(url)
+        assert m_re is not None
+        assert m_re.group(1).lower() == exp_kind
+        assert m_re.group(2) == exp_code
+
         kind, code, embed_url = _post_parts(url)
         assert kind == exp_kind
         assert code == exp_code
