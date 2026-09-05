@@ -443,6 +443,7 @@ dialog {
   box-shadow: var(--shadow-lg);
   animation: dlgIn .2s cubic-bezier(.2,.8,.3,1) both;
 }
+dialog:not([open]) { display: none; }
 @keyframes dlgIn { from { opacity: 0; transform: translateY(10px) scale(.98); } }
 dialog::backdrop { background: rgba(12, 14, 22, .55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 dialog h3 { margin: 0 0 14px; font-size: 16px; color: var(--text-strong); }

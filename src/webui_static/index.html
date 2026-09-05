@@ -6,8 +6,8 @@
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
-<link href="/static/theme.css?v=20260902_3" rel="stylesheet"/>
-<script src="/static/theme.js?v=20260902_3"></script>
+<link href="/static/theme.css?v=20260905_1" rel="stylesheet"/>
+<script src="/static/theme.js?v=20260905_1"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
   .dirty-dot { display: none !important; }
@@ -3604,7 +3604,8 @@ function mkMemberInput(value, onChangeCallback) {
   btn.className = "btn";
   btn.style.padding = "4px 8px";
   btn.textContent = "选择";
-  btn.onclick = () => {
+  btn.onclick = (e) => {
+    if (e) e.preventDefault();
     openMemberSelect(inp.value, (newVal) => {
       inp.value = newVal;
       onChangeCallback(newVal);
