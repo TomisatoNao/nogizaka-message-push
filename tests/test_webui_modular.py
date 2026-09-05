@@ -628,8 +628,8 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260905_4" in archive
-    assert "/static/theme.css?v=20260905_4" in admin
+    assert "/static/theme.css?v=20260906_1" in archive
+    assert "/static/theme.css?v=20260906_1" in admin
 
 
 def test_mobile_header_2row_layout_and_actions_guard():
@@ -670,6 +670,26 @@ def test_admin_mobile_member_and_openid_layout_guards_are_present():
     assert 'right.className = "cmd-openid-actions"' in html
     assert ".cmd-openid-card > .cmd-openid-actions" in html
     assert "width: 100%; flex: 1 1 100%; justify-content: flex-start" in html
+
+
+def test_admin_restart_and_reload_controls_relocated():
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    theme = (_ROOT / "src" / "webui_static" / "theme.css").read_text(encoding="utf-8")
+
+    # 顶栏 Actions 不再堆砌管理业务按钮，仅保留主题、用户和消息归档
+    header_actions = html.split('<div class="header-actions">')[1].split('</header>')[0]
+    assert 'id="btnReloadFile"' not in header_actions
+    assert 'id="btnRestart"' not in header_actions
+
+    # 重启主程序按钮移至状态卡片头部，且在移动端允许折行、不再被强制隐藏
+    assert 'class="status-actions"' in html
+    assert 'id="btnRestart"' in html
+    assert '#btnRestart { display: none !important; }' not in theme
+
+    # 放弃修改并重新载入按钮移至固底 savebar 操作区
+    assert '<div class="savebar-actions">' in html
+    assert 'id="btnReloadFile"' in html
+    assert "放弃修改并重新载入" in html
 
 
 def test_archive_message_order_controls_and_route_state():
@@ -779,4 +799,3 @@ def test_admin_log_view_controls_and_selection_guards():
     assert "isUserBusyWithLog" in html
     assert "appendLiveEntries" in html
     assert "user-select: text" in html
-

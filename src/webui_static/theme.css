@@ -386,7 +386,6 @@ header.app-header {
     overflow: visible;
   }
   .header-actions::-webkit-scrollbar { display: none; }
-  #btnReloadFile, #btnRestart { display: none !important; }
   .header-actions .theme-toggle {
     width: 28px;
     height: 28px;
@@ -617,4 +616,3 @@ dialog h3 { margin: 0 0 14px; font-size: 16px; color: var(--text-strong); }
 }
 .input-group .eye:hover { color: var(--accent); border-color: var(--accent); }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-
