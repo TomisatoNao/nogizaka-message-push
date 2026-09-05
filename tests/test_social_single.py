@@ -108,3 +108,31 @@ def test_instagram_story_mocked(monkeypatch):
     assert post.media[1].url == "https://ig.cdn/img2.jpg"
     assert post.media[2].url == "https://ig.cdn/img3.jpg"
     assert post.extra.get("story_count") == 3
+
+
+def test_instagram_post_url_patterns():
+    from src.social.instagram_embed import _post_parts, _SHORTCODE_RE
+    import re
+
+    # Test _SHORTCODE_RE on various Instagram link formats
+    urls = [
+        ("https://www.instagram.com/p/Dc56WSAoHrh/", "p", "Dc56WSAoHrh"),
+        ("https://www.instagram.com/p/Dc56WSAoHrh/?img_index=5", "p", "Dc56WSAoHrh"),
+        ("https://www.instagram.com/miku_osushi/p/Dc56WSAoHrh/?img_index=5", "p", "Dc56WSAoHrh"),
+        ("https://www.instagram.com/miku_osushi/reel/Dc56WSAoHrh/", "reel", "Dc56WSAoHrh"),
+        ("https://www.instagram.com/reel/Dc56WSAoHrh/", "reel", "Dc56WSAoHrh"),
+        ("https://www.instagram.com/share/p/Dc56WSAoHrh/", "p", "Dc56WSAoHrh"),
+        ("https://www.instagram.com/share/reel/Dc56WSAoHrh/", "reel", "Dc56WSAoHrh"),
+    ]
+
+    for url, exp_kind, exp_code in urls:
+        kind, code, embed_url = _post_parts(url)
+        assert kind == exp_kind
+        assert code == exp_code
+        assert embed_url == f"https://www.instagram.com/{exp_kind}/{exp_code}/embed/captioned/"
+
+        # Also test regex used in single_fetcher
+        m = re.search(r"instagram\.com/(?:[a-zA-Z0-9_.]+/)?(?:p|reel|tv)/([^/?#\s]+)", url)
+        assert m is not None
+        assert m.group(1) == exp_code
+

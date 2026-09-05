@@ -145,8 +145,10 @@ class SocialService:
                 raise SocialAuthRequired(
                     "社交内容需要有效登录态", request_id=request_id
                 ) from exc
+            msg = str(exc).strip()
+            detail = f"社交链接解析失败: {msg}" if msg else "社交链接解析失败"
             raise SocialParseError(
-                "社交链接解析失败", request_id=request_id
+                detail, request_id=request_id
             ) from exc
         if not isinstance(post, Post):
             raise SocialParseError(

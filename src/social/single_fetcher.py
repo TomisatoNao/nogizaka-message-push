@@ -242,8 +242,8 @@ class SocialUrlParser:
                 "Instagram Story 未返回媒体，可能已过期或登录态已失效；请重新配置 Cookies。"
             )
 
-        # 2. 判定普通 Post/Reel 链接（如 /p/xxx/ 或 /reel/xxx/）
-        m = re.search(r"instagram\.com/(?:p|reel|tv)/([^/?#\s]+)", url)
+        # 2. 判定普通 Post/Reel 链接（如 /p/xxx/、/reel/xxx/，支持带用户名或 /share/ 前缀）
+        m = re.search(r"instagram\.com/(?:[a-zA-Z0-9_.]+/)?(?:p|reel|tv)/([^/?#\s]+)", url)
         shortcode = m.group(1) if m else ""
         if shortcode:
             if self._instagram_cookies().get("sessionid"):

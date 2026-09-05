@@ -385,8 +385,10 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
         # 入口只记录类型和 request_id，避免把 URL、Cookie 或第三方响应写入
         # 日志；失败回复也必须走统一 DeliveryService，而不是直接调用 Bot API。
         error_name = type(exc).__name__
+        err_msg = str(exc).strip()
+        err_display = f"{error_name}: {err_msg}" if err_msg else error_name
         log_all(
-            f"⚠️ [社媒解析] 失败 | request_id={request_id} | error={error_name}",
+            f"⚠️ [社媒解析] 失败 | request_id={request_id} | error={err_display}",
             is_error=True,
         )
         try:
@@ -415,7 +417,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
                 )
                 sent = await SocialService(raw_cfg).delivery_service.deliver_text(
                     fallback_target,
-                    f"❌ 社媒链接解析失败（{error_name}，request_id={request_id}）",
+                    f"❌ 社媒链接解析失败（{err_display}，request_id={request_id}）",
                 )
                 if not sent:
                     log_all(

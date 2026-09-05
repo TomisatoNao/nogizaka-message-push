@@ -31,7 +31,7 @@ _UA = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 _SHORTCODE_RE = re.compile(
-    r"instagram\.com/(p|reel|tv)/([^/?#\s]+)", re.IGNORECASE
+    r"instagram\.com/(?:[a-zA-Z0-9_.]+/)?(p|reel|tv)/([^/?#\s]+)", re.IGNORECASE
 )
 _RESERVED_PATHS = {
     "accounts", "about", "direct", "directory", "emails", "explore",
@@ -118,6 +118,8 @@ def _author_from_links(links: list[dict]) -> tuple[str, str]:
             continue
         username = parts[0]
         label = str(link.get("text") or "").strip()
+        if label.endswith("Verified"):
+            label = label[:-8].strip()
         return label or f"@{username}", username
     return "Instagram 用户", ""
 
