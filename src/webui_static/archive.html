@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>坂道监控 · 消息归档</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260905_2">
-<script src="/static/theme.js?v=20260905_1"></script>
+<link rel="stylesheet" href="/static/theme.css?v=20260905_3">
+<script src="/static/theme.js?v=20260905_3"></script>
 <link rel="stylesheet" href="/static/archive.css?v=20260905_1">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
@@ -61,9 +61,26 @@
   <!-- 3. 右侧 Actions 系统与用户控制区 -->
   <div class="header-actions">
     <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
-    <span id="whoami" class="user-badge"></span>
-    <button id="changePwBtn" hidden class="btn subdued-btn" style="white-space:nowrap;" title="修改登录密码">🔑 改密</button>
-    <button id="logoutBtn" hidden class="btn subdued-btn" style="white-space:nowrap;">🚪 登出</button>
+    <div class="header-dropdown user-dropdown" id="userDropdown" hidden>
+      <button class="user-badge dropdown-toggle" id="userMenuBtn" type="button" title="用户账号中心">
+        <span class="user-avatar-icon">👤</span>
+        <span id="whoami" class="user-name"></span>
+        <span class="dropdown-arrow">▾</span>
+      </button>
+      <div class="dropdown-menu user-dropdown-menu">
+        <div class="user-dropdown-header">
+          <div class="user-info-name" id="userMenuName"></div>
+          <div class="user-info-role" id="userMenuRole"></div>
+        </div>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item" id="changePwBtn" type="button">
+          <span class="icon">🔑</span> 修改登录密码
+        </button>
+        <button class="dropdown-item danger" id="logoutBtn" type="button">
+          <span class="icon">🚪</span> 退出登录
+        </button>
+      </div>
+    </div>
     <a href="/" id="adminLink" hidden class="app-switch-btn" title="进入系统管理后台"><span>⚙️</span><span>管理后台</span></a>
   </div>
 </header>

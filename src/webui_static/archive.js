@@ -2880,10 +2880,13 @@ async function initAuth() {
       }
       if (me.user) {
         window._isLoggedIn = true;
-        $("whoami").textContent = "👤 " + me.user.username;
+        $("whoami").textContent = me.user.username;
+        if ($("userMenuName")) $("userMenuName").textContent = "👤 " + me.user.username;
+        if ($("userMenuRole")) $("userMenuRole").textContent = me.user.role === "admin" ? "系统管理员" : "普通用户";
+        if ($("userDropdown")) { $("userDropdown").hidden = false; $("userDropdown").style.display = "inline-block"; }
         $("logoutBtn").hidden = false;
-        $("logoutBtn").style.display = "inline-flex";
-        if ($("changePwBtn")) { $("changePwBtn").hidden = false; $("changePwBtn").style.display = "inline-flex"; }
+        $("logoutBtn").style.display = "flex";
+        if ($("changePwBtn")) { $("changePwBtn").hidden = false; $("changePwBtn").style.display = "flex"; }
         const isAdmin = me.user.role === "admin";
         _updateAdminUI(isAdmin);
         if (adminLink) {
@@ -2896,6 +2899,7 @@ async function initAuth() {
       } else {
         window._isLoggedIn = false;
         $("whoami").textContent = "";
+        if ($("userDropdown")) { $("userDropdown").hidden = true; $("userDropdown").style.display = "none"; }
         $("logoutBtn").hidden = true;
         $("logoutBtn").style.display = "none";
         if ($("changePwBtn")) { $("changePwBtn").hidden = true; $("changePwBtn").style.display = "none"; }
@@ -2937,6 +2941,7 @@ function bindChangePwDialog() {
 
   btn.onclick = (e) => {
     if (e) e.preventDefault();
+    if ($("userDropdown")) $("userDropdown").classList.remove("open");
     const d = $("changePwDialog");
     if (!d) return;
     const oldPw = $("cpOldPw"), newPw = $("cpNewPw"), confirmPw = $("cpConfirmPw"), err = $("cpError");
@@ -2957,6 +2962,7 @@ function bindChangePwDialog() {
   };
 
   if ($("cpCancel")) $("cpCancel").onclick = () => {
+    if ($("userDropdown")) $("userDropdown").classList.remove("open");
     const d = $("changePwDialog");
     if (d && typeof d.close === "function") d.close();
     else if (d) d.removeAttribute("open");

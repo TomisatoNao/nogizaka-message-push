@@ -6,8 +6,8 @@
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
-<link href="/static/theme.css?v=20260905_2" rel="stylesheet"/>
-<script src="/static/theme.js?v=20260905_1"></script>
+<link href="/static/theme.css?v=20260905_3" rel="stylesheet"/>
+<script src="/static/theme.js?v=20260905_3"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
   .dirty-dot { display: none !important; }
@@ -320,9 +320,26 @@
     <button class="btn small danger" hidden="" id="btnRestart" title="优雅停机后原地拉起新进程，.env 重新加载">⟳ 重启主程序</button>
     
     <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
-    <span id="whoami" class="user-badge" hidden=""></span>
-    <button id="btnChangePw" hidden="" class="btn subdued-btn" style="white-space:nowrap;" title="修改登录密码">🔑 改密</button>
-    <button id="btnLogout" hidden="" class="btn subdued-btn">🚪 登出</button>
+    <div class="header-dropdown user-dropdown" id="userDropdown" hidden="">
+      <button class="user-badge dropdown-toggle" id="userMenuBtn" type="button" title="用户账号中心">
+        <span class="user-avatar-icon">👤</span>
+        <span id="whoami" class="user-name"></span>
+        <span class="dropdown-arrow">▾</span>
+      </button>
+      <div class="dropdown-menu user-dropdown-menu">
+        <div class="user-dropdown-header">
+          <div class="user-info-name" id="userMenuName"></div>
+          <div class="user-info-role" id="userMenuRole"></div>
+        </div>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item" id="btnChangePw" type="button">
+          <span class="icon">🔑</span> 修改登录密码
+        </button>
+        <button class="dropdown-item danger" id="btnLogout" type="button">
+          <span class="icon">🚪</span> 退出登录
+        </button>
+      </div>
+    </div>
     <a href="/archive" id="archiveLink" class="app-switch-btn" title="前往消息与博客归档阅览室"><span>📖</span><span>消息归档</span></a>
   </div>
 </header>
@@ -5430,11 +5447,15 @@ document.addEventListener("visibilitychange", () => {
   try {
     const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
     if (me.auth_enabled && me.user) {
-      $("whoami").textContent = "👤 " + me.user.username;
-      $("whoami").hidden = false;
+      $("whoami").textContent = me.user.username;
+      if ($("userMenuName")) $("userMenuName").textContent = "👤 " + me.user.username;
+      if ($("userMenuRole")) $("userMenuRole").textContent = me.user.role === "admin" ? "系统管理员" : "普通用户";
+      if ($("userDropdown")) { $("userDropdown").hidden = false; $("userDropdown").style.display = "inline-block"; }
       $("btnLogout").hidden = false;
       if ($("btnChangePw")) $("btnChangePw").hidden = false;
       if (me.user.role === "admin") $("tabUsers").hidden = false;   // 用户管理仅 admin 可见
+    } else {
+      if ($("userDropdown")) { $("userDropdown").hidden = true; $("userDropdown").style.display = "none"; }
     }
   } catch (e) { /* 忽略 */ }
 })();
@@ -5466,6 +5487,7 @@ $("btnLogout").addEventListener("click", async () => {
   $("cpConfirmPwEye").onclick = () => toggleEye(confirmPw, $("cpConfirmPwEye"));
 
   btn.onclick = () => {
+    if ($("userDropdown")) $("userDropdown").classList.remove("open");
     oldPw.value = ""; newPw.value = ""; confirmPw.value = "";
     oldPw.classList.add("masked"); newPw.classList.add("masked"); confirmPw.classList.add("masked");
     $("cpOldPwEye").textContent = "👁"; $("cpNewPwEye").textContent = "👁"; $("cpConfirmPwEye").textContent = "👁";
@@ -5473,7 +5495,10 @@ $("btnLogout").addEventListener("click", async () => {
     try { dlg.showModal(); } catch (_) { dlg.show(); }
     oldPw.focus();
   };
-  $("cpCancel").onclick = () => dlg.close();
+  $("cpCancel").onclick = () => {
+    if ($("userDropdown")) $("userDropdown").classList.remove("open");
+    dlg.close();
+  };
   $("cpSave").onclick = async () => {
     const o = oldPw.value.trim(), n = newPw.value.trim(), c = confirmPw.value.trim();
     err.style.display = "none";

@@ -38,6 +38,21 @@
         apply(ORDER[(ORDER.indexOf(saved()) + 1) % ORDER.length]);
       });
     });
+
+    // 顶栏通用下拉菜单（支持点击展开/收起，点击菜单外部自动关闭）
+    document.addEventListener("click", function (e) {
+      var toggle = e.target.closest(".header-dropdown .dropdown-toggle");
+      var openDropdowns = document.querySelectorAll(".header-dropdown.open");
+      if (toggle) {
+        var dropdown = toggle.closest(".header-dropdown");
+        openDropdowns.forEach(function (d) { if (d !== dropdown) d.classList.remove("open"); });
+        if (dropdown) dropdown.classList.toggle("open");
+      } else {
+        openDropdowns.forEach(function (d) {
+          if (!d.contains(e.target)) d.classList.remove("open");
+        });
+      }
+    });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
