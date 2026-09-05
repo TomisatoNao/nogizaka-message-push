@@ -111,6 +111,17 @@ def main() -> None:
         assert auth.add_user("admin2", "adminpass456", "admin")[0]
         assert auth.delete_user("admin2")[0], "有两个 admin 时可删除其一"
 
+        # 用户自主修改密码 change_password 单元测试
+        ok, msg = auth.change_password("v1", "wrongpass", "newpass123")
+        assert not ok and "原密码不正确" in msg
+        ok, msg = auth.change_password("v1", "viewerpass123", "short")
+        assert not ok and "至少" in msg
+        ok, msg = auth.change_password("v1", "viewerpass123", "viewerpass123")
+        assert not ok and "相同" in msg
+        ok, msg = auth.change_password("v1", "viewerpass123", "evennewerpass")
+        assert ok and "成功" in msg
+        assert auth.authenticate("v1", "evennewerpass") is not None
+
         # 数据库文件里不含明文密码
         raw_bytes = auth.AUTH_DB_PATH.read_bytes()
         assert b"adminpass123" not in raw_bytes and b"viewerpass123" not in raw_bytes
@@ -336,6 +347,40 @@ def main() -> None:
             assert code == 200 and body["ok"]
             assert _http("GET", base + "/api/archive/members", headers=gck)[0] == 401, \
                 "改密后旧会话应失效"
+
+            # 用户自主修改密码 (/api/auth/change_password)
+            # 1. 未登录 -> 401
+            code, body, _ = _http("POST", base + "/api/auth/change_password",
+                                  {"old_password": "x", "new_password": "y"})
+            assert code == 401
+
+            # 2. 原密码错误 -> 400
+            code, body, _ = _http("POST", base + "/api/auth/change_password",
+                                  {"old_password": "wrongpassword", "new_password": "newpass789"},
+                                  headers=vck)
+            assert code == 400 and "原密码不正确" in body["errors"][0]
+
+            # 3. 两次新密码不一致 -> 400
+            code, body, _ = _http("POST", base + "/api/auth/change_password",
+                                  {"old_password": "evennewerpass", "new_password": "newpass789", "confirm_password": "diff"},
+                                  headers=vck)
+            assert code == 400 and "不一致" in body["errors"][0]
+
+            # 4. 成功修改密码 -> 200，并颁发新会话 Cookie，使用新 Cookie 可继续访问
+            code, body, rh = _http("POST", base + "/api/auth/change_password",
+                                   {"old_password": "evennewerpass", "new_password": "newpass789", "confirm_password": "newpass789"},
+                                   headers=vck)
+            assert code == 200 and body["ok"]
+            new_vck = {"Cookie": _cookie(rh, "sakamichi_session")}
+            code, body, _ = _http("GET", base + "/api/archive/members", headers=new_vck)
+            assert code == 200, "改密后使用新颁发的会话 Cookie 应可无缝访问"
+            # 旧会话已被销毁
+            code, _, _ = _http("GET", base + "/api/archive/members", headers=vck)
+            assert code == 401, "改密后旧会话应失效"
+            # 验证新密码可正常登录
+            code, body, _ = _http("POST", base + "/api/auth/login",
+                                  {"username": "v1", "password": "newpass789"})
+            assert code == 200
 
             # 防误锁：不能删自己、不能删/降最后一个 admin、弱密码被拒
             code, body, _ = _http("POST", base + "/api/users", headers=ck,

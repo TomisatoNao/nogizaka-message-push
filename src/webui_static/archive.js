@@ -2883,6 +2883,7 @@ async function initAuth() {
         $("whoami").textContent = "👤 " + me.user.username;
         $("logoutBtn").hidden = false;
         $("logoutBtn").style.display = "inline-flex";
+        if ($("changePwBtn")) { $("changePwBtn").hidden = false; $("changePwBtn").style.display = "inline-flex"; }
         const isAdmin = me.user.role === "admin";
         _updateAdminUI(isAdmin);
         if (adminLink) {
@@ -2897,6 +2898,7 @@ async function initAuth() {
         $("whoami").textContent = "";
         $("logoutBtn").hidden = true;
         $("logoutBtn").style.display = "none";
+        if ($("changePwBtn")) { $("changePwBtn").hidden = true; $("changePwBtn").style.display = "none"; }
         _updateAdminUI(false);
         // 未登录 / 游客免登录模式下：展示「管理后台」按钮，点击前往登录页 /login
         if (adminLink) {
@@ -2912,6 +2914,72 @@ async function initAuth() {
   return _authInitPromise;
 }
 initAuth();
+// ── 修改个人密码 ──────────────────────────────────
+(function bindChangePwDialog() {
+  const dlg = $("changePwDialog");
+  const btn = $("changePwBtn");
+  if (!dlg || !btn) return;
+  const oldPw = $("cpOldPw"), newPw = $("cpNewPw"), confirmPw = $("cpConfirmPw"), err = $("cpError");
+  const toggleEye = (input, eye) => {
+    if (input.classList.contains("masked")) {
+      input.classList.remove("masked");
+      eye.textContent = "🙈";
+    } else {
+      input.classList.add("masked");
+      eye.textContent = "👁";
+    }
+  };
+  if ($("cpOldPwEye")) $("cpOldPwEye").onclick = () => toggleEye(oldPw, $("cpOldPwEye"));
+  if ($("cpNewPwEye")) $("cpNewPwEye").onclick = () => toggleEye(newPw, $("cpNewPwEye"));
+  if ($("cpConfirmPwEye")) $("cpConfirmPwEye").onclick = () => toggleEye(confirmPw, $("cpConfirmPwEye"));
+
+  btn.onclick = () => {
+    oldPw.value = ""; newPw.value = ""; confirmPw.value = "";
+    oldPw.classList.add("masked"); newPw.classList.add("masked"); confirmPw.classList.add("masked");
+    if ($("cpOldPwEye")) $("cpOldPwEye").textContent = "👁";
+    if ($("cpNewPwEye")) $("cpNewPwEye").textContent = "👁";
+    if ($("cpConfirmPwEye")) $("cpConfirmPwEye").textContent = "👁";
+    err.style.display = "none";
+    try { dlg.showModal(); } catch (_) { dlg.show(); }
+    oldPw.focus();
+  };
+  $("cpCancel").onclick = () => dlg.close();
+  $("cpSave").onclick = async () => {
+    const o = oldPw.value.trim(), n = newPw.value.trim(), c = confirmPw.value.trim();
+    err.style.display = "none";
+    if (!o) { err.textContent = "请输入当前原密码"; err.style.display = "block"; return; }
+    if (!n || n.length < 8) { err.textContent = "新密码至少需要 8 位"; err.style.display = "block"; return; }
+    if (n === o) { err.textContent = "新密码不能与当前原密码相同"; err.style.display = "block"; return; }
+    if (c && c !== n) { err.textContent = "两次输入的新密码不一致"; err.style.display = "block"; return; }
+
+    $("cpSave").disabled = true;
+    try {
+      const resp = await fetch("/api/auth/change_password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ old_password: o, new_password: n, confirm_password: c }),
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        err.textContent = (data.errors || []).join("；") || "修改失败";
+        err.style.display = "block";
+        return;
+      }
+      dlg.close();
+      if (typeof showToast === "function") {
+        showToast("✅ 密码修改成功！当前会话已自动续期");
+      } else {
+        alert("✅ 密码修改成功！当前会话已自动续期");
+      }
+    } catch (e) {
+      err.textContent = "网络请求失败: " + e.message;
+      err.style.display = "block";
+    } finally {
+      $("cpSave").disabled = false;
+    }
+  };
+})();
+
 const logoutBtn = $("logoutBtn");
 if (logoutBtn) {
   logoutBtn.addEventListener("click", async (e) => {

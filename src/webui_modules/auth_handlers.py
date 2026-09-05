@@ -462,6 +462,63 @@ def handle_logout(handler) -> None:
     send_json(handler, {"ok": True, "message": "已成功退出登录"}, 200)
 
 
+def handle_change_password(handler) -> None:
+    """POST /api/auth/change_password 用户自主修改密码（任何登录用户均可调用）。"""
+    if not guard(handler, need_admin=False):
+        return
+
+    user = current_user(handler)
+    if not user:
+        send_json(handler, {"ok": False, "errors": ["未登录"]}, 401)
+        return
+
+    username = user.get("username", "")
+    if not username or username in (API_TOKEN_SESSION_USER, "(api-token)"):
+        send_json(handler, {"ok": False, "errors": ["静态访问令牌会话不支持修改密码"]}, 400)
+        return
+
+    body = handler._read_body_json() if hasattr(handler, "_read_body_json") else {}
+    if not isinstance(body, dict):
+        send_json(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+        return
+
+    old_pw = str(body.get("old_password", ""))
+    new_pw = str(body.get("new_password", ""))
+    confirm_pw = str(body.get("confirm_password", ""))
+
+    if not old_pw:
+        send_json(handler, {"ok": False, "errors": ["请输入当前原密码"]}, 400)
+        return
+    if not new_pw:
+        send_json(handler, {"ok": False, "errors": ["请输入新密码"]}, 400)
+        return
+    if confirm_pw and confirm_pw != new_pw:
+        send_json(handler, {"ok": False, "errors": ["两次输入的新密码不一致"]}, 400)
+        return
+
+    ok, msg = _auth.change_password(username, old_pw, new_pw)
+    if not ok:
+        _audit(handler, "auth.change_password", "failed", actor=username, target=username, details={"reason": msg})
+        send_json(handler, {"ok": False, "errors": [msg]}, 400)
+        return
+
+    # 修改成功后为当前浏览器无缝颁发全新 Session Token 和 Refresh Token
+    role = user.get("role", "viewer")
+    access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
+    refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
+    new_access = _auth.create_session(username, role, access_ttl)
+    new_refresh = _auth.create_refresh_token(username, role, refresh_days)
+
+    handler._pending_set_cookies = [
+        _cookie(SESSION_COOKIE, new_access, access_ttl),
+        _cookie(REFRESH_COOKIE, new_refresh, refresh_days * 86400),
+    ]
+    _audit(handler, "auth.change_password", "success", actor=username, target=username)
+    from src.logger import log_all
+    log_all(f"👤 用户 [{username}] 已自主修改密码并刷新会话")
+    send_json(handler, {"ok": True, "message": "密码修改成功", "username": username}, 200)
+
+
 
 def handle_users_get(handler) -> None:
     """GET /api/auth/users 返回所有用户列表（仅 admin）。"""

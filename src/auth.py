@@ -448,6 +448,31 @@ def set_password(username: str, password: str) -> tuple[bool, str]:
     return True, f"已重置密码: {username}"
 
 
+def change_password(username: str, old_password: str, new_password: str) -> tuple[bool, str]:
+    """用户自主修改密码：校验原密码、强度校验并更新，并销毁历史会话。
+
+    返回 (成功, 说明)。
+    """
+    if not username:
+        return False, "用户名不能为空"
+    users = load_users()
+    record = users.get(username)
+    if not record:
+        return False, f"用户不存在: {username}"
+    if not verify_password(old_password or "", record.get("password") or {}):
+        return False, "当前原密码不正确"
+    if len(new_password or "") < MIN_PASSWORD_LEN:
+        return False, f"新密码至少 {MIN_PASSWORD_LEN} 位"
+    if old_password == new_password:
+        return False, "新密码不能与当前原密码相同"
+
+    record["password"] = hash_password(new_password)
+    save_users(users)
+    destroy_user_sessions(username)
+    destroy_user_refresh_tokens(username)
+    return True, "密码修改成功"
+
+
 def delete_user(username: str) -> tuple[bool, str]:
     """删除用户，并销毁其所有活跃会话与刷新令牌。"""
     users = load_users()

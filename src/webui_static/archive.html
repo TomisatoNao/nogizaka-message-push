@@ -62,6 +62,7 @@
   <div class="header-actions">
     <button class="theme-toggle" type="button" title="切换主题">🖥️</button>
     <span id="whoami" class="user-badge"></span>
+    <button id="changePwBtn" hidden class="btn subdued-btn" style="white-space:nowrap;" title="修改登录密码">🔑 改密</button>
     <a href="/" id="adminLink" hidden class="app-switch-btn" title="进入系统管理后台"><span>⚙️</span><span>管理后台</span></a>
     <button id="logoutBtn" hidden class="btn subdued-btn" style="white-space:nowrap;">🚪 登出</button>
   </div>
@@ -337,5 +338,36 @@
 </div>
 
 <script src="/static/archive.js?v=20260902_3"></script>
+<!-- 修改个人密码对话框 -->
+<dialog id="changePwDialog" style="max-width: 440px; width: 92%;">
+<h3>🔑 修改登录密码</h3>
+<div class="dialog-note">密码修改成功后将自动续期当前浏览器会话，其他设备上的历史登录将全部失效。</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">当前原密码<span class="req">*</span></span></div>
+<div class="input-group">
+<input autocomplete="current-password" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="cpOldPw" placeholder="请输入当前密码" type="text"/>
+<button class="eye" id="cpOldPwEye" type="button">👁</button>
+</div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">新密码<span class="req">*</span></span><span class="fenv">至少 8 位</span></div>
+<div class="input-group">
+<input autocomplete="new-password" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="cpNewPw" placeholder="请输入新密码" type="text"/>
+<button class="eye" id="cpNewPwEye" type="button">👁</button>
+</div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">确认新密码<span class="req">*</span></span></div>
+<div class="input-group">
+<input autocomplete="new-password" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="cpConfirmPw" placeholder="请再次输入新密码" type="text"/>
+<button class="eye" id="cpConfirmPwEye" type="button">👁</button>
+</div>
+</div>
+<div id="cpError" style="color:var(--err); font-size:12.5px; margin-top:6px; display:none;"></div>
+<div class="actions">
+<button class="btn" id="cpCancel" type="button">取消</button>
+<button class="btn primary" id="cpSave" type="button">确认修改</button>
+</div>
+</dialog>
 </body>
 </html>

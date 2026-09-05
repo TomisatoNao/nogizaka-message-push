@@ -430,3 +430,79 @@ body { min-height: 100vh; min-height: 100dvh; overflow-x: clip; width: 100%; max
   }
   img, video, audio { max-width: 100%; }
 }
+
+/* ── 全局弹窗与对话框（Dialog & Modal） ── */
+dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-solid);
+  color: var(--text);
+  padding: 22px 24px;
+  min-width: 320px;
+  max-width: 92vw;
+  box-shadow: var(--shadow-lg);
+  animation: dlgIn .2s cubic-bezier(.2,.8,.3,1) both;
+}
+@keyframes dlgIn { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+dialog::backdrop { background: rgba(12, 14, 22, .55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+dialog h3 { margin: 0 0 14px; font-size: 16px; color: var(--text-strong); }
+.dialog-note {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  margin-bottom: 16px;
+}
+.secret-field { margin-bottom: 16px; }
+.secret-field .flabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.secret-field .fname { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.secret-field .fname .req { color: var(--err); margin-left: 2px; }
+.secret-field .fenv {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--field);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.input-group { display: flex; width: 100%; }
+.input-group input {
+  flex: 1;
+  border-radius: 8px 0 0 8px;
+  border-right: none;
+  font-size: 13.5px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: var(--field);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--tr-fast);
+}
+.input-group input:focus { border-color: var(--accent); }
+.input-group .eye {
+  border: 1px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  background: var(--field);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 13px;
+  font-size: 14px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--tr-fast);
+}
+.input-group .eye:hover { color: var(--accent); border-color: var(--accent); }
+.actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+

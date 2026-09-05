@@ -65,6 +65,7 @@ from src.webui_modules.auth_handlers import (
     guard,
     handle_auth_me,
     handle_api_token_session,
+    handle_change_password,
     handle_login,
     handle_logout,
     handle_refresh,
@@ -509,6 +510,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/auth/logout":
             handle_logout(self)
+            return
+        if path in ("/api/auth/change_password", "/api/auth/password"):
+            handle_change_password(self)
             return
         if path in ("/api/users", "/api/auth/users"):
             body = self._read_body_json()
