@@ -86,6 +86,7 @@
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--border-soft);
            vertical-align: middle; }
+  th:last-child, td:last-child, td.actions { white-space: nowrap; }
   tbody tr { transition: background var(--tr); }
   tbody tr:hover { background: color-mix(in srgb, var(--card-soft) 80%, transparent); }
   tbody tr:last-child td { border-bottom: none; }
@@ -116,7 +117,7 @@
   .btn.danger:hover { border-color: var(--err); color: var(--err); background: rgba(220,53,69,.06); }
   .btn.primary { border-color: var(--accent); background: var(--accent); color: #fff !important; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
   .btn.primary:hover { background: var(--accent-ring); border-color: var(--accent-ring); color: #fff !important; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-  .btn.small { padding: 4px 10px; font-size: 12.5px; }
+  .btn.small { padding: 4px 10px; font-size: 12.5px; white-space: nowrap; }
   .cred { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
   .cred.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
   .cred.miss { color: var(--err); background: var(--danger-soft); }
@@ -1477,7 +1478,7 @@
 </div>
 </div>
 <div class="dialog-actions">
-<button class="btn btn-danger" onclick="document.getElementById('dialog-tgbot').close()">取消</button>
+<button class="btn" onclick="document.getElementById('dialog-tgbot').close()">取消</button>
 <button class="btn" id="tgbSave">保存</button>
 </div>
 </div>
@@ -1494,7 +1495,7 @@
 </label>
 </div>
 <div class="dialog-actions">
-<button class="btn btn-danger" onclick="document.getElementById('dialog-napcat').close()">取消</button>
+<button class="btn" onclick="document.getElementById('dialog-napcat').close()">取消</button>
 <button class="btn" id="ncSave">保存</button>
 </div>
 </div>
@@ -2396,7 +2397,7 @@ function renderQqBots() {
         tdOps.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput, gidInput)));
         tdOps.appendChild(document.createTextNode(" "));
       }
-      tdOps.appendChild(mkBtn("删除", async () => {
+      tdOps.appendChild(mkDelBtn(async () => {
         const upper = (bot.name || "").toUpperCase();
         if (!(await uiConfirm(
           "删除官方 Bot " + (bot.name || "#" + idx) + "？\n" +
@@ -2425,7 +2426,7 @@ function renderQqBots() {
         qqBotStatus = (qqBotStatus || []).filter((s) => s.name !== bot.name);
         markDirty(); renderQqBots();
         msg("已删除，点「保存并热重载」生效", "ok");
-      }, "danger"));
+      }));
 
       tr.append(tdName, tdRemark, tdApp, tdOpenid, tdGroupOpenid, tdSub, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
@@ -2458,7 +2459,7 @@ function renderQqBots() {
            help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
       // 遗留槽位没有 config.json 记录，删除 = 清掉 .env 里的三个变量
       const slotNo = bot.name.replace("BOT", "");
-      tr.cells[5].appendChild(mkBtn("清除", async () => {
+      tr.cells[5].appendChild(mkDelBtn(async () => {
         if (!(await uiConfirm(
           "清除 .env 里 " + bot.name + " 的配置？\n将删除 QQ_OFFICIAL_" + bot.name +
           "_APP_ID / _CLIENT_SECRET / _TARGET_OPENID 三个变量。",
@@ -2480,7 +2481,7 @@ function renderQqBots() {
         } catch (e) {
           msg("清除失败：" + e.message, "err");
         }
-      }, "danger"));
+      }, "清除"));
       tbody.appendChild(tr);
     }
   }
@@ -3385,11 +3386,7 @@ function renderAccounts() {
     btnEdit.onclick = () => openAccountDialog(id);
 
     // 3. 删除
-    const btnDel = document.createElement("button");
-    btnDel.className = "btn small danger";
-    btnDel.type = "button";
-    btnDel.innerHTML = '<span style="font-size:11px;">🗑️</span><span>删除</span>';
-    btnDel.onclick = async () => {
+    const btnDel = mkDelBtn(async () => {
       try {
         const used = (config.monitor || []).filter((m) => m.account === id);
         let confirmed = false;
@@ -3423,7 +3420,7 @@ function renderAccounts() {
         console.error("删除账号异常:", e);
         uiAlert("删除账号失败: " + e.message, "错误");
       }
-    };
+    });
 
     opsWrap.append(btnVerify, btnEdit, btnDel);
     tdOps.appendChild(opsWrap);
@@ -3842,15 +3839,12 @@ function renderNapcat() {
 
     const tdAct = document.createElement("td");
     tdAct.className = "actions";
-    const btnDel = document.createElement("button");
-    btnDel.className = "btn btn-danger";
-    btnDel.textContent = "删除";
-    btnDel.onclick = () => {
+    const btnDel = mkDelBtn(() => {
       const curIdx = (config.napcat_routes || []).indexOf(r);
       if (curIdx >= 0) config.napcat_routes.splice(curIdx, 1);
       else config.napcat_routes.splice(idx, 1);
       markDirty(); renderNapcat();
-    };
+    });
     tdAct.appendChild(btnDel);
     
     tr.append(tdId, tdRemark, tdSub, tdAct);
@@ -3871,7 +3865,7 @@ function renderTGBots() {
     tdName.appendChild(mkInput(b.name || "", (v) => {
       b.name = v.trim().toLowerCase(); 
       markDirty();
-    }, "tg_main", "width:110px"));
+    }, "tg_main", "width:95px"));
 
     const tdRemark = document.createElement("td");
     tdRemark.appendChild(mkInput(b.remark || "", (v) => {
@@ -3879,13 +3873,13 @@ function renderTGBots() {
       if (t) b.remark = t; else delete b.remark;
       markDirty();
       renderSocialPushTargets();
-    }, "例如：频道A", "width:120px"));
+    }, "例如：频道A", "width:105px"));
     
     const tdChat = document.createElement("td");
     tdChat.appendChild(mkInput(b.target_chat || "", (v) => {
       b.target_chat = v.trim(); 
       markDirty();
-    }, "-10012345678", "width:130px"));
+    }, "-10012345678", "width:115px"));
     
     const secretVar = tgTokenEnvKey(b.name);
     const tdSecret = document.createElement("td");
@@ -3937,15 +3931,12 @@ function renderTGBots() {
     
     const tdAct = document.createElement("td");
     tdAct.className = "actions";
-    const btnDel = document.createElement("button");
-    btnDel.className = "btn btn-danger";
-    btnDel.textContent = "删除";
-    btnDel.onclick = () => {
+    const btnDel = mkDelBtn(() => {
       const curIdx = (config.tg_bots || []).indexOf(b);
       if (curIdx >= 0) config.tg_bots.splice(curIdx, 1);
       else config.tg_bots.splice(idx, 1);
       markDirty(); renderTGBots();
-    };
+    });
     tdAct.appendChild(btnDel);
     
     tr.append(tdName, tdRemark, tdChat, tdSecret, tdSub, tdAct);
@@ -4081,8 +4072,8 @@ function renderMembers() {
     subBadge.style.cssText = "display:inline-flex; align-items:center; white-space:nowrap; flex-shrink:0;";
 
     function updateSubBadge() {
-      const accId = (m.account || "").trim();
-      const mid = (m.id || "").trim();
+      const accId = String(m.account || "").trim();
+      const mid = String(m.id != null ? m.id : "").trim();
       if (!accId) {
         subBadge.innerHTML = '<span style="font-size:11.5px; padding:2px 7px; border-radius:6px; background:rgba(255,255,255,0.04); color:var(--muted); border:1px solid rgba(255,255,255,0.08);">🌐 纯社媒/博客</span>';
         return;
@@ -4157,7 +4148,7 @@ function renderMembers() {
     tdSocial.appendChild(badgeContainer);
 
     const tdOps = document.createElement("td");
-    tdOps.appendChild(mkBtn("删除", async () => {
+    tdOps.appendChild(mkDelBtn(async () => {
       // 空白草稿行（未填 ID 且未填名字）直接删除，无需弹窗确认
       if (!m.id && !m.name) {
         const curIdx = (config.monitor || []).indexOf(m);
@@ -4173,7 +4164,7 @@ function renderMembers() {
       if (curIdx >= 0) config.monitor.splice(curIdx, 1);
       else config.monitor.splice(idx, 1);
       markDirty(); renderMembers();
-    }, "danger"));
+    }));
 
     tr.append(tdId, tdName, tdAcc, tdSocial, tdOps);
     tbody.appendChild(tr);
@@ -5043,16 +5034,12 @@ function renderCmdOpenids() {
     btnEdit.textContent = "✏️ 编辑";
     btnEdit.onclick = () => openCmdOpenidDialog(idx);
 
-    const btnDel = document.createElement("button");
-    btnDel.className = "btn small danger";
-    btnDel.type = "button";
-    btnDel.textContent = "🗑️";
-    btnDel.title = "删除此授权";
-    btnDel.onclick = () => {
+    const btnDel = mkDelBtn(() => {
       window._cmdOpenids.splice(idx, 1);
       markDirty();
       renderCmdOpenids();
-    };
+    });
+    btnDel.title = "删除此授权";
 
     right.append(btnCopy, btnEdit, btnDel);
     card.append(left, right);
@@ -5217,11 +5204,11 @@ async function refreshUsers() {
       td.appendChild(document.createTextNode(" "));
     }
     if (!u.is_me && canToggle) {
-      td.appendChild(mkBtn("删除", async () => {
+      td.appendChild(mkDelBtn(async () => {
         if (!(await uiConfirm("删除用户 " + u.username + "？该账号将立即失去访问权限。",
                               { title: "删除用户", yesText: "删除", danger: true }))) return;
         await userAction({ action: "delete", username: u.username });
-      }, "danger"));
+      }));
     }
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -5385,7 +5372,20 @@ function esc(s) { const d = document.createElement("div"); d.textContent = Strin
 function mkBtn(text, onClick, extraCls) {
   const b = document.createElement("button");
   b.className = "btn small" + (extraCls ? " " + extraCls : "");
-  b.textContent = text;
+  b.type = "button";
+  b.style.whiteSpace = "nowrap";
+  if (typeof text === "string" && text.includes("<")) b.innerHTML = text;
+  else b.textContent = text;
+  b.addEventListener("click", onClick);
+  return b;
+}
+function mkDelBtn(onClick, label = "删除") {
+  const b = document.createElement("button");
+  b.className = "btn small danger";
+  b.type = "button";
+  b.style.whiteSpace = "nowrap";
+  b.innerHTML = '<span style="font-size:11px;">🗑️</span><span>' + esc(label) + '</span>';
+  b.title = label;
   b.addEventListener("click", onClick);
   return b;
 }
