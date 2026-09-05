@@ -628,8 +628,8 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260905_3" in archive
-    assert "/static/theme.css?v=20260905_3" in admin
+    assert "/static/theme.css?v=20260905_4" in archive
+    assert "/static/theme.css?v=20260905_4" in admin
 
 
 def test_mobile_header_2row_layout_and_actions_guard():
