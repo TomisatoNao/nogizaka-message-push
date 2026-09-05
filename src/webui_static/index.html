@@ -3892,16 +3892,13 @@ function renderTGBots() {
     tdSecret.style.whiteSpace = "nowrap";
     const tokenState = statusByName[b.name] || {};
     const isConfigured = !!tokenState.configured;
-    const keyHint = document.createElement("div");
-    keyHint.className = "hint";
-    keyHint.style.cssText = "font-size:11px; margin-bottom:4px; white-space:nowrap;";
-    keyHint.textContent = secretVar || "先填写有效 Bot 名称";
-    tdSecret.appendChild(keyHint);
+    tdSecret.title = secretVar ? ("写入 .env: " + secretVar) : "先填写有效 Bot 名称";
 
     const secBtn = document.createElement("button");
     secBtn.className = "btn-secret-status " + (isConfigured ? "configured" : "unconfigured");
     secBtn.type = "button";
     secBtn.disabled = !secretVar;
+    secBtn.title = secretVar ? ("写入 .env: " + secretVar) : "先填写有效 Bot 名称";
     if (isConfigured) {
       secBtn.innerHTML = '<span class="secret-dot"></span><span>✓ 专属 Token</span><span class="secret-action">修改</span>';
     } else {
