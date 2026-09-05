@@ -286,56 +286,82 @@ header.app-header {
     max-width: 100vw;
   }
   header.app-header {
-    padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+    padding: 6px max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
     height: auto;
-    min-height: 52px;
+    min-height: 48px;
     flex-wrap: wrap;
-    gap: 8px 10px;
+    align-items: center;
+    gap: 6px 8px;
     width: 100%;
     max-width: 100vw;
     box-sizing: border-box;
   }
   .header-brand {
-    flex: none;
+    order: 1;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
   }
   .header-brand .brand-title {
-    font-size: 15px;
+    font-size: 14.5px;
+  }
+  .header-brand .brand-icon-img {
+    width: 22px;
+    height: 22px;
   }
   .header-actions {
-    gap: 5px;
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none !important;
     margin-left: auto;
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    justify-content: safe flex-end;
+    gap: 4px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    max-width: calc(100vw - 125px);
   }
   .header-actions::-webkit-scrollbar { display: none; }
   #btnReloadFile, #btnRestart { display: none !important; }
+  .header-actions .theme-toggle {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
   .header-actions .btn {
-    padding: 4px 8px;
-    font-size: 12px;
+    padding: 3px 6px;
+    font-size: 11px;
     white-space: nowrap;
     flex-shrink: 0;
   }
   .header-actions .user-badge {
     font-size: 11px;
-    max-width: 75px;
+    max-width: 56px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     flex-shrink: 0;
+    padding: 2px 4px;
   }
   .header-actions .app-switch-btn {
-    padding: 4px 9px;
-    font-size: 11.5px;
+    padding: 3px 7px;
+    font-size: 11px;
     flex-shrink: 0;
     white-space: nowrap;
+    gap: 3px;
   }
   .header-nav {
     order: 3;
+    flex: 0 0 100%;
     width: 100%;
     max-width: 100%;
     justify-content: flex-start;

@@ -628,8 +628,25 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260905_1" in archive
-    assert "/static/theme.css?v=20260905_1" in admin
+    assert "/static/theme.css?v=20260905_2" in archive
+    assert "/static/theme.css?v=20260905_2" in admin
+
+
+def test_mobile_header_2row_layout_and_actions_guard():
+    theme = (_ROOT / "src" / "webui_static" / "theme.css").read_text(encoding="utf-8")
+
+    # 杜绝移动端 actions 换行后因旧版 calc(100vw - 125px) 导致左侧残留死区黑块（遮罩现象）
+    assert "calc(100vw - 125px)" not in theme
+
+    # 保证移动端统一为两行布局：
+    # 第一行：Brand 居左（order: 1），Actions 紧凑并排居右（order: 2, flex: 1 1 0, safe flex-end）
+    # 第二行：Nav 标签栏独占全宽（order: 3, flex: 0 0 100%）
+    assert "order: 1;" in theme
+    assert "order: 2;" in theme
+    assert "order: 3;" in theme
+    assert "flex: 1 1 0;" in theme
+    assert "justify-content: safe flex-end;" in theme
+    assert "flex: 0 0 100%;" in theme
 
 
 def test_admin_mobile_member_and_openid_layout_guards_are_present():
