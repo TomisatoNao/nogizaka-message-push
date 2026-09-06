@@ -25,6 +25,7 @@
              display: flex; align-items: center; gap: 8px; }
   .card h2::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
   .status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 100%; }
+  .status-actions [hidden] { display: none !important; }
   .status-actions #btnRestart { margin-left: 8px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 18px; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }

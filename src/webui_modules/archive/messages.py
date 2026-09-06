@@ -326,4 +326,113 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         serve_file_range(handler, full)
         return True
 
+    # 9. 后台历史消息全量回填
+    if sub == "messages/backfill":
+        from src.webui_modules.archive.message_backfill import handle_message_backfill
+        handle_message_backfill(handler, guard_fn, read_body_json_fn)
+        return True
+
+    # 10. 失败媒体重试下载
+    if sub == "retry_download":
+        if not guard_fn(need_admin=False):
+            return True
+        raw_m = qp("member")
+        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        if not member or member not in _archive.list_members():
+            _send_json_resp(handler, {"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
+            return True
+        body = read_body_json_fn()
+        if body is None:
+            return True
+        if not isinstance(body, dict):
+            _send_json_resp(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+            return True
+        msg_id = str(body.get("id") or "")
+        try:
+            year = int(body.get("year"))
+            month = int(body.get("month"))
+        except (TypeError, ValueError):
+            _send_json_resp(handler, {"ok": False, "errors": ["year/month 必须是数字"]}, 400)
+            return True
+        if not msg_id or not 1 <= month <= 12 or not 1 <= year <= 9999:
+            _send_json_resp(handler, {"ok": False, "errors": ["缺少 id/year/month"]}, 400)
+            return True
+
+        with _archive_write_lock:
+            msgs = _archive.load_month(member, year, month)
+            target_msg = None
+            for m in msgs:
+                if str(m.get("id", "")) == msg_id:
+                    target_msg = m
+                    break
+            if not target_msg:
+                _send_json_resp(handler, {"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
+                return True
+
+            file_url = target_msg.get("file") or target_msg.get("thumbnail") or ""
+            if not file_url:
+                _send_json_resp(handler, {"ok": False, "errors": ["该消息无媒体下载链接"]}, 400)
+                return True
+
+            import urllib.request
+            ts_str = target_msg.get("published_at") or target_msg.get("updated_at", "")
+            try:
+                dt = _archive.parse_jst_datetime(ts_str)
+            except Exception:
+                from datetime import datetime
+                dt = datetime.now()
+
+            dest_dir = _archive._month_dir(member, dt) / _archive._media_subdir(target_msg.get("type", ""))
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            ts = dt.strftime("%Y%m%d_%H%M%S")
+            tmp_path = dest_dir / f"{ts}_{msg_id}.tmp"
+
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            candidate_urls = [u for u in [target_msg.get("file"), target_msg.get("thumbnail")] if u]
+            ok = False
+            used_url = file_url
+            for u in candidate_urls:
+                if ok:
+                    break
+                try:
+                    req = urllib.request.Request(u, headers=headers)
+                    with urllib.request.urlopen(req, timeout=30) as resp, open(tmp_path, "wb") as f:
+                        if resp.status == 200:
+                            f.write(resp.read())
+                            if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                                ok = True
+                                used_url = u
+                                break
+                except Exception:
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+            if not ok:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                _send_json_resp(handler, {"ok": False, "errors": ["下载失败，该媒体资源链接可能已过期，可使用 backfill_archive.py 工具带最新 Token 回填重试"]}, 400)
+                return True
+
+            ext = _archive._guess_extension(used_url, _archive._sniff_content_type(tmp_path))
+            final_path = dest_dir / f"{ts}_{msg_id}{ext}"
+            os.replace(tmp_path, final_path)
+            rel = final_path.relative_to(_archive._member_root(member)).as_posix()
+
+            target_msg["_local_file"] = rel
+            target_msg.pop("_download_failed", None)
+
+            json_path = (_archive.archive_root() / member / f"{year:04d}" / f"{month:02d}" / "messages.json")
+            tmp = json_path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(msgs, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, json_path)
+            _archive._save_msgs_to_sqlite(member, year, month, [target_msg])
+
+            _send_json_resp(handler, {"ok": True, "id": int(msg_id) if msg_id.isdigit() else msg_id, "local_file": rel, "media_url": f"/api/archive/media/{member}/{rel}"})
+            return True
+
     return False

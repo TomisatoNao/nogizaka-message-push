@@ -672,6 +672,65 @@ class _Handler(BaseHTTPRequestHandler):
             _sys_handle_openid_action(self, action, body, _on_openid_cb)
             return
 
+        if path in ("/api/accounts/verify",):
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            account = str(body.get("account", "")).strip()
+            if not account:
+                self._send_json({"ok": False, "errors": ["缺少 account 参数"]}, 400)
+                return
+            try:
+                from config.credentials import verify_and_handshake_account
+                import asyncio
+                h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
+                self._send_json({"ok": h_ok, "msg": h_msg, "details": h_details})
+            except Exception as e:
+                self._send_json({"ok": False, "msg": f"验证异常: {e}"}, 500)
+            return
+
+        if path in ("/api/accounts/smart_parse",):
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            raw_text = str(body.get("raw", "")).strip()
+            account = str(body.get("account", "")).strip()
+            if not raw_text:
+                self._send_json({"ok": False, "errors": ["缺少 raw 文本"]}, 400)
+                return
+            try:
+                import asyncio
+                res = asyncio.run(self._smart_parse_credentials_text(raw_text, account))
+                self._send_json({"ok": True, **res})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"智能解析异常: {e}"]}, 500)
+            return
+
+        if path in ("/api/accounts/rename",):
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            old_id = str(body.get("old_id", "")).strip()
+            new_id = str(body.get("new_id", "")).strip()
+            if not old_id or not new_id:
+                self._send_json({"ok": False, "errors": ["缺少 old_id 或 new_id 参数"]}, 400)
+                return
+            try:
+                from config import credentials
+                credentials.rename_account(old_id, new_id)
+                from src.logger import log_all
+                log_all(f"🔄 账号凭证与状态已同步重命名: {old_id} -> {new_id}")
+                self._send_json({"ok": True, "old_id": old_id, "new_id": new_id})
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"重命名账号失败: {e}"]}, 500)
+            return
+
         # 4. 归档子路由 POST
         if path.startswith("/api/archive/"):
             sub = path[len("/api/archive/"):]

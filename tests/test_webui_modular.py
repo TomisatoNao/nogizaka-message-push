@@ -595,9 +595,9 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260905_1" in html
+    assert "/static/archive.js?v=20260906_1" in html
     assert "/static/archive.css?v=20260905_1" in html
-    assert "/static/archive.js?v=20260905_1" in perf
+    assert "/static/archive.js?v=20260906_1" in perf
     assert "/static/archive.css?v=20260905_1" in perf
 
 
@@ -799,3 +799,117 @@ def test_admin_log_view_controls_and_selection_guards():
     assert "isUserBusyWithLog" in html
     assert "appendLiveEntries" in html
     assert "user-select: text" in html
+
+
+def test_archive_retry_download_validation(monkeypatch):
+    from src.webui_modules.archive import messages
+
+    handler = _ResponseHandler()
+    handler.path = "/api/archive/retry_download?member=test_member"
+    monkeypatch.setattr(messages._archive, "list_members", lambda: ["test_member"])
+    sent_resps = []
+    monkeypatch.setattr(messages, "_send_json_resp", lambda h, data, code=200: sent_resps.append((data, code)))
+
+    # 1. Non-dict body
+    assert messages.handle_messages(handler, "retry_download", lambda **_: True, lambda: [])
+    assert sent_resps[-1][1] == 400
+
+    # 2. Invalid year/month
+    assert messages.handle_messages(handler, "retry_download", lambda **_: True, lambda: {"id": "1", "year": "bad", "month": 5})
+    assert sent_resps[-1][1] == 400
+
+    # 3. Message not found
+    monkeypatch.setattr(messages._archive, "load_month", lambda *a: [])
+    assert messages.handle_messages(handler, "retry_download", lambda **_: True, lambda: {"id": "999", "year": 2026, "month": 5})
+    assert sent_resps[-1][1] == 404
+
+
+def test_accounts_verify_route(monkeypatch):
+    from unittest.mock import MagicMock
+    from src.webui import _Handler
+    import config.credentials as creds
+
+    handler = _Handler.__new__(_Handler)
+    handler.path = "/api/accounts/verify"
+    handler.command = "POST"
+    handler.headers = {}
+    handler._check_host = MagicMock(return_value=True)
+    handler._check_origin = MagicMock(return_value=True)
+    handler._check_auth = MagicMock(return_value=True)
+    sent_resps = []
+    handler._send_json = lambda data, code=200: sent_resps.append((data, code))
+
+    # Missing account
+    handler._read_body_json = MagicMock(return_value={})
+    handler.do_POST()
+    assert sent_resps[-1][1] == 400
+
+    # Successful verify
+    async def mock_verify(acc):
+        return True, "握手成功", {"plan": "active"}
+
+    monkeypatch.setattr(creds, "verify_and_handshake_account", mock_verify)
+    handler._read_body_json = MagicMock(return_value={"account": "acc1"})
+    handler.do_POST()
+    assert sent_resps[-1][0]["ok"] is True
+    assert sent_resps[-1][0]["msg"] == "握手成功"
+
+
+def test_accounts_smart_parse_route(monkeypatch):
+    from unittest.mock import MagicMock
+    from src.webui import _Handler
+
+    handler = _Handler.__new__(_Handler)
+    handler.path = "/api/accounts/smart_parse"
+    handler.command = "POST"
+    handler.headers = {}
+    handler._check_host = MagicMock(return_value=True)
+    handler._check_origin = MagicMock(return_value=True)
+    handler._check_auth = MagicMock(return_value=True)
+    sent_resps = []
+    handler._send_json = lambda data, code=200: sent_resps.append((data, code))
+
+    # Missing raw text
+    handler._read_body_json = MagicMock(return_value={})
+    handler.do_POST()
+    assert sent_resps[-1][1] == 400
+
+    # Successful parse
+    async def mock_parse(raw, acc=""):
+        return {"token": "tok123", "cookie": "c=1", "refresh_token": "rt123", "extracted": []}
+
+    handler._smart_parse_credentials_text = mock_parse
+    handler._read_body_json = MagicMock(return_value={"raw": "curl ...", "account": "acc1"})
+    handler.do_POST()
+    assert sent_resps[-1][0]["ok"] is True
+    assert sent_resps[-1][0]["token"] == "tok123"
+
+
+def test_accounts_rename_route(monkeypatch):
+    from unittest.mock import MagicMock
+    from src.webui import _Handler
+    import config.credentials as creds
+
+    handler = _Handler.__new__(_Handler)
+    handler.path = "/api/accounts/rename"
+    handler.command = "POST"
+    handler.headers = {}
+    handler._check_host = MagicMock(return_value=True)
+    handler._check_origin = MagicMock(return_value=True)
+    handler._check_auth = MagicMock(return_value=True)
+    sent_resps = []
+    handler._send_json = lambda data, code=200: sent_resps.append((data, code))
+
+    # Missing params
+    handler._read_body_json = MagicMock(return_value={"old_id": "a"})
+    handler.do_POST()
+    assert sent_resps[-1][1] == 400
+
+    # Successful rename
+    renamed = []
+    monkeypatch.setattr(creds, "rename_account", lambda old_id, new_id: renamed.append((old_id, new_id)))
+    handler._read_body_json = MagicMock(return_value={"old_id": "acc_old", "new_id": "acc_new"})
+    handler.do_POST()
+    assert sent_resps[-1][0]["ok"] is True
+    assert renamed == [("acc_old", "acc_new")]
+

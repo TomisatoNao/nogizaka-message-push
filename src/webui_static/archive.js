@@ -3829,7 +3829,9 @@ async function promptArchiveMember() {
       body: JSON.stringify({ url: result.value, translate: result.checked })
     });
     const data = await res.json();
-    showToast(data.msg || (data.ok ? "已成功启动后台博客归档任务！" : "操作失败"), data.ok ? "success" : "error");
+    const ok = res.ok && data.ok;
+    const error = Array.isArray(data.errors) ? data.errors.join("；") : "";
+    showToast(data.msg || error || (ok ? "已成功启动后台博客归档任务！" : `归档请求失败（HTTP ${res.status}）`), ok ? "success" : "error");
   } catch(e) {
     showToast("请求异常: " + e, "error");
   }
@@ -3853,12 +3855,13 @@ async function promptArchiveMessage() {
       body: JSON.stringify({ member: result.value || "", reset: true })
     });
     const data = await res.json();
-    showToast(data.msg || (data.ok ? "已成功启动消息归档回填任务！" : "操作失败"), data.ok ? "success" : "error");
+    const ok = res.ok && data.ok;
+    const error = Array.isArray(data.errors) ? data.errors.join("；") : "";
+    showToast(data.msg || error || (ok ? "已成功启动消息归档回填任务！" : `回填请求失败（HTTP ${res.status}）`), ok ? "success" : "error");
   } catch(e) {
     showToast("请求异常: " + e, "error");
   }
 }
-
 // ── 粉丝信件 (Fan Letters) 交互逻辑 ───────────────────────
 let curLetterMember = "";
 let curLetterImages = [];

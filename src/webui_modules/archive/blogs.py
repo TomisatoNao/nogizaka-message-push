@@ -16,6 +16,7 @@ import uuid
 
 import httpx
 from src.webui_modules.archive import common as _archive_common
+from src.webui_modules.archive.blog_backfill import handle_member_backfill
 from src.webui_modules.archive.common import (
     BLOG_IMAGE_DIR,
     _blog_media_url,
@@ -152,6 +153,9 @@ def _blog_list_excerpt(body_text: str, translation: str, query: str, limit: int 
 
 def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     """处理官方博客子路由，处理则返回 True，未命中返回 False。"""
+    if sub == "blogs/archive_member":
+        handle_member_backfill(handler, guard_fn, read_body_json_fn)
+        return True
     qs = parse_qs(handler.path.partition("?")[2])
 
     def qp(key: str, default: str = "") -> str:
