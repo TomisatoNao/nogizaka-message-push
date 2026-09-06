@@ -49,7 +49,67 @@ from src.member_directory import api_base, build_headers
 PROGRESS_PATH = Path(cfg.TIME_RECORD_DIR).parent / "archive_progress.json"
 PAGE_COUNT = 200
 EMPTY_PAGES_TO_STOP = 3
-DEFAULT_START = "2013-01-01T00:00:00Z"
+DEFAULT_START = "2017-08-01T00:00:00Z"
+
+# 坂道各团体官方 App Message 服务最早开通日期（各团 App 诞生首日）
+APP_LAUNCH_DATES = {
+    "nogizaka": "2017-08-02T00:00:00Z",
+    "sakurazaka": "2017-08-02T00:00:00Z",
+    "hinatazaka": "2019-04-10T00:00:00Z",
+}
+
+# 特定成员/期别正式开通 Message 服务的起始日（杜绝从远古日期无效空转）
+MEMBER_LAUNCH_DATES = {
+    # 乃木坂46 5期生 (2022-10-03 开通)
+    "冨里 奈央": "2022-10-03T00:00:00Z",
+    "井上 和": "2022-10-03T00:00:00Z",
+    "一ノ瀬 美空": "2022-10-03T00:00:00Z",
+    "菅原 咲月": "2022-10-03T00:00:00Z",
+    "小川 彩": "2022-10-03T00:00:00Z",
+    "奥田 いろは": "2022-10-03T00:00:00Z",
+    "中西 アルノ": "2022-10-03T00:00:00Z",
+    "五百城 茉央": "2022-10-03T00:00:00Z",
+    "池田 瑛紗": "2022-10-03T00:00:00Z",
+    "岡本 姫奈": "2022-10-03T00:00:00Z",
+    "川﨑 桜": "2022-10-03T00:00:00Z",
+
+    # 樱坂46 3期生 (2023-03-01 开通)
+    "的野 美青": "2023-03-01T00:00:00Z",
+    "小島 凪紗": "2023-03-01T00:00:00Z",
+    "中嶋 優月": "2023-03-01T00:00:00Z",
+    "小田倉 麗奈": "2023-03-01T00:00:00Z",
+    "谷口 愛季": "2023-03-01T00:00:00Z",
+    "村山 美羽": "2023-03-01T00:00:00Z",
+    "村井 優": "2023-03-01T00:00:00Z",
+    "山下 瞳月": "2023-03-01T00:00:00Z",
+    "遠藤 理子": "2023-03-01T00:00:00Z",
+    "向井 純葉": "2023-03-01T00:00:00Z",
+    "石森 璃花": "2023-03-01T00:00:00Z",
+
+    # 日向坂46 4期生 (2023-03-01 开通)
+    "正源司 陽子": "2023-03-01T00:00:00Z",
+    "藤嶌 果歩": "2023-03-01T00:00:00Z",
+    "宮地 すみれ": "2023-03-01T00:00:00Z",
+    "山下 葉留花": "2023-03-01T00:00:00Z",
+    "清水 理央": "2023-03-01T00:00:00Z",
+    "渡辺 莉奈": "2023-03-01T00:00:00Z",
+    "平尾 帆夏": "2023-03-01T00:00:00Z",
+    "石塚 瑶季": "2023-03-01T00:00:00Z",
+    "平岡 海月": "2023-03-01T00:00:00Z",
+    "竹内 希来里": "2023-03-01T00:00:00Z",
+    "小西 夏菜実": "2023-03-01T00:00:00Z",
+}
+
+
+def get_member_earliest_date(member: dict) -> str:
+    """获取该成员官方 Message 服务的最早开通起始时间戳（避免无意义的远古请求）。"""
+    m_name = (member.get("m_name") or member.get("name") or "").strip()
+    norm_name = m_name.replace(" ", "").replace("　", "").replace("_", "")
+    for k, v in MEMBER_LAUNCH_DATES.items():
+        if k == m_name or k.replace(" ", "").replace("　", "").replace("_", "") == norm_name:
+            return v
+    group = (member.get("group_type") or "").lower()
+    return APP_LAUNCH_DATES.get(group, DEFAULT_START)
 
 
 class AdaptivePacer:
@@ -108,6 +168,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
                           start_from: str, progress: dict,
                           reset_cursor: bool = False,
                           user_specified_start: bool = False) -> None:
+    import time
     m_name = member["m_name"]
     account_id = member["account_id"]
     acc_cfg = cfg.ACCOUNTS.get(account_id, {})
@@ -122,10 +183,17 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
 
     archived_ids, failed_ids = archive.load_archived_ids(m_name)
     saved_cursor = None if reset_cursor else (progress.get(key) or progress.get(legacy_key))
-    if reset_cursor or user_specified_start:
+    earliest_date = get_member_earliest_date(member)
+
+    if user_specified_start:
         cursor = start_from
+    elif reset_cursor:
+        # 全量重置：使用该成员的智能起始日（如 5期生 2022-10-03），绝不盲目从远古年份重扫
+        cursor = earliest_date
     else:
-        cursor = saved_cursor or start_from
+        # 增量断点续传：优先读取已存游标，未存时回退至智能起始日
+        cursor = saved_cursor or earliest_date
+
     print(f"▸ {m_name}（账号 {account_id}）从 {cursor} 开始，已归档 {len(archived_ids)} 条"
           + (f"，待重试媒体 {len(failed_ids)} 条" if failed_ids else ""))
 
@@ -151,33 +219,75 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         print(f"  ⚠️ 抓取 past_messages 失败: {e}")
 
     # ── 2. 分页回填时间线 (timeline) ──
+    retries_net = 0
+    retries_401 = 0
+    retries_429 = 0
+    MAX_RETRIES = 3
+    last_token_check = 0.0
+    zero_new_streak = 0
+
     while True:
-        await proactive_refresh_if_expiring(account_id, 0)   # target_group=0：告警只打日志
+        # Token 检查限频：每隔 5 分钟或首页检查一次，避免每页刷屏日志
+        if time.time() - last_token_check > 300:
+            await proactive_refresh_if_expiring(account_id, 0)
+            last_token_check = time.time()
+
         url = (f"{base.rstrip('/')}/v2/groups/{member['m_id']}/timeline"
                f"?updated_from={quote(cursor)}&count={PAGE_COUNT}&order=asc")
         try:
             resp = await client.get(url, headers=build_headers(account_id, acc_cfg))
         except Exception as e:
+            retries_net += 1
             pacer.on_error()
-            print(f"  ✗ 请求失败: {type(e).__name__}: {e}，{pacer.delay:.0f}s 后重试")
+            if retries_net > MAX_RETRIES:
+                print(f"  ✗ 连续网络请求失败达 {MAX_RETRIES} 次 ({type(e).__name__}: {e})，跳过 {m_name}")
+                break
+            print(f"  ✗ 请求失败: {type(e).__name__}: {e}，{pacer.delay:.0f}s 后重试 ({retries_net}/{MAX_RETRIES})")
             await pacer.wait()
             continue
 
         if resp.status_code == 401:
-            print("  🔄 凭证过期，续期后重试…")
-            await proactive_refresh_if_expiring(account_id, 0)
-            await asyncio.sleep(3)
+            retries_401 += 1
+            if retries_401 > 1:
+                print(f"  ✗ 账号 {account_id} 凭证续期后仍返回 HTTP 401，跳过 {m_name}")
+                break
+            print(f"  🔄 凭证过期 (401)，尝试续期账号 {account_id}…")
+            refreshed = await proactive_refresh_if_expiring(account_id, 0)
+            last_token_check = time.time()
+            if not refreshed:
+                print(f"  ✗ 账号 {account_id} 续期失败，跳过 {m_name}")
+                break
+            await asyncio.sleep(2)
             continue
+
         if resp.status_code == 429:
+            retries_429 += 1
             pacer.on_error(rate_limited=True)
-            print(f"  ⏳ 被限流 (429)，退避 {pacer.delay:.0f}s…")
+            if retries_429 > MAX_RETRIES:
+                print(f"  ⏳ 连续触发 429 限流达 {MAX_RETRIES} 次，暂停跳过 {m_name}")
+                break
+            print(f"  ⏳ 被限流 (429)，退避 {pacer.delay:.0f}s ({retries_429}/{MAX_RETRIES})…")
             await pacer.wait()
             continue
+
+        if resp.status_code in (400, 403, 404):
+            print(f"  ✗ 遇到不可恢复错误 HTTP {resp.status_code}: {resp.text[:120]}，跳过 {m_name}")
+            break
+
         if resp.status_code != 200:
+            retries_net += 1
             pacer.on_error()
-            print(f"  ✗ HTTP {resp.status_code}: {resp.text[:150]}，{pacer.delay:.0f}s 后重试")
+            if retries_net > MAX_RETRIES:
+                print(f"  ✗ 连续异常状态码 HTTP {resp.status_code}，跳过 {m_name}")
+                break
+            print(f"  ✗ HTTP {resp.status_code}: {resp.text[:120]}，{pacer.delay:.0f}s 后重试 ({retries_net}/{MAX_RETRIES})")
             await pacer.wait()
             continue
+
+        # 成功响应：重置重试计数器
+        retries_net = 0
+        retries_401 = 0
+        retries_429 = 0
         pacer.on_success()
 
         msgs = resp.json().get("messages", [])
@@ -202,7 +312,15 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         if legacy_key in progress and legacy_key != key:
             progress.pop(legacy_key, None)
         _save_progress(progress)
-        print(f"  … 游标 {cursor}（本页新归档 {page_new} 条，累计 {total_new}，间隔 {pacer.delay:.1f}s）")
+
+        if page_new > 0:
+            zero_new_streak = 0
+            print(f"  … 游标 {cursor}（本页新归档 {page_new} 条，累计 {total_new}，间隔 {pacer.delay:.1f}s）")
+        else:
+            zero_new_streak += 1
+            if zero_new_streak % 5 == 1:
+                print(f"  … 游标 {cursor}（扫描中，已归档消息秒级跳过，累计新归档 {total_new} 条）")
+
         await pacer.wait()   # 自适应分页间隔
 
     progress[key] = cursor

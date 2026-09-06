@@ -336,6 +336,59 @@
   </div>
 </div>
 
+<!-- Message Backfill Modal -->
+<div id="backfillMessageModal" class="custom-modal-backdrop" style="display:none;">
+  <div class="custom-modal-card" style="max-width: 440px; text-align: left;">
+    <div class="cm-icon" style="text-align: center;">💬</div>
+    <h3 class="cm-title" style="text-align: center;">回填成员历史消息</h3>
+    <p class="cm-message" style="text-align: center; margin-bottom: 16px;">补齐监控成员的历史消息及重试失败媒体</p>
+
+    <div class="cm-input-wrapper" style="margin: 0 0 16px 0;">
+      <label style="font-size: 12.5px; font-weight: 600; color: #a1a1a6; display: block; margin-bottom: 6px;">目标成员</label>
+      <input type="text" id="bmMemberInput" class="cm-input" placeholder="留空代表全部监控成员，或输入姓名（例：冨里 奈央）" autocomplete="off" />
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <label style="font-size: 12.5px; font-weight: 600; color: #a1a1a6; display: block; margin-bottom: 8px;">回填模式</label>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+          <input type="radio" name="bmMode" value="incremental" checked style="margin-top: 2px; accent-color: var(--primary, #7c3aed);" />
+          <div style="line-height: 1.3;">
+            <div style="font-size: 13.5px; font-weight: 600; color: #fff;">断点续传（推荐）</div>
+            <div style="font-size: 12px; color: #8e8e93; margin-top: 2px;">从上次保存的断点继续，自动快速跳过已归档消息</div>
+          </div>
+        </label>
+
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+          <input type="radio" name="bmMode" value="smart_full" style="margin-top: 2px; accent-color: var(--primary, #7c3aed);" />
+          <div style="line-height: 1.3;">
+            <div style="font-size: 13.5px; font-weight: 600; color: #fff;">智能全量扫描（换号 / 漏期推荐）</div>
+            <div style="font-size: 12px; color: #8e8e93; margin-top: 2px;">自动从成员开通首日智能扫描，补齐历史遗漏并重试失败媒体</div>
+          </div>
+        </label>
+
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+          <input type="radio" name="bmMode" value="custom" style="margin-top: 2px; accent-color: var(--primary, #7c3aed);" />
+          <div style="line-height: 1.3;">
+            <div style="font-size: 13.5px; font-weight: 600; color: #fff;">指定起始日期</div>
+            <div style="font-size: 12px; color: #8e8e93; margin-top: 2px;">从指定年月日开始向后扫描归档</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <div id="bmCustomDateRow" style="display: none; margin-bottom: 16px;">
+      <label style="font-size: 12.5px; font-weight: 600; color: #a1a1a6; display: block; margin-bottom: 6px;">起始日期 (YYYY-MM-DD)</label>
+      <input type="date" id="bmFromDateInput" class="cm-input" />
+    </div>
+
+    <div class="cm-actions">
+      <button id="bmCancel" class="cm-btn secondary" type="button">取消</button>
+      <button id="bmConfirm" class="cm-btn primary" type="button">开始回填</button>
+    </div>
+  </div>
+</div>
+
 <!-- Mobile Action Sheet for Member Archive Tools -->
 <div id="archiveToolsSheet" class="mobile-action-sheet" style="display:none;">
   <div class="sheet-backdrop" id="archiveToolsBackdrop"></div>

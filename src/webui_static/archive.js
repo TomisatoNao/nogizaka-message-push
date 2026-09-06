@@ -3838,29 +3838,107 @@ async function promptArchiveMember() {
 }
 
 async function promptArchiveMessage() {
-  const result = await customPrompt({
-    title: "💬 归档成员消息",
-    message: "请输入要补全历史消息的成员姓名（留空代表处理全部监控成员）：\n注：系统将自动扫描补全全部历史，已归档的消息自动秒级跳过。",
-    placeholder: "例：冨里 奈央（支持多姓名或留空）",
-    icon: "💬",
-    confirmText: "开始回填消息"
-  });
+  const modal = $("backfillMessageModal");
+  if (!modal) return;
 
-  if (result === null) return;
+  const memberInput = $("bmMemberInput");
+  const modeRadios = document.querySelectorAll('input[name="bmMode"]');
+  const customDateRow = $("bmCustomDateRow");
+  const fromDateInput = $("bmFromDateInput");
+  const cancelBtn = $("bmCancel");
+  const confirmBtn = $("bmConfirm");
 
-  try {
-    const res = await fetch("/api/archive/messages/backfill", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ member: result.value || "", reset: true })
-    });
-    const data = await res.json();
-    const ok = res.ok && data.ok;
-    const error = Array.isArray(data.errors) ? data.errors.join("；") : "";
-    showToast(data.msg || error || (ok ? "已成功启动消息归档回填任务！" : `回填请求失败（HTTP ${res.status}）`), ok ? "success" : "error");
-  } catch(e) {
-    showToast("请求异常: " + e, "error");
+  // 若当前正在查看某位成员，默认填入该成员显示名
+  if (curMember && curMember !== "__all__") {
+    const curObj = members.find(m => m.name === curMember);
+    memberInput.value = (curObj && curObj.display) || curMember;
+  } else {
+    memberInput.value = "";
   }
+
+  // 默认断点续传模式
+  for (const r of modeRadios) {
+    if (r.value === "incremental") r.checked = true;
+  }
+  customDateRow.style.display = "none";
+  fromDateInput.value = "";
+
+  const onModeChange = () => {
+    const selected = document.querySelector('input[name="bmMode"]:checked');
+    customDateRow.style.display = (selected && selected.value === "custom") ? "block" : "none";
+  };
+
+  for (const r of modeRadios) {
+    r.addEventListener("change", onModeChange);
+  }
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      modal.style.display = "none";
+      for (const r of modeRadios) {
+        r.removeEventListener("change", onModeChange);
+      }
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+      document.removeEventListener("keydown", onKeydown);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onKeydown = (e) => {
+      if (e.key === "Escape") onCancel();
+    };
+
+    const onConfirm = async () => {
+      const memberVal = (memberInput.value || "").trim();
+      const selectedMode = (document.querySelector('input[name="bmMode"]:checked') || {}).value || "incremental";
+
+      let payload = { member: memberVal, reset: false };
+      if (selectedMode === "smart_full") {
+        payload.reset = true;
+      } else if (selectedMode === "custom") {
+        const fromVal = (fromDateInput.value || "").trim();
+        if (!fromVal) {
+          showToast("请选择或输入有效的起始日期 (YYYY-MM-DD)", "warning");
+          return;
+        }
+        payload.reset = true;
+        payload.from_date = fromVal;
+      }
+
+      cleanup();
+      resolve();
+
+      try {
+        const res = await fetch("/api/archive/messages/backfill", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.status === 409) {
+          showToast(data.msg || "已有消息回填任务正在执行中，请勿重复启动！", "warning");
+        } else if (res.ok && data.ok) {
+          showToast(data.msg || "已成功启动消息归档回填任务，可在管理后台系统日志中查看进度。", "success");
+        } else {
+          const error = Array.isArray(data.errors) ? data.errors.join("；") : data.msg;
+          showToast(error || `回填请求失败（HTTP ${res.status}）`, "error");
+        }
+      } catch (e) {
+        showToast("请求异常: " + e, "error");
+      }
+    };
+
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    document.addEventListener("keydown", onKeydown);
+
+    modal.style.display = "flex";
+    setTimeout(() => { memberInput.focus(); }, 60);
+  });
 }
 // ── 粉丝信件 (Fan Letters) 交互逻辑 ───────────────────────
 let curLetterMember = "";

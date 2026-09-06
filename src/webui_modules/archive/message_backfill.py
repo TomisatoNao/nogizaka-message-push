@@ -15,8 +15,23 @@ from src.webui_modules.archive.common import _send_json_resp
 
 _ROOT = Path(__file__).resolve().parents[3]
 
+_BACKFILL_LOCK = threading.Lock()
+_ACTIVE_BACKFILL_PROC: subprocess.Popen | None = None
+_ACTIVE_BACKFILL_REQ_ID: str | None = None
+
+
+def _is_active_proc_running() -> bool:
+    global _ACTIVE_BACKFILL_PROC
+    if _ACTIVE_BACKFILL_PROC is None:
+        return False
+    poll_fn = getattr(_ACTIVE_BACKFILL_PROC, "poll", None)
+    if callable(poll_fn):
+        return poll_fn() is None
+    return False
+
 
 def _collect_output(process, request_id: str) -> None:
+    global _ACTIVE_BACKFILL_PROC, _ACTIVE_BACKFILL_REQ_ID
     try:
         if process.stdout is not None:
             with process.stdout:
@@ -27,9 +42,15 @@ def _collect_output(process, request_id: str) -> None:
         log_all(f"[消息回填] 进程结束 | request_id={request_id} | exit_code={code}", is_error=code != 0)
     except (OSError, ValueError) as exc:
         log_all(f"[消息回填] 日志读取失败 | request_id={request_id} | error={exc}", is_error=True)
+    finally:
+        with _BACKFILL_LOCK:
+            if _ACTIVE_BACKFILL_PROC is process:
+                _ACTIVE_BACKFILL_PROC = None
+                _ACTIVE_BACKFILL_REQ_ID = None
 
 
 def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
+    global _ACTIVE_BACKFILL_PROC, _ACTIVE_BACKFILL_REQ_ID
     if not guard_fn(need_admin=True):
         return
     if handler.command != "POST":
@@ -44,6 +65,7 @@ def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
 
     member = body.get("member", "")
     reset = body.get("reset", False)
+    from_date = body.get("from_date") or body.get("from") or ""
 
     if not isinstance(member, str) or len(member) > 200:
         _send_json_resp(handler, {"ok": False, "msg": "member 必须是 200 字符以内的字符串"}, 400)
@@ -51,6 +73,26 @@ def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
     if not isinstance(reset, bool):
         _send_json_resp(handler, {"ok": False, "msg": "reset 必须是布尔值"}, 400)
         return
+    if not isinstance(from_date, str):
+        _send_json_resp(handler, {"ok": False, "msg": "from_date 必须是字符串"}, 400)
+        return
+    cleaned_from = from_date.strip()
+    if cleaned_from and not re.match(r"^\d{4}-\d{2}-\d{2}$", cleaned_from):
+        _send_json_resp(handler, {"ok": False, "msg": "from_date 格式必须为 YYYY-MM-DD（例如 2023-01-01）"}, 400)
+        return
+
+    with _BACKFILL_LOCK:
+        if _is_active_proc_running():
+            _send_json_resp(
+                handler,
+                {
+                    "ok": False,
+                    "msg": "已有消息回填任务正在执行中，请等待其完成或在系统日志中查看进度",
+                    "request_id": _ACTIVE_BACKFILL_REQ_ID,
+                },
+                409,
+            )
+            return
 
     request_id = uuid.uuid4().hex[:12]
     script = _ROOT / "tools" / "backfill_archive.py"
@@ -60,6 +102,8 @@ def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
 
     # 从 WebUI 启动必须带 --force 跳过主程序运行检测
     command = [sys.executable, "-u", str(script), "--force"]
+    if cleaned_from:
+        command.extend(["--from", cleaned_from])
     cleaned_member = member.strip()
     if cleaned_member:
         tokens = [t.strip() for t in re.split(r"[,，、;；\n]+", cleaned_member) if t.strip()]
@@ -85,7 +129,14 @@ def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
         _send_json_resp(handler, {"ok": False, "msg": "启动回填任务失败，请查看系统日志", "request_id": request_id}, 500)
         return
 
-    log_all(f"[消息回填] 已启动 | request_id={request_id} | pid={process.pid} | member={cleaned_member or 'ALL'} | reset={reset}")
+    with _BACKFILL_LOCK:
+        _ACTIVE_BACKFILL_PROC = process
+        _ACTIVE_BACKFILL_REQ_ID = request_id
+
+    log_all(
+        f"[消息回填] 已启动 | request_id={request_id} | pid={process.pid} | "
+        f"member={cleaned_member or 'ALL'} | reset={reset} | from={cleaned_from or 'auto'}"
+    )
     threading.Thread(
         target=_collect_output,
         args=(process, request_id),

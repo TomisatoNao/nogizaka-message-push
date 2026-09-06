@@ -24,6 +24,17 @@ def invoke(body, guard=lambda **_: True, command="POST"):
     return handler
 
 
+@pytest.fixture(autouse=True)
+def reset_active_backfill():
+    with message_backfill._BACKFILL_LOCK:
+        message_backfill._ACTIVE_BACKFILL_PROC = None
+        message_backfill._ACTIVE_BACKFILL_REQ_ID = None
+    yield
+    with message_backfill._BACKFILL_LOCK:
+        message_backfill._ACTIVE_BACKFILL_PROC = None
+        message_backfill._ACTIVE_BACKFILL_REQ_ID = None
+
+
 @pytest.mark.parametrize("reset", [False, True])
 @pytest.mark.parametrize("member, expected_args", [
     ("", []),
@@ -75,10 +86,42 @@ def test_message_backfill_denied_without_admin(monkeypatch):
 
 @pytest.mark.parametrize("body", [
     [], {"member": 123}, {"member": "a" * 201}, {"member": "test", "reset": "false"},
+    {"from_date": 12345}, {"from_date": "2023-99-99-bad"}, {"from_date": "invalid-date"},
 ])
 def test_invalid_message_backfill_input_does_not_start_process(monkeypatch, body):
     monkeypatch.setattr(message_backfill.subprocess, "Popen", lambda *a, **kw: pytest.fail("Invalid request launched process"))
     assert invoke(body).code == 400
+
+
+def test_message_backfill_with_from_date(monkeypatch):
+    calls = []
+    process = SimpleNamespace(pid=456, stdout=io.StringIO(""), wait=lambda: 0)
+    monkeypatch.setattr(message_backfill.subprocess, "Popen", lambda *a, **kw: calls.append((a, kw)) or process)
+    monkeypatch.setattr(message_backfill.threading, "Thread", lambda **kw: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(message_backfill, "log_all", lambda *a, **kw: None)
+
+    handler = invoke({"member": "冨里 奈央", "reset": True, "from_date": "2023-05-01"})
+    assert handler.code == 202
+    cmd = calls[0][0][0]
+    assert "--from" in cmd
+    idx = cmd.index("--from")
+    assert cmd[idx + 1] == "2023-05-01"
+    assert "冨里 奈央" in cmd
+    assert "--reset" in cmd
+
+
+def test_message_backfill_conflict_when_already_running(monkeypatch):
+    mock_running_process = SimpleNamespace(pid=999, poll=lambda: None)
+    with message_backfill._BACKFILL_LOCK:
+        message_backfill._ACTIVE_BACKFILL_PROC = mock_running_process
+        message_backfill._ACTIVE_BACKFILL_REQ_ID = "active-req-123"
+
+    monkeypatch.setattr(message_backfill.subprocess, "Popen", lambda *a, **kw: pytest.fail("Should not launch when running"))
+    handler = invoke({"member": ""})
+    assert handler.code == 409
+    assert handler.payload["ok"] is False
+    assert "正在执行中" in handler.payload["msg"]
+    assert handler.payload["request_id"] == "active-req-123"
 
 
 def test_wrong_method_and_unreadable_body_do_not_launch(monkeypatch):
