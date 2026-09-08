@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 import httpx
 from src.logger import log_all
+from src.async_utils import gather_cancel_safe
 from src.sources import hinatazaka, nogizaka, sakurazaka
 from pathlib import Path as _Path
 import re as _re
@@ -70,7 +71,7 @@ async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str]
                 return (i, "")
 
     tasks = [_fetch_one(i, url) for i, url in enumerate(image_urls)]
-    results = await asyncio.gather(*tasks)
+    results = await gather_cancel_safe(tasks, cleanup_timeout=5.0)
     results.sort(key=lambda x: x[0])
     return [path for _, path in results]
 
@@ -336,8 +337,6 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
 
     返回的每个 post 额外包含 group_key 和 group_name。
     """
-    import asyncio
-
     blog_cfg = raw_config.get("blog_monitor") or {}
     if not blog_cfg.get("enabled", True):
         return []
@@ -409,14 +408,14 @@ async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
             _process_single_post(post, key, group_name, client, need_detail, fetch_img_fn)
             for post in reversed(real_unseen)
         ]
-        return await asyncio.gather(*tasks)
+        return await gather_cancel_safe(tasks, cleanup_timeout=5.0)
 
     # 3 大团博客并行并发拉取
     group_tasks = [
         _check_group(group_name, fetch_fn, fetch_img_fn, key, need_detail)
         for group_name, fetch_fn, fetch_img_fn, key, need_detail in TASKS
     ]
-    results = await asyncio.gather(*group_tasks)
+    results = await gather_cancel_safe(group_tasks, cleanup_timeout=5.0)
 
     # 汇总并安全写入 SQLite 归档
     for group_posts in results:

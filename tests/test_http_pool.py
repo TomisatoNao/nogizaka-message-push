@@ -32,6 +32,46 @@ async def test_http_pool_lifecycle():
     assert client_gen.is_closed or client_new.is_closed
 
 
+@pytest.mark.asyncio
+async def test_http_pool_reset_is_serialized_and_rebinds_modules():
+    rebound = []
+
+    def on_rebind(client):
+        rebound.append(client)
+
+    http_pool.register_general_client_rebind(on_rebind)
+    try:
+        original = await http_pool.get_general_client()
+        first, second = await asyncio.gather(
+            http_pool.reset_general_client(),
+            http_pool.reset_general_client(),
+        )
+        assert first is not second
+        assert original.is_closed
+        assert first.is_closed
+        assert not second.is_closed
+        assert rebound[-2:] == [first, second]
+    finally:
+        http_pool.unregister_general_client_rebind(on_rebind)
+        await http_pool.close_all()
+
+
+@pytest.mark.asyncio
+async def test_http_pool_close_timeout_does_not_block(monkeypatch):
+    class HangingClient:
+        is_closed = False
+
+        async def aclose(self):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(http_pool, "CLIENT_CLOSE_TIMEOUT_SECONDS", 0.05)
+    started = asyncio.get_running_loop().time()
+    closed = await http_pool._close_quietly(HangingClient())
+    elapsed = asyncio.get_running_loop().time() - started
+    assert closed is False
+    assert elapsed < 1.0
+
+
 def test_http_pool_does_not_reuse_clients_across_event_loops():
     async def get_client():
         return await http_pool.get_general_client()

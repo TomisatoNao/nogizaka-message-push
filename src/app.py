@@ -23,7 +23,7 @@ from config.credentials import (
     validate_account_cred,
 )
 from config.watcher import start_watcher
-from src import archive, blog_fetcher, fetcher, health, tagger, translator
+from src import archive, blog_fetcher, fetcher, health, http_pool, tagger, translator
 from src.app_modules.daily_summary import (
     DISK_WARN_BYTES,
     SUMMARY_MAX_ATTEMPTS,
@@ -504,6 +504,7 @@ async def main() -> None:
     observer = None
     webui_server = None
     summary_task: asyncio.Task | None = None
+    general_rebind_callback = None
     restart_requested = False
 
     try:
@@ -594,6 +595,27 @@ async def main() -> None:
         # 博客 http 客户端
         global _blog_client
         _blog_client = httpx.AsyncClient(timeout=30, proxy=proxy_url, follow_redirects=True)
+
+        # 连接池恢复必须同步更新所有复用普通 Client 的模块；否则只替换
+        # fetcher 会让归档/翻译/标签仍握着已经损坏的旧 transport。
+        http_pool.bind_runtime_clients(
+            http_client,
+            qq_client=qq_client,
+            blog_client=_blog_client,
+        )
+
+        def _rebind_general_client(new_client: httpx.AsyncClient) -> None:
+            nonlocal http_client
+            http_client = new_client
+            init_credentials(new_client)
+            translator.initialize(new_client)
+            archive.rebind_client(new_client)
+            tagger.initialize(new_client)
+            fetcher.initialize(new_client, semaphore)
+            log_all("♻️ 通用 HTTP 连接池已重建，相关模块已完成重新绑定", is_debug=True)
+
+        general_rebind_callback = _rebind_general_client
+        http_pool.register_general_client_rebind(general_rebind_callback)
 
         # 博客长图渲染引擎检测
         try:
@@ -711,6 +733,11 @@ async def main() -> None:
     except KeyboardInterrupt:
         log_all("🛑 安全退出中...")
     finally:
+        if general_rebind_callback is not None:
+            try:
+                http_pool.unregister_general_client_rebind(general_rebind_callback)
+            except Exception:  # nosec B110
+                pass
         if summary_task is not None:
             summary_task.cancel()
             await asyncio.gather(summary_task, return_exceptions=True)

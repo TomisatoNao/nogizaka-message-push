@@ -29,6 +29,7 @@ import httpx
 
 import config.config as cfg
 from src.logger import log_all
+from src.async_utils import cancel_tasks_bounded, gather_cancel_safe
 from src.archive_query import (
     _day_cache,
     _jst_date,
@@ -71,6 +72,7 @@ __all__ = [
     "load_month",
     "member_dir_name",
     "parse_jst_datetime",
+    "rebind_client",
     "realign_archive_timezones",
     "schedule_archive",
     "search",
@@ -454,6 +456,12 @@ def initialize(client: httpx.AsyncClient) -> None:
     sync_all_to_sqlite()
 
 
+def rebind_client(client: httpx.AsyncClient) -> None:
+    """只替换媒体下载 Client，不重复初始化数据库或重建事件循环锁。"""
+    global _media_client
+    _media_client = client
+
+
 
 # ──────────────────────────────────────────────
 # 路径工具
@@ -744,48 +752,69 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
     if not candidate_urls:
         return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_download_failed": True}
 
-    async with _media_sem:
-        client = _media_client
-        for u in candidate_urls:
-            if ok:
-                break
-            for attempt in range(3):
-                try:
-                    if client is not None and not getattr(client, "is_closed", False):
-                        resp = await client.get(u, headers=headers or {}, timeout=60, follow_redirects=True)
-                    else:
-                        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as fallback_client:
-                            resp = await fallback_client.get(u, headers=headers or {})
+    try:
+        async with _media_sem:
+            client = _media_client
+            for u in candidate_urls:
+                if ok:
+                    break
+                for attempt in range(3):
+                    try:
+                        if client is not None and not getattr(client, "is_closed", False):
+                            resp = await client.get(u, headers=headers or {}, timeout=60, follow_redirects=True)
+                        else:
+                            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as fallback_client:
+                                resp = await fallback_client.get(u, headers=headers or {})
 
-                    if resp.status_code == 200 and resp.content:
-                        with open(tmp_path, "wb") as f:
-                            f.write(resp.content)
-                        if tmp_path.exists() and tmp_path.stat().st_size > 0:
-                            ok = True
-                            used_url = u
+                        if resp.status_code == 200 and resp.content:
+                            with open(tmp_path, "wb") as f:
+                                f.write(resp.content)
+                            if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                                ok = True
+                                used_url = u
+                                break
+                            else:
+                                log_all(f"⚠️ 归档媒体下载为空文件 (第 {attempt+1} 次尝试): {u[:80]}", is_debug=True)
+                        elif resp.status_code in (403, 404, 410):
+                            log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (资源已失效或无权访问): {u[:80]}", is_debug=True)
                             break
                         else:
-                            log_all(f"⚠️ 归档媒体下载为空文件 (第 {attempt+1} 次尝试): {u[:80]}", is_debug=True)
-                    elif resp.status_code in (403, 404, 410):
-                        log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (资源已失效或无权访问): {u[:80]}", is_debug=True)
-                        break
-                    else:
-                        log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (第 {attempt+1} 次重试): {u[:80]}", is_debug=True)
-                except Exception as e:
-                    log_all(f"⚠️ 归档媒体下载异常 (第 {attempt+1} 次重试): {u[:80]} — {type(e).__name__}: {e}", is_debug=True)
-                if attempt < 2:
-                    await asyncio.sleep(1.0 * (attempt + 1))
+                            log_all(f"⚠️ 归档媒体下载 HTTP {resp.status_code} (第 {attempt+1} 次重试): {u[:80]}", is_debug=True)
+                    except asyncio.CancelledError:
+                        # 不吞掉停机/轮次超时取消；finally 会清理未完成的临时文件。
+                        raise
+                    except Exception as e:
+                        log_all(f"⚠️ 归档媒体下载异常 (第 {attempt+1} 次重试): {u[:80]} — {type(e).__name__}: {e}", is_debug=True)
+                    if attempt < 2:
+                        await asyncio.sleep(1.0 * (attempt + 1))
+    finally:
+        # 取消发生在网络等待、信号量等待或文件写入期间时，确保 .tmp 不会
+        # 被下一轮误认为可复用，也不会持续污染归档目录。
+        if not ok:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     if not ok:
+        return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_download_failed": True}
+
+    try:
+        ext = _guess_extension(used_url, _sniff_content_type(tmp_path, str(msg.get("type", ""))))
+        final_path = dest_dir / f"{ts}_{msg_id}{ext}"
+        os.replace(tmp_path, final_path)
+    except asyncio.CancelledError:
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
             pass
-        return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_download_failed": True}
-
-    ext = _guess_extension(used_url, _sniff_content_type(tmp_path, str(msg.get("type", ""))))
-    final_path = dest_dir / f"{ts}_{msg_id}{ext}"
-    os.replace(tmp_path, final_path)
+        raise
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     rel = final_path.relative_to(member_root).as_posix()
     return {"id": msg.get("id"), "updated_at": msg.get("updated_at"), "_local_file": rel}
 
@@ -930,7 +959,7 @@ async def archive_messages_batch(
         return msg, msg.get("_local_file", "")
 
     tasks = [_dl_worker(dt, msg) for dt, msg in to_process]
-    results = await asyncio.gather(*tasks)
+    results = await gather_cancel_safe(tasks, cleanup_timeout=5.0)
 
     # 3. 按 (year, month) 聚合批量写入 JSON 与 SQLite
     month_groups: dict[tuple[int, int], list[dict]] = {}
@@ -986,8 +1015,17 @@ def schedule_archive(member: dict, msg: dict, translated: str = "") -> None:
 
 async def wait_pending(timeout: float = 60) -> None:
     """等待后台归档任务收尾（优雅停机用）。"""
-    if _bg_tasks:
-        await asyncio.wait(list(_bg_tasks), timeout=timeout)
+    if not _bg_tasks:
+        return
+    tasks = list(_bg_tasks)
+    done, pending = await asyncio.wait(tasks, timeout=max(0.01, float(timeout)))
+    if pending:
+        cleaned = await cancel_tasks_bounded(pending, timeout=min(5.0, max(0.01, float(timeout))))
+        if not cleaned:
+            log_all(
+                f"⚠️ 归档后台任务未能在收尾预算内全部结束 | pending={len(pending)}",
+                is_error=True,
+            )
 
 
 # ──────────────────────────────────────────────
@@ -1078,7 +1116,7 @@ async def archive_letters_batch(member_name: str, letters: list[dict], headers: 
         return []
 
     tasks = [archive_single_letter(member_name, l_item, headers=headers) for l_item in letters]
-    results = await asyncio.gather(*tasks)
+    results = await gather_cancel_safe(tasks, cleanup_timeout=5.0)
 
     # 按照 created_at DESC 排序整理
     sorted_results = sorted(
