@@ -296,3 +296,40 @@ async def test_failed_member_push_does_not_advance_watermark_to_failed_message(m
 
     assert result is False
     assert watermark_calls == [first_time]
+
+
+@pytest.mark.asyncio
+async def test_message_retry_skips_routes_persisted_as_successful(monkeypatch):
+    from src import fetcher
+    from src.notifier import DeliveryReport
+
+    delivered = {"tg:main"}
+    seen_skip_sets: list[set[str]] = []
+
+    async def archive_message(*_args, **_kwargs):
+        return None
+
+    async def send_message(_member, _chain, *, skip_route_ids=None):
+        seen_skip_sets.append(set(skip_route_ids or set()))
+        return DeliveryReport(())
+
+    monkeypatch.setattr(fetcher.cfg, "ENABLE_TRANSLATION", False, raising=False)
+    monkeypatch.setattr(fetcher.cfg, "QQ_SEND_INTERVAL", 0, raising=False)
+    monkeypatch.setattr(fetcher.archive, "archive_message", archive_message)
+    monkeypatch.setattr(fetcher, "successful_routes", lambda *_args: delivered)
+    monkeypatch.setattr(fetcher, "mark_successful_routes", lambda *_args: None)
+    monkeypatch.setattr(fetcher, "save_sent_id", lambda *_args: None)
+    monkeypatch.setattr(fetcher, "send_member_message_detailed", send_message)
+    monkeypatch.setattr(fetcher, "build_message_chain", lambda *_args, **_kwargs: [])
+
+    member = {"m_name": "测试成员", "group_type": "nogizaka46", "m_id": "1"}
+    result = await fetcher._handle_message(
+        member,
+        {"id": "message-1", "updated_at": "2026-09-08T00:01:00Z", "text": "hello"},
+        [],
+        set(),
+        ["2026-09-08T00:00:00Z"],
+    )
+
+    assert result is True
+    assert seen_skip_sets == [delivered]
