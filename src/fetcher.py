@@ -413,14 +413,24 @@ async def _push_member_messages(member: dict, new_msgs: list,
     truly_new = [m for m in new_msgs
                  if str(m.get("id") or m.get("updated_at", "")) not in id_set]
 
-    for msg in new_msgs:
-        ok = await _handle_message(member, msg, id_list, id_set, l_time_ref)
-        if not ok:
-            archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
-            if time_file:
-                await write_time_record(time_file, file_lock, l_time_ref[0])
-            _health_tracker().record_member_push(m_name, False)
-            return False
+    try:
+        for msg in new_msgs:
+            ok = await _handle_message(member, msg, id_list, id_set, l_time_ref)
+            if not ok:
+                archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
+                if time_file:
+                    await write_time_record(time_file, file_lock, l_time_ref[0])
+                _health_tracker().record_member_push(m_name, False)
+                return False
+    except asyncio.CancelledError:
+        # 路由状态和 sent_id 在单条消息成功后已落盘；取消可能发生在
+        # 后续发送间隔或下一条消息等待期间。先 checkpoint 最后一条成功
+        # 消息的 SQLite 水位线，避免恢复后重复扫描已完成进度，再保留
+        # 取消语义让上层结束本轮。SQLite 是当前水位线的主来源，旧时间
+        # 文件同步在取消路径跳过，下一轮仍会以数据库值为准。
+        archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
+        _health_tracker().record_member_push(m_name, False)
+        raise
 
     archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
     if time_file:
