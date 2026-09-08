@@ -9,6 +9,7 @@ from pathlib import Path
 import signal
 import sys
 import traceback
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -163,8 +164,15 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
         try:
             # 与实际发送请求保持同一套 URL/token 解析规则；此前裸 GET 会被
             # NapCat 的鉴权中间件返回 403，造成“发送可用但启动 DEGRADED”的误判。
-            from src.platforms.napcat import _resolve_api_url_and_headers
-            _send_url, napcat_headers = _resolve_api_url_and_headers(bot_api)
+            parsed_bot_api = urlparse(bot_api)
+            token_values = parse_qs(parsed_bot_api.query)
+            napcat_token = (
+                (token_values.get("access_token") or [""])[0]
+                or (token_values.get("token") or [""])[0]
+            )
+            napcat_headers = {"Content-Type": "application/json"}
+            if napcat_token:
+                napcat_headers["Authorization"] = f"Bearer {napcat_token}"
             resp = await qq_client.get(status_url, headers=napcat_headers)
             if resp.status_code == 200:
                 log_all("🟢 NapCat QQ 连通正常")
