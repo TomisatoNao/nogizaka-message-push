@@ -92,6 +92,8 @@ def send_json(handler, obj: dict, code: int = 200) -> None:
             body = json.dumps(obj, ensure_ascii=True).encode("ascii")
         body, enc_headers = compress_if_supported(handler, body)
         pending_headers, pending_cookies = _take_pending_headers(handler)
+        # 供认证/诊断边界在 finally 中记录实际 HTTP 状态码；不改变响应契约。
+        handler._last_response_code = int(code)
         handler.send_response(code)
         handler.send_header("Content-Type", "application/json; charset=utf-8")
         handler.send_header("Content-Length", str(len(body)))

@@ -11,6 +11,7 @@ import random
 import sys
 import time
 import traceback
+import uuid
 
 import httpx
 
@@ -37,6 +38,118 @@ class _MemberCycleResult:
     def failed(self) -> bool:
         """是否需要在本轮汇总中作为异常成员突出显示。"""
         return not self.skipped and (not self.fetch_ok or self.push_ok is False)
+
+
+class _MemberFetchTimeout(TimeoutError):
+    """带成员上下文的抓取超时结果，不让一个成员拖住整轮巡查。"""
+
+    def __init__(self, member_id: str, account_id: str, timeout_seconds: float):
+        self.member_id = str(member_id or "")
+        self.account_id = str(account_id or "")
+        self.timeout_seconds = float(timeout_seconds)
+        super().__init__(
+            f"成员抓取超时（member_id={self.member_id or '-'}, "
+            f"account_id={self.account_id or '-'}, timeout={self.timeout_seconds:g}s）"
+        )
+
+
+def _timeout_setting(name: str, default: float) -> float:
+    """读取正数超时配置；配置损坏时回退安全默认值。"""
+    try:
+        value = float(getattr(cfg, name, default))
+    except (TypeError, ValueError):
+        value = float(default)
+    return max(0.1, value)
+
+
+def _current_cycle_id() -> str:
+    """读取当前轮次 ID；日志上下文缺失时使用稳定占位符。"""
+    try:
+        return str(health.get_tracker().monitor_snapshot().get("cycle_id") or "-")
+    except Exception:
+        return "-"
+
+
+def _consume_task_result(task: asyncio.Task) -> None:
+    """消费被取消后迟到完成的任务结果，避免 ``Task exception was never retrieved``。"""
+    try:
+        task.result()
+    except BaseException:
+        pass
+
+
+async def _cancel_task_bounded(task: asyncio.Task, cleanup_timeout: float = 5.0) -> bool:
+    """请求取消任务并在有限时间内等待清理，返回是否已结束。"""
+    if task.done():
+        _consume_task_result(task)
+        return True
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=max(0.1, cleanup_timeout))
+    if done:
+        _consume_task_result(task)
+        return True
+    task.add_done_callback(_consume_task_result)
+    return False
+
+
+async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str) -> None:
+    """运行一轮巡查并设置总预算；超时后显式取消并有限等待清理。"""
+    tracker = health.get_tracker()
+    started = time.monotonic()
+    tracker.record_cycle_started(cycle_id, "starting")
+    log_all(
+        f"🔄 巡查轮次开始 | cycle_id={cycle_id} | timeout={timeout_seconds:g}s",
+        is_debug=True,
+    )
+    task = asyncio.create_task(run_cycle_fn(), name=f"message-cycle:{cycle_id}")
+    try:
+        done, pending = await asyncio.wait({task}, timeout=timeout_seconds)
+        if pending:
+            phase = tracker.monitor_snapshot().get("phase", "unknown")
+            cleaned = await _cancel_task_bounded(task, cleanup_timeout=5.0)
+            elapsed_ms = (time.monotonic() - started) * 1000
+            tracker.record_cycle_finished("timeout", elapsed_ms=elapsed_ms, phase=phase)
+            tracker.record_error(
+                f"巡查轮次超时（cycle_id={cycle_id}, phase={phase}, "
+                f"timeout={timeout_seconds:g}s）",
+                health.ErrorTier.TRANSIENT,
+            )
+            log_all(
+                f"⏱️ 巡查轮次超时 | cycle_id={cycle_id} | phase={phase} | "
+                f"timeout={timeout_seconds:g}s | elapsed={elapsed_ms:.0f}ms | "
+                f"cleanup={'ok' if cleaned else 'pending'}",
+                is_error=True,
+            )
+            raise asyncio.TimeoutError(
+                f"巡查轮次超时（cycle_id={cycle_id}, phase={phase}）"
+            )
+
+        # wait() 已确认 task 完成；result() 会正确传播业务异常。
+        task.result()
+    except asyncio.CancelledError:
+        phase = tracker.monitor_snapshot().get("phase", "unknown")
+        await _cancel_task_bounded(task, cleanup_timeout=5.0)
+        tracker.record_cycle_finished(
+            "cancelled", elapsed_ms=(time.monotonic() - started) * 1000, phase=phase
+        )
+        raise
+    except Exception:
+        # 业务异常由外层循环记录；生命周期先结束，避免健康探针永久显示 running。
+        if tracker.monitor_snapshot().get("cycle_in_progress"):
+            tracker.record_cycle_finished(
+                "error", elapsed_ms=(time.monotonic() - started) * 1000
+            )
+        raise
+    else:
+        elapsed_ms = (time.monotonic() - started) * 1000
+        tracker.record_cycle_finished(
+            "success", elapsed_ms=elapsed_ms, phase="idle"
+        )
+        log_all(
+            f"✅ 巡查轮次结束 | cycle_id={cycle_id} | phase=idle | "
+            f"outcome=success | elapsed_ms={elapsed_ms:.0f}",
+            is_debug=True,
+        )
 
 
 def _message_cycle_summary(results: list[_MemberCycleResult], elapsed: float) -> tuple[str, bool]:
@@ -115,6 +228,47 @@ def _alert_group_for_account(acc_id: str) -> int:
     return 0
 
 
+async def _refresh_account_bounded(
+    acc_id: str,
+    target_group: int,
+    account_cfg: object,
+    timeout_seconds: float,
+) -> None:
+    """为单个账号续期设置边界，失败只影响该账号而不取消整轮。"""
+    try:
+        await asyncio.wait_for(
+            proactive_refresh_if_expiring(
+                acc_id,
+                target_group,
+                account_cfg=account_cfg,
+            ),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        message = f"账号 {acc_id} Token 续期超时（{timeout_seconds:g}s）"
+        health.get_tracker().record_error(message, health.ErrorTier.TRANSIENT)
+        log_all(f"⏱️ {message} | cycle_id={_current_cycle_id()} | phase=token_refresh", is_error=True)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        message = f"账号 {acc_id} Token 续期异常: {type(exc).__name__}"
+        health.get_tracker().record_error(message, health.ErrorTier.TRANSIENT)
+        log_all(
+            f"⚠️ {message} | cycle_id={_current_cycle_id()} | phase=token_refresh: {exc}",
+            is_error=True,
+        )
+
+
+async def _fetch_member_bounded(member: dict, fetch_coro, timeout_seconds: float) -> object:
+    """为单个成员抓取设置边界，并返回可定位的超时结果。"""
+    try:
+        return await asyncio.wait_for(fetch_coro, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        return _MemberFetchTimeout(
+            member.get("m_id", ""), member.get("account_id", ""), timeout_seconds
+        )
+
+
 async def _run_cycle() -> None:
     """单轮巡查：获取周期快照 → 主动续期 → 并发抓取 → 串行推送。"""
     app_mod = sys.modules.get("src.app")
@@ -138,11 +292,15 @@ async def _run_cycle() -> None:
 
         # ── 改进 1：每轮巡查前主动检查并刷新即将过期的 Token ──
         if account_target_groups:
+            tracker = health.get_tracker()
+            tracker.record_cycle_phase("token_refresh")
+            refresh_timeout = _timeout_setting("TOKEN_REFRESH_TIMEOUT_SECONDS", 30.0)
             await asyncio.gather(*[
-                proactive_refresh_if_expiring(
+                _refresh_account_bounded(
                     acc_id,
                     grp,
-                    account_cfg=snapshot.accounts.get(acc_id) if snapshot else None,
+                    snapshot.accounts.get(acc_id) if snapshot else None,
+                    refresh_timeout,
                 )
                 for acc_id, grp in account_target_groups.items()
             ])
@@ -153,6 +311,10 @@ async def _run_cycle() -> None:
 
         if shuffled:
             # Phase 1: 并发抓取所有成员的消息（传入快照中的账号配置、回溯时间和过滤类型）
+            tracker = health.get_tracker()
+            tracker.record_cycle_phase("member_fetch")
+            member_fetch_timeout = _timeout_setting("MEMBER_FETCH_TIMEOUT_SECONDS", 60.0)
+
             def _build_fetch_coro(m: dict):
                 acc_id = m.get("account_id") or ""
                 acc_cfg = snapshot.accounts.get(acc_id) if snapshot else None
@@ -166,17 +328,45 @@ async def _run_cycle() -> None:
                 )
 
             fetch_results = await asyncio.gather(
-                *[_build_fetch_coro(m) for m in shuffled],
+                *[
+                    _fetch_member_bounded(m, _build_fetch_coro(m), member_fetch_timeout)
+                    for m in shuffled
+                ],
                 return_exceptions=True,
             )
 
             # Phase 2: 多成员并发流水线推送（各成员内部保持时间顺序，跨成员完全并发）
+            tracker.record_cycle_phase("member_push")
             async def _push_one_member(i: int, result: object) -> _MemberCycleResult:
                 member = shuffled[i]
                 name = member['m_name'].replace(" ", "")
+                member_id = str(member.get("m_id") or "-")
+                account_id = str(member.get("account_id") or "-")
+
+                if isinstance(result, _MemberFetchTimeout):
+                    error = str(result)
+                    health.get_tracker().record_member_fetch(
+                        name, False, health.ErrorTier.TRANSIENT, error
+                    )
+                    log_all(
+                        f"⏱️ 抓取超时 [{name}] | member_id={result.member_id or '-'} | "
+                        f"account_id={result.account_id or '-'} | "
+                        f"timeout={result.timeout_seconds:g}s | cycle_id={_current_cycle_id()} | "
+                        "phase=member_fetch",
+                        is_error=True,
+                    )
+                    return _MemberCycleResult(name=name)
 
                 if isinstance(result, Exception):
-                    log_all(f"💥 抓取异常 [{name}]: {result}", is_error=True)
+                    health.get_tracker().record_member_fetch(
+                        name, False, health.ErrorTier.TRANSIENT, str(result)
+                    )
+                    log_all(
+                        f"💥 抓取异常 [{name}] | member_id={member_id} | "
+                        f"account_id={account_id} | cycle_id={_current_cycle_id()} | "
+                        f"phase=member_fetch | error={type(result).__name__}: {result}",
+                        is_error=True,
+                    )
                     return _MemberCycleResult(name=name)
 
                 if result is None:
@@ -197,8 +387,14 @@ async def _run_cycle() -> None:
                     ok = await fetcher.push_member_messages(
                         member, new_msgs, id_list, id_set, l_time_ref, time_file, file_lock
                     )
-                except Exception:
-                    log_all(f"💥 推送异常 [{name}]:\n{traceback.format_exc()}", is_error=True)
+                except Exception as exc:
+                    log_all(
+                        f"💥 推送异常 [{name}] | member_id={member_id} | "
+                        f"account_id={account_id} | cycle_id={_current_cycle_id()} | "
+                        f"phase=member_push | error={type(exc).__name__}: {exc}\n"
+                        f"{traceback.format_exc()}",
+                        is_error=True,
+                    )
                     health.get_tracker().record_member_push(name, False)
                     return _MemberCycleResult(
                         name=name, fetch_ok=True, new_count=new_count, push_ok=False
@@ -214,11 +410,12 @@ async def _run_cycle() -> None:
             summary, has_errors = cycle_summary_fn(
                 member_results, time.monotonic() - message_cycle_started
             )
-            log_all(summary, is_error=has_errors)
+            log_all(f"{summary} | cycle_id={_current_cycle_id()} | phase=member_push", is_error=has_errors)
     else:
         log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
 
     # ── 博客巡查 ──
+    health.get_tracker().record_cycle_phase("blog")
     blog_cfg = cfg._config.get("blog_monitor") or {}
     if blog_cfg.get("enabled", False) and cfg._config.get("blog_records") is not None:
         try:
@@ -238,14 +435,21 @@ async def _run_cycle() -> None:
                         else:
                             log_all(f"⚠️ 博客 [{post.get('title', '无题')}] 推送失败（无可用通道）", is_error=True)
                     except Exception as e:
-                        log_all(f"💥 博客推送异常: {e}", is_error=True)
+                        log_all(
+                            f"💥 博客推送异常 | cycle_id={_current_cycle_id()} | "
+                            f"phase=blog: {e}",
+                            is_error=True,
+                        )
                         health.get_tracker().record_member_push("博客 (全局)", False)
                     await asyncio.sleep(0.5)
             health.get_tracker().record_member_push("博客 (全局)", True)
 
         except Exception as e:
             health.get_tracker().record_member_fetch("博客 (全局)", False, health.ErrorTier.TRANSIENT, str(e))
-            log_all(f"⚠️ 博客巡查异常: {e}", is_error=True)
+            log_all(
+                f"⚠️ 博客巡查异常 | cycle_id={_current_cycle_id()} | phase=blog: {e}",
+                is_error=True,
+            )
 
 
 async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
@@ -275,12 +479,22 @@ async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
                     continue
                 log_all("⏩ 休眠时段手动触发巡查", is_debug=True)
 
-            await run_cycle_fn()
+            cycle_id = f"{int(time.time() * 1000):x}-{uuid.uuid4().hex[:6]}"
+            cycle_timeout = _timeout_setting("MESSAGE_CYCLE_TIMEOUT_SECONDS", 900.0)
+            await _run_cycle_bounded(run_cycle_fn, cycle_timeout, cycle_id)
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            # _run_cycle_bounded 已记录 cycle_id / 阶段 / 清理结果；此处只继续调度。
+            pass
         except Exception:
             # 任何未预料的异常都不该终止长驻循环：记录后照常等待下一轮
-            log_all(f"💥 巡查轮次异常，跳过本轮:\n{traceback.format_exc()}", is_error=True)
+            monitor = health.get_tracker().monitor_snapshot()
+            log_all(
+                f"💥 巡查轮次异常，跳过本轮 | cycle_id={monitor.get('cycle_id') or '-'} | "
+                f"phase={monitor.get('phase') or 'unknown'}:\n{traceback.format_exc()}",
+                is_error=True,
+            )
             health.get_tracker().record_error("巡查轮次异常", health.ErrorTier.TRANSIENT)
 
         summary = health.get_tracker().cycle_complete()
@@ -304,10 +518,12 @@ async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
 
 __all__ = [
     "_MemberCycleResult",
+    "_MemberFetchTimeout",
     "_message_cycle_summary",
     "_calc_sleep_seconds",
     "_next_interval",
     "_wait_or_trigger",
+    "_run_cycle_bounded",
     "_run_cycle",
     "_run_loop",
 ]

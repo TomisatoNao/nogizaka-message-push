@@ -283,51 +283,103 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
 
         # 0. 健康与就绪探针（免鉴权放行）
-        if path in ("/api/health", "/api/health/status"):
+        if path in ("/api/health", "/api/health/status", "/api/health/live"):
+            is_live_probe = path == "/api/health/live"
             if _on_poll_cb is None:
-                # 独立运行/单测模式：WebUI 自身正常即判定为 healthy
+                # 独立运行/单测模式：没有嵌入式巡查回调时只证明 WebUI 本身可用。
                 self._send_json({
                     "ok": True,
                     "status": "healthy",
                     "startup_state": "STANDALONE",
                     "ready": True,
+                    "monitor_healthy": True,
+                    "monitor_reason": "standalone",
                 }, 200)
                 return
 
-            from src.health import get_tracker
-            snap = get_tracker().startup_snapshot()
-            state = snap.get("state", "READY")
-            # 嵌入 app 运行模式：
-            # 1. 启动自检未完成：返回 503 且 ready=False
+            try:
+                from src.health import get_tracker
+                tracker_snapshot = get_tracker().snapshot()
+                startup = tracker_snapshot.get("startup") or {}
+                monitor = tracker_snapshot.get("monitor") or {}
+                state = startup.get("state", "READY")
+                monitor_healthy = bool(monitor.get("monitor_healthy", True))
+                monitor_reason = str(monitor.get("monitor_reason", "unknown"))
+            except Exception as exc:
+                # 保持旧状态页的兼容回退；真正的存活探针不能把读取失败伪装成健康。
+                if is_live_probe:
+                    self._send_json({
+                        "ok": False,
+                        "status": "unavailable",
+                        "startup_state": "UNKNOWN",
+                        "ready": False,
+                        "monitor_healthy": False,
+                        "monitor_reason": f"health_snapshot_error:{type(exc).__name__}",
+                    }, 503)
+                else:
+                    self._send_json({
+                        "ok": True,
+                        "status": "healthy",
+                        "startup_state": "STANDALONE",
+                        "ready": True,
+                        "monitor_healthy": True,
+                        "monitor_reason": "snapshot_unavailable",
+                    }, 200)
+                return
+
+            is_ready = state in ("READY", "SETUP_REQUIRED")
+            reasons = list(startup.get("reasons", []))
+            if is_live_probe:
+                live_ok = is_ready and monitor_healthy
+                live_reasons = reasons
+                if not monitor_healthy:
+                    live_reasons.append(f"后台巡查不可用: {monitor_reason}")
+                self._send_json({
+                    "ok": live_ok,
+                    "status": "healthy" if live_ok else ("degraded" if is_ready else "starting"),
+                    "startup_state": state,
+                    "ready": is_ready,
+                    "monitor_healthy": monitor_healthy,
+                    "monitor_reason": monitor_reason,
+                    "monitor": monitor,
+                    "reasons": live_reasons,
+                }, 200 if live_ok else 503)
+                return
+
+            # /api/health 与 /api/health/status 仍按启动就绪语义返回，新增监控字段供页面渐进迁移。
             if state == "STARTING":
                 self._send_json({
                     "ok": False,
                     "status": "starting",
                     "startup_state": "STARTING",
                     "ready": False,
-                    "reasons": snap.get("reasons", []),
+                    "monitor_healthy": monitor_healthy,
+                    "monitor_reason": monitor_reason,
+                    "monitor": monitor,
+                    "reasons": reasons,
                 }, 503)
                 return
-
-            # 2. 启动自检出现通道/凭证故障（降级）：返回 503 且 ready=False，阻止部署脚本误判就绪
             if state == "DEGRADED":
                 self._send_json({
                     "ok": False,
                     "status": "degraded",
                     "startup_state": "DEGRADED",
                     "ready": False,
-                    "reasons": snap.get("reasons", []),
+                    "monitor_healthy": monitor_healthy,
+                    "monitor_reason": monitor_reason,
+                    "monitor": monitor,
+                    "reasons": reasons,
                 }, 503)
                 return
-
-            # 3. 正常就绪或等待初次网页配置 (READY / SETUP_REQUIRED)
-            is_ready = state in ("READY", "SETUP_REQUIRED")
             self._send_json({
                 "ok": is_ready,
                 "status": "healthy" if is_ready else "unknown",
                 "startup_state": state,
                 "ready": is_ready,
-                "reasons": snap.get("reasons", []),
+                "monitor_healthy": monitor_healthy,
+                "monitor_reason": monitor_reason,
+                "monitor": monitor,
+                "reasons": reasons,
             }, 200 if is_ready else 503)
             return
 

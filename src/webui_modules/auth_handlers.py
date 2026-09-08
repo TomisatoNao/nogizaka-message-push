@@ -10,8 +10,12 @@ src/webui_modules/auth_handlers.py — WebUI 身份认证、会话与用户管�
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
+import sqlite3
+import time
+import uuid
 from html import escape as html_escape
 from urllib.parse import quote, urlparse
 
@@ -25,6 +29,21 @@ REFRESH_COOKIE = "sakamichi_refresh_token"
 API_TOKEN_SESSION_USER = "(api-token-session)"
 API_TOKEN_SESSION_MAX_SECONDS = 2 * 3600
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _login_request_id(handler) -> str:
+    """为一次登录 POST 生成短 request_id，并复用到开始/结束日志。"""
+    existing = str(getattr(handler, "_login_request_id", "") or "")
+    if existing:
+        return existing
+    request_id = uuid.uuid4().hex[:12]
+    handler._login_request_id = request_id
+    return request_id
+
+
+def _ip_fingerprint(ip: str) -> str:
+    """仅用于日志定位的不可逆 IP 指纹，不把原始地址写入登录日志。"""
+    return hashlib.sha256(str(ip or "?").encode("utf-8")).hexdigest()[:12]
 
 
 def _audit(handler, event: str, outcome: str, *, actor: str | None = None,
@@ -363,11 +382,54 @@ def handle_auth_me(handler) -> None:
 
 
 def handle_login(handler, body: dict) -> None:
-    """POST /api/auth/login 校验用户名密码并派发会话 Cookie。"""
+    """POST /api/auth/login 的可观测边界与异常兜底。"""
+    request_id = _login_request_id(handler)
+    ip = get_client_ip(handler)
+    started = time.monotonic()
+    from src.logger import log_all
+    log_all(
+        f"🔐 登录请求开始 | request_id={request_id} | ip_hash={_ip_fingerprint(ip)}"
+    )
+    try:
+        _handle_login(handler, body)
+    except (sqlite3.OperationalError, TimeoutError) as exc:
+        # 数据库锁或底层超时必须让浏览器收到明确响应，不能留下 Pending 请求。
+        log_all(
+            f"🚨 登录认证服务暂时不可用 | request_id={request_id} | "
+            f"error={type(exc).__name__}",
+            is_error=True,
+        )
+        send_json(handler, {
+            "ok": False,
+            "errors": ["认证服务暂时不可用，请稍后重试"],
+            "request_id": request_id,
+        }, 503)
+    except Exception as exc:
+        # 认证边界不能因异常而静默断开连接；详情只进服务端类型日志。
+        log_all(
+            f"🚨 登录请求异常 | request_id={request_id} | error={type(exc).__name__}: {exc}",
+            is_error=True,
+        )
+        send_json(handler, {
+            "ok": False,
+            "errors": ["登录服务暂时不可用，请稍后重试"],
+            "request_id": request_id,
+        }, 500)
+    finally:
+        status = int(getattr(handler, "_last_response_code", 0) or 0)
+        log_all(
+            f"🔐 登录请求结束 | request_id={request_id} | status={status or 'no_response'} | "
+            f"elapsed_ms={(time.monotonic() - started) * 1000:.0f}"
+        )
+
+
+def _handle_login(handler, body: dict) -> None:
+    """实际校验用户名密码并派发会话 Cookie。"""
     if not getattr(cfg, "AUTH_ENABLED", False):
         send_json(handler, {"ok": False, "errors": ["账号系统未启用"]}, 400)
         return
     ip = get_client_ip(handler)
+    ip_hash = _ip_fingerprint(ip)
     locked = _auth.is_locked_out(ip)
     if locked > 0:
         _audit(handler, "auth.login", "rate_limited", target="login")
@@ -385,7 +447,12 @@ def handle_login(handler, body: dict) -> None:
         _auth.record_failure(ip)
         _audit(handler, "auth.login", "denied", actor=username, target="login")
         from src.logger import log_all
-        log_all(f"🔒 网页登录失败: {username!r} 来自 {ip}", is_error=True)
+        request_id = _login_request_id(handler)
+        log_all(
+            f"🔒 网页登录失败 | request_id={request_id} | username={username!r} | "
+            f"ip_hash={ip_hash}",
+            is_error=True,
+        )
         send_json(handler, {"ok": False, "errors": ["用户名或密码错误"]}, 401)
         return
 
@@ -397,7 +464,11 @@ def handle_login(handler, body: dict) -> None:
     token = _auth.create_session(user["username"], user["role"], access_ttl)
     refresh_token = _auth.create_refresh_token(user["username"], user["role"], ttl_days=refresh_days)
     from src.logger import log_all
-    log_all(f"🔓 网页登录成功: {user['username']}（{user['role']}）来自 {ip}")
+    request_id = _login_request_id(handler)
+    log_all(
+        f"🔓 网页登录成功 | request_id={request_id} | username={user['username']}（{user['role']}） | "
+        f"ip_hash={ip_hash}"
+    )
     _audit(handler, "auth.login", "success", actor=user["username"], target="login",
            details={"role": user["role"], "remember": remember})
 

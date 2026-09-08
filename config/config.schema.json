@@ -477,6 +477,31 @@
       "type": "number",
       "minimum": 0
     },
+    "member_fetch_timeout_seconds": {
+      "type": "number",
+      "minimum": 1,
+      "description": "单个成员消息抓取的最大等待时间（秒）"
+    },
+    "token_refresh_timeout_seconds": {
+      "type": "number",
+      "minimum": 1,
+      "description": "单个账号 Token 续期的最大等待时间（秒）"
+    },
+    "message_cycle_timeout_seconds": {
+      "type": "number",
+      "minimum": 1,
+      "description": "完整消息/博客巡查轮次的最大等待时间（秒）"
+    },
+    "monitor_stale_seconds": {
+      "type": "number",
+      "minimum": 1,
+      "description": "后台巡查心跳判定为过期的等待时间（秒）"
+    },
+    "monitor_startup_grace_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "首次启动尚未完成首轮巡查时的健康宽限期（秒）"
+    },
     "translate": {
       "type": "boolean"
     },

@@ -447,12 +447,14 @@ $("pwToggle").addEventListener("click", () => {
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const btn = $("btn"), msg = $("msg");
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const requestTimer = controller ? window.setTimeout(() => controller.abort(), 30000) : null;
   btn.disabled = true;
   btn.textContent = "登录中…";
   msg.className = "msg";
-  msg.textContent = "";
+  msg.textContent = "正在验证账号…";
   try {
-    const resp = await fetch("/api/auth/login", {
+    const request = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -460,8 +462,16 @@ $("form").addEventListener("submit", async (e) => {
         password: $("p").value,
         remember: $("rememberMe") ? $("rememberMe").checked : true,
       }),
-    });
-    const data = await resp.json();
+    };
+    if (controller) request.signal = controller.signal;
+    // method 在调用点显式声明，便于静态 API 契约检查器识别真实请求方法。
+    const resp = await fetch("/api/auth/login", { ...request, method: "POST" });
+    let data;
+    try {
+      data = await resp.json();
+    } catch (_) {
+      throw new Error("服务器返回了无法识别的响应（HTTP " + resp.status + "）");
+    }
     if (data.ok) {
       msg.className = "msg ok";
       msg.textContent = "✅ 欢迎回来，" + data.user.username;
@@ -474,8 +484,11 @@ $("form").addEventListener("submit", async (e) => {
     $("p").focus();
   } catch (err) {
     msg.className = "msg err";
-    msg.textContent = "请求失败：" + err.message;
+    msg.textContent = err && err.name === "AbortError"
+      ? "登录请求超时（30 秒），请检查服务状态后重试。"
+      : "请求失败：" + (err && err.message ? err.message : "网络连接异常");
   } finally {
+    if (requestTimer) window.clearTimeout(requestTimer);
     btn.disabled = false;
     btn.textContent = "登 录";
   }

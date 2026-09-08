@@ -79,6 +79,12 @@ _DEFAULTS: dict = {
     "monitor_list":             [],
     # 并发 / 反爬
     "http_semaphore_limit":     3,
+    # 巡查存活保护：单成员、Token 与整轮任务分别设预算，避免一个挂起任务拖死主循环
+    "member_fetch_timeout_seconds": 60,
+    "token_refresh_timeout_seconds": 30,
+    "message_cycle_timeout_seconds": 900,
+    "monitor_stale_seconds": 1800,
+    "monitor_startup_grace_seconds": 300,
     # Token 续期独立限流与失败冷却，避免多个账号同时续期占满共享网络资源
     "token_refresh_concurrency":              2,
     "token_refresh_network_cooldown_seconds": 90,
@@ -574,6 +580,11 @@ _KEY_TO_VAR: dict[str, str] = {
     "auth_session_hours":           "AUTH_SESSION_HOURS",
     "auth_cookie_secure":           "AUTH_COOKIE_SECURE",
     "http_semaphore_limit":         "HTTP_SEMAPHORE_LIMIT",
+    "member_fetch_timeout_seconds": "MEMBER_FETCH_TIMEOUT_SECONDS",
+    "token_refresh_timeout_seconds": "TOKEN_REFRESH_TIMEOUT_SECONDS",
+    "message_cycle_timeout_seconds": "MESSAGE_CYCLE_TIMEOUT_SECONDS",
+    "monitor_stale_seconds":         "MONITOR_STALE_SECONDS",
+    "monitor_startup_grace_seconds": "MONITOR_STARTUP_GRACE_SECONDS",
     "token_refresh_concurrency":              "TOKEN_REFRESH_CONCURRENCY",
     "token_refresh_network_cooldown_seconds": "TOKEN_REFRESH_NETWORK_COOLDOWN_SECONDS",
     "token_refresh_max_cooldown_seconds":     "TOKEN_REFRESH_MAX_COOLDOWN_SECONDS",

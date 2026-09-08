@@ -522,6 +522,9 @@ async def main() -> None:
             summary_interval=cfg.HEALTH_SUMMARY_INTERVAL,
             error_buffer=cfg.HEALTH_ERROR_BUFFER,
             token_warn_seconds=cfg.HEALTH_TOKEN_WARN_SECONDS,
+            cycle_timeout_seconds=getattr(cfg, "MESSAGE_CYCLE_TIMEOUT_SECONDS", 900),
+            monitor_stale_seconds=getattr(cfg, "MONITOR_STALE_SECONDS", 1800),
+            startup_grace_seconds=getattr(cfg, "MONITOR_STARTUP_GRACE_SECONDS", 300),
         )
 
         # 首次运行自动生成 admin 管理员并输出初始密码

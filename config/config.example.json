@@ -80,6 +80,14 @@
   "token_refresh_network_cooldown_seconds": 90,
   "token_refresh_max_cooldown_seconds": 600,
 
+  // ── 巡查超时与存活探针（秒）──
+  // 成员抓取和 Token 续期独立计时；整轮预算应覆盖正常的博客/媒体处理。
+  "member_fetch_timeout_seconds": 60,
+  "token_refresh_timeout_seconds": 30,
+  "message_cycle_timeout_seconds": 900,
+  "monitor_stale_seconds": 1800,
+  "monitor_startup_grace_seconds": 300,
+
   // ── 官方博客监控（默认关闭，按需开启指定团）──
   "blog_monitor": {
     "enabled": false,

@@ -41,6 +41,9 @@ _SCRYPT_N = 2 ** 14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _SCRYPT_MAXMEM = 128 * 1024 * 1024
+_SCRYPT_MAX_N = 2 ** 18
+_SCRYPT_MAX_R = 32
+_SCRYPT_MAX_P = 4
 _SALT_BYTES = 16
 
 # 登录限流：LOCK_WINDOW 内失败 MAX_FAILURES 次 → 锁定 LOCK_SECONDS
@@ -69,6 +72,9 @@ def get_auth_db() -> sqlite3.Connection:
 
         AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(AUTH_DB_PATH), timeout=10.0, check_same_thread=False)
+        # ``timeout`` 只影响连接初始化参数；显式设置 busy_timeout，确保并发
+        # 登录/会话写入遇到 SQLite 锁时在有限时间后返回，而不是无限等待。
+        conn.execute("PRAGMA busy_timeout=10000;")
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
 
@@ -329,9 +335,18 @@ def verify_password(password: str, record: dict) -> bool:
     try:
         if record.get("algo") != "scrypt":
             return False
+        n = int(record["n"])
+        r = int(record["r"])
+        p = int(record["p"])
+        # 用户库是本地可写数据；对损坏/篡改的参数设上界，避免一次登录
+        # 请求分配异常内存或长时间占满 WebUI 请求线程。
+        if (n < 2 or n > _SCRYPT_MAX_N or n & (n - 1)
+                or not (1 <= r <= _SCRYPT_MAX_R)
+                or not (1 <= p <= _SCRYPT_MAX_P)):
+            return False
         digest = hashlib.scrypt(
             password.encode("utf-8"), salt=bytes.fromhex(record["salt"]),
-            n=int(record["n"]), r=int(record["r"]), p=int(record["p"]),
+            n=n, r=r, p=p,
             maxmem=_SCRYPT_MAXMEM,
         )
         return hmac.compare_digest(digest.hex(), record["hash"])
