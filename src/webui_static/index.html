@@ -596,6 +596,10 @@
       <label class="field" style="grid-column: 1 / -1; margin: 0;">NapCat OneBot HTTP API 地址
         <input id="napcatApi" placeholder="例如: http://127.0.0.1:3000/send_group_msg" type="text"/>
       </label>
+      <label class="field" style="grid-column: 1 / -1; margin: 0;">远程媒体访问基地址（NapCat 不在本机时填写）
+        <input id="napcatMediaBaseUrl" placeholder="例如: http://192.168.22.13:46046" type="text"/>
+        <small class="hint">Windows NapCat 需要通过此地址读取群晖上的图片、视频和音频；同机部署可留空。</small>
+      </label>
     </div>
     <div class="table-wrap">
       <table>
@@ -2235,6 +2239,7 @@ function renderGeneral() {
     box.appendChild(lab);
   }
   $("napcatApi").value = config.napcat_api || "";
+  $("napcatMediaBaseUrl").value = config.napcat_media_base_url || "";
   const di = config.day_interval || [120, 180], ni = config.night_interval || [1500, 1800];
   const sh = config.sleep_hours || [2, 7];
   $("dayMin").value = di[0]; $("dayMax").value = di[1];
@@ -2591,6 +2596,8 @@ function collectGeneral() {
   };
   config.napcat_api = $("napcatApi").value.trim() || undefined;
   if (config.napcat_api === undefined) delete config.napcat_api;
+  config.napcat_media_base_url = $("napcatMediaBaseUrl").value.trim() || undefined;
+  if (config.napcat_media_base_url === undefined) delete config.napcat_media_base_url;
   config.day_interval = [num("dayMin") ?? 120, num("dayMax") ?? 180];
   config.night_interval = [num("nightMin") ?? 1500, num("nightMax") ?? 1800];
   config.sleep_hours = [num("sleepStart") ?? 2, num("sleepEnd") ?? 7];

@@ -149,6 +149,8 @@ _DEFAULTS: dict = {
     "enable_tg_bot":            False,
     "tg_bots":                  [],
     "napcat_routes":            [],
+    "napcat_media_base_url":    "",
+    "napcat_media_signing_secret": "",
     "proxy":                    "",
 }
 
@@ -621,6 +623,8 @@ _KEY_TO_VAR: dict[str, str] = {
     "media":                        "MEDIA",
     "social":                       "SOCIAL",
     "napcat_routes":                "NAPCAT_ROUTES",
+    "napcat_media_base_url":         "NAPCAT_MEDIA_BASE_URL",
+    "napcat_media_signing_secret":   "NAPCAT_MEDIA_SIGNING_SECRET",
     "tg_bots":                      "TG_BOTS",
     "proxy":                        "PROXY",
 }

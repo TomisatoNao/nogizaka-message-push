@@ -131,7 +131,10 @@ class NapCatAdapter:
         path = media.local_path
         if not path or not os.path.exists(path):
             return None
-        file_uri = "file:///" + os.path.abspath(path).replace("\\", "/")
+        from src.webui_modules.social_media_service import build_napcat_media_uri
+        file_uri = build_napcat_media_uri(path)
+        if not file_uri:
+            file_uri = "file:///" + os.path.abspath(path).replace("\\", "/")
         kind = {
             "image": "image",
             "video": "video",

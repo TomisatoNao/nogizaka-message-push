@@ -27,6 +27,13 @@
     "napcat_api": {
       "type": "string"
     },
+    "napcat_media_base_url": {
+      "type": "string",
+      "format": "uri-reference"
+    },
+    "napcat_media_signing_secret": {
+      "type": "string"
+    },
     "qq_official_bots": {
       "type": "array",
       "items": {

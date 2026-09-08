@@ -6,6 +6,10 @@
     "qq_official": false
   },
   "napcat_api": "http://127.0.0.1:3000/send_group_msg",
+  // NapCat 位于其他主机时填写群晖可被其访问的地址；留空表示同机 file:// 模式
+  "napcat_media_base_url": "",
+  // 可选：固定媒体签名密钥；留空时使用 WEB_ADMIN_TOKEN 或进程随机密钥
+  "napcat_media_signing_secret": "",
 
   // ── QQ 官方机器人列表（初始为空，在网页端添加）──
   "qq_official_bots": [],

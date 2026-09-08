@@ -40,6 +40,7 @@ from src.webui_modules.config_service import (
     validate_secret_values,
 )
 from src.webui_modules.media_service import serve_file_range
+from src.webui_modules.social_media_service import serve_signed_social_media
 from src.webui_modules.static_handler import (
     ARCHIVE_HTML_PATH,
     INDEX_HTML_PATH,
@@ -407,6 +408,11 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/static/"):
             self._send_static(path[len("/static/"):])
+            return
+
+        # 远程 NapCat 使用短时效签名 URL 读取 NAS 上的社媒媒体，不依赖 WebUI 登录 Cookie。
+        if path.startswith("/api/social/media/"):
+            serve_signed_social_media(self, path)
             return
 
         # 2. 鉴权与用户
