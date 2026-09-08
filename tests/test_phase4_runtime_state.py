@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
 import pytest
 
 
@@ -117,3 +118,91 @@ async def test_manual_trigger_does_not_overlap_three_monitor_cycles(monkeypatch)
     assert calls == 3
     assert max_active == 1
     assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_timeout_then_transport_error_still_recovers_for_three_cycles(monkeypatch):
+    import src.app as app
+    from src import health, http_pool
+    from src.app_modules import message_worker
+
+    health.initialize(
+        cycle_timeout_seconds=0.01,
+        monitor_stale_seconds=1,
+        startup_grace_seconds=0,
+    )
+    health.get_tracker().set_startup_state("READY")
+    monkeypatch.setattr(http_pool, "_general_client", None)
+    blocker = asyncio.Event()
+    semaphore = asyncio.Semaphore(1)
+    lock = asyncio.Lock()
+    calls = 0
+    active = 0
+    max_active = 0
+
+    async def cycle():
+        nonlocal calls, active, max_active
+        async with semaphore, lock:
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                calls += 1
+                if calls == 1:
+                    await blocker.wait()
+                elif calls == 2:
+                    raise httpx.ConnectError("proxy disconnected")
+                await asyncio.sleep(0.005)
+            finally:
+                active -= 1
+
+    def should_stop():
+        return calls >= 3
+
+    async def wait_or_trigger(_event, _timeout):
+        return True
+
+    monkeypatch.setattr(app, "_run_cycle", cycle)
+    monkeypatch.setattr(app, "_stop_requested", should_stop)
+    monkeypatch.setattr(message_worker, "_calc_sleep_seconds", lambda: 0)
+    monkeypatch.setattr(message_worker, "_next_interval", lambda: (1, "test"))
+    monkeypatch.setattr(message_worker, "_wait_or_trigger", wait_or_trigger)
+    monkeypatch.setattr(message_worker.cfg, "MESSAGE_CYCLE_TIMEOUT_SECONDS", 0.01, raising=False)
+
+    await message_worker._run_loop(None, asyncio.Event())
+
+    assert calls == 3
+    assert max_active == 1
+    assert active == 0
+    await asyncio.wait_for(semaphore.acquire(), timeout=0.2)
+    semaphore.release()
+    await asyncio.wait_for(lock.acquire(), timeout=0.2)
+    lock.release()
+
+
+@pytest.mark.asyncio
+async def test_cycle_timeout_rebuilds_only_an_existing_general_client(monkeypatch):
+    from src import http_pool, health
+    from src.app_modules import message_worker
+
+    health.initialize(
+        cycle_timeout_seconds=0.01,
+        monitor_stale_seconds=1,
+        startup_grace_seconds=0,
+    )
+    health.get_tracker().set_startup_state("READY")
+    marker = object()
+    monkeypatch.setattr(http_pool, "_general_client", marker)
+    resets: list[object] = []
+
+    async def fake_reset():
+        resets.append(marker)
+        return object()
+
+    monkeypatch.setattr(http_pool, "reset_general_client", fake_reset)
+
+    async def never_finishes():
+        await asyncio.Event().wait()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await message_worker._run_cycle_bounded(never_finishes, 0.01, "pool-reset-timeout")
+    assert resets == [marker]

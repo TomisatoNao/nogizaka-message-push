@@ -17,7 +17,7 @@ import httpx
 
 import config.config as cfg
 from config.credentials import proactive_refresh_if_expiring
-from src import blog_fetcher, fetcher, health
+from src import blog_fetcher, fetcher, health, http_pool
 from src.app_modules.daily_summary import _get_jst_now
 from src.app_modules.process_lock import _stop_requested
 from src.logger import log_all
@@ -107,6 +107,22 @@ async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str
         if pending:
             phase = tracker.monitor_snapshot().get("phase", "unknown")
             cleaned = await _cancel_task_bounded(task, cleanup_timeout=5.0)
+            pool_reset = "skipped"
+            # 只有主程序已绑定通用 Client 时才重建连接池。单元测试/独立
+            # 工具未绑定 Client 不应因为一次超时凭空创建无法回收的新池。
+            if getattr(http_pool, "_general_client", None) is not None:
+                try:
+                    await http_pool.reset_general_client()
+                    pool_reset = "ok"
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # nosec B110 - 恢复失败不能阻断下一轮
+                    pool_reset = f"failed:{type(exc).__name__}"
+                    log_all(
+                        f"⚠️ 巡查超时后重建 HTTP 连接池失败 | cycle_id={cycle_id} | "
+                        f"error={type(exc).__name__}: {exc}",
+                        is_error=True,
+                    )
             elapsed_ms = (time.monotonic() - started) * 1000
             tracker.record_cycle_finished("timeout", elapsed_ms=elapsed_ms, phase=phase)
             tracker.record_error(
@@ -117,7 +133,7 @@ async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str
             log_all(
                 f"⏱️ 巡查轮次超时 | cycle_id={cycle_id} | phase={phase} | "
                 f"timeout={timeout_seconds:g}s | elapsed={elapsed_ms:.0f}ms | "
-                f"cleanup={'ok' if cleaned else 'pending'}",
+                f"cleanup={'ok' if cleaned else 'pending'} | pool_reset={pool_reset}",
                 is_error=True,
             )
             raise asyncio.TimeoutError(
