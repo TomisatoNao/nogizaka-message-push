@@ -161,7 +161,11 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
         bot_api = getattr(cfg, "QQ_BOT_API", "http://127.0.0.1:3000/send_group_msg")
         status_url = bot_api.rsplit("/", 1)[0] + "/get_status"
         try:
-            resp = await qq_client.get(status_url)
+            # 与实际发送请求保持同一套 URL/token 解析规则；此前裸 GET 会被
+            # NapCat 的鉴权中间件返回 403，造成“发送可用但启动 DEGRADED”的误判。
+            from src.platforms.napcat import _resolve_api_url_and_headers
+            _send_url, napcat_headers = _resolve_api_url_and_headers(bot_api)
+            resp = await qq_client.get(status_url, headers=napcat_headers)
             if resp.status_code == 200:
                 log_all("🟢 NapCat QQ 连通正常")
                 health.get_tracker().record_channel("napcat", True)

@@ -18,7 +18,9 @@ _MAX_URL_AGE = 600
 
 
 def _root() -> Path:
-    return Path("data/social_media").resolve()
+    # 不依赖进程启动时的 cwd；部署脚本、systemd 和 Docker 的 cwd 可能不同。
+    # 此模块位于 <project>/src/webui_modules/，因此 parents[2] 始终是项目根。
+    return (Path(__file__).resolve().parents[2] / "data" / "social_media").resolve()
 
 
 def _secret() -> bytes:
