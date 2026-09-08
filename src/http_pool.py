@@ -41,6 +41,27 @@ def _get_lifecycle_lock() -> asyncio.Lock:
         return current[1]
 
 
+def clear_loop_state(loop: asyncio.AbstractEventLoop | None = None) -> bool:
+    """移除指定事件循环的生命周期锁。
+
+    HTTP Client 关闭后锁不再有工作要保护；清理模块级 registry 可避免
+    反复创建/销毁测试或重载 loop 时保留旧锁。调用方应在所有池操作完成
+    后调用，正在运行的 ``get_*`` 不会被中途移除。
+    """
+    if loop is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+    key = id(loop)
+    with _thread_lock:
+        current = _lifecycle_locks.get(key)
+        if current is not None and current[0] is loop:
+            _lifecycle_locks.pop(key, None)
+            return True
+    return False
+
+
 def register_general_client_rebind(callback: Callable[[httpx.AsyncClient], None]) -> None:
     """注册通用 Client 替换后的同步注入回调（幂等）。"""
     with _thread_lock:
@@ -250,6 +271,7 @@ async def close_all() -> None:
 __all__ = [
     "CLIENT_CLOSE_TIMEOUT_SECONDS",
     "bind_runtime_clients",
+    "clear_loop_state",
     "close_all",
     "get_blog_client",
     "get_general_client",

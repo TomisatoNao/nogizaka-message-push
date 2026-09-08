@@ -15,6 +15,7 @@ import httpx
 import config.config as cfg
 from config.credentials import (
     ACCOUNT_CREDS,
+    clear_loop_state as clear_credentials_loop_state,
     get_token_remaining_seconds,
     initialize as init_credentials,
     load_all_accounts,
@@ -778,6 +779,16 @@ async def main() -> None:
                 await asyncio.gather(*(c.aclose() for c in clients_to_close), return_exceptions=True)
             except Exception:  # nosec B110
                 pass
+        # 凭证模块的锁/续期闸门按事件循环创建；所有后台任务和客户端
+        # 都收尾后再清理，避免热重载或测试新 loop 误复用旧对象。
+        try:
+            clear_credentials_loop_state(asyncio.get_running_loop())
+        except Exception:  # nosec B110
+            pass
+        try:
+            http_pool.clear_loop_state(asyncio.get_running_loop())
+        except Exception:  # nosec B110
+            pass
         _release_instance_lock()
         log_all("✅ 资源清理完毕")
 

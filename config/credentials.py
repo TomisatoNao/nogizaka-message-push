@@ -22,6 +22,9 @@ from src.logger import format_httpx_error, log_all, log_response
 ACCOUNT_CREDS:        dict[str, dict]          = {}
 _file_locks:          dict[tuple, asyncio.Lock]  = {}
 _token_refresh_locks: dict[tuple, asyncio.Lock]  = {}
+# 锁对象只允许在创建它的事件循环中使用。记录所属 loop 既能识别
+# ``id(loop)`` 复用，也便于主循环退出时清理旧的运行时状态。
+_lock_owners:         dict[tuple, asyncio.AbstractEventLoop | None] = {}
 _alert_last_sent:     dict[str, float]         = {}
 _http_client:         httpx.AsyncClient | None = None
 _auth_http_client:    httpx.AsyncClient | None = None
@@ -39,8 +42,9 @@ def _get_refresh_lock(account_id: str) -> asyncio.Lock:
         key = (id(loop), account_id)
     except RuntimeError:
         key = (0, account_id)
-    if key not in _token_refresh_locks:
+    if key not in _token_refresh_locks or _lock_owners.get(key) is not loop:
         _token_refresh_locks[key] = asyncio.Lock()
+        _lock_owners[key] = loop
     return _token_refresh_locks[key]
 
 
@@ -50,9 +54,41 @@ def _get_file_lock(filepath: str) -> asyncio.Lock:
         key = (id(loop), filepath)
     except RuntimeError:
         key = (0, filepath)
-    if key not in _file_locks:
+    if key not in _file_locks or _lock_owners.get(key) is not loop:
         _file_locks[key] = asyncio.Lock()
+        _lock_owners[key] = loop
     return _file_locks[key]
+
+
+def clear_loop_state(loop: asyncio.AbstractEventLoop | None = None) -> int:
+    """清理指定事件循环创建的锁与续期信号量。
+
+    主程序在停止后台任务、关闭 HTTP 客户端后调用此函数。锁/信号量本身
+    不需要 ``close``，但如果把它们留在模块级字典中，热重载或测试创建的
+    新事件循环可能误取旧对象；清理返回移除条目数量，便于测试观测。
+    """
+    if loop is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return 0
+
+    loop_id = id(loop)
+    removed = 0
+    for registry in (_file_locks, _token_refresh_locks):
+        for key in list(registry):
+            if isinstance(key, tuple) and key and key[0] == loop_id:
+                owner = _lock_owners.get(key)
+                if owner is loop or owner is None:
+                    registry.pop(key, None)
+                    _lock_owners.pop(key, None)
+                    removed += 1
+
+    current = _refresh_semaphores.get(loop_id)
+    if current is not None and current[0] is loop:
+        _refresh_semaphores.pop(loop_id, None)
+        removed += 1
+    return removed
 
 
 def initialize(
@@ -598,9 +634,9 @@ def get_web_headers(
 
 
 def get_file_lock(file_path: str) -> asyncio.Lock:
-    if file_path not in _file_locks:
-        _file_locks[file_path] = asyncio.Lock()
-    return _file_locks[file_path]
+    # 抓取器在异步上下文调用此入口；必须走 loop-scoped 实现，避免旧版
+    # 以纯路径为 key 的锁跨事件循环复用。
+    return _get_file_lock(file_path)
 
 
 def get_source_headers_for_account(account_id: str, group_type: str) -> dict[str, str]:

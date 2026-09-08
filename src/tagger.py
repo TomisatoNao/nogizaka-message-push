@@ -19,6 +19,7 @@ except ImportError:
 
 import config.config as cfg
 from src.logger import log_all
+from src.async_utils import cancel_tasks_bounded
 from src.utils import RateLimiter
 
 _MIME_MAP = {
@@ -286,8 +287,28 @@ async def _do_tag(member_dir: str, msg: dict, local_file: str) -> None:
         log_all(f"⚠️ 后台打标签异常 [{member_dir}/{local_file}]: {e}", is_debug=True)
 
 
-async def wait_pending(timeout: float = 60) -> None:
-    """等待后台打标签任务收尾（优雅停机用）。"""
-    if _bg_tasks:
-        await asyncio.wait(list(_bg_tasks), timeout=timeout)
+async def wait_pending(timeout: float = 60) -> bool:
+    """等待后台打标签任务收尾（优雅停机用）。
 
+    到达等待预算后主动取消剩余任务并有限收尾，避免主程序随后关闭
+    共享 HTTP Client 时仍有标签任务在后台访问旧连接池。
+    返回 ``True`` 表示所有任务已收尾，``False`` 表示仍有迟到任务由
+    ``cancel_tasks_bounded`` 的回调继续消费。
+    """
+    tasks = tuple(task for task in _bg_tasks if not task.done())
+    if not tasks:
+        return True
+    try:
+        wait_budget = max(0.01, float(timeout))
+    except (TypeError, ValueError):
+        wait_budget = 60.0
+    _, pending = await asyncio.wait(tasks, timeout=wait_budget)
+    if not pending:
+        return True
+    cleaned = await cancel_tasks_bounded(pending, timeout=min(5.0, wait_budget))
+    if not cleaned:
+        log_all(
+            f"⚠️ 后台打标签任务收尾超时 | pending={len(pending)}",
+            is_error=True,
+        )
+    return cleaned
