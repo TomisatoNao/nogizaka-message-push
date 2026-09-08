@@ -115,6 +115,7 @@ def main() -> None:
             code, body, _ = _http("GET", base + "/api/archive/members")
             j = json.loads(body)
             assert code == 200 and j["members"][0]["name"] == "测试_成员" and j["members"][0]["total"] == 2
+            assert j["members"][0]["letters_total"] == 0
 
             code, body, _ = _http("GET", base + "/api/archive/months?member=%E6%B5%8B%E8%AF%95_%E6%88%90%E5%91%98")
             j = json.loads(body)

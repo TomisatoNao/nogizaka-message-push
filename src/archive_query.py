@@ -101,6 +101,26 @@ def get_letters_count(member_dir: str) -> int:
     return len(letters)
 
 
+def get_letters_counts(member_dirs: list[str] | tuple[str, ...]) -> dict[str, int]:
+    """批量返回成员信件归档数量，避免成员选择器逐项查询数据库。"""
+    names = [str(name) for name in member_dirs if name]
+    if not names:
+        return {}
+    conn = _get_init_db()
+    if conn:
+        try:
+            placeholders = ",".join("?" for _ in names)
+            rows = conn.execute(
+                f"SELECT member_dir, COUNT(*) FROM letters WHERE member_dir IN ({placeholders}) GROUP BY member_dir",
+                names,
+            ).fetchall()
+            counts = {str(row[0]): int(row[1] or 0) for row in rows}
+            return {name: counts.get(name, 0) for name in names}
+        except sqlite3.Error as ex:
+            log_all(f"⚠️ 批量查询信件数量异常: {ex}", is_debug=True)
+    return {name: get_letters_count(name) for name in names}
+
+
 def list_members() -> list[str]:
     """返回所有有归档消息的成员列表。优先从 SQLite 获取。"""
     conn = _get_init_db()

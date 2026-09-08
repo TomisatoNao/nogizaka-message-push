@@ -81,6 +81,7 @@ async def test_letter_archiving_and_queries(tmp_path):
         # 5. 计数测试
         count = archive.get_letters_count(m_dir)
         assert count == 2
+        assert archive.get_letters_counts([m_dir, "missing_member"]) == {m_dir: 2, "missing_member": 0}
 
         # 6. letters.json 磁盘文件校验
         json_file = letter_img_dir / "letters.json"

@@ -6,7 +6,7 @@ try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
 const BLOG_GROUP_KEYS = ["nogizaka", "sakurazaka", "hinatazaka"];
 
-let members = [];        // [{name, display, total, months}]
+let members = [];        // [{name, display, total, letters_total, months}]
 let blogGroups = [];     // [{key, total, first_date, last_date}]
 let curMember = "";
 let curBlogGroup = "";   // 非空 = 博客模式
@@ -981,7 +981,8 @@ function renderBlogAuthorChips() {
     const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
     btn.className = "chip" + (isMatch ? " active" : "");
     btn.dataset.author = a.name;
-    const cntStr = a.count ? '<span class="chip-num" title="' + a.count.toLocaleString() + ' 篇博客">' + (a.count >= 1000 ? (a.count / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : a.count) + '</span>' : '';
+    const authorCount = Number(a.total ?? a.count ?? 0);
+    const cntStr = '<span class="chip-num" title="' + authorCount.toLocaleString() + ' 篇博客">' + (authorCount >= 1000 ? (authorCount / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : authorCount) + '</span>';
     btn.innerHTML = '<span class="chip-name">' + esc(a.name) + '</span>' + cntStr;
     btn.onclick = () => selectBlogAuthor(a.name);
     box.appendChild(btn);
@@ -1039,7 +1040,8 @@ function renderBlogAuthorPopover(filterKeyword = "") {
 
   for (const a of filtered) {
     const isMatch = curBlogAuthor && (a.name === curBlogAuthor || a.name.replace(/[\s　_]+/g, "") === curBlogAuthor.replace(/[\s　_]+/g, ""));
-    const cntTxt = a.count ? a.count.toLocaleString() + ' 篇' : '作者';
+    const authorCount = Number(a.total ?? a.count ?? 0);
+    const cntTxt = authorCount.toLocaleString() + ' 篇';
     const item = document.createElement("div");
     item.className = "author-popover-item" + (isMatch ? " active" : "");
     item.setAttribute("role", "option");
@@ -1082,6 +1084,11 @@ function updateBlogAuthorDisplay() {
   if ($("curBlogAuthorDisplay")) {
     $("curBlogAuthorDisplay").textContent = curBlogAuthor || "全部作者";
   }
+  const normalizedAuthor = (curBlogAuthor || "").replace(/[\s　_]+/g, "");
+  const count = curBlogAuthor
+    ? Number((curGroupAuthors.find(a => a.name === curBlogAuthor || (a.name || "").replace(/[\s　_]+/g, "") === normalizedAuthor) || {}).total || 0)
+    : Number((blogGroups.find(g => g.key === curBlogGroup) || {}).total || 0);
+  if ($("curBlogAuthorCount")) $("curBlogAuthorCount").textContent = "（" + count.toLocaleString() + "）";
 }
 
 function toggleBlogAuthorPopover() {
@@ -3958,6 +3965,8 @@ async function selectLetterMember(mName) {
   const mObj = members.find(m => m.name === mName) || { name: mName, display: mName };
   const disp = $("curLetterMemberDisplay");
   if (disp) disp.textContent = mObj.display || mName;
+  const letterCount = Number(mObj.letters_total || 0);
+  if ($("curLetterMemberCount")) $("curLetterMemberCount").textContent = "（" + letterCount.toLocaleString() + "）";
 
   if ($("tabHome")) $("tabHome").classList.remove("active");
   if ($("tabMsg")) $("tabMsg").classList.remove("active");
@@ -4140,7 +4149,8 @@ function renderLetterMemberPopover(filterKeyword = "") {
       item.innerHTML = '<div class="m-name-txt">' +
                        avatarHTML +
                        '<span class="mpi-name">' + esc(m.display) + '</span>' +
-                       '</div>';
+                       '</div>' +
+                       '<span class="m-cnt">' + Number(m.letters_total || 0).toLocaleString() + ' 封</span>';
       item.addEventListener("click", () => {
         closeLetterMemberPopover();
         selectLetterMember(m.name);

@@ -72,6 +72,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         from src.sakamichi_roster import get_member_sort_tuple
 
         raw_members = _archive.list_members()
+        letter_counts = _archive.get_letters_counts(raw_members)
         for name in raw_members:
             months = _archive.list_months(name)
             norm = name.replace(" ", "").replace("　", "").replace("_", "")
@@ -86,6 +87,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 "avatar": avatar,
                 "months": len(months),
                 "total": sum(m["count"] for m in months),
+                "letters_total": letter_counts.get(name, 0),
             })
 
         members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
