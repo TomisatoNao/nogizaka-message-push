@@ -9,8 +9,6 @@ from pathlib import Path
 import signal
 import sys
 import traceback
-from urllib.parse import parse_qs, urlparse
-
 import httpx
 
 import config.config as cfg
@@ -59,6 +57,11 @@ from src.app_modules.process_lock import (
 )
 from src.logger import init_loggers, log_all
 from src.platforms import napcat, qq_official, tgbot
+from src.platforms.napcat_session import (
+    NapCatSessionMonitor,
+    classify_status_response,
+    resolve_status_endpoint,
+)
 from src.platforms.qq_official import health_check as qq_official_health_check
 from src.social.manager import start_social_service, stop_social_service
 from src.webui import start_webui
@@ -160,31 +163,56 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
     # ── 检查 NapCat 连通性 ────────────────────────────────
     if napcat_enabled:
         bot_api = getattr(cfg, "QQ_BOT_API", "http://127.0.0.1:3000/send_group_msg")
-        status_url = bot_api.rsplit("/", 1)[0] + "/get_status"
         try:
-            # 与实际发送请求保持同一套 URL/token 解析规则；此前裸 GET 会被
-            # NapCat 的鉴权中间件返回 403，造成“发送可用但启动 DEGRADED”的误判。
-            parsed_bot_api = urlparse(bot_api)
-            token_values = parse_qs(parsed_bot_api.query)
-            napcat_token = (
-                (token_values.get("access_token") or [""])[0]
-                or (token_values.get("token") or [""])[0]
-            )
-            napcat_headers = {"Content-Type": "application/json"}
-            if napcat_token:
-                napcat_headers["Authorization"] = f"Bearer {napcat_token}"
+            # 与实际发送请求保持同一套 URL/token 解析规则；状态接口必须带上
+            # QQ_BOT_API 中配置的 access_token，否则 NapCat 会返回 403。
+            status_url, napcat_headers = resolve_status_endpoint(bot_api)
             resp = await qq_client.get(status_url, headers=napcat_headers)
-            if resp.status_code == 200:
-                log_all("🟢 NapCat QQ 连通正常")
+            body = None
+            try:
+                body = resp.json()
+            except Exception:
+                pass
+            state, online, reason = classify_status_response(
+                int(getattr(resp, "status_code", 0) or 0),
+                body,
+                getattr(resp, "text", ""),
+            )
+            if state == "online" or (resp.status_code == 200 and state == "unknown"):
+                log_all(
+                    "🟢 NapCat QQ 连通正常"
+                    + ("（接口未返回 online 字段）" if state == "unknown" else "")
+                )
                 health.get_tracker().record_channel("napcat", True)
+                health.get_tracker().record_napcat_session(
+                    state,
+                    online=online,
+                    reason=reason or "启动探针通过",
+                )
+            elif state == "offline":
+                log_all("🟡 NapCat QQ 接口可达，但 QQ 账号当前离线", is_warning=True)
+                health.get_tracker().record_channel("napcat", False, "QQ 账号离线")
+                health.get_tracker().record_napcat_session(
+                    state, online=online, reason=reason or "QQ 账号离线"
+                )
+                all_ok = False
+                degraded_reasons.append("NapCat QQ 账号离线")
             else:
                 log_all(f"🟡 NapCat QQ 返回 HTTP {resp.status_code}，可能运行异常", is_error=True)
                 health.get_tracker().record_channel("napcat", False, f"HTTP {resp.status_code}")
+                health.get_tracker().record_napcat_session(
+                    state,
+                    online=online,
+                    reason=reason or f"HTTP {resp.status_code}",
+                )
                 all_ok = False
                 degraded_reasons.append(f"NapCat 返回 HTTP {resp.status_code}")
         except Exception as e:
             log_all(f"🔴 NapCat QQ 无法连接 ({type(e).__name__})，请确认 napcat/lagrange 已启动", is_error=True)
             health.get_tracker().record_channel("napcat", False, "无法连接")
+            health.get_tracker().record_napcat_session(
+                "unreachable", reason="启动探针无法连接", consecutive_failures=1
+            )
             all_ok = False
             degraded_reasons.append("NapCat 无法连接")
     else:
@@ -517,6 +545,7 @@ async def main() -> None:
     observer = None
     webui_server = None
     summary_task: asyncio.Task | None = None
+    napcat_monitor: NapCatSessionMonitor | None = None
     general_rebind_callback = None
     restart_requested = False
 
@@ -660,6 +689,28 @@ async def main() -> None:
         # 5. 启动健康检查
         await _health_check(qq_client)
 
+        # 5.5 持续巡检 NapCat 会话。该任务只读 get_status，不会自动登录或
+        # 重启 QQ；离线时由发送门闩短暂熔断，避免监控/社媒同时制造重试风暴。
+        if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
+            def _on_napcat_snapshot(snapshot) -> None:
+                health.get_tracker().record_napcat_session(
+                    snapshot.state,
+                    online=snapshot.online,
+                    reason=snapshot.reason,
+                    checked_at=snapshot.checked_at,
+                    consecutive_failures=snapshot.consecutive_failures,
+                )
+                napcat.set_session_state(snapshot.state)
+
+            napcat_monitor = NapCatSessionMonitor(
+                qq_client,
+                getattr(cfg, "QQ_BOT_API", ""),
+                interval_seconds=getattr(cfg, "NAPCAT_SESSION_CHECK_INTERVAL", 60),
+                logger=log_all,
+                on_snapshot=_on_napcat_snapshot,
+            )
+            napcat_monitor.start()
+
         # 6. 可选启动 config.json 文件监控
         config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
         observer = start_watcher(config_path, on_reload=_on_config_reload)
@@ -754,6 +805,11 @@ async def main() -> None:
         if summary_task is not None:
             summary_task.cancel()
             await asyncio.gather(summary_task, return_exceptions=True)
+        if napcat_monitor is not None:
+            try:
+                await napcat_monitor.stop()
+            except Exception:  # nosec B110
+                pass
         _main_loop = None
         listener_tasks = [task for _, task in _command_listeners.values()]
         _command_listeners.clear()

@@ -73,6 +73,13 @@ class HealthTracker:
         self._startup_state: str = "STARTING"
         self._startup_reasons: list[str] = []
         self._startup_updated_at: float = 0.0
+        self._napcat_session: dict[str, object] = {
+            "state": "unknown",
+            "online": None,
+            "reason": "尚未探测",
+            "checked_at": None,
+            "consecutive_failures": 0,
+        }
 
         # 巡查生命周期与存活状态。时间戳使用 Unix 时间，年龄使用
         # monotonic，避免系统校时导致健康判定倒退或突然过期。
@@ -108,6 +115,13 @@ class HealthTracker:
             )
             self._startup_grace_seconds = max(0.0, float(startup_grace_seconds))
             self._start_time = time.monotonic()
+            self._napcat_session = {
+                "state": "unknown",
+                "online": None,
+                "reason": "尚未探测",
+                "checked_at": None,
+                "consecutive_failures": 0,
+            }
 
     def set_startup_state(self, state: str, reasons: list[str] | None = None) -> None:
         """更新启动/配置状态（``READY``、``SETUP_REQUIRED`` 或 ``DEGRADED``）。"""
@@ -128,6 +142,36 @@ class HealthTracker:
                 "reasons": list(self._startup_reasons),
                 "updated_at": self._startup_updated_at or None,
             }
+
+    def record_napcat_session(
+        self,
+        state: str,
+        *,
+        online: bool | None = None,
+        reason: str = "",
+        checked_at: float | None = None,
+        consecutive_failures: int = 0,
+    ) -> None:
+        """记录 NapCat 会话探针，不计入消息发送成功率。"""
+
+        allowed = {"online", "offline", "auth_failed", "unreachable", "unknown"}
+        normalized = str(state or "unknown").lower()
+        if normalized not in allowed:
+            normalized = "unknown"
+        with self._lock:
+            self._napcat_session = {
+                "state": normalized,
+                "online": online if isinstance(online, bool) else None,
+                "reason": str(reason or ""),
+                "checked_at": checked_at if checked_at is not None else time.time(),
+                "consecutive_failures": max(0, int(consecutive_failures)),
+            }
+
+    def napcat_session_snapshot(self) -> dict:
+        """返回最近一次 NapCat 会话状态快照。"""
+
+        with self._lock:
+            return dict(self._napcat_session)
 
     # ── 巡查生命周期 ─────────────────────────────────
 
@@ -306,6 +350,7 @@ class HealthTracker:
                 "uptime_seconds": (time.monotonic() - self._start_time) if self._start_time else 0,
                 "next_cycle": dict(self._next_cycle) if self._next_cycle else None,
                 "startup": self.startup_snapshot(),
+                "napcat_session": self.napcat_session_snapshot(),
                 "monitor": monitor,
                 # 顶层别名便于旧版状态页/脚本逐步迁移，不破坏原有字段。
                 "monitor_healthy": monitor["monitor_healthy"],
@@ -385,7 +430,18 @@ class HealthTracker:
             lines.append(f"  成员: {fetch_ok}/{fetch_total} 拉取正常 {fetch_icon} · "
                          f"{push_ok}/{fetch_total} 推送正常 {push_icon}")
 
-        # 4. 近期错误（仅 PERSISTENT 存在时展开，或最近 5 条皆有）
+        # 4. NapCat 会话状态（不与发送计数混淆）
+        napcat_state = self._napcat_session.get("state")
+        if napcat_state and napcat_state != "unknown":
+            state_labels = {
+                "online": "在线 ✅",
+                "offline": "离线 ⚠️",
+                "auth_failed": "鉴权失败 ⚠️",
+                "unreachable": "接口不可达 ⚠️",
+            }
+            lines.append(f"  NapCat: {state_labels.get(napcat_state, napcat_state)}")
+
+        # 5. 近期错误（仅 PERSISTENT 存在时展开，或最近 5 条皆有）
         recent_window = self._summary_interval
         persistent_errors = [
             (msg, tier, cyc) for msg, tier, cyc in self._errors
