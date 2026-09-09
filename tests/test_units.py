@@ -332,6 +332,20 @@ def test_member_dir_name() -> None:
     print("  ✅ member_dir_name 目录匹配正确")
 
 
+def test_napcat_url_resolution() -> None:
+    print("=== napcat api url resolution ===")
+    from src.platforms.napcat import _resolve_api_url_and_headers
+
+    url1, h1 = _resolve_api_url_and_headers("http://192.168.22.25:3000")
+    assert url1 == "http://192.168.22.25:3000/send_group_msg"
+    assert "Authorization" not in h1
+
+    url2, h2 = _resolve_api_url_and_headers("http://192.168.22.25:3000/send_group_msg?access_token=tomisatonao")
+    assert url2 == "http://192.168.22.25:3000/send_group_msg?access_token=tomisatonao"
+    assert h2["Authorization"] == "Bearer tomisatonao"
+    print("  ✅ napcat url resolution 正确补齐与鉴权提取")
+
+
 def main() -> None:
     test_utc_to_jst()
     test_log_truncation()
@@ -346,6 +360,7 @@ def main() -> None:
     test_powershell_scripts_have_bom()
     test_match_member_filter()
     test_member_dir_name()
+    test_napcat_url_resolution()
     print("\n" + "=" * 50)
     print("🎉 全部单元断言通过")
 

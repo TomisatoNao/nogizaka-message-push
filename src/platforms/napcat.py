@@ -117,6 +117,29 @@ def _split_video_record_chain(message_chain: list[dict]) -> list[list[dict]]:
 # ──────────────────────────────────────────────
 # 发送
 # ──────────────────────────────────────────────
+def _resolve_api_url_and_headers(raw_url: str) -> tuple[str, dict[str, str]]:
+    url = (raw_url or getattr(cfg, "QQ_BOT_API", "") or "").strip()
+    if not url:
+        url = "http://127.0.0.1:3000/send_group_msg"
+
+    headers = {"Content-Type": "application/json", "User-Agent": cfg.QQ_USER_AGENT}
+    try:
+        from urllib.parse import urlparse, parse_qs, urlunparse
+        parsed = urlparse(url)
+        # 若未填具体的发送 endpoint，自动补齐 /send_group_msg
+        if not parsed.path or parsed.path == "/":
+            parsed = parsed._replace(path="/send_group_msg")
+            url = urlunparse(parsed)
+        # 若 URL 中携带 access_token 或 token，自动增加 Authorization Bearer 头增强兼容
+        qs = parse_qs(parsed.query)
+        token = qs.get("access_token", [None])[0] or qs.get("token", [None])[0]
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    except Exception:
+        pass
+    return url, headers
+
+
 async def _post_message(group_id: int, message_chain: list[dict], max_retries: int) -> bool:
     payload_str = json.dumps(
         {"group_id": group_id, "message": strip_internal_keys(message_chain)},
@@ -128,12 +151,13 @@ async def _post_message(group_id: int, message_chain: list[dict], max_retries: i
             is_debug=True,
         )
 
+    api_url, req_headers = _resolve_api_url_and_headers(cfg.QQ_BOT_API)
     for attempt in range(max_retries):
         try:
             resp = await _client.post(
-                cfg.QQ_BOT_API,
+                api_url,
                 content=payload_str,
-                headers={"Content-Type": "application/json", "User-Agent": cfg.QQ_USER_AGENT},
+                headers=req_headers,
             )
             if resp.status_code == 200:
                 try:

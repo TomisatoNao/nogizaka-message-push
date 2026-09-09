@@ -403,6 +403,36 @@ def check_session(cookies: dict | None = None, *, proxy: str = "",
 
     ua = user_agent or DEFAULT_UA
     proxies_dict = None
+    if not proxy:
+        try:
+            from config import config as cfg
+            proxy = (
+                getattr(cfg, "PROXY", "")
+                or (getattr(cfg, "SOCIAL_CONFIG", {}).get("proxy", "") if cfg else "")
+            )
+        except (ImportError, AttributeError):
+            pass
+        if not proxy:
+            try:
+                cfg_path = os.path.join("config", "config.json")
+                if os.path.exists(cfg_path):
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        proxy = (
+                            data.get("proxy")
+                            or data.get("social", {}).get("proxy")
+                            or ""
+                        )
+            except Exception:
+                pass
+        if not proxy:
+            proxy = (
+                os.environ.get("HTTP_PROXY")
+                or os.environ.get("HTTPS_PROXY")
+                or os.environ.get("ALL_PROXY")
+                or ""
+            )
+
     if proxy:
         p_str = str(proxy).strip()
         if p_str:

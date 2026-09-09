@@ -4,11 +4,14 @@ services:
     container_name: sakamichi-push
     restart: unless-stopped
     ports:
-      # 管理端默认仅暴露给宿主机；远程访问请使用 HTTPS 反向代理。
-      - "127.0.0.1:46046:46046"
+      # 管理端对外端口（局域网/公网）
+      - "46046:46046"
     environment:
       - TZ=Asia/Tokyo
-      # 容器网络直连 NapCat 服务的 HTTP API
+      # 启用 NapCat OneBot11 推送通道
+      - ENABLE_NAPCAT_QQ=true
+      # 容器内网直连 NapCat 服务的 HTTP API
+      - QQ_BOT_API=http://napcat:3000/send_group_msg
       - NAPCAT_API_URL=http://napcat:3000/send_group_msg
     volumes:
       - ./config:/app/config
@@ -23,13 +26,16 @@ services:
     container_name: napcat
     restart: unless-stopped
     environment:
-      - ACCOUNT=123456789
       - HTTP_ENABLE=true
       - HTTP_PORT=3000
       - WEBUI_PORT=6099
+      - WEBUI_TOKEN=tomisatonao
+      - NAPCAT_UID=0
+      - NAPCAT_GID=0
     ports:
-      - "6099:6099" # NapCat 网页扫码登录控制台
+      - "6099:6099" # NapCat 网页扫码登录控制台 (http://NAS_IP:6099/webui?token=tomisatonao)
       - "3000:3000" # OneBot 11 HTTP 接口
     volumes:
-      - ./napcat/data:/app/.napcat
       - ./napcat/config:/app/napcat/config
+      - ./napcat/qq:/app/.config/QQ
+      - ./napcat/data:/app/.napcat

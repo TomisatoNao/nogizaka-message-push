@@ -120,3 +120,70 @@ def test_forwarder_reuses_same_runtime_view_for_recording_path(monkeypatch):
 
     assert result.delivery_succeeded is True
     assert calls == []
+
+def test_platform_settings_supports_direct_platform_dict():
+    from src.social.settings import platform_settings
+    direct_x = {
+        "enabled": True,
+        "accounts": ["test_acc"],
+        "backends": ["nitter"],
+    }
+    merged = platform_settings(direct_x, "x")
+    assert merged["enabled"] is True
+    assert merged["accounts"] == ["test_acc"]
+    assert "https://nitter.perennialte.ch" in merged["nitter_instances"]
+
+
+def test_ig_session_check_session_fallback_proxy(monkeypatch):
+    from src.social import ig_session
+    monkeypatch.setattr(cfg, "PROXY", "http://127.0.0.1:9999")
+    called_proxies = []
+
+    def fake_get(url, **kwargs):
+        called_proxies.append(kwargs.get("proxies"))
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {"form_data": {"username": "test_user"}}
+        )
+
+    monkeypatch.setattr("requests.get", fake_get)
+    import sys
+    monkeypatch.setitem(sys.modules, "curl_cffi", None)
+    monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
+
+    res = ig_session.check_session({"sessionid": "mock_id"}, proxy="")
+    assert res["valid"] is True
+    assert res["username"] == "test_user"
+    assert called_proxies and called_proxies[0]["http"] == "http://127.0.0.1:9999"
+
+
+def test_x_fetcher_failure_warning_rate_limiting(monkeypatch, caplog):
+    import logging
+    from src.social.fetchers.x_fetcher import XFetcher
+
+    fetcher = XFetcher({
+        "platforms": {
+            "x": {
+                "enabled": True,
+                "accounts": ["test_fail_acc"],
+                "backends": ["syndication"],
+            }
+        }
+    })
+
+    def fake_syndication(account):
+        raise RuntimeError("Network timeout")
+
+    fetcher._backend_syndication = fake_syndication
+
+    with caplog.at_level(logging.WARNING):
+        # 第一次全后端失败应有 WARNING 告警
+        posts1 = fetcher._fetch_timeline("test_fail_acc")
+        assert posts1 == []
+        assert any("所有时间线后端均不可用" in record.message for record in caplog.records)
+
+        # 紧接着第二次应受频控抑制，不重复刷屏
+        caplog.clear()
+        posts2 = fetcher._fetch_timeline("test_fail_acc")
+        assert posts2 == []
+        assert not any("所有时间线后端均不可用" in record.message for record in caplog.records)

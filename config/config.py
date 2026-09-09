@@ -796,6 +796,9 @@ def _load_config() -> dict:
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
     cfg["zhipu_api_key"]  = _env("ZHIPU_API_KEY", "")
     cfg["proxy"]          = (cfg.get("proxy") or "").strip() or _env("HTTP_PROXY") or _env("HTTPS_PROXY") or _env("ALL_PROXY") or _env("PROXY", "")
+    napcat_env_api        = _env("QQ_BOT_API") or _env("NAPCAT_API_URL")
+    if napcat_env_api:
+        cfg["qq_bot_api"] = napcat_env_api
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
     cfg = _match_account_credentials(cfg)
@@ -884,6 +887,7 @@ ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)  
 ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT) # type: ignore[has-type]
 ENABLE_TG_BOT          = _env_bool("ENABLE_TG_BOT",          ENABLE_TG_BOT)          # type: ignore[has-type]
 DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)   # type: ignore[has-type]
+QQ_BOT_API             = _env("QQ_BOT_API",                  _env("NAPCAT_API_URL", QQ_BOT_API)) # type: ignore[has-type]
 
 
 # ================================================================
@@ -962,10 +966,11 @@ def reload() -> bool:
 
             # 重新应用环境变量覆盖
             global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD, \
-                   ENABLE_TG_BOT
+                   ENABLE_TG_BOT, QQ_BOT_API
             ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)
             ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT)
             DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)
+            QQ_BOT_API             = _env("QQ_BOT_API",                  _env("NAPCAT_API_URL", QQ_BOT_API))
 
             # TG Bot 的专属 Token 会在 _load_config → _build_tg_bots 中重新读取。
             ENABLE_TG_BOT  = _env_bool("ENABLE_TG_BOT", ENABLE_TG_BOT)

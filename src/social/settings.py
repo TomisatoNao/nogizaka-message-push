@@ -38,8 +38,8 @@ _PLATFORM_DEFAULTS: dict[str, dict] = {
         "include_replies": False,         # 是否推送回复
         "backends": ["syndication", "nitter", "apiv2"],
         "nitter_instances": [
-            "https://nitter.net",
-            "https://nitter.privacydev.net",
+            "https://nitter.perennialte.ch",
+            "https://xcancel.com",
         ],
         "bearer_token": "",               # nosec B105 -- 可选：官方 API v2 Bearer Token
         "fetch_alt_text": True,           # 抓取图片 alt 描述并一并翻译
@@ -303,6 +303,9 @@ def _merged(defaults: dict, raw: dict | None) -> dict:
 def platform_settings(config: dict, platform: str) -> dict:
     """读取某个社交平台的配置（含默认值填充）。"""
     raw = (config.get("platforms") or {}).get(platform)
+    if raw is None and platform in SOCIAL_PLATFORMS and isinstance(config, dict):
+        if "accounts" in config or "enabled" in config or "backends" in config or "interval_seconds" in config:
+            raw = config
     return _merged(_PLATFORM_DEFAULTS.get(platform, {}), raw)
 
 

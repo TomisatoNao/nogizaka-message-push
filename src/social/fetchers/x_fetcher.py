@@ -20,6 +20,7 @@ import html
 import json
 import logging
 import math
+import time
 import os
 import re
 try:
@@ -233,6 +234,7 @@ class XFetcher(SocialFetcher):
         self._session.headers.update({"User-Agent": _UA,
                                       "Accept-Language": "ja,en;q=0.8"})
         self._uid_cache: dict[str, str] = {}
+        self._last_backend_fail_warn: dict[str, float] = {}
 
     # ── 主流程 ───────────────────────────────────────────
 
@@ -348,6 +350,7 @@ class XFetcher(SocialFetcher):
 
     def _fetch_timeline(self, account: str) -> list[_RawTweet]:
         backends = self.cfg.get("backends") or ["syndication", "nitter", "apiv2"]
+        backend_errors: list[str] = []
         for name in backends:
             fn = {
                 "syndication": self._backend_syndication,
@@ -359,15 +362,30 @@ class XFetcher(SocialFetcher):
             try:
                 got = fn(account)
             except Exception as e:
-                log.debug("[x] 后端 %s 异常: %s", name,
-                          str(e).replace("\n", " ")[:160])
+                err_msg = str(e).replace("\n", " ")[:160]
+                backend_errors.append(f"{name}: {err_msg}")
+                log.debug("[x] 后端 %s 异常: %s", name, err_msg)
                 continue
             if got:
                 log.debug("[x] 后端 %s 取得 %s 条推文", name, len(got))
                 self._fill_missing_alts(got)
                 return got
             log.debug("[x] 后端 %s 无结果，尝试下一个", name)
-        log.debug("[x] @%s 所有后端均无结果（可能被限流或账号无公开推文）", account)
+
+        now = time.time()
+        last_warn = self._last_backend_fail_warn.get(account, 0.0)
+        if now - last_warn >= 1800:
+            self._last_backend_fail_warn[account] = now
+            err_summary = "; ".join(backend_errors) if backend_errors else "无推文返回"
+            log.warning(
+                "[x] ⚠️ @%s 所有时间线后端均不可用（已尝试: %s）。错误概要: %s。"
+                "提示: syndication 接口已被官方阻断，公共 Nitter 实例受限不稳定；如需稳定抓取请在 config.json 的 platforms.x 中配置 bearer_token 或健康可用的 Nitter/RSS 实例。",
+                account,
+                ", ".join(backends),
+                err_summary,
+            )
+        else:
+            log.debug("[x] @%s 所有后端均无结果（可能被限流或账号无公开推文）", account)
         return []
 
     # ── 图片 alt（无障碍描述）补齐 ────────────────────────

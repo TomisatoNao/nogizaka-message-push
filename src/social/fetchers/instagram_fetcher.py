@@ -101,11 +101,15 @@ class InstagramFetcher(SocialFetcher):
     @property
     def has_cookies(self) -> bool:
         """当前是否具备任何有效配置的登录态（cookies_file、浏览器复用或 sessionid）。"""
-        return bool(
-            self._session.cookies.get("sessionid")
-            or (self.cfg.get("cookies_file") or "").strip()
-            or (self.cfg.get("cookies_from_browser") or "").strip()
-        )
+        if self._session.cookies.get("sessionid"):
+            return True
+        if (self.cfg.get("cookies_file") or "").strip() or (self.cfg.get("cookies_from_browser") or "").strip():
+            return True
+        try:
+            from src.social import ig_session
+            return bool(ig_session.read_cookie_file().get("sessionid"))
+        except Exception:
+            return False
 
     # ── 会话准备 ─────────────────────────────────────────
 
@@ -518,6 +522,7 @@ class InstagramFetcher(SocialFetcher):
 
     def _list_feed_entries(self, account: str) -> list[dict]:
         """返回 [{id, url, timestamp, title, kind}]（多后端自动回退）。"""
+        self._warm_session()
         # 后端 0：带登录态的 Feed 接口 —— 有 cookies 时最可靠
         if self._session.cookies.get("sessionid") or self.cfg.get("cookies_file") or self.cfg.get("cookies_from_browser"):
             try:
