@@ -379,12 +379,9 @@
         <tbody id="stTokens"></tbody>
       </table>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ Token 续期机制说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        Token 剩余不足 5 分钟时，主程序会在下一轮巡查前自动续期，无需手动干预；只有显示「失效」时才需要重新填写凭证。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      Token 剩余不足 5 分钟会自动续期；显示「失效」时请重新填写凭证。
+    </p>
   </div>
 
   <!-- Card 3: 推送通道概览 -->
@@ -517,17 +514,9 @@
     <div style="margin-top: 12px;">
       <button class="btn" id="btnAddQqBot" type="button">＋ 添加 QQ Bot</button>
     </div>
-    <details class="help-box" style="margin-top: 12px;">
-      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
-        ℹ️ QQ 官方 Bot 填写与 OpenID 自动获取说明
-      </summary>
-      <div class="hint" id="qqBotHint" style="margin-top: 8px; line-height: 1.65;">
-        • <b>App ID 与 Secret</b>：App ID 直接在表格里填；Client Secret 点对应行「填写」存入 <code>.env</code>。<br/>
-        • <b>多目标路由推送（同一 Bot 推多群）</b>：同一个 QQ 官方 Bot（相同 App ID & Secret）可添加多行，分别填写不同的【群 OPENID】或【个人 OPENID】，并配置独立的【⚙️ 订阅规则】（如群 A 订阅日向坂、群 B 订阅乃木坂），相互独立、互不干扰。<br/>
-        • <b>指令监听去重</b>：若启用「私聊 Bot 查询信息」，系统会自动对相同 App ID 聚合复用单个 WebSocket 连接，绝不重复连接或冲突。<br/>
-        • <b>目标 OpenID 获取</b>：已知可直接填；不知则点「🎯 自动获取」，向 Bot 发送一条私聊消息即可自动捕获回填。
-      </div>
-    </details>
+    <p class="hint" id="qqBotHint" style="margin-top: 10px; margin-bottom: 0; line-height: 1.55;">
+      Client Secret 由对应行「填写」保存到 <code>.env</code>；多个私聊或群聊目标请添加多行并分别设置 OpenID 与订阅规则。
+    </p>
 
     <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
@@ -577,15 +566,9 @@
         </div>
       </div>
 
-      <details class="help-box" style="margin-top: 10px;">
-        <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">
-          ℹ️ 指令与权限说明
-        </summary>
-        <div class="hint" style="margin-top: 6px; line-height: 1.65;">
-          • <b>私聊与群聊 @ 使用</b>：白名单用户私聊 Bot 或在群内 @机器人 发送 <code>/help</code> 可查看指令菜单（支持 <code>/status</code> 运行状态、<code>/members</code> 监控偶像、<code>/latest</code> 最新消息、<code>/search</code> 归档搜索、<code>/ping</code> 延时测试等）。<br/>
-          • <b>社媒自动抓取与双语翻译</b>：直接向 Bot 发送 X(Twitter) / Instagram / TikTok 动态链接，将自动下载原图/高清视频并生成 AI 双语翻译回复！
-        </div>
-      </details>
+      <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+        指令权限由上方模式和 OpenID 白名单控制；详细命令与部署说明请参阅 README。
+      </p>
     </div>
   </div>
 
@@ -598,7 +581,7 @@
       </label>
       <label class="field" style="grid-column: 1 / -1; margin: 0;">远程媒体访问基地址（NapCat 不在本机时填写）
         <input id="napcatMediaBaseUrl" placeholder="例如: http://192.168.22.13:46046" type="text"/>
-        <small class="hint">Windows NapCat 需要通过此地址读取群晖上的图片、视频和音频；同机部署可留空。</small>
+        <small class="hint">跨容器或跨主机时必须填写 NapCat 可访问的媒体地址；同一共享文件系统可留空。</small>
       </label>
     </div>
     <div class="table-wrap">
@@ -617,15 +600,9 @@
     <div style="margin-top: 12px;">
       <button class="btn" id="btnAddNapcat" type="button">➕ 添加 NapCat 路由</button>
     </div>
-    <details class="help-box" style="margin-top: 12px;">
-      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
-        ℹ️ NapCat QQ 群推送说明
-      </summary>
-      <div class="hint" style="margin-top: 8px; line-height: 1.65;">
-        • <b>API 地址</b>：填写 NapCat OneBot 服务的 HTTP 消息发送接口（如 <code>http://127.0.0.1:3000/send_group_msg</code> 或 <code>http://127.0.0.1:3000</code>）。<br/>
-        • <b>群号与差异化路由</b>：添加多行群号，并分别为每个群配置独立的【⚙️ 订阅规则】，实现不同群接收不同偶像成员的消息推送。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      API 地址可填写基础地址或完整的 <code>/send_group_msg</code> 接口；不同群组可通过各自的订阅规则分别接收消息。
+    </p>
   </div>
 
   <!-- Block 4: Telegram Bot 模块 -->
@@ -650,16 +627,9 @@
     <div style="margin-top: 12px;">
       <button class="btn" id="btnAddTGBot" type="button">➕ 添加 TG Bot</button>
     </div>
-    <details class="help-box" style="margin-top: 12px;">
-      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">
-        ℹ️ Telegram Bot 配置与多 Bot / 多频道分发说明
-      </summary>
-      <div class="hint" style="margin-top: 8px; line-height: 1.65;">
-        • <b>每个 Bot 使用独立 Token</b>：在对应行点击「填写」，凭证会写入 <code>.env</code>。变量名由 Bot 名称生成（例如 <code>tg_bot1</code> → <code>TG_BOT1_TOKEN</code>）；未配置专属 Token 的 Bot 不会注册或推送。<br/>
-        • <b>Target Chat ID 格式</b>：个人用户填 numeric ID（如 <code>12345678</code>）；群组/频道填 <code>-100</code> 开头的群 ID。<br/>
-        • <b>多目标路由推送</b>：通过添加多行配置，将不同成员的消息分发给不同的 TG 群组或频道。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      每个 Bot 使用独立的 <code>.env</code> Token；Target Chat ID 支持个人、群组和频道，多个目标请添加多行。
+    </p>
   </div>
 </section>
 <!-- ── 动态监控 ─────────────────────────────── -->
@@ -685,12 +655,9 @@
       </label>
 
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 博客推送目标配置提示</summary>
-      <div class="hint" style="margin-top: 6px;">
-        博客具体的推送目标渠道，请在「推送通道」对应卡片（QQ Bot / NapCat / Telegram）中为各通道勾选「推博客」。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      博客推送目标在「推送通道」页面的对应路由中配置。
+    </p>
   </div>
 
   <!-- Card 2: 𝕏 (Twitter) 监控设置 -->
@@ -710,12 +677,6 @@
         <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
       </label>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 𝕏 抓取原理与原图直链说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        采用免登录 Syndication API 与 Nitter 兜底链路，自动将推文配图升级为 <code>?name=orig</code> 最高清原图格式；支持图片无障碍 alt 描述自动提取并送交 AI 翻译。
-      </div>
-    </details>
   </div>
 
   <!-- Card 3: 📸 Instagram 监控设置 -->
@@ -744,7 +705,7 @@
           <span id="igSessionStatus"></span>
         </div>
         <div id="igSessionDetail" style="font-size:12px; color:var(--muted); margin-top:4px;">
-          支持 Netscape / JSON / 完整 Cookies 格式，保障 Story 与图集解析
+          支持 Netscape / JSON / 完整 Cookies 格式；Story 需要登录 Cookie，公开 Feed 可免登录。
         </div>
       </div>
       <div style="display:flex; gap:8px;">
@@ -753,12 +714,6 @@
         <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
       </div>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">🛡️ Instagram 防风控安全机制说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        系统内置 <code>ig_safety.py</code> 安全闸门：每小时硬顶配额限制、请求间隔抖动与 6 小时熔断冷却。Story 抓取需要配置 Session ID；若无 Session ID 则仅抓取公开 Feed。
-      </div>
-    </details>
   </div>
 
   <!-- Card 4: 🎵 TikTok / TikTok Live 监控与直播切片录制 -->
@@ -782,12 +737,6 @@
         <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
       </label>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">🎥 TikTok Live 录制与分片机制</summary>
-      <div class="hint" style="margin-top: 6px;">
-        直播录制采用 8s 超轻量探测；开播后后台自动拉起 ffmpeg 混流无损切片（默认每 30 分钟分片），断流自动续录，停播后自动通过全通道推送通知。
-      </div>
-    </details>
   </div>
 
   <!-- Card 5: 🧰 实用工具 · 单条社媒链接解析与手动推送 -->
@@ -898,12 +847,6 @@
         <button class="btn small danger" id="btnClearZhipuKey" type="button" style="display:none;">清空</button>
       </div>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 双引擎智能轮番调用与自动容灾说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        同时配置 Gemini 与智谱 API Key 时，系统在每次翻译请求时<b>智能交替轮流分发（Round-Robin）</b>，分摊单家配额并大幅提升并发响应速度；当任意一家遭遇限频（429）或网络故障时，<b>自动无缝降级</b>至另一引擎模型。
-      </div>
-    </details>
   </div>
 
   <div class="card">
@@ -917,12 +860,6 @@
       </label>
     </div>
     <div id="proxyTestResult" style="margin-top: 4px;"></div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 代理配置与作用域说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        配置后将接管 <b>Google Gemini 翻译、Telegram 推送、Instagram 抓取、X / TikTok 抓取与 Message 消息轮询</b> 等外网请求；若留空则自动读取宿主机 <code>HTTP_PROXY</code> 环境变量或使用直连。
-      </div>
-    </details>
   </div>
 
   <div class="card">
@@ -936,13 +873,6 @@
         <input id="summaryHour" max="23" min="0" type="number"/>
       </label>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 归档与自动标签说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        • <b>自动识别图片标签</b>：开启后后台自动使用视觉模型对新图片提取特征标签；关闭时<b>停止自动打标签</b>，且归档页<b>不显示自动识别出的标签</b>，<b>对手动自定义标签功能完全无影响</b>。<br/>
-        • 归档内容可在 <a href="/archive">📖 消息归档</a> 页浏览；归档的访问权限（是否允许游客免登录浏览）可在「🔑 用户」选项卡中统一管理。
-      </div>
-    </details>
   </div>
 
   <div class="card">
@@ -952,12 +882,9 @@
       <label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
       <label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">⚠️ 安全与监听配置警告</summary>
-      <div class="hint" style="margin-top: 6px;">
-        关闭开关并保存后需通过修改 <code>config.json</code> 才能重新打开。监听地址改为非 127.0.0.1 前请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      监听地址或端口修改需重启生效；绑定非 <code>127.0.0.1</code> 前，请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。
+    </p>
   </div>
 </section>
 
@@ -970,7 +897,8 @@
           <span>🌐</span> 归档公开访问（游客免登录）
         </h2>
         <div class="hint" style="margin-top:6px; line-height:1.6;">
-          开启后，访客无需输入账号密码即可直接浏览 <a href="/archive" target="_blank" style="color:var(--accent); font-weight:600;">📚 消息与博客归档</a>；管理后台（配置、凭证、日志及用户管理等）依然严格受管理员密码保护。
+          仅归档页允许游客访问，管理后台仍需管理员登录。
+          <a href="/archive" target="_blank" style="color:var(--accent); font-weight:600;">打开归档 ↗</a>
         </div>
       </div>
       <label class="switch" style="font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:8px;">
@@ -992,14 +920,9 @@
     <div style="margin-top:12px">
       <button class="btn" id="btnAddUser" type="button">＋ 添加用户</button>
     </div>
-    <details class="help-box" style="margin-top: 14px;">
-      <summary style="font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 角色权限说明与安全防锁定机制</summary>
-      <div class="hint" style="margin-top: 8px;">
-        · <b>admin</b> 可使用管理端全部功能；<b>viewer</b> 只能访问 <a href="/archive">📚 消息归档</a>。<br/>
-        · 密码以 scrypt 加盐哈希存储，任何界面都不会回显；改密码会立即让该用户已登录的会话失效。<br/>
-        · <b>防锁死机制</b>：系统禁止删除或降级最后一个 admin 账号，且禁止删除当前正在登录的账号。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      <code>admin</code> 可管理全部功能，<code>viewer</code> 仅可访问归档；系统会阻止删除或降级最后一个管理员。
+    </p>
   </div>
 </section>
 
@@ -1032,12 +955,9 @@
       <button class="btn" id="btnApplyJson" type="button">应用到表单</button>
       <button class="btn" id="btnResetJson" type="button">从表单刷新</button>
     </div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ JSON 配置模式说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        保存时服务端会按 schema 校验，并以标准分区注释重新生成 <code>config.json</code>（自定义注释会丢失）。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      保存时服务端会按 Schema 校验，并按标准分区重写 <code>config.json</code>。
+    </p>
   </div>
 
   <div class="card">
@@ -1049,12 +969,9 @@
       </table>
     </div>
     <div class="empty" hidden="" id="historyEmpty">还没有历史快照（保存一次配置后出现）。</div>
-    <details class="help-box" style="margin-top: 10px;">
-      <summary style="font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none;">ℹ️ 历史快照与安全回滚说明</summary>
-      <div class="hint" style="margin-top: 6px;">
-        恢复前会自动将当前版本快照一份，因此恢复操作本身可以再撤销。
-      </div>
-    </details>
+    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      回滚前会自动保存当前版本快照，恢复操作也可以再次撤销。
+    </p>
   </div>
 </section>
 </main>
