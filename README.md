@@ -145,6 +145,44 @@ curl -fsS http://127.0.0.1:46046/api/health/status
 
 生产环境建议将 `image` 固定到已通过 CI 的版本标签或镜像 digest，而不是长期依赖会漂移的 `latest`。
 
+#### NapCat QQ 群推送部署方式
+
+NapCat 有两种常见部署方式，请按实际网络拓扑选择：
+
+**方式 1：与主程序同一份 Compose（群晖推荐）**
+
+使用仓库自带的 `docker-compose.with-napcat.yml`。两个容器会加入同一个 Docker 网络，主程序通过服务名访问 NapCat：
+
+```yaml
+QQ_BOT_API=http://napcat:3000/send_group_msg?access_token=<OneBot_HTTP_Token>
+NAPCAT_API_URL=http://napcat:3000/send_group_msg?access_token=<OneBot_HTTP_Token>
+NAPCAT_MEDIA_BASE_URL=http://sakamichi-push:46046
+```
+
+其中 `<OneBot_HTTP_Token>` 是 NapCat OneBot HTTP 服务的 Token，**不是** NapCat WebUI 登录 Token。若 NapCat 未启用 HTTP Token，则删除 `?access_token=...`。媒体基地址必须是 NapCat 容器能够访问的地址；同一 Compose 网络优先使用 `http://sakamichi-push:46046`。
+
+**方式 2：NapCat 在另一台电脑或另一套容器**
+
+将 API 地址改为 NapCat 所在主机的局域网地址，例如：
+
+```text
+http://192.168.1.20:3000/send_group_msg?access_token=<OneBot_HTTP_Token>
+```
+
+同时将 `NAPCAT_MEDIA_BASE_URL` 设置为主程序对 NapCat 可访问的 HTTP 地址，例如 `http://192.168.1.10:46046`。不要填写主程序容器内部的 `/app/data/...` 路径；远程 NapCat 无法读取该路径，会出现 `ENOENT`。
+
+> **配置优先级**：Compose 环境变量 / `.env` 会覆盖 `config/config.json`。如果已经在 Web 管理端填写 API 地址，请不要在 Compose 中保留旧的 `QQ_BOT_API` 或 `NAPCAT_API_URL`，否则页面修改不会生效。
+
+部署或修改后执行：
+
+```bash
+docker compose -f docker-compose.with-napcat.yml up -d --force-recreate
+docker logs --tail 100 sakamichi-push
+curl -fsS http://127.0.0.1:46046/api/health/status
+```
+
+预期日志包含 `NapCat QQ 连通正常` 和 `启动状态：READY`。
+
 ---
 
 ### 方式 B：原生 Python 环境运行
@@ -484,6 +522,7 @@ ZHIPU_API_KEY=df488cc9...              # 智谱开放平台 API Key
 TG_BOT1_TOKEN=123456:ABC...            # config.json 中 tg_bot1 的专属 Token
 # TG_BOT2_TOKEN=123456:XYZ...           # config.json 中 tg_bot2 的专属 Token
 WEB_ADMIN_TOKEN=your_token             # Web 管理端外部 API 调用 Token (可选)
+NAPCAT_MEDIA_SIGNING_SECRET=change_me  # 远程媒体签名密钥（建议使用 32 字节以上随机值）
 INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 ```
 
@@ -551,6 +590,30 @@ Telegram 每个 Bot 必须配置独立的 `<Bot 名称大写>_TOKEN` 环境变�
 <summary><b>Q8: 更新后如何确认运行的是新版本？</b></summary>
 
 Docker 部署请先执行 `docker compose pull && docker compose up -d`，再请求 `/api/health/status` 验证服务已恢复。若使用自定义部署脚本，应先确认脚本同步的 Git 提交，再执行同样的健康检查；不要只刷新浏览器页面判断版本是否更新。
+</details>
+
+<details>
+<summary><b>Q9: NapCat 启动检查 HTTP 403，但测试推送也失败？</b></summary>
+
+优先检查 OneBot HTTP Token。`WEBUI_TOKEN` 只用于 NapCat 网页控制台，不能作为 OneBot API Token。使用 `curl` 验证：
+
+```bash
+curl -i -H "Authorization: Bearer <OneBot_HTTP_Token>" http://<NapCat主机>:3000/get_status
+```
+
+若返回 `token verify failed!`，说明 Token 错误；若返回 HTTP 200，再检查 Compose 中的 `QQ_BOT_API` 是否覆盖了 Web 管理端保存的配置。启动检查和实际推送使用同一地址及鉴权信息。
+</details>
+
+<details>
+<summary><b>Q10: 动态推送出现 C:\app\data\... ENOENT？</b></summary>
+
+这是远程 NapCat 收到了主程序容器的本地文件路径。请配置 `NAPCAT_MEDIA_BASE_URL`，同一 Compose 使用 `http://sakamichi-push:46046`，跨主机使用群晖可访问的内网 HTTP 地址，然后重建容器。推送日志应出现 `/api/social/media/`，而不是 `file:///` 或 `C:\app\data\`。
+</details>
+
+<details>
+<summary><b>Q11: 健康检查显示 DEGRADED，但通道后来已经恢复？</b></summary>
+
+启动检查只反映启动瞬间状态。确认外部服务已恢复后重启主程序容器，或执行管理端“重新载入”。如果 NapCat 容器比主程序启动更慢，请等待 NapCat 完成登录后再重启主程序。
 </details>
 
 ---
