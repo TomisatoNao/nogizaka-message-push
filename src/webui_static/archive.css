@@ -307,6 +307,25 @@ html.view-blog #blogGrid { display: block !important; }
   .center { text-align: center; padding: 28px 0; color: var(--muted); }
   #loadMore { display: block; margin: 18px auto; }
   #loadMore[hidden] { display: none; }
+  .message-month-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    margin: 24px auto 8px;
+    padding: 12px 0 4px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .message-month-footer .nav { min-width: 104px; }
+  .message-month-current {
+    min-width: 140px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+  }
   .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
   .tag-chip { display: inline-block; padding: 2px 10px; border-radius: 999px;
                background: var(--accent-soft); color: var(--accent); font-size: 12px;
@@ -2481,6 +2500,22 @@ html.view-blog #blogGrid { display: block !important; }
       text-align: center !important;
       padding: 7px 26px 7px 10px !important;
       font-size: 13.5px !important;
+    }
+    .message-month-footer {
+      gap: 6px;
+      margin-top: 20px;
+      padding-top: 10px;
+    }
+    .message-month-footer .nav {
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 8px 10px;
+      white-space: nowrap;
+    }
+    .message-month-current {
+      min-width: 0;
+      flex: 0 0 auto;
+      font-size: 12.5px;
     }
     /* 搜索栏单行紧凑 Flex 布局 */
     .toolbar {

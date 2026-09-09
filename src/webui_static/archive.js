@@ -928,6 +928,7 @@ function _enterMemberMode() {
   curMode = "msg";
   setHtmlViewClass("msg");
   curBlogGroup = "";
+  hideMessageMonthFooter();
   if ($("tabHome")) $("tabHome").classList.remove("active");
   if ($("tabMsg")) $("tabMsg").classList.add("active");
   if ($("tabBlog")) $("tabBlog").classList.remove("active");
@@ -996,6 +997,7 @@ async function selectBlogGroup(key, author = "", updateHash = true, routeState =
   setHtmlViewClass("blog");
   curMember = "";
   curBlogGroup = key;
+  hideMessageMonthFooter();
   curBlogAuthor = author || "";
   try {
     localStorage.setItem("archive_last_blog_group", key);
@@ -2055,6 +2057,7 @@ async function selectMember(name, keepHash) {
   curMember = name;
   try { localStorage.setItem("archive_last_msg_member", name); } catch (_) {}
   curBlogGroup = "";     // 切换到成员模式，清空博客分组
+  hideMessageMonthFooter();
   syncChipHighlight();  // 同步 chip 高亮
   if (!keepHash) searchQuery = "";
   syncSearchInput();
@@ -2064,6 +2067,7 @@ async function selectMember(name, keepHash) {
   } catch (e) {
     if (e.name === "AbortError" || version !== memberVersion) return;
     months = [];
+    hideMessageMonthFooter();
     $("monthSelect").innerHTML = "";
     $("stats").textContent = "";
     resetContent();
@@ -2073,6 +2077,7 @@ async function selectMember(name, keepHash) {
   }
   if (version !== memberVersion) return;
   months = data.ok ? data.months : [];
+  syncMessageMonthFooter();
   const sel = $("monthSelect");
   sel.innerHTML = "";
   for (const m of months) {
@@ -2082,6 +2087,7 @@ async function selectMember(name, keepHash) {
     sel.appendChild(opt);
   }
   if (!months.length) {
+    hideMessageMonthFooter();
     resetContent();
     $("stats").textContent = "";
     $("emptyHint").textContent = "成员「" + name + "」还没有归档内容。请从成员列表重新选择。";
@@ -2113,13 +2119,53 @@ function syncHash() {
   writeArchiveHash(p.toString());
 }
 
+function currentMessageMonthIndex() {
+  if (!curYM) return -1;
+  return months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
+}
+
+function hideMessageMonthFooter() {
+  const footer = $("messageMonthFooter");
+  if (footer) footer.hidden = true;
+}
+
+function syncMessageMonthFooter() {
+  const footer = $("messageMonthFooter");
+  if (!footer) return;
+
+  const monthIndex = currentMessageMonthIndex();
+  const visible = curMode === "msg" && !!curMember && !searchQuery && monthIndex >= 0;
+  footer.hidden = !visible;
+  if (!visible) return;
+
+  $("messageMonthFooterCurrent").textContent = curYM.year + " 年 " + curYM.month + " 月";
+  $("prevMonthBottom").disabled = monthIndex >= months.length - 1;
+  $("nextMonthBottom").disabled = monthIndex <= 0;
+}
+
+function navigateAdjacentMonth(offset, { scrollToTop = false } = {}) {
+  const monthIndex = currentMessageMonthIndex();
+  const target = monthIndex >= 0 ? months[monthIndex + offset] : null;
+  if (!target) return;
+
+  selectMonth(target.year, target.month);
+  if (scrollToTop) {
+    try {
+      window.scrollTo({ top: 0, behavior: "instant" });
+    } catch (_) {
+      window.scrollTo(0, 0);
+    }
+  }
+}
+
 
 async function selectMonth(year, month) {
   curYM = { year, month };
   calYM = { year, month };
   renderCalendar();
   $("monthSelect").value = year + "-" + month;
-  const idx = months.findIndex((m) => m.year === year && m.month === month);
+  syncMessageMonthFooter();
+  const idx = currentMessageMonthIndex();
   $("prevMonth").disabled = idx >= months.length - 1;
   $("nextMonth").disabled = idx <= 0;
   resetContent();
@@ -2204,6 +2250,7 @@ async function loadPage() {
 function startSearch(q, updateHash = true) {
   searchQuery = normalizedQuery(q);
   syncSearchInput();
+  syncMessageMonthFooter();
   resetContent();
   if (curMode === "blog") {
     loadBlogPage(1, updateHash);
@@ -2249,6 +2296,7 @@ $("searchSubmit").addEventListener("click", () => {
 function clearSearch() {
   searchQuery = "";
   syncSearchInput();
+  syncMessageMonthFooter();
   if (curMode === "blog") { loadBlogPage(1, true); return; }
   if (curYM) selectMonth(curYM.year, curYM.month);
 }
@@ -2802,12 +2850,16 @@ $("monthSelect").addEventListener("change", () => {
   selectMonth(y, m);
 });
 $("prevMonth").addEventListener("click", () => {
-  const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
-  if (idx < months.length - 1) selectMonth(months[idx + 1].year, months[idx + 1].month);
+  navigateAdjacentMonth(1);
 });
 $("nextMonth").addEventListener("click", () => {
-  const idx = months.findIndex((m) => m.year === curYM.year && m.month === curYM.month);
-  if (idx > 0) selectMonth(months[idx - 1].year, months[idx - 1].month);
+  navigateAdjacentMonth(-1);
+});
+$("prevMonthBottom").addEventListener("click", () => {
+  navigateAdjacentMonth(1, { scrollToTop: true });
+});
+$("nextMonthBottom").addEventListener("click", () => {
+  navigateAdjacentMonth(-1, { scrollToTop: true });
 });
 $("loadMore").addEventListener("click", () => {
   if (pageLoading || page >= totalPages) return;
@@ -3218,6 +3270,7 @@ async function showHome() {
   const requestVersion = ++_homeRequestVersion;
   const routeAtStart = location.hash;
   curMode = "home";
+  hideMessageMonthFooter();
   setHtmlViewClass("home");
   if ($("tabHome")) $("tabHome").classList.add("active");
   if ($("tabMsg")) $("tabMsg").classList.remove("active");
@@ -4069,6 +4122,7 @@ function openLetterLightbox(idx) {
 
 async function selectLetterMember(mName) {
   curMode = "letter";
+  hideMessageMonthFooter();
   setHtmlViewClass("letter");
   curLetterMember = mName;
   try { localStorage.setItem("archive_last_letter_member", mName); } catch (_) {}

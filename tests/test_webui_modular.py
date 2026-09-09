@@ -596,9 +596,45 @@ def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
     assert "/static/archive.js?v=20260910_1" in html
-    assert "/static/archive.css?v=20260905_1" in html
+    assert "/static/archive.css?v=20260910_1" in html
     assert "/static/archive.js?v=20260910_1" in perf
-    assert "/static/archive.css?v=20260905_1" in perf
+    assert "/static/archive.css?v=20260910_1" in perf
+
+
+def test_archive_message_month_footer_contract():
+    """消息列表底部应提供与顶部一致的可用月份切换入口。"""
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    styles = (_ROOT / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+
+    assert '<nav class="message-month-footer" id="messageMonthFooter"' in html
+    assert 'id="prevMonthBottom"' in html
+    assert 'id="nextMonthBottom"' in html
+    assert 'id="messageMonthFooterCurrent"' in html
+    assert 'aria-label="消息月份导航"' in html
+
+    # 顶部/底部共用相邻月份计算，沿用已有 months 列表和 selectMonth 流程。
+    assert "function currentMessageMonthIndex()" in script
+    assert "function navigateAdjacentMonth(offset, { scrollToTop = false } = {})" in script
+    assert "navigateAdjacentMonth(1);" in script
+    assert "navigateAdjacentMonth(-1);" in script
+    assert "navigateAdjacentMonth(1, { scrollToTop: true });" in script
+    assert "navigateAdjacentMonth(-1, { scrollToTop: true });" in script
+    assert 'window.scrollTo({ top: 0, behavior: "instant" });' in script
+    assert 'curMode === "msg" && !!curMember && !searchQuery && monthIndex >= 0' in script
+    assert 'footer.hidden = !visible;' in script
+    assert '$("prevMonthBottom").disabled = monthIndex >= months.length - 1;' in script
+    assert '$("nextMonthBottom").disabled = monthIndex <= 0;' in script
+    assert '/api/archive/months?member=' in script
+    assert "syncHash();" in script
+
+    # 桌面和移动端都保留足够的触控空间，且导航不使用 fixed/sticky 覆盖内容。
+    assert ".message-month-footer" in styles
+    assert ".message-month-footer .nav" in styles
+    assert ".message-month-current" in styles
+    assert "@media (max-width: 640px)" in styles
+    assert "flex: 1 1 0;" in styles
+    assert "position: fixed" not in styles.split(".message-month-footer", 1)[1].split("}", 1)[0]
 
 
 def test_archive_message_media_visibility_contract():
