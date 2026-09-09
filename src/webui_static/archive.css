@@ -308,18 +308,24 @@ html.view-blog #blogGrid { display: block !important; }
   #loadMore { display: block; margin: 18px auto; }
   #loadMore[hidden] { display: none; }
   .message-month-footer {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    justify-content: center;
     gap: 10px;
-    width: 100%;
-    margin: 24px auto 8px;
+    /* 消息气泡最多占主列 92%，底部导航跟随同一视觉宽度并左对齐。 */
+    width: 92%;
+    margin: 24px 0 8px;
     padding: 12px 0 4px;
     border-top: 1px solid var(--border-soft);
   }
-  .message-month-footer .nav { min-width: 104px; }
+  .message-month-footer .nav {
+    width: 132px;
+    min-width: 0;
+  }
+  .message-month-footer .nav:first-child { justify-self: end; }
+  .message-month-footer .nav:last-child { justify-self: start; }
   .message-month-current {
-    min-width: 140px;
+    min-width: 120px;
     color: var(--muted);
     font-size: 13px;
     font-weight: 600;
@@ -2160,6 +2166,94 @@ html.view-blog #blogGrid { display: block !important; }
     accent-color: var(--primary, #7c3aed);
     cursor: pointer;
   }
+  .blog-group-backfill-card {
+    max-width: 440px;
+    text-align: left;
+  }
+  .blog-group-backfill-card .cm-icon,
+  .blog-group-backfill-card .cm-title,
+  .blog-group-backfill-card > .cm-message {
+    text-align: center;
+  }
+  .blog-group-backfill-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 4px 0 8px;
+    color: #a1a1a6;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .blog-group-select-all,
+  .blog-group-advanced {
+    border: 1px solid rgba(124, 58, 237, 0.35);
+    border-radius: 8px;
+    background: rgba(124, 58, 237, 0.1);
+    color: #c7b6ff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+  }
+  .blog-group-select-all {
+    padding: 5px 10px;
+  }
+  .blog-group-select-all:hover,
+  .blog-group-advanced:hover {
+    background: rgba(124, 58, 237, 0.2);
+    border-color: rgba(124, 58, 237, 0.6);
+  }
+  .blog-group-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .blog-group-option {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 8px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #f2f2f7;
+    cursor: pointer;
+    font-size: 13px;
+    transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+  }
+  .blog-group-option:has(input:checked) {
+    border-color: rgba(124, 58, 237, 0.8);
+    background: rgba(124, 58, 237, 0.18);
+    color: #d6c8ff;
+  }
+  .blog-group-option input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    accent-color: var(--primary, #7c3aed);
+    cursor: pointer;
+  }
+  .blog-group-option-icon {
+    font-size: 15px;
+    line-height: 1;
+  }
+  .blog-group-backfill-note {
+    margin: 12px 0 8px;
+    color: #8e8e93;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .blog-group-advanced {
+    width: 100%;
+    padding: 8px 10px;
+    margin-bottom: 16px;
+  }
+  .blog-group-backfill-card .cm-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
   .cm-actions {
     display: flex;
     gap: 10px;
@@ -2229,6 +2323,8 @@ html.view-blog #blogGrid { display: block !important; }
   @media (max-width: 640px) {
     .blog-hero .bh-title { font-size: 18px; }
     .br-content { padding: 20px 16px 60px; border-left: none; border-right: none; box-shadow: none; font-size: 15px; }
+    .blog-group-options { grid-template-columns: 1fr; }
+    .blog-group-option { min-height: 46px; padding: 9px 11px; }
   }
 
   /* 移动端触控优化 */
@@ -2502,19 +2598,20 @@ html.view-blog #blogGrid { display: block !important; }
       font-size: 13.5px !important;
     }
     .message-month-footer {
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      width: 100%;
       gap: 6px;
-      margin-top: 20px;
+      margin: 20px 0 8px;
       padding-top: 10px;
     }
     .message-month-footer .nav {
-      flex: 1 1 0;
+      width: 100%;
       min-width: 0;
       padding: 8px 10px;
       white-space: nowrap;
     }
     .message-month-current {
       min-width: 0;
-      flex: 0 0 auto;
       font-size: 12.5px;
     }
     /* 搜索栏单行紧凑 Flex 布局 */

@@ -414,6 +414,11 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 | **🔑 用户** | scrypt 加盐哈希用户鉴权、在线增删用户、分配角色、随机高强度密码生成。 |
 | **🛠️ 高级** | 实时脱敏运行日志控制台、全局 JSON 配置可视化在线编辑及 **10 份历史配置快照一键回滚**。 |
 
+在「👥 成员工具」中选择「归档三团全量博客」即可按团体批量回填历史博客。团体默认不选，
+可多选乃木坂、樱坂、日向坂；任务会在后台按团顺序运行，进度和失败摘要写入系统日志。
+全量回填保存正文、原始图片 URL 和本地图片，重复运行会跳过已有文章并补齐缺失媒体，
+不会自动调用翻译。需要只补抓某位成员时，使用弹窗中的「高级：按成员 URL 补抓」。
+
 ### 2. QQ 官方机器人私聊指令矩阵
 
 启用 QQ 官方 Bot 并在后台开启「指令监听」后，授权管理员私聊机器人即可直接发送交互指令（走被动回复通道，不消耗主动推送额度）：
@@ -442,6 +447,7 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 | `archive_letters.py` | `python tools/archive_letters.py [成员名]` | 归档粉丝信件（Fan Letters）高清信纸原图入库 |
 | `backfill_archive.py` | `python tools/backfill_archive.py 冨里奈央 --from 2023-01-01` | 回填指定成员的历史 Message 消息与媒体 |
 | `archive_member.py` | `python tools/archive_member.py <博客URL> --translate` | 归档全量历史博客、下载原图并进行 AI 补翻 |
+| `backfill_blogs.py` | `python tools/backfill_blogs.py --group nogizaka --group sakurazaka --download-images` | 按团体顺序回填全量历史博客；可下载本地图片，重复运行会跳过已有文章并补齐缺失媒体 |
 | `sync_archive_db.py` | `python tools/sync_archive_db.py` | 扫描本地磁盘归档并全量重构 SQLite 数据库与 FTS5 索引 |
 | `tag_images.py` | `python tools/tag_images.py --member 冨里奈央` | 批量对历史归档图片调用 Gemini Vision 补全标签 |
 | `get_qq_openid.py` | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 快速捕获 QQ 官方 Bot 私聊用户的 `target_openid` |

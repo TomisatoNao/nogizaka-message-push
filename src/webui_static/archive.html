@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260906_1">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260910_1">
+<link rel="stylesheet" href="/static/archive.css?v=20260910_3">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -48,8 +48,8 @@
         <span class="arrow">▾</span>
       </button>
       <div class="dropdown-menu">
-        <button class="dropdown-item" id="btnArchiveMember" onclick="promptArchiveMember()">
-          <span class="icon">📄</span> 抓取成员全量博客
+        <button class="dropdown-item" id="btnArchiveMember" onclick="promptArchiveGroups()">
+          <span class="icon">📄</span> 归档三团全量博客
         </button>
         <button class="dropdown-item" id="btnArchiveMessage" onclick="promptArchiveMessage()">
           <span class="icon">💬</span> 回填成员历史消息
@@ -343,6 +343,44 @@
   </div>
 </div>
 
+<!-- Group Blog Backfill Modal -->
+<div id="blogGroupBackfillModal" class="custom-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="bgbTitle" aria-describedby="bgbMessage" style="display:none;">
+  <div class="custom-modal-card blog-group-backfill-card">
+    <div class="cm-icon">📚</div>
+    <h3 class="cm-title" id="bgbTitle">归档三团全量博客</h3>
+    <p class="cm-message" id="bgbMessage">选择要归档的团体；已有文章自动跳过，图片保存到本地。</p>
+
+    <div class="blog-group-backfill-toolbar">
+      <span>归档团体</span>
+      <button id="bgbSelectAll" class="blog-group-select-all" type="button">全选</button>
+    </div>
+    <div class="blog-group-options" role="group" aria-label="选择博客归档团体">
+      <label class="blog-group-option" for="bgbNogizaka">
+        <input type="checkbox" id="bgbNogizaka" value="nogizaka" />
+        <span class="blog-group-option-icon">💜</span>
+        <span>乃木坂46</span>
+      </label>
+      <label class="blog-group-option" for="bgbSakurazaka">
+        <input type="checkbox" id="bgbSakurazaka" value="sakurazaka" />
+        <span class="blog-group-option-icon">🌸</span>
+        <span>樱坂46</span>
+      </label>
+      <label class="blog-group-option" for="bgbHinatazaka">
+        <input type="checkbox" id="bgbHinatazaka" value="hinatazaka" />
+        <span class="blog-group-option-icon">☀️</span>
+        <span>日向坂46</span>
+      </label>
+    </div>
+    <p class="blog-group-backfill-note">全量任务在后台运行，翻译请在博客页面按篇触发。</p>
+    <button id="bgbAdvanced" class="blog-group-advanced" type="button">高级：按成员 URL 补抓</button>
+
+    <div class="cm-actions">
+      <button id="bgbCancel" class="cm-btn secondary" type="button">取消</button>
+      <button id="bgbConfirm" class="cm-btn primary" type="button" disabled>开始归档</button>
+    </div>
+  </div>
+</div>
+
 <!-- Message Backfill Modal -->
 <div id="backfillMessageModal" class="custom-modal-backdrop" style="display:none;">
   <div class="custom-modal-card" style="max-width: 440px; text-align: left;">
@@ -404,7 +442,7 @@
     <div class="sheet-title">👥 成员归档工具</div>
     <button class="sheet-item" id="sheetBtnArchiveMember" type="button">
       <span class="icon">📄</span>
-      <span class="label">抓取成员全量博客</span>
+      <span class="label">归档三团全量博客</span>
     </button>
     <button class="sheet-item" id="sheetBtnArchiveMessage" type="button">
       <span class="icon">💬</span>
@@ -447,7 +485,7 @@
 </dialog>
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
-<script src="/static/archive.js?v=20260910_1"></script>
+<script src="/static/archive.js?v=20260910_3"></script>
 
 </body>
 </html>

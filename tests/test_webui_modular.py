@@ -595,10 +595,27 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260910_1" in html
-    assert "/static/archive.css?v=20260910_1" in html
-    assert "/static/archive.js?v=20260910_1" in perf
-    assert "/static/archive.css?v=20260910_1" in perf
+    assert "/static/archive.js?v=20260910_3" in html
+    assert "/static/archive.css?v=20260910_3" in html
+    assert "/static/archive.js?v=20260910_3" in perf
+    assert "/static/archive.css?v=20260910_3" in perf
+
+
+def test_archive_group_blog_backfill_contract():
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    assert 'id="blogGroupBackfillModal"' in html
+    assert 'id="bgbNogizaka"' in html
+    assert 'id="bgbSakurazaka"' in html
+    assert 'id="bgbHinatazaka"' in html
+    assert 'id="bgbSelectAll"' in html
+    assert 'id="bgbAdvanced"' in html
+    assert "function promptArchiveGroups()" in script
+    assert 'fetch("/api/archive/blogs/archive_groups"' in script
+    assert 'JSON.stringify({ groups })' in script
+    assert "function promptArchiveMemberUrl()" in script
+    assert "翻译请在博客页面按篇触发" in html
 
 
 def test_archive_message_month_footer_contract():
@@ -632,8 +649,15 @@ def test_archive_message_month_footer_contract():
     assert ".message-month-footer" in styles
     assert ".message-month-footer .nav" in styles
     assert ".message-month-current" in styles
+    assert "grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);" in styles
+    assert ".message-month-footer .nav:first-child { justify-self: end; }" in styles
+    assert ".message-month-footer .nav:last-child { justify-self: start; }" in styles
+    assert "width: 92%;" in styles
+    assert "margin: 24px 0 8px;" in styles
     assert "@media (max-width: 640px)" in styles
-    assert "flex: 1 1 0;" in styles
+    assert "width: 132px;" in styles
+    assert "width: 100%;" in styles[styles.rfind(".message-month-footer {"):]
+    assert "margin: 20px 0 8px;" in styles
     assert "position: fixed" not in styles.split(".message-month-footer", 1)[1].split("}", 1)[0]
 
 

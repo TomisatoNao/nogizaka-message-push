@@ -2948,7 +2948,7 @@ if ($("sheetBtnCancel")) $("sheetBtnCancel").addEventListener("click", closeArch
 if ($("sheetBtnArchiveMember")) {
   $("sheetBtnArchiveMember").addEventListener("click", () => {
     closeArchiveSheet();
-    promptArchiveMember();
+    promptArchiveGroups();
   });
 }
 if ($("sheetBtnArchiveMessage")) {
@@ -3979,7 +3979,100 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
   });
 }
 
-async function promptArchiveMember() {
+const BLOG_BACKFILL_GROUPS = [
+  { id: "bgbNogizaka", key: "nogizaka" },
+  { id: "bgbSakurazaka", key: "sakurazaka" },
+  { id: "bgbHinatazaka", key: "hinatazaka" },
+];
+
+function selectedBlogBackfillGroups() {
+  return BLOG_BACKFILL_GROUPS
+    .filter(({ id }) => $(id)?.checked)
+    .map(({ key }) => key);
+}
+
+function syncBlogBackfillGroupUI() {
+  const selected = selectedBlogBackfillGroups();
+  const confirm = $("bgbConfirm");
+  const selectAll = $("bgbSelectAll");
+  if (confirm) confirm.disabled = selected.length === 0;
+  if (selectAll) selectAll.textContent = selected.length === BLOG_BACKFILL_GROUPS.length ? "清空" : "全选";
+  BLOG_BACKFILL_GROUPS.forEach(({ id }) => {
+    const input = $(id);
+    const option = input?.closest(".blog-group-option");
+    if (option) option.classList.toggle("selected", !!input.checked);
+  });
+}
+
+function closeBlogBackfillGroupModal() {
+  const modal = $("blogGroupBackfillModal");
+  if (modal) modal.style.display = "none";
+}
+
+function promptArchiveGroups() {
+  const modal = $("blogGroupBackfillModal");
+  if (!modal) return;
+  BLOG_BACKFILL_GROUPS.forEach(({ id }) => {
+    const input = $(id);
+    if (input) input.checked = false;
+  });
+  syncBlogBackfillGroupUI();
+  modal.style.display = "flex";
+  const first = $(BLOG_BACKFILL_GROUPS[0].id);
+  setTimeout(() => first?.focus(), 60);
+}
+
+if ($("blogGroupBackfillModal")) {
+  BLOG_BACKFILL_GROUPS.forEach(({ id }) => {
+    $(id)?.addEventListener("change", syncBlogBackfillGroupUI);
+  });
+  $("bgbSelectAll")?.addEventListener("click", () => {
+    const selectAll = selectedBlogBackfillGroups().length !== BLOG_BACKFILL_GROUPS.length;
+    BLOG_BACKFILL_GROUPS.forEach(({ id }) => {
+      const input = $(id);
+      if (input) input.checked = selectAll;
+    });
+    syncBlogBackfillGroupUI();
+  });
+  $("bgbCancel")?.addEventListener("click", closeBlogBackfillGroupModal);
+  $("bgbAdvanced")?.addEventListener("click", () => {
+    closeBlogBackfillGroupModal();
+    promptArchiveMemberUrl();
+  });
+  $("blogGroupBackfillModal").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeBlogBackfillGroupModal();
+  });
+  $("blogGroupBackfillModal").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeBlogBackfillGroupModal();
+  });
+  $("bgbConfirm")?.addEventListener("click", async () => {
+    const groups = selectedBlogBackfillGroups();
+    if (!groups.length) return;
+    const confirm = $("bgbConfirm");
+    if (confirm) confirm.disabled = true;
+    closeBlogBackfillGroupModal();
+    try {
+      const res = await fetch("/api/archive/blogs/archive_groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups }),
+      });
+      const data = await res.json();
+      const ok = res.ok && data.ok;
+      const error = Array.isArray(data.errors) ? data.errors.join("；") : "";
+      showToast(
+        data.msg || error || (ok ? "已成功启动后台博客归档任务！" : `归档请求失败（HTTP ${res.status}）`),
+        ok ? "success" : "error",
+      );
+    } catch (error) {
+      showToast("请求异常: " + error, "error");
+    } finally {
+      syncBlogBackfillGroupUI();
+    }
+  });
+}
+
+async function promptArchiveMemberUrl() {
   const result = await customPrompt({
     title: "📥 归档成员博客",
     message: "请输入任意坂道成员博客列表页 URL（支持乃木坂46 / 樱坂46 / 日向坂46）：",
@@ -4005,6 +4098,11 @@ async function promptArchiveMember() {
   } catch(e) {
     showToast("请求异常: " + e, "error");
   }
+}
+
+// 兼容旧版书签、脚本及外部页面调用；新入口使用 promptArchiveGroups()。
+async function promptArchiveMember() {
+  return promptArchiveMemberUrl();
 }
 
 async function promptArchiveMessage() {

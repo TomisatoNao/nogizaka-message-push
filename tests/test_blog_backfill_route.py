@@ -20,10 +20,28 @@ class Handler:
         self.code = code
 
 
+@pytest.fixture(autouse=True)
+def clear_blog_backfill_state():
+    """每个路由测试独立运行，避免模拟进程没有真实 collector 时残留锁。"""
+    with blog_backfill._BACKFILL_LOCK:
+        blog_backfill._clear_active_locked()
+    yield
+    with blog_backfill._BACKFILL_LOCK:
+        blog_backfill._clear_active_locked()
+
+
 def invoke(body, guard=lambda **_: True, command="POST"):
     handler = Handler()
     handler.command = command
     archive_handlers.handle_archive(handler, "blogs/archive_member", guard, lambda: body)
+    return handler
+
+
+def invoke_groups(body, guard=lambda **_: True, command="POST"):
+    handler = Handler()
+    handler.path = "/api/archive/blogs/archive_groups"
+    handler.command = command
+    archive_handlers.handle_archive(handler, "blogs/archive_groups", guard, lambda: body)
     return handler
 
 
@@ -130,3 +148,59 @@ def test_real_background_process_forwards_unicode_progress(monkeypatch, tmp_path
     assert any("博客进度 🌸" in line for line in logs)
     assert any(URL in line and "--translate" in line for line in logs)
     assert "exit_code=0" in logs[-1]
+
+
+@pytest.mark.parametrize(
+    "groups, expected",
+    [
+        (["sakurazaka", "nogizaka"], ["nogizaka", "sakurazaka"]),
+        (["hinatazaka"], ["hinatazaka"]),
+        (["nogizaka", "nogizaka", "hinatazaka"], ["nogizaka", "hinatazaka"]),
+    ],
+)
+def test_group_backfill_starts_selected_groups_in_fixed_order(monkeypatch, groups, expected):
+    calls = []
+    threads = []
+    process = SimpleNamespace(pid=456, stdout=io.StringIO("全量进度\n"), wait=lambda: 0)
+    monkeypatch.setattr(blog_backfill.subprocess, "Popen", lambda *a, **kw: calls.append((a, kw)) or process)
+    monkeypatch.setattr(blog_backfill.threading, "Thread", lambda **kw: SimpleNamespace(start=lambda: threads.append(kw)))
+    monkeypatch.setattr(blog_backfill, "log_all", lambda *a, **kw: None)
+
+    handler = invoke_groups({"groups": groups})
+    assert handler.code == 202
+    command = calls[0][0][0]
+    actual = [command[i + 1] for i, value in enumerate(command) if value == "--group"]
+    assert actual == expected
+    assert command[-1] == "--download-images"
+    assert "--translate" not in command
+    assert threads[0]["args"] == (process, handler.payload["request_id"])
+
+
+@pytest.mark.parametrize("body", [{}, {"groups": []}, {"groups": ["unknown"]}, {"groups": "nogizaka"}, {"groups": [1]}])
+def test_group_backfill_rejects_invalid_selection(monkeypatch, body):
+    monkeypatch.setattr(blog_backfill.subprocess, "Popen", lambda *a, **kw: pytest.fail("Invalid request launched process"))
+    assert invoke_groups(body).code == 400
+
+
+def test_group_backfill_returns_conflict_when_blog_task_is_running(monkeypatch):
+    process = SimpleNamespace(pid=789, poll=lambda: None)
+    with blog_backfill._BACKFILL_LOCK:
+        blog_backfill._ACTIVE_BACKFILL_PROC = process
+        blog_backfill._ACTIVE_BACKFILL_REQ_ID = "running123"
+        blog_backfill._ACTIVE_BACKFILL_KIND = "member_url"
+    monkeypatch.setattr(blog_backfill.subprocess, "Popen", lambda *a, **kw: pytest.fail("Concurrent request launched process"))
+    handler = invoke_groups({"groups": ["nogizaka"]})
+    assert handler.code == 409
+    assert handler.payload["request_id"] == "running123"
+    assert handler.payload["task"] == "member_url"
+
+
+def test_collector_releases_shared_task_state(monkeypatch):
+    process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: 0)
+    with blog_backfill._BACKFILL_LOCK:
+        blog_backfill._ACTIVE_BACKFILL_PROC = process
+        blog_backfill._ACTIVE_BACKFILL_REQ_ID = "trace123"
+        blog_backfill._ACTIVE_BACKFILL_KIND = "groups"
+    monkeypatch.setattr(blog_backfill, "log_all", lambda *a, **kw: None)
+    blog_backfill._collect_output(process, "trace123")
+    assert blog_backfill._ACTIVE_BACKFILL_PROC is None
