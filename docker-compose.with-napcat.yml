@@ -10,9 +10,6 @@ services:
       - TZ=Asia/Tokyo
       # 启用 NapCat OneBot11 推送通道
       - ENABLE_NAPCAT_QQ=true
-      # 容器内网直连 NapCat 服务的 HTTP API
-      - QQ_BOT_API=http://napcat:3000/send_group_msg
-      - NAPCAT_API_URL=http://napcat:3000/send_group_msg
     volumes:
       - ./config:/app/config
       - ./data:/app/data
@@ -26,15 +23,16 @@ services:
     container_name: napcat
     restart: unless-stopped
     environment:
+      - ACCOUNT=3376333268
       - HTTP_ENABLE=true
-      - HTTP_PORT=3000
+      - HTTP_PORT=36036
       - WEBUI_PORT=6099
       - WEBUI_TOKEN=tomisatonao
       - NAPCAT_UID=0
       - NAPCAT_GID=0
     ports:
       - "6099:6099" # NapCat 网页扫码登录控制台 (http://NAS_IP:6099/webui?token=tomisatonao)
-      - "3000:3000" # OneBot 11 HTTP 接口
+      - "36036:36036" # OneBot 11 HTTP 接口（使用高端口避免占用宿主机 3000）
     volumes:
       - ./napcat/config:/app/napcat/config
       - ./napcat/qq:/app/.config/QQ
