@@ -595,9 +595,9 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260906_1" in html
+    assert "/static/archive.js?v=20260909_1" in html
     assert "/static/archive.css?v=20260905_1" in html
-    assert "/static/archive.js?v=20260906_1" in perf
+    assert "/static/archive.js?v=20260909_1" in perf
     assert "/static/archive.css?v=20260905_1" in perf
 
 
@@ -912,4 +912,3 @@ def test_accounts_rename_route(monkeypatch):
     handler.do_POST()
     assert sent_resps[-1][0]["ok"] is True
     assert renamed == [("acc_old", "acc_new")]
-
