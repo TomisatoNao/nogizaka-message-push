@@ -151,15 +151,26 @@ NapCat 有两种常见部署方式，请按实际网络拓扑选择：
 
 **方式 1：与主程序同一份 Compose（群晖推荐）**
 
-使用仓库自带的 `docker-compose.with-napcat.yml`。两个容器会加入同一个 Docker 网络，主程序通过服务名访问 NapCat：
+使用仓库自带的 `docker-compose.with-napcat.yml`。该文件中的 NapCat OneBot HTTP 端口为 `36036`（`3000` 是其他部署的常见端口），两个容器会加入同一个 Docker 网络，主程序通过服务名访问 NapCat：
 
 ```yaml
-QQ_BOT_API=http://napcat:3000/send_group_msg?access_token=<OneBot_HTTP_Token>
-NAPCAT_API_URL=http://napcat:3000/send_group_msg?access_token=<OneBot_HTTP_Token>
+QQ_BOT_API=http://napcat:36036/send_group_msg?access_token=<OneBot_HTTP_Token>
+NAPCAT_API_URL=http://napcat:36036/send_group_msg?access_token=<OneBot_HTTP_Token>
 NAPCAT_MEDIA_BASE_URL=http://sakamichi-push:46046
 ```
 
 其中 `<OneBot_HTTP_Token>` 是 NapCat OneBot HTTP 服务的 Token，**不是** NapCat WebUI 登录 Token。若 NapCat 未启用 HTTP Token，则删除 `?access_token=...`。媒体基地址必须是 NapCat 容器能够访问的地址；同一 Compose 网络优先使用 `http://sakamichi-push:46046`。
+
+从仓库目录启动同机部署：
+
+```bash
+git clone https://github.com/TomisatoNao/nogizaka-message-push.git
+cd nogizaka-message-push
+docker compose -f docker-compose.with-napcat.yml up -d
+```
+
+NapCat 网页控制台默认在 `http://<群晖IP>:6099/`，OneBot HTTP 接口由 Compose 内部的
+`napcat:36036` 提供。首次启动后先在 NapCat 控制台完成 QQ 登录，再在本系统 Web 管理端保存路由并发送测试消息。
 
 **方式 2：NapCat 在另一台电脑或另一套容器**
 
@@ -598,10 +609,10 @@ Docker 部署请先执行 `docker compose pull && docker compose up -d`，再请
 优先检查 OneBot HTTP Token。`WEBUI_TOKEN` 只用于 NapCat 网页控制台，不能作为 OneBot API Token。使用 `curl` 验证：
 
 ```bash
-curl -i -H "Authorization: Bearer <OneBot_HTTP_Token>" http://<NapCat主机>:3000/get_status
+curl -i -H "Authorization: Bearer <OneBot_HTTP_Token>" http://<NapCat主机>:<OneBot_HTTP_Port>/get_status
 ```
 
-若返回 `token verify failed!`，说明 Token 错误；若返回 HTTP 200，再检查 Compose 中的 `QQ_BOT_API` 是否覆盖了 Web 管理端保存的配置。启动检查和实际推送使用同一地址及鉴权信息。
+同一 Compose 部署的 `<OneBot_HTTP_Port>` 是 `36036`；其他部署按 NapCat 实际端口填写。若返回 `token verify failed!`，说明 Token 错误；若返回 HTTP 200，再检查 Compose 中的 `QQ_BOT_API` 是否覆盖了 Web 管理端保存的配置。启动检查和实际推送使用同一地址及鉴权信息。
 </details>
 
 <details>
