@@ -8,7 +8,7 @@ import pytest
 from src.social.adapters import DeliveryTarget
 from src.social.delivery_service import ArchiveService, DeliveryService
 from src.social.models import MediaItem, Post
-from src.social.route_planner import PlannedRoute
+from src.social.route_planner import PlannedRoute, RoutePlanner
 
 
 class _Adapter:
@@ -108,6 +108,33 @@ def test_delivery_service_returns_no_route_without_invoking_adapter():
     assert adapter.calls == []
 
 
+@pytest.mark.parametrize("platform", ["x", "instagram", "tiktok", "tiktok_live"])
+def test_route_planner_respects_per_platform_subscription_switch(platform):
+    """自动社媒路由必须由对应的 push_* 开关控制，不能把关闭误当成全量订阅。"""
+    target = {f"push_{platform}": False}
+    assert not RoutePlanner._matches_filters(target, platform, "成员", "账号")
+
+    # 未配置过滤器代表该内容类型下接收全部成员/账号。
+    assert RoutePlanner._matches_filters(
+        {f"push_{platform}": True}, platform, "成员", "账号"
+    )
+
+
+def test_route_planner_empty_filters_match_all_and_nonmatching_filters_are_skipped():
+    assert RoutePlanner._matches_filters(
+        {"push_instagram": True, "member_filter": [], "social_filter": []},
+        "instagram",
+        "成员",
+        "账号",
+    )
+    assert not RoutePlanner._matches_filters(
+        {"push_instagram": True, "social_filter": ["other_account"]},
+        "instagram",
+        "成员",
+        "账号",
+    )
+
+
 @pytest.mark.asyncio
 async def test_qq_official_adapter_supports_direct_target_and_official_target():
     from src.social.adapters import OfficialTarget, QQOfficialAdapter
@@ -153,5 +180,4 @@ async def test_qq_official_adapter_supports_direct_target_and_official_target():
     )
     assert await adapter.send_text(t2, "hello group") is True
     assert bot.sent_texts[-1] == ("groups", "group456", "hello group")
-
 
