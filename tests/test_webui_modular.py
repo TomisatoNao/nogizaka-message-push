@@ -595,10 +595,43 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260909_1" in html
+    assert "/static/archive.js?v=20260910_1" in html
     assert "/static/archive.css?v=20260905_1" in html
-    assert "/static/archive.js?v=20260909_1" in perf
+    assert "/static/archive.js?v=20260910_1" in perf
     assert "/static/archive.css?v=20260905_1" in perf
+
+
+def test_archive_message_media_visibility_contract():
+    """Message 媒体离开视野/切后台时必须暂停，且两条创建路径都接入观察器。"""
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    assert "ARCHIVE_MEDIA_VISIBILITY_THRESHOLD = 0.25" in script
+    assert "new IntersectionObserver" in script
+    assert "entry.intersectionRatio < ARCHIVE_MEDIA_VISIBILITY_THRESHOLD" in script
+    assert "function pauseAllArchiveMedia()" in script
+    assert "archiveMediaElements().forEach(pauseArchiveMedia);" in script
+    assert 'document.addEventListener("visibilitychange"' in script
+    assert 'document.hidden || document.visibilityState !== "visible"' in script
+    assert 'window.addEventListener("pagehide", pauseAllArchiveMedia)' in script
+
+    # 不支持 IntersectionObserver 时，滚动/resize 仅通过 requestAnimationFrame 节流。
+    assert "function bindArchiveMediaFallback()" in script
+    assert 'window.addEventListener("scroll", scheduleArchiveMediaVisibilityCheck' in script
+    assert 'window.addEventListener("resize", scheduleArchiveMediaVisibilityCheck' in script
+    assert "window.requestAnimationFrame" in script
+    assert "return window.setTimeout(callback, 0);" in script
+
+    # 初次渲染与重试下载后的动态媒体都必须注册；回收旧卡片时解除观察。
+    assert 'b.querySelectorAll("video, audio").forEach(observeArchiveMedia);' in script
+    assert "missDiv.replaceWith(mediaEl);" in script
+    assert "observeArchiveMedia(mediaEl);" in script
+    assert "clearArchiveMediaObservers($(\"timeline\"));" in script
+    assert "if (observedArchiveMedia.has(media)) return;" in script
+
+    # 可见性回调只 pause，不调用 play，返回视野后保持暂停。
+    observer_block = script.split("archiveMediaObserver = new IntersectionObserver", 1)[1].split("});", 1)[0]
+    assert "pauseArchiveMedia(entry.target)" in observer_block
+    assert ".play()" not in observer_block
 
 
 def test_archive_home_omits_duplicate_history_section():

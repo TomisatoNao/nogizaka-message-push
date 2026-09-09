@@ -70,6 +70,111 @@ function mediaUrl(u) {
   return u || "";
 }
 
+// ── Message 媒体可见性控制 ─────────────────────────
+// 媒体只在用户明确点击后播放；滚动离开视野或切到后台时暂停，返回后
+// 保持暂停，避免突然出声、持续耗流量。25% 是“仍在阅读区域内”的最低
+// 可见比例，IntersectionObserver 不支持时才启用节流后的几何计算兜底。
+const ARCHIVE_MEDIA_VISIBILITY_THRESHOLD = 0.25;
+let archiveMediaObserver = null;
+const observedArchiveMedia = new Set();
+let archiveMediaFallbackBound = false;
+let archiveMediaFallbackFrame = 0;
+
+function requestArchiveMediaFrame(callback) {
+  if (typeof window.requestAnimationFrame === "function") {
+    return window.requestAnimationFrame(callback);
+  }
+  return window.setTimeout(callback, 0);
+}
+
+function archiveMediaElements() {
+  const timeline = $("timeline");
+  return timeline ? timeline.querySelectorAll("video, audio") : [];
+}
+
+function pauseArchiveMedia(media) {
+  if (!media || typeof media.pause !== "function" || media.paused) return;
+  try {
+    media.pause();
+  } catch (_) {
+    // 某些浏览器在页面切换瞬间可能拒绝 pause；不能阻塞其它媒体处理。
+  }
+}
+
+function pauseAllArchiveMedia() {
+  archiveMediaElements().forEach(pauseArchiveMedia);
+}
+
+function isArchiveMediaVisible(media) {
+  if (!media || typeof media.getBoundingClientRect !== "function") return false;
+  const rect = media.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  const visibleWidth = Math.max(0, Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0));
+  const visibleHeight = Math.max(0, Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0));
+  const visibleRatio = (visibleWidth * visibleHeight) / (rect.width * rect.height);
+  return visibleRatio >= ARCHIVE_MEDIA_VISIBILITY_THRESHOLD;
+}
+
+function checkArchiveMediaVisibility() {
+  archiveMediaElements().forEach((media) => {
+    if (!isArchiveMediaVisible(media)) pauseArchiveMedia(media);
+  });
+}
+
+function scheduleArchiveMediaVisibilityCheck() {
+  if (archiveMediaFallbackFrame) return;
+  archiveMediaFallbackFrame = requestArchiveMediaFrame(() => {
+    archiveMediaFallbackFrame = 0;
+    checkArchiveMediaVisibility();
+  });
+}
+
+function bindArchiveMediaFallback() {
+  if (archiveMediaFallbackBound) return;
+  archiveMediaFallbackBound = true;
+  window.addEventListener("scroll", scheduleArchiveMediaVisibilityCheck, { passive: true });
+  window.addEventListener("resize", scheduleArchiveMediaVisibilityCheck, { passive: true });
+}
+
+if (typeof IntersectionObserver === "function") {
+  archiveMediaObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting || entry.intersectionRatio < ARCHIVE_MEDIA_VISIBILITY_THRESHOLD) {
+        pauseArchiveMedia(entry.target);
+      }
+    }
+  }, { threshold: [0, ARCHIVE_MEDIA_VISIBILITY_THRESHOLD] });
+} else {
+  bindArchiveMediaFallback();
+}
+
+function observeArchiveMedia(media) {
+  if (!media || (media.tagName !== "VIDEO" && media.tagName !== "AUDIO")) return;
+  if (observedArchiveMedia.has(media)) return;
+  observedArchiveMedia.add(media);
+  if (archiveMediaObserver) {
+    archiveMediaObserver.observe(media);
+  } else {
+    scheduleArchiveMediaVisibilityCheck();
+  }
+}
+
+function clearArchiveMediaObservers(container) {
+  for (const media of observedArchiveMedia) {
+    if (!container || container.contains(media)) {
+      if (archiveMediaObserver) archiveMediaObserver.unobserve(media);
+      observedArchiveMedia.delete(media);
+    }
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || document.visibilityState !== "visible") pauseAllArchiveMedia();
+});
+window.addEventListener("pagehide", pauseAllArchiveMedia);
+
 window.handleImgError = function(img) {
   const retryCount = parseInt(img.dataset.retry || "0", 10);
   if (retryCount < 3) {
@@ -209,6 +314,7 @@ function resetContent() {
   contentAbort = null;
   pageLoading = false;
   page = 1; totalPages = 1; images = []; lastDay = "";
+  clearArchiveMediaObservers($("timeline"));
   $("timeline").innerHTML = "";
   $("emptyHint").hidden = true;
   $("loadMore").hidden = true;
@@ -2398,6 +2504,9 @@ function renderBubble(msg) {
               mediaEl.src = url;
             }
             missDiv.replaceWith(mediaEl);
+            if (mediaEl.tagName === "VIDEO" || mediaEl.tagName === "AUDIO") {
+              observeArchiveMedia(mediaEl);
+            }
           }
         } else {
           showToast("重试失败：" + (data.errors || []).join("；"), "error");
@@ -2548,6 +2657,7 @@ function renderBubble(msg) {
     jumpToDay(jump.dataset.date);
   });
   tl.appendChild(b);
+  b.querySelectorAll("video, audio").forEach(observeArchiveMedia);
 }
 
 let toastTimer = null;
