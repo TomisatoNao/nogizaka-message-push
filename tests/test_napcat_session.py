@@ -9,6 +9,7 @@ import pytest
 
 import config.config as cfg
 from src.platforms.napcat_session import (
+    NapCatSessionAlertTracker,
     NapCatSessionMonitor,
     classify_status_response,
     resolve_status_endpoint,
@@ -57,6 +58,19 @@ def test_status_classifier_handles_business_auth_failure_on_http_200():
     )
     assert (state, online) == ("auth_failed", None)
     assert reason == "鉴权失败"
+
+
+def test_napcat_session_alert_tracker_deduplicates_until_recovery():
+    tracker = NapCatSessionAlertTracker()
+
+    assert tracker.update("online") is None
+    assert tracker.update("offline") == "offline"
+    assert tracker.update("offline") is None
+    assert tracker.update("unreachable") is None
+    assert tracker.update("unknown") is None
+    assert tracker.update("online") == "recovered"
+    assert tracker.update("online") is None
+    assert tracker.update("offline") == "offline"
 
 
 @pytest.mark.asyncio

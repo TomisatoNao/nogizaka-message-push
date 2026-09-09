@@ -58,6 +58,7 @@ from src.app_modules.process_lock import (
 from src.logger import init_loggers, log_all
 from src.platforms import napcat, qq_official, tgbot
 from src.platforms.napcat_session import (
+    NapCatSessionAlertTracker,
     NapCatSessionMonitor,
     classify_status_response,
     resolve_status_endpoint,
@@ -135,6 +136,56 @@ def _alert_group_for_account(acc_id: str) -> int:
         if m.get("account_id") == acc_id and m.get("target_groups"):
             return m["target_groups"][0]
     return 0
+
+
+async def _send_napcat_session_alert(event: str, reason: str = "") -> bool:
+    """通过现有系统告警路由通知 NapCat 会话离线/恢复。
+
+    NapCat 账号掉线时，其自身群路由可能无法发送，因此这里复用
+    ``send_alert_message`` 的全量告警路由（Telegram、官方 QQ Bot 以及
+    仍可用的 NapCat 路由）。调用边界隔离异常，不能让告警故障影响会话
+    巡检任务本身。
+    """
+
+    normalized = str(event or "").lower()
+    if normalized == "offline":
+        detail = str(reason or "QQ 账号当前离线").replace("\r", " ").replace("\n", " ").strip()
+        detail = detail[:160] + ("…" if len(detail) > 160 else "")
+        text = (
+            "NapCat QQ 会话已离线（可能是 KickedOffline/账号登录失效）。"
+            f"探针原因：{detail}。请在 NapCat 中重新登录。"
+        )
+    elif normalized == "recovered":
+        text = "NapCat QQ 会话已恢复在线，离线熔断已解除。"
+    else:
+        return False
+
+    try:
+        # send_alert_message 当前会按每条路由的 push_alert 配置广播；
+        # 0 仅作为兼容参数，避免与账号级告警目标耦合。
+        from src.notifier import send_alert_message
+
+        delivered = await send_alert_message(0, text)
+    except Exception as exc:  # 告警不能反向打断会话巡检
+        log_all(
+            f"⚠️ NapCat 会话告警发送异常 | event={normalized} | "
+            f"error={type(exc).__name__}",
+            is_warning=True,
+        )
+        return False
+
+    if delivered:
+        log_all(
+            f"✅ NapCat 会话告警已发送 | event={normalized}",
+            is_debug=True,
+        )
+    else:
+        log_all(
+            f"⚠️ NapCat 会话告警未送达 | event={normalized} | "
+            "请检查告警渠道的 push_alert 配置",
+            is_warning=True,
+        )
+    return delivered
 
 
 # ──────────────────────────────────────────────
@@ -692,7 +743,9 @@ async def main() -> None:
         # 5.5 持续巡检 NapCat 会话。该任务只读 get_status，不会自动登录或
         # 重启 QQ；离线时由发送门闩短暂熔断，避免监控/社媒同时制造重试风暴。
         if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
-            def _on_napcat_snapshot(snapshot) -> None:
+            napcat_alert_tracker = NapCatSessionAlertTracker()
+
+            async def _on_napcat_snapshot(snapshot) -> None:
                 health.get_tracker().record_napcat_session(
                     snapshot.state,
                     online=snapshot.online,
@@ -701,6 +754,9 @@ async def main() -> None:
                     consecutive_failures=snapshot.consecutive_failures,
                 )
                 napcat.set_session_state(snapshot.state)
+                alert_event = napcat_alert_tracker.update(snapshot.state)
+                if alert_event:
+                    await _send_napcat_session_alert(alert_event, snapshot.reason)
 
             napcat_monitor = NapCatSessionMonitor(
                 qq_client,
@@ -883,6 +939,7 @@ __all__ = [
     "_initial_admin_banner",
     "_health_check",
     "_alert_group_for_account",
+    "_send_napcat_session_alert",
     "_install_stop_handlers",
     "_init_accounts",
     "_sync_command_listeners",

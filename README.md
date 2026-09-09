@@ -490,7 +490,7 @@ python tools/backup_data.py restore backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar
 python tools/backup_data.py restore backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz --apply
 ```
 
-- 使用 Uptime Kuma 等工具监控 `https://<你的域名>/api/health/status`。项目已有的 QQ/TG/官方 Bot 告警通道会沿用各通道的 `push_alert` 配置发送运行告警。
+- 使用 Uptime Kuma 等工具监控 `https://<你的域名>/api/health/status`。项目已有的 QQ/TG/官方 Bot 告警通道会沿用各通道的 `push_alert` 配置发送运行告警；NapCat 会话从在线变为离线（包括 `KickedOffline`）时也会按同一规则发送一次告警，恢复在线后发送恢复通知。
 
 ### 4. 进阶底层配置结构参考
 
@@ -625,6 +625,12 @@ curl -i -H "Authorization: Bearer <OneBot_HTTP_Token>" http://<NapCat主机>:<On
 <summary><b>Q11: 健康检查显示 DEGRADED，但通道后来已经恢复？</b></summary>
 
 启动检查只反映启动瞬间状态。确认外部服务已恢复后重启主程序容器，或执行管理端“重新载入”。如果 NapCat 容器比主程序启动更慢，请等待 NapCat 完成登录后再重启主程序。
+</details>
+
+<details>
+<summary><b>Q12: NapCat 被 KickedOffline 后，告警会发到哪里？</b></summary>
+
+后台会话探针确认 QQ 账号离线后，只在这次离线生命周期发送一次“NapCat QQ 会话已离线”告警；探针持续失败不会重复刷屏，明确恢复在线后再发送恢复通知。告警目标沿用各路由的 `push_alert` 开关，因此请至少配置一个仍可用的 Telegram 或 QQ 官方 Bot 告警目标作为带外通知。NapCat 自己的群路由在 QQ 被踢下线期间可能无法发送，这是平台状态导致的正常现象。
 </details>
 
 ---

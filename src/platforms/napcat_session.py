@@ -31,6 +31,39 @@ class NapCatSessionSnapshot:
     consecutive_failures: int = 0
 
 
+class NapCatSessionAlertTracker:
+    """将会话探针压缩为一次离线告警和一次恢复告警。
+
+    ``NapCatSessionMonitor`` 每个周期都会回调宿主，即使状态没有变化；
+    这里单独维护告警生命周期，避免同一段掉线期间重复刷屏。网络暂态
+    ``unknown``/``unreachable`` 不会清除已确认的离线状态，直到探针明确
+    报告 ``online`` 后才发送恢复通知。
+    """
+
+    def __init__(self) -> None:
+        self._offline_alerted = False
+
+    @property
+    def offline_alerted(self) -> bool:
+        """当前是否处于已经发送过离线告警的生命周期。"""
+
+        return self._offline_alerted
+
+    def update(self, state: str) -> str | None:
+        """处理一次状态，返回 ``offline``、``recovered`` 或 ``None``。"""
+
+        normalized = str(state or "unknown").lower()
+        if normalized == "offline":
+            if self._offline_alerted:
+                return None
+            self._offline_alerted = True
+            return "offline"
+        if normalized == "online" and self._offline_alerted:
+            self._offline_alerted = False
+            return "recovered"
+        return None
+
+
 def _safe_reason(value: object, limit: int = 160) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
     return text[:limit] + ("…" if len(text) > limit else "")
@@ -252,6 +285,7 @@ class NapCatSessionMonitor:
 __all__ = [
     "NapCatSessionMonitor",
     "NapCatSessionSnapshot",
+    "NapCatSessionAlertTracker",
     "classify_status_response",
     "resolve_status_endpoint",
 ]
