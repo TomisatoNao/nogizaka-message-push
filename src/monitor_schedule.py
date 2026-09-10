@@ -23,6 +23,13 @@ JST = timezone(timedelta(hours=9), name="JST")
 MonitorPhase = Literal["day", "night", "sleep"]
 
 
+def _hour_label(hour: int, *, end: bool = False) -> str:
+    """格式化时段边界；结束边界为 0 时显示为 24:00，避免区间看起来倒置。"""
+    if end and hour == 0:
+        return "24:00"
+    return f"{hour:02d}:00"
+
+
 def _as_hour(value: Any, default: int) -> int:
     """读取 0–23 的小时值；配置异常时回退默认值。"""
     try:
@@ -246,9 +253,12 @@ class MonitorSchedule:
     def window_summary(self) -> str:
         """给管理端/启动日志使用的紧凑说明。"""
         return (
-            f"JST 日间 {self.day_start_hour:02d}:00–{self.night_start_hour:02d}:00 · "
-            f"深夜 {self.night_start_hour:02d}:00–{self.sleep_start_hour:02d}:00 · "
-            f"休眠 {self.sleep_start_hour:02d}:00–{self.sleep_end_hour:02d}:00"
+            f"JST 日间 {_hour_label(self.day_start_hour)}–"
+            f"{_hour_label(self.night_start_hour, end=True)} · "
+            f"深夜 {_hour_label(self.night_start_hour)}–"
+            f"{_hour_label(self.sleep_start_hour, end=True)} · "
+            f"休眠 {_hour_label(self.sleep_start_hour)}–"
+            f"{_hour_label(self.sleep_end_hour, end=True)}"
         )
 
 

@@ -112,6 +112,18 @@ def test_schedule_window_summary_is_explicit_about_all_windows():
     assert "休眠 02:00" in text
 
 
+def test_schedule_window_summary_displays_midnight_end_as_24_hours():
+    schedule = MonitorSchedule(
+        day_start_hour=7,
+        night_start_hour=0,
+        sleep_start_hour=2,
+        sleep_end_hour=7,
+    )
+
+    assert "日间 07:00–24:00" in schedule.window_summary()
+    assert "深夜 00:00–02:00" in schedule.window_summary()
+
+
 def test_schedule_invalid_equal_day_night_boundary_falls_back_safely():
     schedule = MonitorSchedule.from_config({
         "monitor_schedule": {

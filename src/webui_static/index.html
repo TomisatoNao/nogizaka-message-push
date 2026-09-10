@@ -40,6 +40,10 @@
   .monitor-card > .grid > .switch { white-space: normal; align-items: flex-start; line-height: 1.4; }
   .monitor-project { min-width: 0; padding: 14px 16px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 58%, transparent); }
   .monitor-project h3 { margin: 0 0 11px; color: var(--text); font-size: 13px; line-height: 1.45; font-weight: 650; }
+  .monitor-project.message-project { grid-column: 1 / -1; }
+  .monitor-project-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; margin-bottom: 12px; }
+  .monitor-project-heading h3 { margin: 0; }
+  .monitor-project-heading .switch { flex: 0 0 auto; }
   .monitor-project .monitor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; min-width: 0; }
   .monitor-project .monitor-fields.single { grid-template-columns: minmax(0, 1fr); }
   .monitor-project .switch { white-space: normal; align-items: flex-start; line-height: 1.4; width: 100%; }
@@ -48,8 +52,14 @@
   .monitor-project .field > input,
   .monitor-project .field > textarea,
   .monitor-project .pair { min-width: 0; }
-  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; }
+  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: center; gap: 12px 16px; }
   .schedule-card .schedule-grid .field { min-width: 0; }
+  .schedule-card .schedule-grid .schedule-field { width: 100%; }
+  .schedule-card .schedule-grid .schedule-field input { max-width: 180px; text-align: center; font-variant-numeric: tabular-nums; }
+  .monitor-card .field > input[type=number] { max-width: 240px; font-variant-numeric: tabular-nums; }
+  .message-project .message-fields { grid-template-columns: repeat(2, minmax(220px, 280px)); justify-content: center; gap: 12px 18px; }
+  .message-project .message-fields .pair { width: 220px; max-width: 100%; }
+  .message-project .message-fields .pair input { flex: 0 1 90px; width: 90px; text-align: center; font-variant-numeric: tabular-nums; }
   .schedule-card .schedule-state { margin: 12px 0 0; padding: 9px 12px; color: var(--muted); background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.55; }
   .schedule-card .schedule-state strong { color: var(--accent); }
   .status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 100%; }
@@ -311,6 +321,7 @@
     .monitor-card .monitor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .monitor-card > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .schedule-card .schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .message-project .message-fields { grid-template-columns: repeat(2, minmax(200px, 280px)); }
   }
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
@@ -332,11 +343,17 @@
     .monitor-project { padding: 12px; }
     .monitor-project .monitor-fields { grid-template-columns: 1fr; gap: 10px; }
     .monitor-project h3 { font-size: 12.5px; }
+    .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+    .monitor-card .field > input[type=number] { max-width: none; }
+    .schedule-card .schedule-grid .schedule-field { width: 100%; }
 
     /* min/max、起/止等成对输入始终保持一行；输入框平分剩余空间。 */
     .pair { flex-wrap: nowrap; width: 100%; min-width: 0; }
     .pair input { flex: 1 1 0; width: auto; min-width: 0; }
     .pair > span { flex: 0 0 auto; white-space: nowrap; }
+    .message-project .message-fields { justify-content: stretch; }
+    .message-project .message-fields .pair { width: 100%; }
+    .message-project .message-fields .pair input { flex: 1 1 0; width: auto; }
 
     .btn { padding: 8px 12px; font-size: 13.5px; }
     .btn.small { padding: 6px 10px; font-size: 12.5px; }
@@ -730,18 +747,18 @@
   <!-- Card 1: 全局监控时段 -->
   <div class="card monitor-card schedule-card">
     <h2>🕘 全局监控调度 <span class="settings-unit">（JST / UTC+9）</span></h2>
-    <p class="settings-scope-note">统一控制 Message、官方博客、X、Instagram、TikTok 和 TikTok Live 的自动轮询。休眠只暂停新的内容抓取，不影响健康检查、告警、手动操作或已经开始的直播录制。</p>
+    <p class="settings-scope-note">统一控制 Message、官方博客、X、Instagram、TikTok 和 TikTok Live 的自动轮询。休眠只暂停新的内容抓取，不影响健康检查、告警、手动操作或已经开始的直播录制。小时字段按 JST 的 0–23 输入，0 表示午夜 00:00。</p>
     <div class="schedule-grid">
-      <label class="field">日间开始（JST 小时）
+      <label class="field schedule-field">日间开始（JST 小时）
         <input id="scheduleDayStart" max="23" min="0" type="number"/>
       </label>
-      <label class="field">深夜开始（JST 小时）
+      <label class="field schedule-field">深夜开始（JST 小时）
         <input id="scheduleNightStart" max="23" min="0" type="number"/>
       </label>
-      <label class="field">休眠开始（JST 小时）
+      <label class="field schedule-field">休眠开始（JST 小时）
         <input id="sleepStart" max="23" min="0" type="number"/>
       </label>
-      <label class="field">休眠结束（JST 小时）
+      <label class="field schedule-field">休眠结束（JST 小时）
         <input id="sleepEnd" max="23" min="0" type="number"/>
       </label>
     </div>
@@ -753,11 +770,12 @@
   <div class="card monitor-card">
     <h2>💬 Message 监控设置</h2>
     <div class="monitor-grid">
-      <div class="monitor-project">
-        <h3>成员消息自动巡查</h3>
-        <div class="monitor-fields">
+      <div class="monitor-project message-project">
+        <div class="monitor-project-heading">
+          <h3>成员消息自动巡查</h3>
           <label class="switch"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
-          <span aria-hidden="true"></span>
+        </div>
+        <div class="monitor-fields">
           <label class="field">日间间隔（min / max 秒）
             <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
           </label>
@@ -2410,16 +2428,16 @@ function updateScheduleState() {
     const n = parseInt($(id)?.value, 10);
     return Number.isFinite(n) ? Math.max(0, Math.min(23, n)) : fallback;
   };
-  const pad = (n) => String(n).padStart(2, "0") + ":00";
+  const pad = (n, end = false) => (end && n === 0 ? "24:00" : String(n).padStart(2, "0") + ":00");
   const day = value("scheduleDayStart", 7);
   const night = value("scheduleNightStart", 23);
   const sleepStart = value("sleepStart", 2);
   const sleepEnd = value("sleepEnd", 7);
   const pause = $("schedulePause")?.checked !== false;
   state.innerHTML = "当前有效时段：" +
-    "<strong>日间 " + pad(day) + "–" + pad(night) + "</strong> · " +
-    "<strong>深夜 " + pad(night) + "–" + pad(sleepStart) + "</strong> · " +
-    "<strong>休眠 " + pad(sleepStart) + "–" + pad(sleepEnd) + "</strong>" +
+    "<strong>日间 " + pad(day) + "–" + pad(night, true) + "</strong> · " +
+    "<strong>深夜 " + pad(night) + "–" + pad(sleepStart, true) + "</strong> · " +
+    "<strong>休眠 " + pad(sleepStart) + "–" + pad(sleepEnd, true) + "</strong>" +
     (pause ? "（休眠暂停内容监控）" : "（休眠不停轮询）");
 }
 

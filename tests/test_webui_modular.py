@@ -196,6 +196,11 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert "monitor-project" in html
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
     assert ".monitor-project .switch { white-space: normal" in html
+    assert "class=\"monitor-project message-project\"" in html
+    assert ".monitor-project.message-project { grid-column: 1 / -1; }" in html
+    assert ".schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px));" in html
+    assert "0 表示午夜 00:00" in html
+    assert "end && n === 0 ? \"24:00\"" in html
     assert "告警重复通知冷却" in html
     assert "QQ / NapCat 发送节流间隔" in html
     assert "NapCat 单路发送超时" in html
