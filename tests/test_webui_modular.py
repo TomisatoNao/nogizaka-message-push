@@ -209,7 +209,8 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
         "socialXOn", "socialXInterval", "socialXNightInterval", "socialXAccounts",
         "socialIgOn", "socialIgFeed", "socialIgStories", "socialIgInterval",
         "socialIgIntervalMax", "socialIgNightInterval", "socialIgNightIntervalMax",
-        "socialIgAccounts", "socialTiktokOn", "socialTiktokInterval",
+        "socialIgAccounts", "igSessionStatus", "igSessionDetail", "btnFillIgSession",
+        "btnCheckIgSession", "btnClearIgSession", "socialTiktokOn", "socialTiktokInterval",
         "socialTiktokAccounts", "socialLiveOn", "socialLiveInterval", "socialLiveAccounts",
     ):
         assert html.count(f'id="{element_id}"') == 1
@@ -222,8 +223,28 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert ".monitor-control-group .switch { flex: 0 0 auto; width: auto;" in html
     assert ".monitor-frequency-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in html
     assert ".monitor-field-pair input { flex: 0 1 90px; width: 90px;" in html
-    assert "class=\"monitor-project message-project\"" in html
-    assert ".monitor-project.message-project { grid-column: 1 / -1; }" in html
+    # 动态监控采用摘要卡 + 独立详情弹窗；平台表单只保留在对应弹窗内。
+    assert '<div class="monitor-summary-grid"' in html
+    assert html.count('class="card admin-module monitor-summary-card') == 6
+    for summary_id in ("message", "blog", "x", "instagram", "tiktok", "tiktok-live"):
+        assert f'data-monitor-summary-card="{summary_id}"' in html
+    for dialog_id in (
+        "monitorMessageDialog", "monitorBlogDialog", "monitorXDialog",
+        "monitorInstagramDialog", "monitorTiktokDialog", "monitorLiveDialog",
+    ):
+        assert html.count(f'id="{dialog_id}"') == 1
+        assert f'aria-labelledby="{dialog_id}Title"' in html
+    assert html.count('class="monitor-settings-dialog"') == 6
+    assert html.count('data-monitor-dialog-close') >= 10
+    assert 'data-monitor-dialog-target="monitorMessageDialog"' in html
+    assert 'data-monitor-dialog-target="monitorBlogDialog"' in html
+    assert 'data-monitor-dialog-target="monitorXDialog"' in html
+    assert 'data-monitor-dialog-target="monitorInstagramDialog"' in html
+    assert html.count('data-monitor-dialog-target="monitorTiktokDialog"') == 1
+    assert html.count('data-monitor-dialog-target="monitorLiveDialog"') == 1
+    assert ".monitor-summary-grid { display: grid; grid-template-columns: repeat(3" in html
+    assert ".monitor-settings-dialog {" in html
+    assert ".monitor-dialog-scroll" in html
     assert ".schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in html
     assert ".admin-schedule-group" in html
     assert ".admin-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in html
@@ -239,11 +260,54 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert 'class="monitor-credential-group"' in html
     assert "settings-field-grid" in html
     assert "settings-control-group" in html
-    assert ".monitor-project-heading h3 { flex: 1 1 100%; }" in html
-    assert ".monitor-project-heading > .switch { flex: 1 1 100%; width: 100%;" in html
+    assert ".monitor-summary-heading" in html
+    assert ".monitor-summary-title { flex: 1 1 auto; min-width: 0;" in html
+    assert ".monitor-summary-settings { flex: 0 0 auto;" in html
+    assert ".monitor-summary-status-row" in html
+    assert "function renderMonitorSummaries()" in html
+    assert "function bindMonitorSettingsDialogs()" in html
+    assert "dialog.showModal()" in html
+    assert "dialog.addEventListener(\"close\"" in html
+    # 桌面三列、平板两列、手机单列；具体断点也必须显式存在，避免依赖自动换行。
+    assert "@media (max-width: 900px) and (min-width: 641px)" in html
+    assert "@media (max-width: 640px)" in html
+    assert ".monitor-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr));" in html
+    assert ".monitor-summary-grid { grid-template-columns: 1fr;" in html
+    main_start = html.index("<main>")
+    main_end = html.index("</main>", main_start)
+    for dialog_id in (
+        "monitorMessageDialog", "monitorBlogDialog", "monitorXDialog",
+        "monitorInstagramDialog", "monitorTiktokDialog", "monitorLiveDialog",
+    ):
+        assert main_start < html.index(f'id="{dialog_id}"') < main_end
+    dialog_fields = {
+        "monitorMessageDialog": ("dayMin", "dayMax", "nightMin", "nightMax"),
+        "monitorBlogDialog": (
+            "blogHinatazaka", "blogNogizaka", "blogSakurazaka",
+            "blogDayMin", "blogDayMax", "blogNightMin", "blogNightMax",
+        ),
+        "monitorXDialog": ("socialXInterval", "socialXNightInterval", "socialXAccounts"),
+        "monitorInstagramDialog": (
+            "socialIgFeed", "socialIgStories", "socialIgInterval", "socialIgIntervalMax",
+            "socialIgNightInterval", "socialIgNightIntervalMax", "socialIgAccounts",
+            "igSessionStatus", "igSessionDetail", "btnFillIgSession", "btnCheckIgSession", "btnClearIgSession",
+        ),
+        "monitorTiktokDialog": ("socialTiktokInterval", "socialTiktokAccounts"),
+        "monitorLiveDialog": ("socialLiveInterval", "socialLiveAccounts"),
+    }
+    for dialog_id, field_ids in dialog_fields.items():
+        start = html.index(f'id="{dialog_id}"')
+        dialog = html[start:html.index("</dialog>", start)]
+        assert all(f'id="{field_id}"' in dialog for field_id in field_ids)
+    tiktok_dialog = html[html.index('id="monitorTiktokDialog"'):html.index("</dialog>", html.index('id="monitorTiktokDialog"'))]
+    live_dialog = html[html.index('id="monitorLiveDialog"'):html.index("</dialog>", html.index('id="monitorLiveDialog"'))]
+    assert 'id="socialLiveInterval"' not in tiktok_dialog
+    assert 'id="socialLiveAccounts"' not in tiktok_dialog
+    assert 'id="socialTiktokInterval"' not in live_dialog
+    assert 'id="socialTiktokAccounts"' not in live_dialog
     # TikTok / Live 的补充账号必须留在各自项目容器内，避免项目边界不清。
     for account_id in ("socialTiktokAccounts", "socialLiveAccounts"):
-        project_start = html.rfind('<div class="monitor-project"', 0, html.index(f'id="{account_id}"'))
+        project_start = html.rfind('class="monitor-project', 0, html.index(f'id="{account_id}"'))
         assert project_start >= 0
         assert html.index(f'id="{account_id}"') < html.index('</div>\n      </div>', project_start)
     assert "告警重复通知冷却" in html

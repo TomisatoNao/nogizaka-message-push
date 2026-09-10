@@ -270,6 +270,27 @@
   .monitor-credential-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .monitor-credential-clear { display: none; }
   .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: stretch; }
+  /* 动态监控摘要：首屏只显示状态和关键指标，详细表单在平台独立弹窗中编辑。 */
+  #tab-social > .schedule-card { margin-bottom: 14px; }
+  .monitor-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 176px; gap: 14px; align-items: stretch; margin-bottom: 14px; }
+  .monitor-summary-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box; padding: 18px 20px; margin: 0; }
+  .monitor-summary-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
+  .monitor-summary-title { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--text); font-size: 14px; line-height: 1.4; font-weight: 650; overflow-wrap: anywhere; }
+  .monitor-summary-settings { flex: 0 0 auto; white-space: nowrap; }
+  .monitor-summary-status-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .monitor-summary-toggle { flex: 1 1 auto; min-width: 0; align-items: flex-start; font-size: 13px; line-height: 1.4; white-space: normal; }
+  .monitor-summary-toggle .track { transform: scale(.88); transform-origin: left center; margin-right: -4px; }
+  .monitor-summary-status { flex: 0 0 auto; }
+  .monitor-summary-metrics { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; margin-top: auto; }
+  .monitor-summary-metric { display: inline-flex; align-items: center; max-width: 100%; padding: 5px 8px; border: 1px solid var(--border-soft); border-radius: 8px; background: color-mix(in srgb, var(--card-soft) 68%, transparent); color: var(--muted); font-size: 11.5px; line-height: 1.35; overflow-wrap: anywhere; }
+  .monitor-settings-dialog { width: min(720px, calc(100vw - 32px)); max-width: 720px; max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; }
+  .monitor-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 22px 16px; border-bottom: 1px solid var(--border-soft); }
+  .monitor-dialog-header h3 { min-width: 0; margin: 0; color: var(--text); font-size: 16px; line-height: 1.4; }
+  .monitor-dialog-header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .monitor-dialog-scroll { max-height: calc(100dvh - 152px); overflow-y: auto; padding: 18px 22px 22px; }
+  .monitor-settings-dialog .monitor-project { padding: 14px; }
+  .monitor-settings-dialog .monitor-project-heading h3 { font-size: 13.5px; }
+  .monitor-dialog-actions { justify-content: flex-end; margin: 0; padding: 12px 22px 16px; border-top: 1px solid var(--border-soft); }
   .admin-schedule-group { min-width: 0; margin: 0; padding: 11px 12px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
   .admin-schedule-group legend { padding: 0 6px; color: var(--text); font-size: 12px; font-weight: 650; }
   .admin-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -653,6 +674,8 @@
     .admin-social-tool-input { gap: 8px; }
     .admin-social-url { flex-basis: 240px; min-width: 240px; }
     .monitor-card .monitor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .monitor-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .monitor-summary-card { min-height: 0; padding: 16px; }
     .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
     .monitor-project-heading h3 { flex: 1 1 100%; }
     .monitor-project-heading > .switch { flex: 1 1 100%; width: 100%; white-space: normal; }
@@ -725,6 +748,17 @@
     .admin-social-targets { padding: 10px 12px; }
     .admin-social-channel-list { gap: 8px 12px; }
     .admin-social-result { padding: 12px; }
+    .monitor-summary-grid { grid-template-columns: 1fr; gap: 12px; }
+    .monitor-summary-card { min-height: 0; padding: 16px; }
+    .monitor-summary-settings { min-height: 40px; }
+    .monitor-settings-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 16px; }
+    .monitor-dialog-header { padding: 16px 14px 13px; }
+    .monitor-dialog-header h3 { font-size: 15px; }
+    .monitor-dialog-scroll { max-height: calc(100dvh - 132px); padding: 14px 14px 16px; }
+    .monitor-dialog-actions { padding: 10px 14px 14px; }
+    .monitor-settings-dialog .monitor-frequency-group { grid-template-columns: 1fr; gap: 10px; }
+    .monitor-settings-dialog .monitor-control-group { align-items: flex-start; }
+    .monitor-settings-dialog .monitor-project { padding: 12px; }
     .monitor-control-group { align-items: flex-start; }
     .monitor-frequency-group,
     .monitor-account-group { grid-template-columns: 1fr; gap: 10px; }
@@ -1189,170 +1223,79 @@
     <div id="scheduleState" class="schedule-state" aria-live="polite">当前有效时段：—</div>
   </div>
 
-  <!-- Card 2: 💬 Message 监控设置 -->
-  <div class="card admin-module monitor-card">
-    <h2>💬 Message 监控设置</h2>
-    <div class="monitor-grid">
-      <div class="monitor-project message-project">
-        <div class="monitor-project-heading">
-          <h3>成员消息自动巡查</h3>
-          <label class="switch"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
-        </div>
-        <div class="monitor-frequency-group" role="group" aria-label="Message 轮询频率">
-          <label class="field">日间间隔（min / max 秒）
-            <span class="pair monitor-field-pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
-          </label>
-          <label class="field">深夜间隔（min / max 秒）
-            <span class="pair monitor-field-pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
-          </label>
-        </div>
+  <!-- 平台监控摘要：启用状态可直接切换，详细设置由平台按钮打开独立弹窗。 -->
+  <div class="monitor-summary-grid" aria-label="平台监控摘要">
+    <article class="card admin-module monitor-summary-card" data-monitor-summary-card="message">
+      <div class="monitor-summary-heading">
+        <h3 class="monitor-summary-title">💬 Message</h3>
+        <button class="btn small monitor-summary-settings" type="button" data-monitor-dialog-target="monitorMessageDialog" aria-controls="monitorMessageDialog" aria-haspopup="dialog">⚙ 设置</button>
       </div>
-    </div>
-  </div>
+      <div class="monitor-summary-status-row">
+        <label class="switch monitor-summary-toggle"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
+        <span id="monitorMessageStatus" class="admin-status-badge muted monitor-summary-status">—</span>
+      </div>
+      <div class="monitor-summary-metrics" id="monitorMessageMetrics" aria-live="polite"></div>
+    </article>
 
-  <!-- Card 3: 📝 官方博客抓取设置 -->
-  <div class="card admin-module monitor-card">
-    <h2>📝 官方博客监控设置</h2>
-    <div class="monitor-grid">
-      <div class="monitor-project monitor-project--full">
-        <div class="monitor-project-heading">
-          <h3>博客内容抓取</h3>
-          <label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
-        </div>
-        <div class="monitor-control-group" role="group" aria-label="博客团体开关">
-          <span class="monitor-group-label">团体独立开关</span>
-          <div class="switch-group">
-            <label class="switch admin-compact-switch"><input id="blogHinatazaka" type="checkbox"/><span class="track"></span>日向坂</label>
-            <label class="switch admin-compact-switch"><input id="blogNogizaka" type="checkbox"/><span class="track"></span>乃木坂</label>
-            <label class="switch admin-compact-switch"><input id="blogSakurazaka" type="checkbox"/><span class="track"></span>樱坂</label>
-          </div>
-        </div>
-        <div class="monitor-frequency-group" role="group" aria-label="博客轮询频率">
-          <label class="field">博客日间间隔（min / max 秒）
-            <span class="pair monitor-field-pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
-          </label>
-          <label class="field">博客深夜间隔（min / max 秒）
-            <span class="pair monitor-field-pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
-          </label>
-        </div>
-        <p class="hint admin-note--flush">博客推送目标在「推送通道」页面的对应路由中配置。</p>
+    <article class="card admin-module monitor-summary-card" data-monitor-summary-card="blog">
+      <div class="monitor-summary-heading">
+        <h3 class="monitor-summary-title">📝 官方博客</h3>
+        <button class="btn small monitor-summary-settings" type="button" data-monitor-dialog-target="monitorBlogDialog" aria-controls="monitorBlogDialog" aria-haspopup="dialog">⚙ 设置</button>
       </div>
-    </div>
-  </div>
+      <div class="monitor-summary-status-row">
+        <label class="switch monitor-summary-toggle"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
+        <span id="monitorBlogStatus" class="admin-status-badge muted monitor-summary-status">—</span>
+      </div>
+      <div class="monitor-summary-metrics" id="monitorBlogMetrics" aria-live="polite"></div>
+    </article>
 
-  <!-- Card 2: 𝕏 (Twitter) 监控设置 -->
-  <div class="card admin-module monitor-card">
-    <h2>𝕏 (Twitter) 监控设置</h2>
-    <div class="monitor-grid">
-      <div class="monitor-project monitor-project--full">
-        <div class="monitor-project-heading">
-          <h3>𝕏 内容监控</h3>
-          <label class="switch"><input id="socialXOn" type="checkbox"/><span class="track"></span>启用 𝕏 监控</label>
-        </div>
-        <div class="monitor-frequency-group" role="group" aria-label="X 轮询频率">
-          <label class="field">日间轮询间隔（秒）
-            <input id="socialXInterval" min="10" placeholder="60" type="number"/>
-          </label>
-          <label class="field">深夜轮询间隔（秒）
-            <input id="socialXNightInterval" min="10" placeholder="300" type="number"/>
-          </label>
-        </div>
-        <div class="monitor-account-group">
-          <label class="field">社媒监控账号（每行一个；仅在此处配置 X 账号）
-            <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
-          </label>
-        </div>
+    <article class="card admin-module monitor-summary-card" data-monitor-summary-card="x">
+      <div class="monitor-summary-heading">
+        <h3 class="monitor-summary-title">𝕏 Twitter</h3>
+        <button class="btn small monitor-summary-settings" type="button" data-monitor-dialog-target="monitorXDialog" aria-controls="monitorXDialog" aria-haspopup="dialog">⚙ 设置</button>
       </div>
-    </div>
-  </div>
+      <div class="monitor-summary-status-row">
+        <label class="switch monitor-summary-toggle"><input id="socialXOn" type="checkbox"/><span class="track"></span>启用 𝕏 监控</label>
+        <span id="monitorXStatus" class="admin-status-badge muted monitor-summary-status">—</span>
+      </div>
+      <div class="monitor-summary-metrics" id="monitorXMetrics" aria-live="polite"></div>
+    </article>
 
-  <!-- Card 3: 📸 Instagram 监控设置 -->
-  <div class="card admin-module monitor-card">
-    <h2>📸 Instagram 监控设置（Feed / Story / Reels）</h2>
-    <div class="monitor-grid">
-      <div class="monitor-project monitor-project--full">
-        <div class="monitor-project-heading">
-          <h3>Instagram 内容监控</h3>
-          <label class="switch"><input id="socialIgOn" type="checkbox"/><span class="track"></span>启用 Instagram 监控</label>
-        </div>
-        <div class="monitor-control-group" role="group" aria-label="Instagram 内容类型">
-          <span class="monitor-group-label">内容类型</span>
-          <div class="switch-group">
-            <label class="switch"><input id="socialIgFeed" type="checkbox"/><span class="track"></span>包含主页 Feed 动态</label>
-            <label class="switch"><input id="socialIgStories" type="checkbox"/><span class="track"></span>包含 24h Story 快拍</label>
-          </div>
-        </div>
-        <div class="monitor-frequency-group" role="group" aria-label="Instagram 轮询频率">
-          <label class="field">日间轮询间隔（min / max 秒）
-            <span class="pair monitor-field-pair"><input id="socialIgInterval" min="60" placeholder="1800" type="number"/><span>–</span><input id="socialIgIntervalMax" min="60" placeholder="3600" type="number"/></span>
-          </label>
-          <label class="field">深夜轮询间隔（min / max 秒）
-            <span class="pair monitor-field-pair"><input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/><span>–</span><input id="socialIgNightIntervalMax" min="60" placeholder="10800" type="number"/></span>
-          </label>
-        </div>
-        <div class="monitor-account-group">
-          <label class="field">社媒监控账号（每行一个；仅在此处配置 Instagram 账号）
-            <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
-          </label>
-        </div>
-        <p class="hint admin-note--flush">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
-        <div class="monitor-credential-group">
-          <div>
-            <div class="monitor-credential-title">
-              <span>🍪 Instagram 登录凭证 (Cookies)</span>
-              <span id="igSessionStatus"></span>
-            </div>
-            <div class="monitor-credential-detail" id="igSessionDetail">
-              支持 Netscape / JSON / 完整 Cookies 格式；Story 需要登录 Cookie，公开 Feed 可免登录。
-            </div>
-          </div>
-          <div class="monitor-credential-actions">
-            <button class="btn small primary" id="btnFillIgSession" type="button">配置 Cookies</button>
-            <button class="btn small" id="btnCheckIgSession" type="button">检测连通性</button>
-            <button class="btn small danger monitor-credential-clear" id="btnClearIgSession" type="button">清空</button>
-          </div>
-        </div>
+    <article class="card admin-module monitor-summary-card" data-monitor-summary-card="instagram">
+      <div class="monitor-summary-heading">
+        <h3 class="monitor-summary-title">📸 Instagram</h3>
+        <button class="btn small monitor-summary-settings" type="button" data-monitor-dialog-target="monitorInstagramDialog" aria-controls="monitorInstagramDialog" aria-haspopup="dialog">⚙ 设置</button>
       </div>
-    </div>
-  </div>
+      <div class="monitor-summary-status-row">
+        <label class="switch monitor-summary-toggle"><input id="socialIgOn" type="checkbox"/><span class="track"></span>启用 Instagram 监控</label>
+        <span id="monitorInstagramStatus" class="admin-status-badge muted monitor-summary-status">—</span>
+      </div>
+      <div class="monitor-summary-metrics" id="monitorInstagramMetrics" aria-live="polite"></div>
+    </article>
 
-  <!-- Card 4: 🎵 TikTok / TikTok Live 监控与直播切片录制 -->
-  <div class="card admin-module monitor-card">
-    <h2>🎵 TikTok 短视频 & TikTok Live 自动录制</h2>
-    <div class="monitor-grid">
-      <div class="monitor-project">
-        <div class="monitor-project-heading">
-          <h3>🎵 TikTok 短视频</h3>
-          <label class="switch"><input id="socialTiktokOn" type="checkbox"/><span class="track"></span>启用 TikTok 短视频监控</label>
-        </div>
-        <div class="monitor-frequency-group single" role="group" aria-label="TikTok 短视频轮询频率">
-          <label class="field">日间/深夜轮询间隔（秒）
-            <input id="socialTiktokInterval" min="30" placeholder="120" type="number"/>
-          </label>
-        </div>
-        <div class="monitor-account-group">
-          <label class="field">TikTok 短视频全局补充账号
-            <textarea id="socialTiktokAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
-          </label>
-        </div>
+    <article class="card admin-module monitor-summary-card" data-monitor-summary-card="tiktok">
+      <div class="monitor-summary-heading">
+        <h3 class="monitor-summary-title">🎵 TikTok 短视频</h3>
+        <button class="btn small monitor-summary-settings" type="button" data-monitor-dialog-target="monitorTiktokDialog" aria-controls="monitorTiktokDialog" aria-haspopup="dialog">⚙ 设置</button>
       </div>
-      <div class="monitor-project">
-        <div class="monitor-project-heading">
-          <h3>🔴 TikTok Live</h3>
-          <label class="switch"><input id="socialLiveOn" type="checkbox"/><span class="track"></span>启用直播探测与录制</label>
-        </div>
-        <div class="monitor-frequency-group single" role="group" aria-label="TikTok Live 探测频率">
-          <label class="field">日间/深夜探测频率（秒）
-            <input id="socialLiveInterval" min="5" placeholder="8" type="number"/>
-          </label>
-        </div>
-        <div class="monitor-account-group">
-          <label class="field">TikTok Live 直播全局补充账号
-            <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
-          </label>
-        </div>
+      <div class="monitor-summary-status-row">
+        <label class="switch monitor-summary-toggle"><input id="socialTiktokOn" type="checkbox"/><span class="track"></span>启用短视频监控</label>
+        <span id="monitorTiktokStatus" class="admin-status-badge muted monitor-summary-status">—</span>
       </div>
-    </div>
+      <div class="monitor-summary-metrics" id="monitorTiktokMetrics" aria-live="polite"></div>
+    </article>
+
+    <article class="card admin-module monitor-summary-card" data-monitor-summary-card="tiktok-live">
+      <div class="monitor-summary-heading">
+        <h3 class="monitor-summary-title">🔴 TikTok Live</h3>
+        <button class="btn small monitor-summary-settings" type="button" data-monitor-dialog-target="monitorLiveDialog" aria-controls="monitorLiveDialog" aria-haspopup="dialog">⚙ 设置</button>
+      </div>
+      <div class="monitor-summary-status-row">
+        <label class="switch monitor-summary-toggle"><input id="socialLiveOn" type="checkbox"/><span class="track"></span>启用直播探测与录制</label>
+        <span id="monitorLiveStatus" class="admin-status-badge muted monitor-summary-status">—</span>
+      </div>
+      <div class="monitor-summary-metrics" id="monitorLiveMetrics" aria-live="polite"></div>
+    </article>
   </div>
 
   <!-- Card 5: 🧰 实用工具 · 单条社媒链接解析与手动推送 -->
@@ -1415,6 +1358,227 @@
     </div>
   </div>
 </section>
+<!-- 动态监控详情弹窗：表单保留在 main 内，便于沿用全局脏状态监听。 -->
+<dialog id="monitorMessageDialog" class="monitor-settings-dialog" aria-labelledby="monitorMessageDialogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="monitorMessageDialogTitle">💬 Message 监控设置</h3>
+      <p>调整成员消息自动巡查的日间与深夜间隔。</p>
+    </div>
+    <button class="btn small" type="button" data-monitor-dialog-close>关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="monitor-project monitor-project--full">
+      <div class="monitor-project-heading">
+        <h3>成员消息自动巡查</h3>
+        <span class="admin-status-badge muted">启用状态可在摘要卡切换</span>
+      </div>
+      <div class="monitor-frequency-group" role="group" aria-label="Message 轮询频率">
+        <label class="field">日间间隔（min / max 秒）
+          <span class="pair monitor-field-pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
+        </label>
+        <label class="field">深夜间隔（min / max 秒）
+          <span class="pair monitor-field-pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
+        </label>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-monitor-dialog-close>完成</button>
+  </div>
+</dialog>
+
+<dialog id="monitorBlogDialog" class="monitor-settings-dialog" aria-labelledby="monitorBlogDialogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="monitorBlogDialogTitle">📝 官方博客监控设置</h3>
+      <p>选择需要巡查的团体，并调整博客轮询区间。</p>
+    </div>
+    <button class="btn small" type="button" data-monitor-dialog-close>关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="monitor-project monitor-project--full">
+      <div class="monitor-project-heading">
+        <h3>博客内容抓取</h3>
+        <span class="admin-status-badge muted">启用状态可在摘要卡切换</span>
+      </div>
+      <div class="monitor-control-group" role="group" aria-label="博客团体开关">
+        <span class="monitor-group-label">团体独立开关</span>
+        <div class="switch-group">
+          <label class="switch admin-compact-switch"><input id="blogHinatazaka" type="checkbox"/><span class="track"></span>日向坂</label>
+          <label class="switch admin-compact-switch"><input id="blogNogizaka" type="checkbox"/><span class="track"></span>乃木坂</label>
+          <label class="switch admin-compact-switch"><input id="blogSakurazaka" type="checkbox"/><span class="track"></span>樱坂</label>
+        </div>
+      </div>
+      <div class="monitor-frequency-group" role="group" aria-label="博客轮询频率">
+        <label class="field">博客日间间隔（min / max 秒）
+          <span class="pair monitor-field-pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
+        </label>
+        <label class="field">博客深夜间隔（min / max 秒）
+          <span class="pair monitor-field-pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
+        </label>
+      </div>
+      <p class="hint admin-note--flush">博客推送目标在「推送通道」页面的对应路由中配置。</p>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-monitor-dialog-close>完成</button>
+  </div>
+</dialog>
+
+<dialog id="monitorXDialog" class="monitor-settings-dialog" aria-labelledby="monitorXDialogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="monitorXDialogTitle">𝕏 Twitter 监控设置</h3>
+      <p>配置 X 的轮询间隔和需要监控的账号。</p>
+    </div>
+    <button class="btn small" type="button" data-monitor-dialog-close>关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="monitor-project monitor-project--full">
+      <div class="monitor-project-heading">
+        <h3>𝕏 内容监控</h3>
+        <span class="admin-status-badge muted">启用状态可在摘要卡切换</span>
+      </div>
+      <div class="monitor-frequency-group" role="group" aria-label="X 轮询频率">
+        <label class="field">日间轮询间隔（秒）
+          <input id="socialXInterval" min="10" placeholder="60" type="number"/>
+        </label>
+        <label class="field">深夜轮询间隔（秒）
+          <input id="socialXNightInterval" min="10" placeholder="300" type="number"/>
+        </label>
+      </div>
+      <div class="monitor-account-group">
+        <label class="field">社媒监控账号（每行一个；仅在此处配置 X 账号）
+          <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-monitor-dialog-close>完成</button>
+  </div>
+</dialog>
+
+<dialog id="monitorInstagramDialog" class="monitor-settings-dialog" aria-labelledby="monitorInstagramDialogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="monitorInstagramDialogTitle">📸 Instagram 监控设置</h3>
+      <p>选择内容类型、账号、轮询区间和登录凭证。</p>
+    </div>
+    <button class="btn small" type="button" data-monitor-dialog-close>关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="monitor-project monitor-project--full">
+      <div class="monitor-project-heading">
+        <h3>Instagram 内容监控</h3>
+        <span class="admin-status-badge muted">启用状态可在摘要卡切换</span>
+      </div>
+      <div class="monitor-control-group" role="group" aria-label="Instagram 内容类型">
+        <span class="monitor-group-label">内容类型</span>
+        <div class="switch-group">
+          <label class="switch"><input id="socialIgFeed" type="checkbox"/><span class="track"></span>包含主页 Feed 动态</label>
+          <label class="switch"><input id="socialIgStories" type="checkbox"/><span class="track"></span>包含 24h Story 快拍</label>
+        </div>
+      </div>
+      <div class="monitor-frequency-group" role="group" aria-label="Instagram 轮询频率">
+        <label class="field">日间轮询间隔（min / max 秒）
+          <span class="pair monitor-field-pair"><input id="socialIgInterval" min="60" placeholder="1800" type="number"/><span>–</span><input id="socialIgIntervalMax" min="60" placeholder="3600" type="number"/></span>
+        </label>
+        <label class="field">深夜轮询间隔（min / max 秒）
+          <span class="pair monitor-field-pair"><input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/><span>–</span><input id="socialIgNightIntervalMax" min="60" placeholder="10800" type="number"/></span>
+        </label>
+      </div>
+      <div class="monitor-account-group">
+        <label class="field">社媒监控账号（每行一个；仅在此处配置 Instagram 账号）
+          <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
+        </label>
+      </div>
+      <p class="hint admin-note--flush">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
+      <div class="monitor-credential-group">
+        <div>
+          <div class="monitor-credential-title">
+            <span>🍪 Instagram 登录凭证 (Cookies)</span>
+            <span id="igSessionStatus"></span>
+          </div>
+          <div class="monitor-credential-detail" id="igSessionDetail">
+            支持 Netscape / JSON / 完整 Cookies 格式；Story 需要登录 Cookie，公开 Feed 可免登录。
+          </div>
+        </div>
+        <div class="monitor-credential-actions">
+          <button class="btn small primary" id="btnFillIgSession" type="button">配置 Cookies</button>
+          <button class="btn small" id="btnCheckIgSession" type="button">检测连通性</button>
+          <button class="btn small danger monitor-credential-clear" id="btnClearIgSession" type="button">清空</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-monitor-dialog-close>完成</button>
+  </div>
+</dialog>
+
+<dialog id="monitorTiktokDialog" class="monitor-settings-dialog" aria-labelledby="monitorTiktokDialogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="monitorTiktokDialogTitle">🎵 TikTok 短视频设置</h3>
+      <p>调整短视频巡查间隔和补充账号。</p>
+    </div>
+    <button class="btn small" type="button" data-monitor-dialog-close>关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="monitor-project monitor-project--full">
+      <div class="monitor-project-heading">
+        <h3>🎵 TikTok 短视频</h3>
+        <span class="admin-status-badge muted">启用状态可在摘要卡切换</span>
+      </div>
+      <div class="monitor-frequency-group single" role="group" aria-label="TikTok 短视频轮询频率">
+        <label class="field">日间/深夜轮询间隔（秒）
+          <input id="socialTiktokInterval" min="30" placeholder="120" type="number"/>
+        </label>
+      </div>
+      <div class="monitor-account-group">
+        <label class="field">TikTok 短视频全局补充账号
+          <textarea id="socialTiktokAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-monitor-dialog-close>完成</button>
+  </div>
+</dialog>
+
+<dialog id="monitorLiveDialog" class="monitor-settings-dialog" aria-labelledby="monitorLiveDialogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="monitorLiveDialogTitle">🔴 TikTok Live 设置</h3>
+      <p>调整直播探测频率和补充账号。</p>
+    </div>
+    <button class="btn small" type="button" data-monitor-dialog-close>关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="monitor-project monitor-project--full">
+      <div class="monitor-project-heading">
+        <h3>🔴 TikTok Live</h3>
+        <span class="admin-status-badge muted">启用状态可在摘要卡切换</span>
+      </div>
+      <div class="monitor-frequency-group single" role="group" aria-label="TikTok Live 探测频率">
+        <label class="field">日间/深夜探测频率（秒）
+          <input id="socialLiveInterval" min="5" placeholder="8" type="number"/>
+        </label>
+      </div>
+      <div class="monitor-account-group">
+        <label class="field">TikTok Live 直播全局补充账号
+          <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-monitor-dialog-close>完成</button>
+  </div>
+</dialog>
 <!-- ── 系统设置 ─────────────────────────────── -->
 <section class="tab" id="tab-system">
 
@@ -2089,6 +2253,7 @@ let config = null;        // 当前编辑中的配置对象（新格式）
 let credStatus = {};      // 账号凭证状态
 let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
 let envStatus = {};       // 常用凭证与每个 Telegram Bot 专属 Token 的配置状态
+let igSessionConfigured = null; // Instagram Cookies 状态：null 表示尚未完成探测
 let dirty = false;
 // 清理旧版保存在 localStorage 中的静态 Token；Token 模式改用 HttpOnly 会话 Cookie。
 try { localStorage.removeItem("webAdminToken"); } catch (_) {}
@@ -2097,6 +2262,52 @@ const $ = (id) => document.getElementById(id);
 const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
 
 let baseline = "";   // 最近一次加载/保存时的配置快照（JSON 串）
+
+// 动态监控摘要卡 → 平台独立详情弹窗；关闭时把焦点还给触发按钮。
+function bindMonitorSettingsDialogs() {
+  const returnFocus = new Map();
+  document.querySelectorAll("[data-monitor-dialog-target]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const dialog = $(button.dataset.monitorDialogTarget);
+      if (!dialog) return;
+      returnFocus.set(dialog, button);
+      document.querySelectorAll(".monitor-settings-dialog[open]").forEach((openDialog) => {
+        if (openDialog !== dialog) openDialog.close();
+      });
+      try {
+        dialog.showModal();
+      } catch (e) {
+        console.warn("打开监控设置弹窗失败:", e);
+        return;
+      }
+      const focusSection = button.dataset.monitorDialogFocus;
+      const section = focusSection
+        ? dialog.querySelector('[data-monitor-dialog-section="' + focusSection + '"]')
+        : null;
+      if (section) section.scrollIntoView({ block: "start" });
+      const focusRoot = section || dialog;
+      const firstControl = focusRoot.querySelector("input:not([type=hidden]), textarea, select")
+        || dialog.querySelector("input:not([type=hidden]), textarea, select");
+      if (firstControl) firstControl.focus();
+    });
+  });
+  document.querySelectorAll("[data-monitor-dialog-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const dialog = button.closest("dialog");
+      if (dialog) dialog.close();
+    });
+  });
+  document.querySelectorAll(".monitor-settings-dialog").forEach((dialog) => {
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      const trigger = returnFocus.get(dialog);
+      if (trigger && document.contains(trigger)) trigger.focus();
+    });
+  });
+}
+bindMonitorSettingsDialogs();
 
 function setDirty(v) {
   dirty = v;
@@ -2137,6 +2348,7 @@ function markDirty() {
   let baseObj = {};
   try { baseObj = JSON.parse(baseline); } catch(e){}
   setDirty(!deepEqual(config, baseObj));
+  if (config) renderMonitorSummaries();
 }
 
 // ── 页面内确认 / 提示（替代原生 confirm/alert）────
@@ -2408,7 +2620,9 @@ function switchAdminTab(targetTab, updateHash = true) {
   const btn = document.querySelector(`.header-nav .nav-tab[data-tab="${targetTab}"], nav.tabs button[data-tab="${targetTab}"]`);
   if (!btn) return;
 
-  if (targetTab === "advanced") { 
+  document.querySelectorAll(".monitor-settings-dialog[open]").forEach((dialog) => dialog.close());
+
+  if (targetTab === "advanced") {
     collectGeneral();
     collectChannels(); 
     collectSocial();
@@ -2921,6 +3135,85 @@ $("btnPollNow").addEventListener("click", async () => {
 });
 
 // ── 基本设置 ─────────────────────────────────────
+function monitorRangeText(range, fallback) {
+  const values = Array.isArray(range) && range.length >= 2 ? range : fallback;
+  if (!Array.isArray(values) || values.length < 2) return "—";
+  return String(values[0]) + "–" + String(values[1]) + " 秒";
+}
+
+function monitorCount(values) {
+  return Array.isArray(values) ? values.filter((value) => String(value || "").trim()).length : 0;
+}
+
+function setMonitorSummary(statusId, metricsId, enabled, metrics) {
+  const status = $(statusId);
+  if (status) {
+    status.className = "admin-status-badge monitor-summary-status " + (enabled ? "ok" : "muted");
+    status.textContent = enabled ? "已启用" : "已停用";
+  }
+  const target = $(metricsId);
+  if (!target) return;
+  target.replaceChildren(...metrics.map((value) => {
+    const item = document.createElement("span");
+    item.className = "monitor-summary-metric";
+    item.textContent = value;
+    return item;
+  }));
+}
+
+function renderMonitorSummaries() {
+  if (!config) return;
+
+  const message = config.message_monitor || {};
+  const dayRange = config.day_interval || [120, 180];
+  const nightRange = config.night_interval || [1500, 1800];
+  const memberCount = Array.isArray(config.monitor) ? config.monitor.length : 0;
+  setMonitorSummary("monitorMessageStatus", "monitorMessageMetrics", message.enabled !== false, [
+    "成员 " + memberCount,
+    "日间 " + monitorRangeText(dayRange, [120, 180]),
+    "深夜 " + monitorRangeText(nightRange, [1500, 1800]),
+  ]);
+
+  const blog = config.blog_monitor || {};
+  const groups = [["hinatazaka", "日向坂"], ["nogizaka", "乃木坂"], ["sakurazaka", "樱坂"]]
+    .filter(([key]) => blog[key] !== false)
+    .map(([, label]) => label);
+  setMonitorSummary("monitorBlogStatus", "monitorBlogMetrics", blog.enabled !== false, [
+    "团体 " + (groups.length ? groups.join("、") : "未选择"),
+    "日间 " + monitorRangeText(blog.day_interval, [60, 120]),
+    "深夜 " + monitorRangeText(blog.night_interval, [1650, 1950]),
+  ]);
+
+  const platforms = config.platforms || {};
+  const x = platforms.x || {};
+  setMonitorSummary("monitorXStatus", "monitorXMetrics", !!x.enabled, [
+    "账号 " + monitorCount(x.accounts),
+    "日间 " + String(x.interval_seconds || 60) + " 秒",
+    "深夜 " + String(x.night_interval_seconds || 300) + " 秒",
+  ]);
+
+  const instagram = platforms.instagram || {};
+  const cookieText = igSessionConfigured === true ? "Cookies 已配置" : igSessionConfigured === false ? "Cookies 未配置" : "Cookies 检测中";
+  setMonitorSummary("monitorInstagramStatus", "monitorInstagramMetrics", !!instagram.enabled, [
+    "Feed " + (instagram.include_feed !== false ? "开" : "关"),
+    "Story " + (instagram.include_stories !== false ? "开" : "关"),
+    "账号 " + monitorCount(instagram.accounts),
+    cookieText,
+  ]);
+
+  const tiktok = platforms.tiktok || {};
+  setMonitorSummary("monitorTiktokStatus", "monitorTiktokMetrics", !!tiktok.enabled, [
+    "间隔 " + String(tiktok.interval_seconds || 120) + " 秒",
+    "账号 " + monitorCount(tiktok.accounts),
+  ]);
+
+  const live = platforms.tiktok_live || {};
+  setMonitorSummary("monitorLiveStatus", "monitorLiveMetrics", !!live.enabled, [
+    "探测 " + String(live.interval_seconds || 8) + " 秒",
+    "账号 " + monitorCount(live.accounts),
+  ]);
+}
+
 function updateScheduleState() {
   const state = $("scheduleState");
   if (!state) return;
@@ -3036,6 +3329,7 @@ function renderGeneral() {
   if ($("sysProxy")) $("sysProxy").value = config.proxy || "";
   renderQqBots();
   renderSocialPushTargets();
+  renderMonitorSummaries();
 }
 
 let canCaptureOpenid = false;   // 独立模式下没有事件循环跑 WebSocket 监听
@@ -3813,6 +4107,7 @@ async function renderIgSessionUI() {
 
   const data = await fetchIgSessionStatus();
   if (data && data.configured) {
+    igSessionConfigured = true;
     const isGood = data.assessment && data.assessment.safe_enough;
     const levelStr = isGood ? "完整度: " + (data.assessment.level === "full" ? "满分完整" : "良好") : "仅基础会话";
     const userStr = data.user_id ? " (UID: " + data.user_id + ")" : "";
@@ -3823,6 +4118,7 @@ async function renderIgSessionUI() {
     if (btnClear) btnClear.style.display = "inline-block";
     if (btnCheck) btnCheck.style.display = "inline-block";
   } else {
+    igSessionConfigured = data ? false : null;
     igStatusEl.innerHTML = '<span class="admin-status-badge err">✗ 未配置</span>';
     if (igDetailEl) {
       igDetailEl.textContent = "未配置 Cookies。当前为匿名模式，单帖链接可正常解析，但主页定时巡查易触发官方 429 限流。";
@@ -3830,6 +4126,7 @@ async function renderIgSessionUI() {
     if (btnClear) btnClear.style.display = "none";
     if (btnCheck) btnCheck.style.display = "none";
   }
+  renderMonitorSummaries();
 }
 
 function openIgCookieDialog() {
@@ -3998,6 +4295,7 @@ function renderSocial() {
   $("socialLiveAccounts").value = (pttl.accounts || []).join("\n");
 
   renderIgSessionUI();
+  renderMonitorSummaries();
 }
 
 function collectSocial() {

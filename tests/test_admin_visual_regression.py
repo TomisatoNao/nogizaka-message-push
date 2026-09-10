@@ -203,15 +203,17 @@ def _api_payload(path: str) -> dict:
 def _assert_screenshot(actual, expected, *, max_ratio: float = 0.005) -> None:
     from PIL import Image, ImageChops
 
-    actual_image = Image.open(actual).convert("RGBA")
-    expected_image = Image.open(expected).convert("RGBA")
+    # 使用 RGB 计算差异；RGBA 的 alpha 通道在静态截图中通常相同，
+    # ImageChops.getbbox() 会因此忽略实际发生变化的 RGB 像素。
+    actual_image = Image.open(actual).convert("RGB")
+    expected_image = Image.open(expected).convert("RGB")
     if actual_image.size != expected_image.size:
         raise AssertionError(f"截图尺寸变化：{actual_image.size} != {expected_image.size}")
     diff = ImageChops.difference(actual_image, expected_image)
     bbox = diff.getbbox()
     if bbox is None:
         return
-    changed = sum(1 for pixel in diff.getdata() if pixel != (0, 0, 0, 0))
+    changed = sum(1 for pixel in diff.getdata() if pixel != (0, 0, 0))
     ratio = changed / (actual_image.width * actual_image.height)
     if ratio > max_ratio:
         actual_path = Path(actual)
@@ -238,12 +240,24 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
 
             def handle_api(route):
                 path = urlsplit(route.request.url).path
+                if path == "/api/config" and route.request.method == "PUT":
+                    save_payloads.append(json.loads(route.request.post_data or "{}"))
+                    route.fulfill(
+                        status=200,
+                        content_type="application/json; charset=utf-8",
+                        body=json.dumps(
+                            {"ok": True, "reloaded": True, "cred_status": {}},
+                            ensure_ascii=False,
+                        ),
+                    )
+                    return
                 route.fulfill(
                     status=200,
                     content_type="application/json; charset=utf-8",
                     body=json.dumps(_api_payload(path), ensure_ascii=False),
                 )
 
+            save_payloads = []
             page = context.new_page()
             page.route("**/api/**", handle_api)
             page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
@@ -531,6 +545,158 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         assert group["fieldCount"] == 2
                         assert group["rects"][1]["top"] - group["rects"][0]["top"] <= 2
                         assert all(rect["right"] <= group["groupRight"] + 1 for rect in group["rects"])
+
+                    summary = page.evaluate(
+                        """() => {
+                            const grid = document.querySelector('#tab-social.active .monitor-summary-grid');
+                            const cards = [...(grid?.querySelectorAll('.monitor-summary-card') || [])];
+                            const box = (el) => {
+                                const r = el.getBoundingClientRect();
+                                return {left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height};
+                            };
+                                return {
+                                    columns: grid ? getComputedStyle(grid).gridTemplateColumns : '',
+                                    gridBox: grid ? box(grid) : null,
+                                    scheduleBox: (() => {
+                                        const el = document.querySelector('#tab-social.active .schedule-card');
+                                        return el ? box(el) : null;
+                                    })(),
+                                    toolBox: (() => {
+                                        const el = grid?.nextElementSibling;
+                                        return el ? box(el) : null;
+                                    })(),
+                                    cards: cards.map((card) => ({
+                                    key: card.dataset.monitorSummaryCard,
+                                    box: box(card),
+                                    metrics: card.querySelectorAll('.monitor-summary-metric').length,
+                                    settingsTarget: card.querySelector('[data-monitor-dialog-target]')?.dataset.monitorDialogTarget || '',
+                                })),
+                                dialogs: [...document.querySelectorAll('.monitor-settings-dialog')].map((dialog) => ({
+                                    id: dialog.id,
+                                    fieldCount: dialog.querySelectorAll('input[id], textarea[id], select[id]').length,
+                                    fieldIds: [...dialog.querySelectorAll('input[id], textarea[id], select[id]')].map((field) => field.id),
+                                    hasScroll: !!dialog.querySelector('.monitor-dialog-scroll'),
+                                })),
+                            };
+                        }"""
+                    )
+                    expected_columns = {"desktop": 3, "tablet": 2, "mobile": 1}[viewport_name]
+                    assert len(summary["columns"].split()) == expected_columns
+                    assert summary["gridBox"]["right"] <= metrics["viewportWidth"] + 1
+                    assert len(summary["cards"]) == 6
+                    assert {card["key"] for card in summary["cards"]} == {
+                        "message", "blog", "x", "instagram", "tiktok", "tiktok-live",
+                    }
+                    assert {card["key"]: card["settingsTarget"] for card in summary["cards"]} == {
+                        "message": "monitorMessageDialog",
+                        "blog": "monitorBlogDialog",
+                        "x": "monitorXDialog",
+                        "instagram": "monitorInstagramDialog",
+                        "tiktok": "monitorTiktokDialog",
+                        "tiktok-live": "monitorLiveDialog",
+                    }
+                    assert all(card["box"]["height"] > 120 for card in summary["cards"])
+                    card_heights = {round(card["box"]["height"], 1) for card in summary["cards"]}
+                    assert len(card_heights) == 1
+                    assert all(card["box"]["right"] <= metrics["viewportWidth"] + 1 for card in summary["cards"])
+                    assert summary["scheduleBox"] and summary["gridBox"] and summary["toolBox"]
+                    assert round(summary["gridBox"]["top"] - summary["scheduleBox"]["bottom"], 1) == 14.0
+                    assert round(summary["toolBox"]["top"] - summary["gridBox"]["bottom"], 1) == 14.0
+                    assert all(card["metrics"] >= 2 for card in summary["cards"])
+                    assert {dialog["id"] for dialog in summary["dialogs"]} == {
+                        "monitorMessageDialog", "monitorBlogDialog", "monitorXDialog",
+                        "monitorInstagramDialog", "monitorTiktokDialog", "monitorLiveDialog",
+                    }
+                    assert all(dialog["fieldCount"] > 0 and dialog["hasScroll"] for dialog in summary["dialogs"])
+                    dialog_fields = {dialog["id"]: set(dialog["fieldIds"]) for dialog in summary["dialogs"]}
+                    assert dialog_fields["monitorTiktokDialog"] == {
+                        "socialTiktokInterval", "socialTiktokAccounts",
+                    }
+                    assert dialog_fields["monitorLiveDialog"] == {
+                        "socialLiveInterval", "socialLiveAccounts",
+                    }
+
+                    # 每张摘要卡的设置入口都应打开正确的独立 dialog；关闭后输入值保持不变。
+                    settings_buttons = page.locator("#tab-social.active [data-monitor-dialog-target]")
+                    assert settings_buttons.count() == 6
+                    seen_dialogs = set()
+                    for index in range(settings_buttons.count()):
+                        button = settings_buttons.nth(index)
+                        target = button.get_attribute("data-monitor-dialog-target")
+                        assert target
+                        seen_dialogs.add(target)
+                        button.click()
+                        dialog = page.locator("#" + target)
+                        dialog.wait_for(state="visible", timeout=5000)
+                        dialog_metrics = page.evaluate(
+                            """(id) => {
+                                const dialog = document.getElementById(id);
+                                const scroll = dialog?.querySelector('.monitor-dialog-scroll');
+                                return {
+                                    open: !!dialog?.open,
+                                    dialogOverflow: !!dialog && dialog.scrollWidth > dialog.clientWidth + 1,
+                                    scrollOverflow: !!scroll && scroll.scrollWidth > scroll.clientWidth + 1,
+                                    width: dialog?.getBoundingClientRect().width || 0,
+                                    pageScrollWidth: document.documentElement.scrollWidth,
+                                    viewportWidth: window.innerWidth,
+                                };
+                            }""",
+                            target,
+                        )
+                        assert dialog_metrics["open"] is True
+                        assert dialog_metrics["dialogOverflow"] is False
+                        assert dialog_metrics["scrollOverflow"] is False
+                        assert dialog_metrics["width"] <= metrics["viewportWidth"] + 1
+                        assert dialog_metrics["pageScrollWidth"] <= dialog_metrics["viewportWidth"] + 1
+                        if index == settings_buttons.count() - 1:
+                            page.keyboard.press("Escape")
+                        else:
+                            dialog.locator("[data-monitor-dialog-close]").first.click()
+                        dialog.wait_for(state="hidden", timeout=5000)
+                    assert seen_dialogs == {
+                        "monitorMessageDialog", "monitorBlogDialog", "monitorXDialog",
+                        "monitorInstagramDialog", "monitorTiktokDialog", "monitorLiveDialog",
+                    }
+
+                    x_settings = page.locator('[data-monitor-dialog-target="monitorXDialog"]').first
+                    x_settings.click()
+                    x_interval = page.locator("#socialXInterval")
+                    original_interval = x_interval.input_value()
+                    x_interval.fill(str(int(original_interval) + 1))
+                    page.locator("#monitorXDialog [data-monitor-dialog-close]").last.click()
+                    assert x_interval.input_value() == str(int(original_interval) + 1)
+
+                    # 摘要卡的快速开关沿用原有脏状态/保存栏链路。
+                    x_toggle_label = page.locator('label.switch:has(#socialXOn)')
+                    x_toggle_label.click()
+                    page.locator("footer.savebar.show").wait_for(state="visible", timeout=5000)
+                    x_toggle_label.click()
+
+                    # 桌面端额外拦截一次保存请求，确认弹窗表单仍序列化为原有配置结构。
+                    if viewport_name == "desktop":
+                        page.locator("#btnSave").click()
+                        page.wait_for_timeout(150)
+                        assert save_payloads
+                        payload = save_payloads[-1]
+                        expected_top_level = {
+                            "accounts", "monitor", "channels", "day_interval", "night_interval",
+                            "monitor_schedule", "message_monitor", "blog_monitor", "platforms",
+                        }
+                        assert expected_top_level <= set(payload)
+                        assert {"x", "instagram", "tiktok", "tiktok_live"} <= set(payload["platforms"])
+                        assert {"interval_range_seconds", "night_interval_range_seconds"} <= set(payload["platforms"]["instagram"])
+                        page.locator("#btnReloadFile").click()
+                        x_interval.wait_for(state="attached")
+                        page.wait_for_function(
+                            "(value) => document.querySelector('#socialXInterval')?.value === value",
+                            arg=original_interval,
+                            timeout=5000,
+                        )
+                    else:
+                        # 非桌面尺寸只验证交互，不把临时值带入该尺寸的视觉基线。
+                        x_settings.click()
+                        x_interval.fill(original_interval)
+                        page.locator("#monitorXDialog [data-monitor-dialog-close]").last.click()
                 elif tab in {"users", "advanced"}:
                     # 用户和历史记录表的动态操作也必须通过统一操作组承载；
                     # 历史记录为空时允许没有操作行，但一旦有行就不能回退到空格分隔按钮。
