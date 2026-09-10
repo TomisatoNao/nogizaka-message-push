@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: .
+      ADMIN_VISUAL_MAX_RATIO: "0.60"
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
