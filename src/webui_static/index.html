@@ -850,24 +850,31 @@
 <section class="tab" id="tab-system">
 
   <div class="card">
-    <h2>⏱️ 轮询节奏（秒 / JST 小时）</h2>
+    <h2>⏱️ Message 轮询与发送节奏（秒 / JST 小时）</h2>
+    <div class="hint">日间、深夜和休眠只控制 Message 自动巡查；告警冷却、QQ/NapCat 发送间隔和单路超时属于告警或发送通道设置，不会改变 Message 抓取频率。</div>
     <div class="grid">
-      <label class="field">日间间隔（min / max 秒）
+      <label class="field" title="Message 自动巡查：每轮完成后等待的随机区间。">
+        Message 日间间隔（min / max 秒）
         <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
       </label>
-      <label class="field">深夜间隔（min / max 秒）
+      <label class="field" title="Message 自动巡查：深夜时段每轮完成后等待的随机区间。">
+        Message 深夜间隔（min / max 秒）
         <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
       </label>
-      <label class="field">休眠时段（起 / 止 时）
+      <label class="field" title="Message 自动巡查：该时段完全暂停，手动立即巡查仍可唤醒。">
+        Message 休眠时段（起 / 止 JST 小时）
         <span class="pair"><input id="sleepStart" max="23" min="0" type="number"/><span>–</span><input id="sleepEnd" max="23" min="0" type="number"/></span>
       </label>
-      <label class="field">告警冷却（秒）
+      <label class="field" title="相同告警的重复通知抑制时间，不影响任何轮询。">
+        告警重复通知冷却（秒）
         <input id="alertCooldown" min="0" type="number"/>
       </label>
-      <label class="field">QQ 发送间隔（秒）
+      <label class="field" title="官方 QQ Bot 和 NapCat 发送请求的节流间隔，不影响抓取频率。">
+        QQ / NapCat 发送节流间隔（秒）
         <input id="qqSendInterval" min="0" step="0.1" type="number"/>
       </label>
-      <label class="field">NapCat 单路超时（秒）
+      <label class="field" title="单个 NapCat 路由一次发送（含有限重试）的最大等待时间。">
+        NapCat 单路发送超时（秒）
         <input id="napcatSendTimeout" max="300" min="1" type="number"/>
       </label>
     </div>

@@ -170,6 +170,14 @@ def test_admin_frontend_config_and_dark_select_contracts():
     assert "同一个 timeline 请求的 Request Headers" not in html
     assert "必须包含 URL 与请求体" in html
     assert "Request Headers 文本" not in html
+    # 系统设置页必须明确区分 Message 轮询参数与通道/告警参数，避免把发送节流误解为抓取频率。
+    assert "Message 轮询与发送节奏" in html
+    assert "Message 日间间隔" in html
+    assert "Message 深夜间隔" in html
+    assert "Message 休眠时段" in html
+    assert "告警重复通知冷却" in html
+    assert "QQ / NapCat 发送节流间隔" in html
+    assert "NapCat 单路发送超时" in html
 
 
 def test_system_handlers_smart_parse():

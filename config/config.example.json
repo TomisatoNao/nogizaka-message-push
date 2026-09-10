@@ -74,10 +74,12 @@
     "enabled": false
   },
 
-  // ── 推送节奏（秒）──
+  // ── Message 轮询节奏（秒 / JST 小时）──
+  // 日间/深夜是每轮 Message 巡查完成后的随机等待区间；sleep_hours 会完全暂停 Message 自动巡查。
   "day_interval": [120, 180],
   "night_interval": [1500, 1800],
   "sleep_hours": [2, 7],
+  // 以下不是 Message 抓取频率：告警通知冷却，以及 QQ/NapCat 发送层节流。
   "alert_cooldown": 3600,
   // Token 续期保护：每次最多并发 2 个，网络失败后指数退避（秒）
   "token_refresh_concurrency": 2,

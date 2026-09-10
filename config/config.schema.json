@@ -452,6 +452,7 @@
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
+      "description": "Message 日间自动巡查每轮完成后的随机等待区间（秒）",
       "items": {
         "type": "integer",
         "minimum": 1
@@ -461,6 +462,7 @@
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
+      "description": "Message 深夜自动巡查每轮完成后的随机等待区间（秒）；休眠时段优先级更高",
       "items": {
         "type": "integer",
         "minimum": 1
@@ -470,6 +472,7 @@
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
+      "description": "Message 自动巡查的完全暂停时段（起止 JST 小时）",
       "items": {
         "type": "integer",
         "minimum": 0,
@@ -478,11 +481,13 @@
     },
     "alert_cooldown": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "相同告警重复通知的冷却时间（秒），不影响轮询"
     },
     "qq_send_interval": {
       "type": "number",
-      "minimum": 0
+      "minimum": 0,
+      "description": "官方 QQ Bot 和 NapCat 发送请求的节流间隔（秒），不影响抓取频率"
     },
     "napcat_send_timeout_seconds": {
       "type": "number",

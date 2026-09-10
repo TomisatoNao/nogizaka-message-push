@@ -95,7 +95,8 @@ _DEFAULTS: dict = {
     "napcat_send_timeout_seconds": 45,
     "token_refresh_before_seconds": 300,
     "backtrack_hours":          24,
-    # 轮询节奏（config.json 的 day_interval / night_interval / sleep_hours 可覆盖）
+    # Message 轮询节奏（config.json 的 day_interval / night_interval / sleep_hours 可覆盖）；
+    # 告警冷却和 QQ/NapCat 发送节流在下方单独配置，不属于 Message 抓取间隔。
     "day_start_hour":           7,
     "night_start_hour":         0,
     "sleep_start_hour":         2,
