@@ -19,6 +19,7 @@ import logging
 import random
 import threading
 
+from src.monitor_schedule import MonitorSchedule
 from src.social.fetchers.base import BaseFetcher
 from src.social.models import Post
 from src.social.settings import social_settings
@@ -48,6 +49,7 @@ class SocialScheduler:
         self._stop_evt = threading.Event()
         self._threads: list[threading.Thread] = []
         self._failures: dict[str, int] = {}
+        self._sleep_phase_logged: set[str] = set()
 
     # ── 生命周期 ──────────────────────────────────────────
 
@@ -98,6 +100,18 @@ class SocialScheduler:
                         return
                     continue
 
+                # 全局休眠只阻止新的内容轮询。健康检查、告警和已经启动的
+                # 直播录制不经过这个线程，因此不会被一起暂停。每次循环重读
+                # 配置，热重载后无需重启即可在下一小段等待中生效。
+                if self._is_content_sleeping():
+                    if pname not in self._sleep_phase_logged:
+                        log.info("[%s] 😴 全局内容监控休眠，暂停新一轮轮询", pname)
+                        self._sleep_phase_logged.add(pname)
+                    if self._wait_for_schedule_wake():
+                        return
+                    continue
+                self._sleep_phase_logged.discard(pname)
+
                 self._poll_once(fetcher)
                 self._failures[pname] = 0
                 sleep_for = fetcher.get_interval()
@@ -118,6 +132,22 @@ class SocialScheduler:
 
             if self._stop_evt.wait(max(5, int(sleep_for))):
                 return
+
+    def _wait_for_schedule_wake(self) -> bool:
+        """休眠时以短片段等待，返回 True 表示收到停止信号。"""
+        while not self._stop_evt.is_set():
+            schedule = MonitorSchedule.from_config(self._config)
+            remaining = schedule.seconds_until_wake()
+            if remaining <= 0:
+                return False
+            # 最长 30 秒一次，既不会占住退出，也能及时看到热重载后的新边界。
+            if self._stop_evt.wait(min(30, max(1, remaining))):
+                return True
+        return True
+
+    def _is_content_sleeping(self) -> bool:
+        """当前是否应暂停新的内容轮询（用于测试和日志契约）。"""
+        return MonitorSchedule.from_config(self._config).is_sleeping()
 
     def _poll_once(self, fetcher: BaseFetcher) -> None:
         """一次轮询：抓取 → 转发（加锁）→ 回写游标。"""

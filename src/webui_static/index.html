@@ -24,6 +24,34 @@
              letter-spacing: .06em; text-transform: uppercase;
              display: flex; align-items: center; gap: 8px; }
   .card h2::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+  /* 系统设置中的轮询卡片按“Message / 通道”分组，避免长说明把字段挤成不规则多列。 */
+  .system-settings-card > h2 { text-transform: none; letter-spacing: .02em; }
+  .settings-unit { font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--muted); }
+  .settings-scope-note { margin: -2px 0 16px; max-width: 780px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .settings-group { padding: 14px 16px 16px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 55%, transparent); }
+  .settings-group + .settings-group { margin-top: 12px; }
+  .settings-group-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--text); font-size: 12.5px; font-weight: 650; }
+  .settings-group-badge { padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-soft)); border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); font-size: 10.5px; font-weight: 600; }
+  .settings-group.channels .settings-group-badge { color: var(--muted); border-color: var(--border-soft); background: color-mix(in srgb, var(--border) 35%, transparent); }
+  .settings-group .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
+  /* 动态监控设置：每个项目拥有独立容器，长标题只能在自己的网格内收缩。 */
+  .monitor-card .monitor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; }
+  .monitor-card > .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; }
+  .monitor-card > .grid > .switch { white-space: normal; align-items: flex-start; line-height: 1.4; }
+  .monitor-project { min-width: 0; padding: 14px 16px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 58%, transparent); }
+  .monitor-project h3 { margin: 0 0 11px; color: var(--text); font-size: 13px; line-height: 1.45; font-weight: 650; }
+  .monitor-project .monitor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; min-width: 0; }
+  .monitor-project .monitor-fields.single { grid-template-columns: minmax(0, 1fr); }
+  .monitor-project .switch { white-space: normal; align-items: flex-start; line-height: 1.4; width: 100%; }
+  .monitor-project .switch .track { margin-top: 1px; }
+  .monitor-project .field { min-width: 0; }
+  .monitor-project .field > input,
+  .monitor-project .field > textarea,
+  .monitor-project .pair { min-width: 0; }
+  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; }
+  .schedule-card .schedule-grid .field { min-width: 0; }
+  .schedule-card .schedule-state { margin: 12px 0 0; padding: 9px 12px; color: var(--muted); background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.55; }
+  .schedule-card .schedule-state strong { color: var(--accent); }
   .status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 100%; }
   .status-actions [hidden] { display: none !important; }
   .status-actions #btnRestart { margin-left: 8px; }
@@ -278,13 +306,32 @@
     transform: scale(1.15);
   }
 
+  @media (max-width: 900px) and (min-width: 641px) {
+    .settings-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .monitor-card .monitor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .monitor-card > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .schedule-card .schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
   /* ── 手机端适配（≤640px） ──────────────────────── */
   @media (max-width: 640px) {
     main { padding: 14px 12px 180px; max-width: 100vw; box-sizing: border-box; }
     .status-actions #btnRestart { margin-left: 0; }
     .card { padding: 18px 20px; margin-bottom: 16px; box-sizing: border-box; }
     .card h2 { font-size: 12px; margin-bottom: 14px; }
+    .system-settings-card { padding: 16px 14px; }
+    .system-settings-card > h2 { font-size: 13px; }
+    .settings-scope-note { margin: -2px 0 12px; font-size: 11.5px; line-height: 1.55; }
+    .settings-group { padding: 12px; }
+    .settings-group-title { margin-bottom: 10px; }
+    .settings-group .grid { grid-template-columns: 1fr; gap: 12px; }
     .grid { grid-template-columns: 1fr; gap: 12px; }
+    .monitor-card .monitor-grid { grid-template-columns: 1fr; gap: 12px; }
+    .monitor-card > .grid { grid-template-columns: 1fr; gap: 12px; }
+    .schedule-card .schedule-grid { grid-template-columns: 1fr; gap: 12px; }
+    .monitor-project { padding: 12px; }
+    .monitor-project .monitor-fields { grid-template-columns: 1fr; gap: 10px; }
+    .monitor-project h3 { font-size: 12.5px; }
 
     /* min/max、起/止等成对输入始终保持一行；输入框平分剩余空间。 */
     .pair { flex-wrap: nowrap; width: 100%; min-width: 0; }
@@ -505,7 +552,6 @@
   <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
       <h2 style="margin:0;">👥 监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
-      <label class="switch" style="margin:0;"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
     </div>
     <div class="table-wrap">
       <table class="member-table">
@@ -681,8 +727,50 @@
 </section>
 <!-- ── 动态监控 ─────────────────────────────── -->
 <section class="tab" id="tab-social">
-  <!-- Card 1: 📝 官方博客抓取设置 -->
-  <div class="card">
+  <!-- Card 1: 全局监控时段 -->
+  <div class="card monitor-card schedule-card">
+    <h2>🕘 全局监控调度 <span class="settings-unit">（JST / UTC+9）</span></h2>
+    <p class="settings-scope-note">统一控制 Message、官方博客、X、Instagram、TikTok 和 TikTok Live 的自动轮询。休眠只暂停新的内容抓取，不影响健康检查、告警、手动操作或已经开始的直播录制。</p>
+    <div class="schedule-grid">
+      <label class="field">日间开始（JST 小时）
+        <input id="scheduleDayStart" max="23" min="0" type="number"/>
+      </label>
+      <label class="field">深夜开始（JST 小时）
+        <input id="scheduleNightStart" max="23" min="0" type="number"/>
+      </label>
+      <label class="field">休眠开始（JST 小时）
+        <input id="sleepStart" max="23" min="0" type="number"/>
+      </label>
+      <label class="field">休眠结束（JST 小时）
+        <input id="sleepEnd" max="23" min="0" type="number"/>
+      </label>
+    </div>
+    <label class="switch" style="margin-top:12px;"><input id="schedulePause" type="checkbox"/><span class="track"></span>休眠时段暂停所有内容监控</label>
+    <div id="scheduleState" class="schedule-state" aria-live="polite">当前有效时段：—</div>
+  </div>
+
+  <!-- Card 2: 💬 Message 监控设置 -->
+  <div class="card monitor-card">
+    <h2>💬 Message 监控设置</h2>
+    <div class="monitor-grid">
+      <div class="monitor-project">
+        <h3>成员消息自动巡查</h3>
+        <div class="monitor-fields">
+          <label class="switch"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
+          <span aria-hidden="true"></span>
+          <label class="field">日间间隔（min / max 秒）
+            <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
+          </label>
+          <label class="field">深夜间隔（min / max 秒）
+            <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 3: 📝 官方博客抓取设置 -->
+  <div class="card monitor-card">
     <h2>📝 官方博客监控设置</h2>
     <div class="grid">
       <label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
@@ -708,7 +796,7 @@
   </div>
 
   <!-- Card 2: 𝕏 (Twitter) 监控设置 -->
-  <div class="card">
+  <div class="card monitor-card">
     <h2>𝕏 (Twitter) 监控设置</h2>
     <div class="grid">
       <label class="switch"><input id="socialXOn" type="checkbox"/><span class="track"></span>启用 𝕏 监控</label>
@@ -727,17 +815,17 @@
   </div>
 
   <!-- Card 3: 📸 Instagram 监控设置 -->
-  <div class="card">
+  <div class="card monitor-card">
     <h2>📸 Instagram 监控设置（Feed / Story / Reels）</h2>
     <div class="grid">
       <label class="switch"><input id="socialIgOn" type="checkbox"/><span class="track"></span>启用 Instagram 监控</label>
       <label class="switch"><input id="socialIgFeed" type="checkbox"/><span class="track"></span>包含主页 Feed 动态</label>
       <label class="switch"><input id="socialIgStories" type="checkbox"/><span class="track"></span>包含 24h Story 快拍</label>
-      <label class="field">日间轮询间隔（秒）
-        <input id="socialIgInterval" min="60" placeholder="1800" type="number"/>
+      <label class="field">日间轮询间隔（min / max 秒）
+        <span class="pair"><input id="socialIgInterval" min="60" placeholder="1800" type="number"/><span>–</span><input id="socialIgIntervalMax" min="60" placeholder="3600" type="number"/></span>
       </label>
-      <label class="field">夜间轮询间隔（秒）
-        <input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/>
+      <label class="field">夜间轮询间隔（min / max 秒）
+        <span class="pair"><input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/><span>–</span><input id="socialIgNightIntervalMax" min="60" placeholder="10800" type="number"/></span>
       </label>
     </div>
     <div style="margin-top:14px;">
@@ -745,6 +833,7 @@
         <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
       </label>
     </div>
+    <p class="hint" style="margin:10px 0 0;">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
     <div style="margin-top:14px; padding:14px 16px; background:var(--card-soft); border:1px solid var(--border-soft); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
       <div>
         <div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;">
@@ -764,17 +853,27 @@
   </div>
 
   <!-- Card 4: 🎵 TikTok / TikTok Live 监控与直播切片录制 -->
-  <div class="card">
+  <div class="card monitor-card">
     <h2>🎵 TikTok 短视频 & TikTok Live 自动录制</h2>
-    <div class="grid">
-      <label class="switch"><input id="socialTiktokOn" type="checkbox"/><span class="track"></span>启用 TikTok 短视频监控</label>
-      <label class="field">短视频轮询间隔（秒）
-        <input id="socialTiktokInterval" min="30" placeholder="120" type="number"/>
-      </label>
-      <label class="switch"><input id="socialLiveOn" type="checkbox"/><span class="track"></span>启用 TikTok Live 直播探测与录制</label>
-      <label class="field">直播探测频率（秒）
-        <input id="socialLiveInterval" min="5" placeholder="8" type="number"/>
-      </label>
+    <div class="monitor-grid">
+      <div class="monitor-project">
+        <h3>🎵 TikTok 短视频</h3>
+        <div class="monitor-fields single">
+          <label class="switch"><input id="socialTiktokOn" type="checkbox"/><span class="track"></span>启用 TikTok 短视频监控</label>
+          <label class="field">日间/深夜轮询间隔（秒）
+            <input id="socialTiktokInterval" min="30" placeholder="120" type="number"/>
+          </label>
+        </div>
+      </div>
+      <div class="monitor-project">
+        <h3>🔴 TikTok Live</h3>
+        <div class="monitor-fields single">
+          <label class="switch"><input id="socialLiveOn" type="checkbox"/><span class="track"></span>启用直播探测与录制</label>
+          <label class="field">日间/深夜探测频率（秒）
+            <input id="socialLiveInterval" min="5" placeholder="8" type="number"/>
+          </label>
+        </div>
+      </div>
     </div>
     <div style="margin-top:14px;" class="grid">
       <label class="field">TikTok 短视频全局补充账号
@@ -849,34 +948,27 @@
 <!-- ── 系统设置 ─────────────────────────────── -->
 <section class="tab" id="tab-system">
 
-  <div class="card">
-    <h2>⏱️ Message 轮询与发送节奏（秒 / JST 小时）</h2>
-    <div class="hint">日间、深夜和休眠只控制 Message 自动巡查；告警冷却、QQ/NapCat 发送间隔和单路超时属于告警或发送通道设置，不会改变 Message 抓取频率。</div>
-    <div class="grid">
-      <label class="field" title="Message 自动巡查：每轮完成后等待的随机区间。">
-        Message 日间间隔（min / max 秒）
-        <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
-      </label>
-      <label class="field" title="Message 自动巡查：深夜时段每轮完成后等待的随机区间。">
-        Message 深夜间隔（min / max 秒）
-        <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
-      </label>
-      <label class="field" title="Message 自动巡查：该时段完全暂停，手动立即巡查仍可唤醒。">
-        Message 休眠时段（起 / 止 JST 小时）
-        <span class="pair"><input id="sleepStart" max="23" min="0" type="number"/><span>–</span><input id="sleepEnd" max="23" min="0" type="number"/></span>
-      </label>
-      <label class="field" title="相同告警的重复通知抑制时间，不影响任何轮询。">
-        告警重复通知冷却（秒）
-        <input id="alertCooldown" min="0" type="number"/>
-      </label>
-      <label class="field" title="官方 QQ Bot 和 NapCat 发送请求的节流间隔，不影响抓取频率。">
-        QQ / NapCat 发送节流间隔（秒）
-        <input id="qqSendInterval" min="0" step="0.1" type="number"/>
-      </label>
-      <label class="field" title="单个 NapCat 路由一次发送（含有限重试）的最大等待时间。">
-        NapCat 单路发送超时（秒）
-        <input id="napcatSendTimeout" max="300" min="1" type="number"/>
-      </label>
+  <div class="card system-settings-card">
+    <h2>🚦 发送与告警参数</h2>
+    <div class="settings-scope-note">这些参数只影响告警通知、QQ/NapCat 发送节流和单路超时，不改变任何内容监控的抓取频率。监控时段与轮询间隔请在“动态监控”页面配置。</div>
+    <div class="settings-group channels" aria-labelledby="deliverySettingsTitle">
+      <div class="settings-group-title" id="deliverySettingsTitle">
+        <span>告警与发送通道</span><span class="settings-group-badge">不控制抓取频率</span>
+      </div>
+      <div class="grid">
+        <label class="field" title="相同告警的重复通知抑制时间，不影响任何轮询。">
+          告警重复通知冷却（秒）
+          <input id="alertCooldown" min="0" type="number"/>
+        </label>
+        <label class="field" title="官方 QQ Bot 和 NapCat 发送请求的节流间隔，不影响抓取频率。">
+          QQ / NapCat 发送节流间隔（秒）
+          <input id="qqSendInterval" min="0" step="0.1" type="number"/>
+        </label>
+        <label class="field" title="单个 NapCat 路由一次发送（含有限重试）的最大等待时间。">
+          NapCat 单路发送超时（秒）
+          <input id="napcatSendTimeout" max="300" min="1" type="number"/>
+        </label>
+      </div>
     </div>
   </div>
 
@@ -1755,6 +1847,17 @@ async function saveConfig() {
   if (config.blog_monitor && config.blog_monitor.night_interval && config.blog_monitor.night_interval[0] > config.blog_monitor.night_interval[1]) {
     errors.push("博客夜间巡查间隔的最小值不能大于最大值");
   }
+  const schedule = config.monitor_schedule || {};
+  for (const [key, label] of [["day_start_hour", "日间开始"], ["night_start_hour", "深夜开始"]]) {
+    const hour = schedule[key];
+    if (typeof hour !== "number" || !Number.isInteger(hour) || hour < 0 || hour > 23) {
+      errors.push("全局监控" + label + "必须为 0 ~ 23 之间的整点数字");
+    }
+  }
+  if (!Array.isArray(schedule.sleep_hours) || schedule.sleep_hours.length !== 2 ||
+      schedule.sleep_hours.some((hour) => typeof hour !== "number" || !Number.isInteger(hour) || hour < 0 || hour > 23)) {
+    errors.push("全局休眠时段必须填写两个 0 ~ 23 之间的整点小时");
+  }
   if (config.daily_summary && config.daily_summary.hour !== undefined && config.daily_summary.hour !== null) {
     const h = config.daily_summary.hour;
     if (typeof h !== "number" || isNaN(h) || h < 0 || h > 23) {
@@ -2300,6 +2403,26 @@ $("btnPollNow").addEventListener("click", async () => {
 });
 
 // ── 基本设置 ─────────────────────────────────────
+function updateScheduleState() {
+  const state = $("scheduleState");
+  if (!state) return;
+  const value = (id, fallback) => {
+    const n = parseInt($(id)?.value, 10);
+    return Number.isFinite(n) ? Math.max(0, Math.min(23, n)) : fallback;
+  };
+  const pad = (n) => String(n).padStart(2, "0") + ":00";
+  const day = value("scheduleDayStart", 7);
+  const night = value("scheduleNightStart", 23);
+  const sleepStart = value("sleepStart", 2);
+  const sleepEnd = value("sleepEnd", 7);
+  const pause = $("schedulePause")?.checked !== false;
+  state.innerHTML = "当前有效时段：" +
+    "<strong>日间 " + pad(day) + "–" + pad(night) + "</strong> · " +
+    "<strong>深夜 " + pad(night) + "–" + pad(sleepStart) + "</strong> · " +
+    "<strong>休眠 " + pad(sleepStart) + "–" + pad(sleepEnd) + "</strong>" +
+    (pause ? "（休眠暂停内容监控）" : "（休眠不停轮询）");
+}
+
 function renderGeneral() {
   const box = $("channelSwitches");
   box.innerHTML = "";
@@ -2323,10 +2446,15 @@ function renderGeneral() {
   $("napcatApi").value = config.napcat_api || "";
   $("napcatMediaBaseUrl").value = config.napcat_media_base_url || "";
   const di = config.day_interval || [120, 180], ni = config.night_interval || [1500, 1800];
-  const sh = config.sleep_hours || [2, 7];
+  const schedule = config.monitor_schedule || {};
+  const sh = schedule.sleep_hours || config.sleep_hours || [2, 7];
   $("dayMin").value = di[0]; $("dayMax").value = di[1];
   $("nightMin").value = ni[0]; $("nightMax").value = ni[1];
+  $("scheduleDayStart").value = schedule.day_start_hour ?? config.day_start_hour ?? 7;
+  $("scheduleNightStart").value = schedule.night_start_hour ?? config.night_start_hour ?? 0;
   $("sleepStart").value = sh[0]; $("sleepEnd").value = sh[1];
+  $("schedulePause").checked = schedule.pause_content_monitors !== false;
+  updateScheduleState();
   const mm = config.message_monitor || {};
   if ($("msgMonitorOn")) $("msgMonitorOn").checked = mm.enabled !== false;
   const bm = config.blog_monitor || {};
@@ -2683,11 +2811,25 @@ function collectGeneral() {
   if (config.napcat_media_base_url === undefined) delete config.napcat_media_base_url;
   config.day_interval = [num("dayMin") ?? 120, num("dayMax") ?? 180];
   config.night_interval = [num("nightMin") ?? 1500, num("nightMax") ?? 1800];
-  config.sleep_hours = [num("sleepStart") ?? 2, num("sleepEnd") ?? 7];
+  const scheduleDayStart = num("scheduleDayStart") ?? 7;
+  const scheduleNightStart = num("scheduleNightStart") ?? 0;
+  const scheduleSleepHours = [num("sleepStart") ?? 2, num("sleepEnd") ?? 7];
+  config.monitor_schedule = {
+    ...(config.monitor_schedule || {}),
+    timezone: (config.monitor_schedule && config.monitor_schedule.timezone) || "Asia/Tokyo",
+    day_start_hour: scheduleDayStart,
+    night_start_hour: scheduleNightStart,
+    sleep_hours: scheduleSleepHours,
+    pause_content_monitors: $("schedulePause") ? $("schedulePause").checked : true,
+  };
+  // 保留旧版顶层别名，方便未迁移的旧调用方读取；运行时优先使用
+  // monitor_schedule 中的新值。
+  config.sleep_hours = scheduleSleepHours;
   config.message_monitor = {
     enabled: $("msgMonitorOn") ? $("msgMonitorOn").checked : true
   };
   config.blog_monitor = {
+    ...(config.blog_monitor || {}),
     enabled: $("blogMonitorOn").checked,
     hinatazaka: $("blogHinatazaka").checked,
     nogizaka: $("blogNogizaka").checked,
@@ -3314,8 +3456,12 @@ function renderSocial() {
   $("socialIgOn").checked = !!pig.enabled;
   $("socialIgFeed").checked = pig.include_feed !== false;
   $("socialIgStories").checked = pig.include_stories !== false;
-  $("socialIgInterval").value = pig.interval_seconds || 1800;
-  $("socialIgNightInterval").value = pig.night_interval_seconds || 5400;
+  const igDay = pig.interval_range_seconds || (pig.interval_seconds ? [pig.interval_seconds, pig.interval_seconds] : [1800, 3600]);
+  const igNight = pig.night_interval_range_seconds || (pig.night_interval_seconds ? [pig.night_interval_seconds, pig.night_interval_seconds] : [5400, 10800]);
+  $("socialIgInterval").value = igDay[0];
+  $("socialIgIntervalMax").value = igDay[1];
+  $("socialIgNightInterval").value = igNight[0];
+  $("socialIgNightIntervalMax").value = igNight[1];
   $("socialIgAccounts").value = (pig.accounts || []).join("\n");
 
   const ptt = p.tiktok || {};
@@ -3336,6 +3482,7 @@ function collectSocial() {
   const parseAccs = (val) => Array.from(new Set(val.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean)));
 
   config.platforms.x = {
+    ...(config.platforms.x || {}),
     enabled: $("socialXOn").checked,
     interval_seconds: parseInt($("socialXInterval").value, 10) || 60,
     night_interval_seconds: parseInt($("socialXNightInterval").value, 10) || 300,
@@ -3343,17 +3490,25 @@ function collectSocial() {
     display_names: (config.platforms.x && config.platforms.x.display_names) || {}
   };
 
+  const igDayMin = parseInt($("socialIgInterval").value, 10) || 1800;
+  const igDayMax = parseInt($("socialIgIntervalMax").value, 10) || igDayMin;
+  const igNightMin = parseInt($("socialIgNightInterval").value, 10) || 5400;
+  const igNightMax = parseInt($("socialIgNightIntervalMax").value, 10) || igNightMin;
   config.platforms.instagram = {
+    ...(config.platforms.instagram || {}),
     enabled: $("socialIgOn").checked,
     include_feed: $("socialIgFeed").checked,
     include_stories: $("socialIgStories").checked,
-    interval_seconds: parseInt($("socialIgInterval").value, 10) || 1800,
-    night_interval_seconds: parseInt($("socialIgNightInterval").value, 10) || 5400,
+    interval_seconds: igDayMin,
+    night_interval_seconds: igNightMin,
+    interval_range_seconds: [igDayMin, igDayMax],
+    night_interval_range_seconds: [igNightMin, igNightMax],
     accounts: parseAccs($("socialIgAccounts").value),
     display_names: (config.platforms.instagram && config.platforms.instagram.display_names) || {}
   };
 
   config.platforms.tiktok = {
+    ...(config.platforms.tiktok || {}),
     enabled: $("socialTiktokOn").checked,
     interval_seconds: parseInt($("socialTiktokInterval").value, 10) || 120,
     accounts: parseAccs($("socialTiktokAccounts").value),
@@ -3361,6 +3516,7 @@ function collectSocial() {
   };
 
   config.platforms.tiktok_live = {
+    ...(config.platforms.tiktok_live || {}),
     enabled: $("socialLiveOn").checked,
     interval_seconds: parseInt($("socialLiveInterval").value, 10) || 8,
     accounts: parseAccs($("socialLiveAccounts").value),
@@ -5544,6 +5700,12 @@ function mkInput(value, onChange, placeholder, style) {
 }
 
 function renderAll() { renderGeneral(); renderChannels(); renderSocial(); renderAccounts(); renderMembers(); refreshRawJson(); }
+
+["scheduleDayStart", "scheduleNightStart", "sleepStart", "sleepEnd", "schedulePause"].forEach((id) => {
+  const el = $(id);
+  if (el) el.addEventListener("input", updateScheduleState);
+  if (el) el.addEventListener("change", updateScheduleState);
+});
 
 // ── 入口 ─────────────────────────────────────────
 $("btnSave").addEventListener("click", saveConfig);

@@ -17,20 +17,16 @@ fetchers/social_base.py — 社交平台 fetcher 公共基类
 import logging
 import os
 import random
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from src.social.fetchers.base import BaseFetcher
+from src.monitor_schedule import JST, MonitorSchedule
 from src.social.models import MediaItem, Post
 from src.social.downloader import MediaDownloader, classify_media
 from src.social.settings import platform_settings
 from src.social.store import SocialStore
 
 log = logging.getLogger("collink")
-
-_CST = timezone(timedelta(hours=8))
-_NIGHT_START = 0
-_NIGHT_END = 6
-
 
 class SocialFetcher(BaseFetcher):
     """社交平台 fetcher 基类。"""
@@ -143,7 +139,9 @@ class SocialFetcher(BaseFetcher):
         夜间可分别用 `night_interval_range_seconds` / `night_interval_seconds`。
         """
         cfg = self.cfg
-        is_night = _NIGHT_START <= datetime.now(_CST).hour < _NIGHT_END
+        now = datetime.now(timezone.utc)
+        schedule = MonitorSchedule.from_config(self._config)
+        is_night = schedule.interval_phase(now) == "night"
 
         # 形态 1：区间随机（优先）
         rng = (cfg.get("night_interval_range_seconds") if is_night else None) \
@@ -224,7 +222,7 @@ class SocialFetcher(BaseFetcher):
         if dropped:
             log.debug("[%s] @%s 丢弃 %s 条 bootstrap 前的内容（时间戳 < %s）",
                       self.platform_name, account, dropped,
-                      datetime.fromtimestamp(boot_time, tz=_CST).strftime("%Y-%m-%d %H:%M"))
+                      datetime.fromtimestamp(boot_time, tz=JST).strftime("%Y-%m-%d %H:%M JST"))
         return kept
 
     # ── 媒体 ─────────────────────────────────────────────

@@ -1,14 +1,10 @@
 """Abstract base class for all platform fetchers."""
 import random
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
+from src.monitor_schedule import MonitorSchedule
 from src.social.models import Post
-
-_CST = timezone(timedelta(hours=8))
-_NIGHT_START = 0   # 0:00 CST
-_NIGHT_END = 6     # 6:00 CST
-
 
 def _activity_multiplier(hour: int) -> float:
     """时间-活跃度映射：模拟真人使用手机的 Pareto 分布模式
@@ -48,8 +44,10 @@ class BaseFetcher(ABC):
 
     def get_interval(self) -> int:
         cfg = self._config.get("platforms", {}).get(self.platform_name, {})
-        hour = datetime.now(_CST).hour
-        if _NIGHT_START <= hour < _NIGHT_END:
+        now = datetime.now(timezone.utc)
+        schedule = MonitorSchedule.from_config(self._config)
+        hour = schedule._as_jst(now).hour
+        if schedule.interval_phase(now) == "night":
             base = self.night_interval_seconds
         else:
             base = self.interval_seconds

@@ -189,6 +189,12 @@ def _normalize_config(raw: dict) -> dict:
 
     if not is_old:
         cfg = dict(raw)
+
+        # 统一监控调度块保留嵌套结构；MonitorSchedule 会同时兼容旧版
+        # 顶层 day/night/sleep 键，因此这里不强行覆盖用户已有的旧值。
+        if isinstance(cfg.get("monitor_schedule"), dict):
+            cfg["monitor_schedule"] = dict(cfg["monitor_schedule"])
+
         channels = cfg.pop("channels", {})
         cfg["enable_napcat_qq"]       = channels.get("napcat", False)
         cfg["enable_qq_official_bot"] = channels.get("qq_official", False)
@@ -565,6 +571,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "night_start_hour":             "NIGHT_START_HOUR",
     "sleep_start_hour":             "SLEEP_START_HOUR",
     "sleep_end_hour":               "SLEEP_END_HOUR",
+    "monitor_schedule":             "MONITOR_SCHEDULE",
     "day_interval":                 "DAY_INTERVAL",
     "night_interval":               "NIGHT_INTERVAL",
     "backtrack_hours":              "BACKTRACK_HOURS",
@@ -642,6 +649,7 @@ _CONTAINER_KEYS = frozenset({
     "skip_publish_types", "media_type_map",
     "platforms", "blog_monitor", "blog_records",
     "media", "social", "napcat_routes", "tg_bots",
+    "monitor_schedule",
 })
 
 # 需要特殊类型转换的 key（JSON 类型 → Python 类型）

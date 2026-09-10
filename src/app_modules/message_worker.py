@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import timedelta
 import random
 import sys
 import time
@@ -17,11 +16,11 @@ import httpx
 
 import config.config as cfg
 from config.credentials import proactive_refresh_if_expiring
-from src import blog_fetcher, fetcher, health, http_pool
+from src import fetcher, health, http_pool
 from src.app_modules.daily_summary import _get_jst_now
 from src.app_modules.process_lock import _stop_requested
 from src.logger import log_all
-from src.utils import in_hour_range
+from src.monitor_schedule import MonitorSchedule
 
 
 @dataclass(frozen=True)
@@ -191,20 +190,13 @@ def _message_cycle_summary(results: list[_MemberCycleResult], elapsed: float) ->
 
 
 def _calc_sleep_seconds() -> int:
-    """若当前在休眠时段内，返回距离休眠结束的秒数；否则返回 0。
-    支持跨午夜休眠窗口（如 SLEEP_START=22, SLEEP_END=6）。"""
-    jst = _get_jst_now()
-    if in_hour_range(jst.hour, cfg.SLEEP_START_HOUR, cfg.SLEEP_END_HOUR):
-        wake = jst.replace(hour=cfg.SLEEP_END_HOUR, minute=0, second=0, microsecond=0)
-        if wake <= jst:
-            wake += timedelta(days=1)
-        return int((wake - jst).total_seconds())
-    return 0
+    """若当前在全局内容监控休眠时段，返回到唤醒的秒数。"""
+    return MonitorSchedule.from_config(cfg).seconds_until_wake(_get_jst_now())
 
 
 def _next_interval() -> tuple[int, str]:
-    jst = _get_jst_now()
-    if in_hour_range(jst.hour, cfg.NIGHT_START_HOUR, cfg.DAY_START_HOUR):
+    schedule = MonitorSchedule.from_config(cfg)
+    if schedule.interval_phase(_get_jst_now()) == "night":
         base = random.randint(*cfg.NIGHT_INTERVAL)  # nosec B311
         tag = "🌙 深夜低速"
     else:
@@ -430,44 +422,6 @@ async def _run_cycle() -> None:
     else:
         log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
 
-    # ── 博客巡查 ──
-    health.get_tracker().record_cycle_phase("blog")
-    blog_cfg = cfg._config.get("blog_monitor") or {}
-    if blog_cfg.get("enabled", False) and cfg._config.get("blog_records") is not None:
-        try:
-            blog_client = getattr(app_mod, "_blog_client", None) if app_mod else None
-            blog_db = getattr(app_mod, "_blog_db", None) if app_mod else None
-            new_posts = await blog_fetcher.run_blog_cycle(
-                blog_client, blog_db, cfg._config)
-            health.get_tracker().record_member_fetch("博客 (全局)", True)
-            if new_posts:
-                from src.notifier import send_blog_post
-                log_all(f"📝 博客更新：{len(new_posts)} 篇")
-                for post in new_posts:
-                    try:
-                        ok = await send_blog_post(post)
-                        if ok:
-                            log_all(f"✅ 博客 [{post.get('title', '无题')}] 推送完成")
-                        else:
-                            log_all(f"⚠️ 博客 [{post.get('title', '无题')}] 推送失败（无可用通道）", is_error=True)
-                    except Exception as e:
-                        log_all(
-                            f"💥 博客推送异常 | cycle_id={_current_cycle_id()} | "
-                            f"phase=blog: {e}",
-                            is_error=True,
-                        )
-                        health.get_tracker().record_member_push("博客 (全局)", False)
-                    await asyncio.sleep(0.5)
-            health.get_tracker().record_member_push("博客 (全局)", True)
-
-        except Exception as e:
-            health.get_tracker().record_member_fetch("博客 (全局)", False, health.ErrorTier.TRANSIENT, str(e))
-            log_all(
-                f"⚠️ 博客巡查异常 | cycle_id={_current_cycle_id()} | phase=blog: {e}",
-                is_error=True,
-            )
-
-
 async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
                     stop_event: asyncio.Event | None = None) -> None:
     app_mod = sys.modules.get("src.app")
@@ -485,8 +439,10 @@ async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
             sleep_sec = _calc_sleep_seconds()
             if sleep_sec > 0:
                 jst = _get_jst_now()
+                schedule = MonitorSchedule.from_config(cfg)
                 log_all(
-                    f"😴 休眠时段（{cfg.SLEEP_START_HOUR}:00-{cfg.SLEEP_END_HOUR}:00 JST），"
+                    f"😴 全局内容监控休眠（{schedule.sleep_start_hour}:00-"
+                    f"{schedule.sleep_end_hour}:00 JST），"
                     f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
                     is_debug=True,
                 )

@@ -409,8 +409,8 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 | **📊 状态** | 实时巡查轮次、下次倒计时、各账号 Token 剩余寿命、通道健康度、立即巡查与测试推送。 |
 | **👥 账号与成员** | 账号凭证在线填报与握手测试；**成员订阅状态胶囊（🌟已订阅·至9/1、⏳曾订阅、⚫离线）**；未订阅成员智能跳过轮询抓取。 |
 | **📢 推送通道** | NapCat QQ、Telegram、QQ 官方 Bot 开关、API 配置、**渠道备注名**、订阅开关与白名单过滤。 |
-| **🌐 动态监控** | 官方博客（三团独立开关/频率）、𝕏 (Twitter)、Instagram (Feed/Story)、TikTok 短视频与 TikTok Live 直播录制总控。 |
-| **⚙️ 系统设置** | Message 轮询时段（日间/深夜/休眠）、AI 翻译多引擎参数与 API Key、本地归档、每日健康报告。 |
+| **🌐 动态监控** | 全局 JST 日间/深夜/休眠时段、Message 与官方博客独立频率、𝕏 (Twitter)、Instagram (Feed/Story)、TikTok 短视频与 TikTok Live 直播录制总控。休眠只暂停新的内容轮询，不影响健康检查、告警、手动操作或已经开始的直播录制。 |
+| **⚙️ 系统设置** | 只保留 QQ/NapCat 发送节流、告警冷却、单路超时、AI 翻译、代理、本地归档和每日健康报告；监控频率统一在「动态监控」。 |
 | **🔑 用户** | scrypt 加盐哈希用户鉴权、在线增删用户、分配角色、随机高强度密码生成。 |
 | **🛠️ 高级** | 实时脱敏运行日志控制台、全局 JSON 配置可视化在线编辑及 **10 份历史配置快照一键回滚**。 |
 
@@ -526,9 +526,32 @@ Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env
   "gemini_models": ["gemini-3.7-flash", "glm-4-flash"],
   "day_interval": [120, 180],
   "night_interval": [1500, 1800],
-  "sleep_hours": [2, 7]
+  "monitor_schedule": {
+    "timezone": "Asia/Tokyo",
+    "day_start_hour": 7,
+    "night_start_hour": 23,
+    "sleep_hours": [2, 7],
+    "pause_content_monitors": true
+  },
+  "blog_monitor": {
+    "enabled": true,
+    "day_interval": [60, 120],
+    "night_interval": [1650, 1950]
+  },
+  "platforms": {
+    "instagram": {
+      "interval_range_seconds": [1800, 3600],
+      "night_interval_range_seconds": [5400, 10800]
+    }
+  }
 }
 ```
+
+`day_interval` / `night_interval` 是 Message 每轮完成后的随机等待区间；博客使用
+`blog_monitor` 内的独立区间，X、TikTok 和 TikTok Live 使用各自平台的秒数。Instagram
+Feed/Reels 使用两个明确的随机区间，Story 另有按账号的安全限频。`monitor_schedule`
+统一以 JST 判定日间、深夜和休眠；旧版顶层 `sleep_hours`、`day_start_hour` 等键仍可读取，
+新配置优先使用嵌套块。修改后点击管理端“保存并热重载”，下一轮任务读取新快照。
 
 > Docker Compose 默认只将管理端发布到宿主机 `127.0.0.1:46046`。需要远程访问时，请使用 HTTPS 反向代理并把 `auth.cookie_secure` 设为 `true`；不要直接将 HTTP 管理端暴露到公网。应用会自动接受与请求 Host 相同的 HTTPS Origin；若要锁定唯一访问域名或代理没有保留 Host，可在 `web_admin.origin` 填写完整外部地址。
 

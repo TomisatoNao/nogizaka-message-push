@@ -131,6 +131,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 账号池 ──",    ["accounts"]),
     ("── 监控成员 ──",  ["monitor"]),
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
+    ("── 全局监控调度（JST）──", ["monitor_schedule"]),
 ]
 _OPTIONAL_ORDER = ["qq_send_interval", "napcat_send_timeout_seconds", "translate", "image_tagging", "gemini_models", "gemini_min_interval", "translate_timeout"]
 _OPTIONAL_COMMENT = "── 可选覆盖 ──（不写则用内置默认值）"
@@ -149,7 +150,7 @@ def _render_value(key: str, val) -> str:
             and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands") \
+    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands", "monitor_schedule") \
             and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"

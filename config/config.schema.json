@@ -588,6 +588,41 @@
         }
       }
     },
+    "monitor_schedule": {
+      "type": "object",
+      "description": "所有内容监控共用的 JST 日间、深夜与全局休眠策略",
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "enum": ["Asia/Tokyo", "JST"]
+        },
+        "day_start_hour": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 23
+        },
+        "night_start_hour": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 23
+        },
+        "sleep_hours": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "所有内容监控暂停的起止 JST 小时",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 23
+          }
+        },
+        "pause_content_monitors": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
     "blog_monitor": {
       "type": "object",
       "properties": {
@@ -620,6 +655,14 @@
             "type": "integer",
             "minimum": 1
           }
+        },
+        "error_backoff_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "error_backoff_max_seconds": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     },
@@ -641,16 +684,44 @@
       "type": "object",
       "properties": {
         "x": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "interval_seconds": {"type": "integer", "minimum": 1},
+            "night_interval_seconds": {"type": "integer", "minimum": 0}
+          }
         },
         "instagram": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "interval_seconds": {"type": "integer", "minimum": 1},
+            "night_interval_seconds": {"type": "integer", "minimum": 0},
+            "interval_range_seconds": {
+              "type": "array", "minItems": 2, "maxItems": 2,
+              "items": {"type": "integer", "minimum": 1}
+            },
+            "night_interval_range_seconds": {
+              "type": "array", "minItems": 2, "maxItems": 2,
+              "items": {"type": "integer", "minimum": 1}
+            },
+            "story_interval_range_seconds": {
+              "type": "array", "minItems": 2, "maxItems": 2,
+              "items": {"type": "integer", "minimum": 1}
+            }
+          }
         },
         "tiktok": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "interval_seconds": {"type": "integer", "minimum": 1},
+            "night_interval_seconds": {"type": "integer", "minimum": 0}
+          }
         },
         "tiktok_live": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "interval_seconds": {"type": "integer", "minimum": 1},
+            "night_interval_seconds": {"type": "integer", "minimum": 0}
+          }
         }
       }
     },

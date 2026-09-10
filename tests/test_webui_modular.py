@@ -170,11 +170,32 @@ def test_admin_frontend_config_and_dark_select_contracts():
     assert "同一个 timeline 请求的 Request Headers" not in html
     assert "必须包含 URL 与请求体" in html
     assert "Request Headers 文本" not in html
-    # 系统设置页必须明确区分 Message 轮询参数与通道/告警参数，避免把发送节流误解为抓取频率。
-    assert "Message 轮询与发送节奏" in html
-    assert "Message 日间间隔" in html
-    assert "Message 深夜间隔" in html
-    assert "Message 休眠时段" in html
+    # 动态监控页集中展示全局时段、Message 与其它项目；系统页只保留发送层参数。
+    assert "全局监控调度" in html
+    assert "Message 监控设置" in html
+    assert "monitor_schedule" in html
+    assert "🚦 发送与告警参数" in html
+    assert "不控制抓取频率" in html
+    assert "日间间隔（min / max 秒）" in html
+    assert "深夜间隔（min / max 秒）" in html
+    assert "休眠时段暂停所有内容监控" in html
+    assert "socialIgIntervalMax" in html
+    assert "socialIgNightIntervalMax" in html
+
+
+def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    for element_id in (
+        "scheduleDayStart", "scheduleNightStart", "sleepStart", "sleepEnd",
+        "schedulePause", "scheduleState", "msgMonitorOn", "dayMin", "dayMax",
+        "nightMin", "nightMax",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "function updateScheduleState()" in html
+    assert "config.monitor_schedule =" in html
+    assert "monitor-project" in html
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
+    assert ".monitor-project .switch { white-space: normal" in html
     assert "告警重复通知冷却" in html
     assert "QQ / NapCat 发送节流间隔" in html
     assert "NapCat 单路发送超时" in html

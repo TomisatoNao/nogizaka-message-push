@@ -46,6 +46,7 @@ from src.app_modules.message_worker import (
     _run_loop,
     _wait_or_trigger,
 )
+from src.app_modules.blog_worker import run_blog_loop
 from src.app_modules.process_lock import (
     PID_FILE,
     STOP_FILE,
@@ -57,6 +58,7 @@ from src.app_modules.process_lock import (
     _stop_requested,
 )
 from src.logger import init_loggers, log_all
+from src.monitor_schedule import MonitorSchedule
 from src.platforms import napcat, qq_official, tgbot
 from src.platforms.napcat_session import (
     NapCatSessionAlertTracker,
@@ -651,6 +653,7 @@ async def main() -> None:
     observer = None
     webui_server = None
     summary_task: asyncio.Task | None = None
+    blog_task: asyncio.Task | None = None
     napcat_monitor: NapCatSessionMonitor | None = None
     general_rebind_callback = None
     restart_requested = False
@@ -660,6 +663,10 @@ async def main() -> None:
         init_loggers()
         _acquire_instance_lock()
         log_all("🌸 坂道联合监控系统已启动")
+        log_all(
+            f"🕘 内容监控时段已生效 | {MonitorSchedule.from_config(cfg).window_summary()}",
+            is_debug=True,
+        )
         # 上次的停止信号不该影响本次启动
         try:
             STOP_FILE.unlink(missing_ok=True)
@@ -839,6 +846,20 @@ async def main() -> None:
         stop_event = asyncio.Event()
         _install_stop_handlers(stop_event)
 
+        # 博客独立于 Message 主循环运行；worker 每轮读取 cfg._config，支持
+        # 热重载 blog_monitor 的开关、频率和全局 JST 休眠边界。
+        if _blog_client is not None and _blog_db is not None:
+            blog_task = asyncio.create_task(
+                run_blog_loop(
+                    _blog_client,
+                    _blog_db,
+                    lambda: getattr(cfg, "_config", {}),
+                    stop_event,
+                ),
+                name="blog-monitor",
+            )
+            log_all("📝 官方博客独立监控任务已启动", is_debug=True)
+
         loop = asyncio.get_running_loop()
 
         # Windows 平台 IOCP 异步操作中止容错（防止 WinError 995 异常中断事件循环）
@@ -917,6 +938,9 @@ async def main() -> None:
         if summary_task is not None:
             summary_task.cancel()
             await asyncio.gather(summary_task, return_exceptions=True)
+        if blog_task is not None:
+            blog_task.cancel()
+            await asyncio.gather(blog_task, return_exceptions=True)
         if napcat_monitor is not None:
             try:
                 await napcat_monitor.stop()

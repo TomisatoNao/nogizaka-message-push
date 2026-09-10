@@ -306,7 +306,17 @@ def platform_settings(config: dict, platform: str) -> dict:
     if raw is None and platform in SOCIAL_PLATFORMS and isinstance(config, dict):
         if "accounts" in config or "enabled" in config or "backends" in config or "interval_seconds" in config:
             raw = config
-    return _merged(_PLATFORM_DEFAULTS.get(platform, {}), raw)
+    result = _merged(_PLATFORM_DEFAULTS.get(platform, {}), raw)
+
+    # 旧版 Instagram 页面只保存单值 interval_seconds；如果用户明确写了
+    # 这个旧键却没有写 range，不能让内置的默认 range 把页面输入静默覆盖。
+    # 新页面保存 range 时则保持 range 优先，行为不变。
+    if platform == "instagram" and isinstance(raw, dict):
+        if "interval_seconds" in raw and "interval_range_seconds" not in raw:
+            result.pop("interval_range_seconds", None)
+        if "night_interval_seconds" in raw and "night_interval_range_seconds" not in raw:
+            result.pop("night_interval_range_seconds", None)
+    return result
 
 
 def media_settings(config: dict) -> dict:

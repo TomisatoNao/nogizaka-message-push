@@ -24,6 +24,7 @@ from src.app_modules.message_worker import (
     _run_loop,
     _wait_or_trigger,
 )
+from src.app_modules.blog_worker import BlogWorker, run_blog_loop
 from src.app_modules.process_lock import (
     PID_FILE,
     STOP_FILE,
@@ -72,4 +73,7 @@ __all__ = [
     "_wait_or_trigger",
     "_run_cycle",
     "_run_loop",
+    # blog_worker
+    "BlogWorker",
+    "run_blog_loop",
 ]

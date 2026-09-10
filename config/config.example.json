@@ -74,11 +74,21 @@
     "enabled": false
   },
 
-  // ── Message 轮询节奏（秒 / JST 小时）──
-  // 日间/深夜是每轮 Message 巡查完成后的随机等待区间；sleep_hours 会完全暂停 Message 自动巡查。
+  // ── Message 轮询节奏（秒）──
+  // 日间/深夜是每轮 Message 巡查完成后的随机等待区间。
   "day_interval": [120, 180],
   "night_interval": [1500, 1800],
-  "sleep_hours": [2, 7],
+  // ── 全局内容监控时段（JST / UTC+9）──
+  // 示例：日间 07:00-23:00，深夜 23:00-02:00，休眠 02:00-07:00。
+  // 休眠暂停 Message、博客、X、Instagram、TikTok 的新一轮轮询，
+  // 不停止健康检查、告警发送或已经开始的直播录制。
+  "monitor_schedule": {
+    "timezone": "Asia/Tokyo",
+    "day_start_hour": 7,
+    "night_start_hour": 23,
+    "sleep_hours": [2, 7],
+    "pause_content_monitors": true
+  },
   // 以下不是 Message 抓取频率：告警通知冷却，以及 QQ/NapCat 发送层节流。
   "alert_cooldown": 3600,
   // Token 续期保护：每次最多并发 2 个，网络失败后指数退避（秒）
@@ -87,7 +97,7 @@
   "token_refresh_max_cooldown_seconds": 600,
 
   // ── 巡查超时与存活探针（秒）──
-  // 成员抓取和 Token 续期独立计时；整轮预算应覆盖正常的博客/媒体处理。
+  // 成员抓取和 Token 续期独立计时；整轮预算覆盖 Message 处理，博客有独立预算。
   "member_fetch_timeout_seconds": 60,
   "token_refresh_timeout_seconds": 30,
   "message_cycle_timeout_seconds": 900,
@@ -101,7 +111,10 @@
     "nogizaka": false,
     "sakurazaka": false,
     "day_interval": [60, 120],
-    "night_interval": [1650, 1950]
+    "night_interval": [1650, 1950],
+    // 博客抓取异常时指数退避，避免站点故障期间紧密重试。
+    "error_backoff_seconds": 60,
+    "error_backoff_max_seconds": 900
   },
   "blog_records": {
     "hinatazaka": "",
@@ -124,6 +137,8 @@
       "include_stories": true,
       "interval_seconds": 1800,
       "night_interval_seconds": 5400,
+      "interval_range_seconds": [1800, 3600],
+      "night_interval_range_seconds": [5400, 10800],
       "accounts": [],
       "display_names": {},
       "cookies_file": "",
