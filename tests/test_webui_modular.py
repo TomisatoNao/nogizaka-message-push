@@ -232,6 +232,50 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert "NapCat 单路发送超时" in html
 
 
+def test_admin_modules_share_grouped_responsive_layout_contract():
+    """状态、账号/成员和推送通道统一使用模块/控制/数据/操作层级。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    for section_id in ("tab-status", "tab-monitors", "tab-channels"):
+        start = html.index(f'id="{section_id}"')
+        end = html.index("</section>", start)
+        section = html[start:end]
+        assert 'class="card admin-module"' in section
+        assert "admin-module-heading" in section
+        assert "admin-data-group" in section
+        assert "admin-actions" in section
+        # 目标管理页的静态结构不再用 style= 负责布局，避免和动态监控的组件规则分叉。
+        assert "style=" not in section
+
+    for element_id in (
+        "stStartup", "stCycle", "stNext", "pollFeedback", "stTokens", "stChannels",
+        "stNapcatHealth", "stDeliveryBacklog", "btnCopyDeliveryDiag", "stDiskTotal",
+        "stDiskFree", "stDiskPercent", "stDiskBar", "stAppTotal", "stStorageGrid", "stErrors",
+        "accountRows", "accountEmpty", "btnAddAccount", "memberRows", "memberEmpty",
+        "btnAddMember", "btnPickMember", "btnSyncSubs", "channelSwitches", "qqBotRows",
+        "btnAddQqBot", "qqBotHint", "cmdOn", "cmdOptionsBlock", "cmdMode", "cmdWhitelistWrap",
+        "cmdWhitelistCountBadge", "btnSyncBotOpenids", "btnAddCmdOpenid", "cmdModeHintBanner",
+        "cmdOpenidList", "napcatApi", "napcatMediaBaseUrl", "napcatRows", "btnAddNapcat",
+        "tgTokenMigrationNotice", "tgBotRows", "btnAddTGBot",
+    ):
+        assert html.count(f'id="{element_id}"') == 1
+
+    for selector in (
+        ".admin-module", ".admin-module-heading", ".admin-control-group",
+        ".admin-data-group", ".admin-actions", ".admin-field-grid",
+        ".admin-summary-grid", ".admin-status-badge", ".admin-channel-switches",
+        ".admin-member-account", ".admin-storage-grid",
+    ):
+        assert selector in html
+    assert ".admin-field-grid { display: grid; grid-template-columns: repeat(3" in html
+    assert ".admin-field-grid { grid-template-columns: repeat(2" in html
+    assert ".admin-field-grid," in html and "grid-template-columns: 1fr" in html
+    assert ".admin-module-heading > .status-actions" in html
+    assert ".table-wrap { overflow-x: auto; }" in html
+    assert "function mkTableInput(" in html
+    assert "className = \"admin-table-input\"" in html
+
+
 def test_system_handlers_smart_parse():
     import asyncio
     raw_curl = "curl 'https://api.message.nogizaka46.com/v1/messages' -H 'authorization: Bearer my_jwt_token_12345678901234567890'"

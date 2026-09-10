@@ -24,6 +24,118 @@
              letter-spacing: .06em; text-transform: uppercase;
              display: flex; align-items: center; gap: 8px; }
   .card h2::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+
+  /* 管理端共享模块：状态、账号和推送通道与动态监控使用同一套层级语言。
+     表格仍保留表格语义，仅将外层标题、控制区、数据区和操作区统一。 */
+  .admin-module { min-width: 0; }
+  .admin-module-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-width: 0; margin-bottom: 14px; }
+  .admin-module-heading > h2 { flex: 1 1 260px; min-width: 0; margin: 0; }
+  .admin-module-heading > .admin-actions,
+  .admin-module-heading > .status-actions { flex: 0 0 auto; }
+  .admin-actions,
+  .status-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .admin-control-group,
+  .admin-data-group,
+  .admin-account-group { min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
+  .admin-control-group { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
+  .admin-control-group .switch { flex: 0 0 auto; width: auto; white-space: normal; line-height: 1.4; }
+  .admin-compact-switch .track { transform: scale(.8); transform-origin: left center; }
+  .admin-data-group { overflow: hidden; }
+  .admin-data-group + .admin-data-group { margin-top: 12px; }
+  .admin-data-group > .table-wrap { margin: -12px -14px; }
+  .admin-data-group > .hint:last-child,
+  .admin-note { margin: 10px 0 0; line-height: 1.6; }
+  .admin-note { color: var(--muted); font-size: 12px; }
+  .admin-error-item { padding: 3px 0; font-size: 13px; color: var(--muted); }
+  .admin-error-item--persistent { color: var(--err); }
+  .admin-field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 240px)); justify-content: start; gap: 12px 18px; min-width: 0; }
+  .admin-field-grid > * { min-width: 0; }
+  .admin-field-grid input[type=number] { max-width: 240px; font-variant-numeric: tabular-nums; }
+  .admin-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; min-width: 0; }
+  .admin-summary-item { min-width: 0; padding: 11px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 68%, transparent); }
+  .admin-summary-label { display: block; margin-bottom: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+  .admin-summary-value { display: block; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.45; font-variant-numeric: tabular-nums; }
+  .admin-summary-value.accent { color: var(--accent); }
+  .admin-summary-feedback { margin: 0; font-size: 13px; }
+  .admin-status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
+  .admin-status-badge.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .admin-status-badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .admin-status-badge.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+  .admin-status-badge.muted { color: var(--muted); background: color-mix(in srgb, var(--border) 40%, transparent); }
+  .admin-legacy-slot { color: var(--muted); font-size: 11px; }
+  .admin-table-actions { margin-top: 12px; }
+  .admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .admin-button-icon { font-size: 11px; }
+  .admin-cell-id { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text-strong); }
+  .admin-cell-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .admin-cell-label { font-size: 12px; color: var(--muted); }
+  .admin-nowrap { white-space: nowrap; }
+  .admin-table-input { max-width: 100%; }
+  .admin-table-input--id { width: 115px; }
+  .admin-table-input--remark { width: 125px; }
+  .admin-table-input--app { width: 110px; }
+  .admin-table-input--openid { width: 150px; }
+  .admin-table-input--group-openid { width: 130px; }
+  .admin-table-input--napcat-id { width: 120px; }
+  .admin-table-input--napcat-remark { width: 130px; }
+  .admin-table-input--tg-name { width: 95px; }
+  .admin-table-input--tg-remark { width: 105px; }
+  .admin-table-input--tg-chat { width: 115px; }
+  .admin-table-input--member-id { width: 75px; }
+  .admin-table-input--member-name { max-width: 130px; }
+  .admin-secret-clear { margin-left: 6px; padding: 3px 7px; font-size: 11px; }
+  .admin-field-grid--compact { margin-bottom: 12px; }
+  .admin-note--flush { margin: 0; }
+  .admin-credential-list { display: flex; flex-direction: column; gap: 8px; }
+  .admin-credential-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .admin-credential-name { min-width: 180px; color: var(--muted); font-size: 12.5px; }
+  .admin-proxy-result { margin-top: 4px; }
+  .admin-settings-note { margin: 10px 0 0; }
+  .admin-member-account { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+  .admin-member-account select { width: 138px; min-width: 130px; flex: 0 0 138px; }
+  .admin-member-sub-badge { display: inline-flex; align-items: center; white-space: nowrap; flex: 0 0 auto; }
+  .admin-member-sub-badge > span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; }
+  .admin-member-sub-badge .is-neutral { color: var(--muted); background: color-mix(in srgb, var(--border) 28%, transparent); border: 1px solid var(--border-soft); }
+  .admin-member-sub-badge .is-active { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 25%, transparent); font-weight: 600; }
+  .admin-member-sub-badge .is-expired { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); font-weight: 600; }
+  .admin-member-social { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .admin-member-social .social-badge { padding: 2px 6px; border-radius: 4px; font-size: 11.5px; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+  .admin-member-social .social-badge--x { background: rgba(29,161,242,.12); color: #1d9bf0; }
+  .admin-member-social .social-badge--ig { background: rgba(225,48,108,.12); color: #e1306c; }
+  .admin-member-social .social-badge--tt { background: rgba(254,44,85,.12); color: #fe2c55; }
+  .admin-member-social .social-empty { color: var(--muted); font-size: 12px; }
+  .admin-member-social .btn { margin-left: auto; padding: 2px 8px; font-size: 11.5px; }
+  .admin-storage-summary { margin-bottom: 14px; }
+  .admin-storage-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; font-size: 13px; }
+  .admin-storage-summary-row strong { color: var(--text); }
+  .admin-storage-summary-row .free { color: var(--ok); }
+  .admin-progress-track { height: 8px; overflow: hidden; display: flex; background: var(--border-soft); border-radius: 4px; }
+  .admin-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #ec4899); border-radius: 4px; transition: width .4s ease; }
+  .admin-storage-footnote { margin-top: 6px; color: var(--muted); font-size: 11.5px; }
+  .admin-storage-footnote strong { color: var(--text); }
+  .admin-storage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+  .admin-storage-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+  .admin-storage-card-heading,
+  .admin-storage-card-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .admin-storage-card-heading { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+  .admin-storage-card-count { padding: 1px 6px; border-radius: 10px; color: var(--storage-color, var(--accent)); background: color-mix(in srgb, var(--storage-color, var(--accent)) 14%, transparent); font-size: 11px; font-weight: 600; }
+  .admin-storage-card-size { color: var(--text); font-size: 16px; font-weight: 700; }
+  .admin-storage-clean { padding: 2px 8px; color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, var(--border)); background: transparent; font-size: 11px; }
+  .admin-channel-switches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .admin-channel-switches .switch { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 55%, transparent); }
+  .admin-submodule { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
+  .admin-submodule-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .admin-submodule-title { min-width: 0; flex: 1 1 320px; }
+  .admin-submodule-title h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14.5px; }
+  .admin-submodule-title p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .admin-command-options { transition: all var(--tr); }
+  .admin-whitelist { padding: 14px 16px; background: color-mix(in srgb, var(--card-solid) 95%, transparent); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+  .admin-whitelist-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .admin-whitelist-label { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); font-size: 13.5px; font-weight: 600; }
+  .admin-whitelist-count { padding: 1px 7px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); font-size: 11px; font-weight: 600; }
+  .admin-whitelist-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+  .admin-command-hint { margin-bottom: 12px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 6px; color: var(--muted); font-size: 12px; line-height: 1.6; background: color-mix(in srgb, var(--card) 90%, transparent); }
+  .admin-openid-list { display: flex; flex-direction: column; gap: 8px; }
   /* 系统设置与动态监控共用同一套“控制组 / 频率组 / 账号组”视觉语言。 */
   .system-settings-card > h2 { text-transform: none; letter-spacing: .02em; }
   .settings-unit { font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--muted); }
@@ -75,6 +187,7 @@
   .schedule-card .schedule-grid .schedule-field input { max-width: 180px; text-align: center; font-variant-numeric: tabular-nums; }
   .schedule-card .schedule-state { margin: 12px 0 0; padding: 9px 12px; color: var(--muted); background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.55; }
   .schedule-card .schedule-state strong { color: var(--accent); }
+  .schedule-pause-toggle { margin-top: 12px; }
   .status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 100%; }
   .status-actions [hidden] { display: none !important; }
   .status-actions #btnRestart { margin-left: 8px; }
@@ -150,6 +263,18 @@
   th { font-size: 11.5px; color: var(--muted); font-weight: 650; letter-spacing: .04em;
        text-transform: uppercase; }
   td input, td select { min-width: 70px; }
+  td input.admin-table-input--id { width: 115px; max-width: 115px; }
+  td input.admin-table-input--remark { width: 125px; max-width: 125px; }
+  td input.admin-table-input--app { width: 110px; max-width: 110px; }
+  td input.admin-table-input--openid { width: 150px; max-width: 150px; }
+  td input.admin-table-input--group-openid { width: 130px; max-width: 130px; }
+  td input.admin-table-input--napcat-id { width: 120px; max-width: 120px; }
+  td input.admin-table-input--napcat-remark { width: 130px; max-width: 130px; }
+  td input.admin-table-input--tg-name { width: 95px; max-width: 95px; }
+  td input.admin-table-input--tg-remark { width: 105px; max-width: 105px; }
+  td input.admin-table-input--tg-chat { width: 115px; max-width: 115px; }
+  td input.admin-table-input--member-id { width: 75px; max-width: 75px; }
+  td input.admin-table-input--member-name { max-width: 130px; }
   .table-wrap { overflow-x: auto; }
   /* 状态表在窄屏仍保持列语义，容器负责横向滚动，避免表头/数值逐字换行。 */
   .status-table { min-width: 560px; }
@@ -185,6 +310,8 @@
      table auto layout 将输入框压缩为几乎不可见，导致“姓名不显示”。 */
   .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 95px; min-width: 95px; }
   .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 145px; min-width: 145px; }
+  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 290px; min-width: 290px; }
+  .member-table th:nth-child(5), .member-table td:nth-child(5) { width: 75px; min-width: 75px; text-align: center; }
   .member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }
 
   /* OpenID 白名单卡片：左侧信息和右侧操作分别拥有可收缩/换行能力，
@@ -195,7 +322,7 @@
   .cmd-openid-card > .cmd-openid-actions { flex: 0 0 auto; flex-wrap: wrap; }
   .btn { border: 1px solid var(--border); background: var(--card-solid); color: var(--text);
     padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
-    font-family: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
     transition: transform var(--tr-fast), border-color var(--tr), background var(--tr), opacity var(--tr), box-shadow var(--tr);
     box-shadow: 0 1px 2px rgba(0,0,0,.02); text-decoration: none; }
   .btn:hover { border-color: var(--accent); background: var(--card-soft); box-shadow: 0 2px 6px rgba(0,0,0,.04); color: var(--accent); }
@@ -330,6 +457,11 @@
   }
 
   @media (max-width: 900px) and (min-width: 641px) {
+    .admin-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
+    .admin-channel-switches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-module-heading > h2 { flex-basis: 220px; }
+    .admin-member-account { align-items: flex-start; flex-wrap: wrap; }
     .settings-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .settings-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
     .settings-control-group { gap: 10px 14px; }
@@ -346,6 +478,29 @@
     .status-actions #btnRestart { margin-left: 0; }
     .card { padding: 18px 20px; margin-bottom: 16px; box-sizing: border-box; }
     .card h2 { font-size: 12px; margin-bottom: 14px; }
+    .admin-module-heading { gap: 10px; margin-bottom: 12px; }
+    .admin-module-heading > h2 { flex-basis: 100%; }
+    .admin-module-heading > .admin-actions,
+    .admin-module-heading > .status-actions { width: 100%; justify-content: flex-start; }
+    .admin-actions .btn,
+    .status-actions .btn { min-height: 40px; }
+    .admin-control-group,
+    .admin-data-group,
+    .admin-account-group { padding: 10px 12px; }
+    .admin-data-group > .table-wrap { margin: -10px -12px; }
+    .admin-field-grid,
+    .admin-summary-grid,
+    .admin-channel-switches { grid-template-columns: 1fr; gap: 10px; }
+    .admin-field-grid input[type=number] { max-width: none; }
+    .admin-summary-item { padding: 10px 12px; }
+    .admin-member-account { align-items: flex-start; flex-wrap: wrap; }
+    .admin-member-account select { flex: 1 1 180px; width: auto; min-width: 0; }
+    .admin-member-social .btn { margin-left: 0; min-height: 36px; }
+    .admin-whitelist { padding: 12px; }
+    .admin-whitelist-heading { align-items: flex-start; }
+    .admin-whitelist-tools { width: 100%; }
+    .admin-whitelist-tools .btn { flex: 1 1 auto; min-height: 40px; }
+    .admin-storage-summary-row { align-items: flex-start; flex-direction: column; gap: 4px; }
     .system-settings-card { padding: 16px 14px; }
     .system-settings-card > h2 { font-size: 13px; }
     .settings-scope-note { margin: -2px 0 12px; font-size: 11.5px; line-height: 1.55; }
@@ -474,46 +629,50 @@
 <!-- ── 状态 ─────────────────────────────── -->
 <section class="tab active" id="tab-status">
   <!-- Card 1: 核心运行 KPI 与快捷控制 -->
-  <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
-      <h2 style="margin:0; flex:1;">📊 系统运行状态</h2>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>📊 系统运行状态</h2>
       <div class="status-actions">
         <button class="btn small" hidden="" id="btnPollNow" type="button">⏩ 立即巡查</button>
         <button class="btn small" hidden="" id="btnTestPush" type="button">📨 测试推送</button>
         <button class="btn small danger" hidden="" id="btnRestart" type="button" title="重启服务并重新加载凭证，运行中的任务将短暂中断">⟳ 重启主程序</button>
       </div>
     </div>
-    <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; background:var(--card-soft); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-soft);">
-      <div><span style="font-size:12px; color:var(--muted); display:block;">启动状态</span><span id="stStartup" class="cred" style="font-weight:600; font-size:14px;">—</span></div>
-      <div><span style="font-size:12px; color:var(--muted); display:block;">巡查周期</span><span id="stCycle" style="font-weight:600; font-size:14px;">—</span></div>
-      <div><span style="font-size:12px; color:var(--muted); display:block;">下一次巡查倒计时</span><span id="stNext" style="font-weight:600; font-size:14px; color:var(--accent);">—</span></div>
-      <span class="hint" id="pollFeedback" style="margin:0; font-size:13px;"></span>
+    <div class="admin-summary-grid" role="group" aria-label="系统运行摘要">
+      <div class="admin-summary-item"><span class="admin-summary-label">启动状态</span><span id="stStartup" class="admin-summary-value cred">—</span></div>
+      <div class="admin-summary-item"><span class="admin-summary-label">巡查周期</span><span id="stCycle" class="admin-summary-value">—</span></div>
+      <div class="admin-summary-item"><span class="admin-summary-label">下一次巡查倒计时</span><span id="stNext" class="admin-summary-value accent">—</span></div>
     </div>
-    <p class="hint" id="stHint" style="margin-top:10px; margin-bottom:0;"></p>
+    <span class="hint admin-summary-feedback" id="pollFeedback"></span>
+    <p class="hint admin-note" id="stHint"></p>
   </div>
 
   <!-- Card 2: 账号 Token 健康状态 -->
-  <div class="card">
+  <div class="card admin-module">
     <h2>🔑 账号 Token 凭证健康状态</h2>
-    <div class="table-wrap">
+    <div class="admin-data-group">
+      <div class="table-wrap">
       <table>
         <thead><tr><th>账号 ID</th><th>剩余有效时间</th><th>状态</th></tr></thead>
         <tbody id="stTokens"></tbody>
       </table>
+      </div>
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    <p class="hint admin-note">
       Token 剩余不足 5 分钟会自动续期；显示「失效」时请重新填写凭证。
     </p>
   </div>
 
   <!-- Card 3: 推送通道概览 -->
-  <div class="card">
+  <div class="card admin-module">
     <h2>📢 推送通道统计（自上次摘要）</h2>
-    <div class="table-wrap">
+    <div class="admin-data-group">
+      <div class="table-wrap">
       <table class="status-table">
         <thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
         <tbody id="stChannels"></tbody>
       </table>
+      </div>
     </div>
     <div id="stNapcatHealth" class="napcat-health" role="status" aria-live="polite">
       🐱 NapCat 状态：等待探测结果…
@@ -521,50 +680,54 @@
     <div id="stDeliveryBacklog" class="delivery-backlog" role="status" aria-live="polite">
       🧭 路由补偿：暂无待处理数据
     </div>
-    <div class="delivery-backlog-actions">
+    <div class="admin-actions delivery-backlog-actions">
       <button class="btn small" id="btnCopyDeliveryDiag" type="button">📋 复制脱敏诊断摘要</button>
     </div>
   </div>
 
   <!-- Card 4: 存储空间与媒体占用 -->
-  <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
-      <h2 style="margin:0; flex:1;">💾 存储空间与媒体占用</h2>
-      <button class="btn small" id="btnRefreshStorage" type="button">🔄 刷新用量</button>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>💾 存储空间与媒体占用</h2>
+      <div class="admin-actions"><button class="btn small" id="btnRefreshStorage" type="button">🔄 刷新用量</button></div>
     </div>
-    
+
     <!-- 磁盘总体使用率进度条 -->
-    <div style="background:var(--card-soft); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-soft); margin-bottom:14px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:13px;">
-        <span style="color:var(--text); font-weight:600;">系统总磁盘: <span id="stDiskTotal" style="color:var(--muted); font-weight:normal;">—</span></span>
-        <span style="color:var(--muted);">剩余可用: <b id="stDiskFree" style="color:var(--ok); font-weight:600;">—</b> (已用 <span id="stDiskPercent">0%</span>)</span>
+    <div class="admin-data-group admin-storage-summary">
+      <div class="admin-storage-summary-row">
+        <span><strong>系统总磁盘:</strong> <span id="stDiskTotal" class="admin-cell-label">—</span></span>
+        <span class="admin-cell-label">剩余可用: <b id="stDiskFree" class="free">—</b> (已用 <span id="stDiskPercent">0%</span>)</span>
       </div>
-      <div style="height:8px; background:var(--border-soft); border-radius:4px; overflow:hidden; display:flex;">
-        <div id="stDiskBar" style="height:100%; width:0%; background:linear-gradient(90deg, var(--accent), #ec4899); border-radius:4px; transition:width 0.4s ease;"></div>
+      <div class="admin-progress-track">
+        <div id="stDiskBar" class="admin-progress-bar"></div>
       </div>
-      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">
-        本系统各模块累计落盘数据: <b id="stAppTotal" style="color:var(--text);">—</b>
+      <div class="admin-storage-footnote">
+        本系统各模块累计落盘数据: <b id="stAppTotal">—</b>
       </div>
     </div>
 
     <!-- 各分类存储网格 -->
-    <div id="stStorageGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+    <div id="stStorageGrid" class="admin-storage-grid">
       <!-- 动态注入 -->
     </div>
   </div>
 
   <!-- Card 5: 近期运行错误 -->
-  <div class="card">
+  <div class="card admin-module">
     <h2>⚠️ 近期运行错误（最多 20 条）</h2>
-    <div class="empty" id="stErrors">（无）</div>
+    <div class="admin-data-group"><div class="empty" id="stErrors">（无）</div></div>
   </div>
 </section>
 <!-- ── 账号与成员 ─────────────────────────────── -->
 <section class="tab" id="tab-monitors">
   <!-- Card 1: 账号池 -->
-  <div class="card">
-    <h2>🔑 账号池（凭证在 .env，按账号名大写自动匹配）</h2>
-    <div class="table-wrap">
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>🔑 账号池（凭证在 .env，按账号名大写自动匹配）</h2>
+      <div class="admin-actions"><button class="btn" id="btnAddAccount" type="button">＋ 添加账号</button></div>
+    </div>
+    <div class="admin-data-group">
+      <div class="table-wrap">
       <table>
         <thead>
           <tr>
@@ -578,92 +741,90 @@
         </thead>
         <tbody id="accountRows"></tbody>
       </table>
+      </div>
     </div>
     <div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
-    <div style="margin-top:12px">
-      <button class="btn" id="btnAddAccount" type="button">＋ 添加账号</button>
-    </div>
   </div>
 
   <!-- Card 2: 监控成员与社媒绑定配置 -->
-  <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
-      <h2 style="margin:0;">👥 监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>👥 监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
+      <div class="admin-actions">
+        <button class="btn" id="btnAddMember" type="button">＋ 手动添加成员</button>
+        <button class="btn" id="btnPickMember" type="button">📋 从账号拉取成员列表</button>
+        <button class="btn small" id="btnSyncSubs" type="button">🔄 刷新订阅状态</button>
+      </div>
     </div>
-    <div class="table-wrap">
+    <div class="admin-data-group">
+      <div class="table-wrap">
       <table class="member-table">
         <thead>
           <tr>
-            <th style="width:95px;">成员 ID</th>
-            <th style="width:145px;">名字</th>
-            <th style="width:290px;">Message 账号 & 订阅状态</th>
+            <th>成员 ID</th>
+            <th>名字</th>
+            <th>Message 账号 &amp; 订阅状态</th>
             <th>社交账号绑定 (X / IG / TikTok)</th>
-            <th style="width:75px; text-align:center;">操作</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody id="memberRows"></tbody>
       </table>
+      </div>
     </div>
     <div class="empty" hidden="" id="memberEmpty">还没有监控成员。</div>
-    <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-      <button class="btn" id="btnAddMember" type="button">＋ 手动添加成员</button>
-      <button class="btn" id="btnPickMember" type="button">📋 从账号拉取成员列表</button>
-      <button class="btn small" id="btnSyncSubs" type="button" style="margin-left:auto; color:var(--muted); font-size:12px;">🔄 刷新订阅状态</button>
-    </div>
   </div>
 </section>
 <!-- ── 推送通道 ─────────────────────────────── -->
 <section class="tab" id="tab-channels">
   <!-- Block 1: 顶栏 全局推送通道总开关 -->
-  <div class="card">
+  <div class="card admin-module">
     <h2>🌐 全局推送通道总开关</h2>
-    <div class="grid" id="channelSwitches"></div>
+    <div class="admin-control-group admin-channel-switches" id="channelSwitches" role="group" aria-label="全局推送通道"></div>
   </div>
 
   <!-- Block 2: QQ 官方 Bot 模块 -->
-  <div class="card">
-    <h2>🤖 QQ 官方 Bot 列表（密钥存 .env）</h2>
-    <div class="table-wrap">
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>🤖 QQ 官方 Bot 列表（密钥存 .env）</h2>
+      <div class="admin-actions"><button class="btn" id="btnAddQqBot" type="button">＋ 添加 QQ Bot</button></div>
+    </div>
+    <div class="admin-data-group">
+      <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th style="white-space:nowrap;">名称 (ID)</th>
-            <th style="white-space:nowrap;">备注</th>
-            <th style="white-space:nowrap;">App ID</th>
-            <th style="white-space:nowrap;">个人 OpenID</th>
-            <th style="white-space:nowrap;">群 OpenID</th>
-            <th style="white-space:nowrap;">订阅与过滤规则</th>
-            <th style="white-space:nowrap;">Client Secret</th>
-            <th style="white-space:nowrap;">状态</th>
-            <th style="white-space:nowrap;">操作</th>
+            <th class="admin-nowrap">名称 (ID)</th>
+            <th class="admin-nowrap">备注</th>
+            <th class="admin-nowrap">App ID</th>
+            <th class="admin-nowrap">个人 OpenID</th>
+            <th class="admin-nowrap">群 OpenID</th>
+            <th class="admin-nowrap">订阅与过滤规则</th>
+            <th class="admin-nowrap">Client Secret</th>
+            <th class="admin-nowrap">状态</th>
+            <th class="admin-nowrap">操作</th>
           </tr>
         </thead>
         <tbody id="qqBotRows"></tbody>
       </table>
+      </div>
     </div>
-    <div style="margin-top: 12px;">
-      <button class="btn" id="btnAddQqBot" type="button">＋ 添加 QQ Bot</button>
-    </div>
-    <p class="hint" id="qqBotHint" style="margin-top: 10px; margin-bottom: 0; line-height: 1.55;">
+    <p class="hint admin-note" id="qqBotHint">
       Client Secret 由对应行「填写」保存到 <code>.env</code>；多个私聊或群聊目标请添加多行并分别设置 OpenID 与订阅规则。
     </p>
 
-    <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft);">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <h3 style="margin: 0; font-size: 14.5px; display: flex; align-items: center; gap: 6px;">
-            🤖 Bot 智能指令响应与社媒自动解析
-          </h3>
-          <div style="font-size: 12px; color: var(--muted); margin-top: 3px;">
-            支持在 QQ 私聊或群聊 @机器人 触发 /help, /status, /latest 等指令，及发送社媒链接自动解析并 AI 双语翻译
-          </div>
+    <div class="admin-submodule">
+      <div class="admin-submodule-heading">
+        <div class="admin-submodule-title">
+          <h3>🤖 Bot 智能指令响应与社媒自动解析</h3>
+          <p>支持在 QQ 私聊或群聊 @机器人 触发 /help, /status, /latest 等指令，及发送社媒链接自动解析并 AI 双语翻译</p>
         </div>
         <label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许 Bot 响应指令与社媒解析</label>
       </div>
 
-      <div id="cmdOptionsBlock" style="transition: all var(--tr);">
-        <div class="grid" style="margin-bottom: 12px;">
-          <label class="field" style="margin: 0;">响应权限范围
+      <div id="cmdOptionsBlock" class="admin-command-options">
+        <div class="admin-field-grid admin-field-grid--compact">
+          <label class="field">响应权限范围
             <select id="cmdMode">
               <option value="configured">🎯 自动授权上方已配置的 Bot 目标（群聊 / 私聊，推荐）</option>
               <option value="whitelist">🔒 自定义授权白名单（仅允许下方列表登记的 OpenID）</option>
@@ -672,100 +833,100 @@
           </label>
         </div>
 
-        <div id="cmdWhitelistWrap" style="background: color-mix(in srgb, var(--card-solid) 95%, transparent); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 14px 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 13.5px; font-weight: 600; color: var(--text);">📋 授权 OpenID 白名单</span>
-              <span id="cmdWhitelistCountBadge" style="font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);">0 个授权</span>
+        <div id="cmdWhitelistWrap" class="admin-whitelist">
+          <div class="admin-whitelist-heading">
+            <div class="admin-whitelist-label">
+              <span>📋 授权 OpenID 白名单</span>
+              <span id="cmdWhitelistCountBadge" class="admin-whitelist-count">0 个授权</span>
             </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn small" id="btnSyncBotOpenids" type="button" title="从上方 QQ 官方 Bot 列表中快速导入所有已配置的 OpenID">
-                ⚡ 一键导入上方 Bot 目标
-              </button>
-              <button class="btn small primary" id="btnAddCmdOpenid" type="button">
-                ＋ 添加授权 OpenID
-              </button>
+            <div class="admin-whitelist-tools">
+              <button class="btn small" id="btnSyncBotOpenids" type="button" title="从上方 QQ 官方 Bot 列表中快速导入所有已配置的 OpenID">⚡ 一键导入上方 Bot 目标</button>
+              <button class="btn small primary" id="btnAddCmdOpenid" type="button">＋ 添加授权 OpenID</button>
             </div>
           </div>
 
-          <div id="cmdModeHintBanner" style="font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.6; padding: 8px 12px; border-radius: 6px; background: color-mix(in srgb, var(--card) 90%, transparent); border: 1px dashed var(--border);">
-          </div>
-
-          <div id="cmdOpenidList" style="display: flex; flex-direction: column; gap: 8px;">
-          </div>
+          <div id="cmdModeHintBanner" class="admin-command-hint"></div>
+          <div id="cmdOpenidList" class="admin-openid-list"></div>
         </div>
       </div>
 
-      <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+      <p class="hint admin-note">
         指令权限由上方模式和 OpenID 白名单控制；详细命令与部署说明请参阅 README。
       </p>
     </div>
   </div>
 
   <!-- Block 3: NapCat 路由模块 -->
-  <div class="card">
-    <h2>🐱 NapCat 群推送路由 (独立解耦)</h2>
-    <div class="grid" style="margin-bottom: 14px;">
-      <label class="field" style="grid-column: 1 / -1; margin: 0;">NapCat OneBot HTTP API 地址
-        <input id="napcatApi" placeholder="例如: http://127.0.0.1:3000/send_group_msg" type="text"/>
-      </label>
-      <label class="field" style="grid-column: 1 / -1; margin: 0;">远程媒体访问基地址（NapCat 不在本机时填写）
-        <input id="napcatMediaBaseUrl" placeholder="例如: http://192.168.22.13:46046" type="text"/>
-        <small class="hint">跨容器或跨主机时必须填写 NapCat 可访问的媒体地址；同一共享文件系统可留空。</small>
-      </label>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>🐱 NapCat 群推送路由 (独立解耦)</h2>
+      <div class="admin-actions"><button class="btn" id="btnAddNapcat" type="button">➕ 添加 NapCat 路由</button></div>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="white-space:nowrap;">NapCat 群号</th>
-            <th style="white-space:nowrap;">群备注</th>
-            <th style="white-space:nowrap;">订阅与过滤规则</th>
-            <th style="white-space:nowrap;">操作</th>
-          </tr>
-        </thead>
-        <tbody id="napcatRows"></tbody>
-      </table>
+    <div class="admin-account-group">
+      <div class="admin-field-grid">
+        <label class="field">NapCat OneBot HTTP API 地址
+          <input id="napcatApi" placeholder="例如: http://127.0.0.1:3000/send_group_msg" type="text"/>
+        </label>
+        <label class="field">远程媒体访问基地址（NapCat 不在本机时填写）
+          <input id="napcatMediaBaseUrl" placeholder="例如: http://192.168.22.13:46046" type="text"/>
+          <small class="hint">跨容器或跨主机时必须填写 NapCat 可访问的媒体地址；同一共享文件系统可留空。</small>
+        </label>
+      </div>
     </div>
-    <div style="margin-top: 12px;">
-      <button class="btn" id="btnAddNapcat" type="button">➕ 添加 NapCat 路由</button>
+    <div class="admin-data-group">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>NapCat 群号</th>
+              <th>群备注</th>
+              <th>订阅与过滤规则</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="napcatRows"></tbody>
+        </table>
+      </div>
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    <p class="hint admin-note">
       API 地址可填写基础地址或完整的 <code>/send_group_msg</code> 接口；不同群组可通过各自的订阅规则分别接收消息。
     </p>
   </div>
 
   <!-- Block 4: Telegram Bot 模块 -->
-  <div class="card">
-    <h2>✈️ Telegram Bots (独立解耦，凭证存 .env)</h2>
-    <div id="tgTokenMigrationNotice" class="hint" hidden style="margin-bottom: 14px; padding: 10px 14px; color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-radius: var(--radius-sm);"></div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="white-space:nowrap;">Bot 名称</th>
-            <th style="white-space:nowrap;">备注</th>
-            <th style="white-space:nowrap;">Target Chat ID</th>
-            <th style="white-space:nowrap;">专属 Token (.env)</th>
-            <th style="white-space:nowrap;">订阅与过滤规则</th>
-            <th style="white-space:nowrap;">操作</th>
-          </tr>
-        </thead>
-        <tbody id="tgBotRows"></tbody>
-      </table>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>✈️ Telegram Bots (独立解耦，凭证存 .env)</h2>
+      <div class="admin-actions"><button class="btn" id="btnAddTGBot" type="button">➕ 添加 TG Bot</button></div>
     </div>
-    <div style="margin-top: 12px;">
-      <button class="btn" id="btnAddTGBot" type="button">➕ 添加 TG Bot</button>
+    <div id="tgTokenMigrationNotice" class="hint admin-note" hidden></div>
+    <div class="admin-data-group">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Bot 名称</th>
+              <th>备注</th>
+              <th>Target Chat ID</th>
+              <th>专属 Token (.env)</th>
+              <th>订阅与过滤规则</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tgBotRows"></tbody>
+        </table>
+      </div>
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    <p class="hint admin-note">
       每个 Bot 使用独立的 <code>.env</code> Token；Target Chat ID 支持个人、群组和频道，多个目标请添加多行。
     </p>
   </div>
+
 </section>
 <!-- ── 动态监控 ─────────────────────────────── -->
 <section class="tab" id="tab-social">
   <!-- Card 1: 全局监控时段 -->
-  <div class="card monitor-card schedule-card">
+  <div class="card admin-module monitor-card schedule-card">
     <h2>🕘 全局监控调度 <span class="settings-unit">（JST / UTC+9）</span></h2>
     <p class="settings-scope-note">统一控制 Message、官方博客、X、Instagram、TikTok 和 TikTok Live 的自动轮询。休眠只暂停新的内容抓取，不影响健康检查、告警、手动操作或已经开始的直播录制。小时字段按 JST 的 0–23 输入，0 表示午夜 00:00。</p>
     <div class="schedule-grid">
@@ -782,12 +943,12 @@
         <input id="sleepEnd" max="23" min="0" type="number"/>
       </label>
     </div>
-    <label class="switch" style="margin-top:12px;"><input id="schedulePause" type="checkbox"/><span class="track"></span>休眠时段暂停所有内容监控</label>
+    <label class="switch schedule-pause-toggle"><input id="schedulePause" type="checkbox"/><span class="track"></span>休眠时段暂停所有内容监控</label>
     <div id="scheduleState" class="schedule-state" aria-live="polite">当前有效时段：—</div>
   </div>
 
   <!-- Card 2: 💬 Message 监控设置 -->
-  <div class="card monitor-card">
+  <div class="card admin-module monitor-card">
     <h2>💬 Message 监控设置</h2>
     <div class="monitor-grid">
       <div class="monitor-project message-project">
@@ -808,7 +969,7 @@
   </div>
 
   <!-- Card 3: 📝 官方博客抓取设置 -->
-  <div class="card monitor-card">
+  <div class="card admin-module monitor-card">
     <h2>📝 官方博客监控设置</h2>
     <div class="monitor-grid">
       <div class="monitor-project monitor-project--full">
@@ -819,9 +980,9 @@
         <div class="monitor-control-group" role="group" aria-label="博客团体开关">
           <span class="monitor-group-label">团体独立开关</span>
           <div class="switch-group">
-            <label class="switch"><input id="blogHinatazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>日向坂</label>
-            <label class="switch"><input id="blogNogizaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>乃木坂</label>
-            <label class="switch"><input id="blogSakurazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>樱坂</label>
+            <label class="switch admin-compact-switch"><input id="blogHinatazaka" type="checkbox"/><span class="track"></span>日向坂</label>
+            <label class="switch admin-compact-switch"><input id="blogNogizaka" type="checkbox"/><span class="track"></span>乃木坂</label>
+            <label class="switch admin-compact-switch"><input id="blogSakurazaka" type="checkbox"/><span class="track"></span>樱坂</label>
           </div>
         </div>
         <div class="monitor-frequency-group" role="group" aria-label="博客轮询频率">
@@ -832,13 +993,13 @@
             <span class="pair monitor-field-pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
           </label>
         </div>
-        <p class="hint" style="margin:0;">博客推送目标在「推送通道」页面的对应路由中配置。</p>
+        <p class="hint admin-note--flush">博客推送目标在「推送通道」页面的对应路由中配置。</p>
       </div>
     </div>
   </div>
 
   <!-- Card 2: 𝕏 (Twitter) 监控设置 -->
-  <div class="card monitor-card">
+  <div class="card admin-module monitor-card">
     <h2>𝕏 (Twitter) 监控设置</h2>
     <div class="monitor-grid">
       <div class="monitor-project monitor-project--full">
@@ -864,7 +1025,7 @@
   </div>
 
   <!-- Card 3: 📸 Instagram 监控设置 -->
-  <div class="card monitor-card">
+  <div class="card admin-module monitor-card">
     <h2>📸 Instagram 监控设置（Feed / Story / Reels）</h2>
     <div class="monitor-grid">
       <div class="monitor-project monitor-project--full">
@@ -914,7 +1075,7 @@
   </div>
 
   <!-- Card 4: 🎵 TikTok / TikTok Live 监控与直播切片录制 -->
-  <div class="card monitor-card">
+  <div class="card admin-module monitor-card">
     <h2>🎵 TikTok 短视频 & TikTok Live 自动录制</h2>
     <div class="monitor-grid">
       <div class="monitor-project">
@@ -1015,7 +1176,7 @@
 <!-- ── 系统设置 ─────────────────────────────── -->
 <section class="tab" id="tab-system">
 
-  <div class="card system-settings-card">
+  <div class="card admin-module system-settings-card">
     <h2>🚦 发送与告警参数</h2>
     <div class="settings-scope-note">这些参数只影响告警通知、QQ/NapCat 发送节流和单路超时，不改变任何内容监控的抓取频率。监控时段与轮询间隔请在“动态监控”页面配置。</div>
     <div class="settings-group channels" aria-labelledby="deliverySettingsTitle">
@@ -1039,7 +1200,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card admin-module">
     <h2>🌐 多引擎 AI 翻译设置（Gemini + 智谱 GLM-4 智能轮番调度）</h2>
     <div class="settings-group">
       <div class="settings-group-title"><span>翻译运行参数</span><span class="settings-group-badge">仅影响翻译请求</span></div>
@@ -1053,39 +1214,39 @@
       </label>
       </div>
     </div>
-    <div class="settings-group" style="margin-top:12px;">
+    <div class="settings-group">
       <div class="settings-group-title"><span>服务凭证</span></div>
-      <div style="display:flex; flex-direction:column; gap:8px;">
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Google Gemini Key (.env)</span>
+      <div class="admin-credential-list">
+      <div class="admin-credential-row">
+        <span class="admin-credential-name">Google Gemini Key (.env)</span>
         <span id="geminiKeyStatus"></span>
         <button class="btn small" id="btnFillGeminiKey" type="button">填写</button>
-        <button class="btn small danger" id="btnClearGeminiKey" type="button" style="display:none;">清空</button>
+        <button class="btn small danger" id="btnClearGeminiKey" type="button" hidden>清空</button>
       </div>
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <span style="font-size:12.5px; color:var(--muted); min-width:180px;">智谱开放平台 Key (.env)</span>
+      <div class="admin-credential-row">
+        <span class="admin-credential-name">智谱开放平台 Key (.env)</span>
         <span id="zhipuKeyStatus"></span>
         <button class="btn small" id="btnFillZhipuKey" type="button">填写</button>
-        <button class="btn small danger" id="btnClearZhipuKey" type="button" style="display:none;">清空</button>
+        <button class="btn small danger" id="btnClearZhipuKey" type="button" hidden>清空</button>
       </div>
       </div>
     </div>
   </div>
 
-  <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
-      <h2 style="margin:0; flex:1;">🌐 全局网络代理设置（HTTP / SOCKS5）</h2>
-      <button class="btn small" id="btnTestProxy" type="button">⚡ 测试连通性</button>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>🌐 全局网络代理设置（HTTP / SOCKS5）</h2>
+      <div class="admin-actions"><button class="btn small" id="btnTestProxy" type="button">⚡ 测试连通性</button></div>
     </div>
-    <div class="grid">
-      <label class="field" style="grid-column: 1 / -1;">代理服务器地址 (Proxy URL)
+    <div class="admin-account-group">
+      <label class="field">代理服务器地址 (Proxy URL)
         <input id="sysProxy" placeholder="例如: http://127.0.0.1:7890 或 socks5://127.0.0.1:1080 (留空为直连)" type="text"/>
       </label>
     </div>
-    <div id="proxyTestResult" style="margin-top: 4px;"></div>
+    <div id="proxyTestResult" class="admin-proxy-result"></div>
   </div>
 
-  <div class="card">
+  <div class="card admin-module">
     <h2>💾 消息归档与每日摘要</h2>
     <div class="settings-group">
       <div class="settings-group-title"><span>归档内容</span></div>
@@ -1106,7 +1267,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card admin-module">
     <h2>🖥️ 网页管理端服务配置</h2>
     <div class="settings-group">
       <div class="settings-group-title"><span>服务监听</span><span class="settings-group-badge">重启后生效</span></div>
@@ -1116,7 +1277,7 @@
         <label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
       </div>
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    <p class="hint admin-settings-note">
       监听地址或端口修改需重启生效；绑定非 <code>127.0.0.1</code> 前，请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。
     </p>
   </div>
@@ -2093,7 +2254,7 @@ async function fetchStatus() {
       STARTING: "⏳ 启动中",
     };
     startupBox.textContent = stateLabels[state] || state;
-    startupBox.className = "cred " + (state === "READY" ? "ok" : state === "DEGRADED" ? "miss" : "");
+    startupBox.className = "admin-summary-value cred " + (state === "READY" ? "ok" : state === "DEGRADED" ? "miss" : "");
     startupBox.title = (startup.reasons || []).join("；");
   }
   $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
@@ -2102,8 +2263,8 @@ async function fetchStatus() {
   updateCountdown();
 
   const okBadge = (v, okText, badText) => v
-    ? '<span class="cred ok">' + okText + "</span>"
-    : '<span class="cred miss">' + badText + "</span>";
+    ? '<span class="admin-status-badge ok">' + okText + "</span>"
+    : '<span class="admin-status-badge err">' + badText + "</span>";
 
   const tokens = $("stTokens");
   if (tokens) {
@@ -2113,10 +2274,10 @@ async function fetchStatus() {
     for (const acc of names) {
       const t = data.tokens[acc];
       let badge;
-      if (!t.healthy || t.remaining <= 0) badge = '<span class="cred miss">🔴 失效（需重新填凭证）</span>';
+      if (!t.healthy || t.remaining <= 0) badge = '<span class="admin-status-badge err">🔴 失效（需重新填凭证）</span>';
       else if (t.remaining < (data.token_warn_seconds || 600))
-        badge = '<span class="cred" style="color:var(--warn)">🔄 即将自动续期</span>';
-      else badge = '<span class="cred ok">✓ 正常</span>';
+        badge = '<span class="admin-status-badge warn">🔄 即将自动续期</span>';
+      else badge = '<span class="admin-status-badge ok">✓ 正常</span>';
       tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
         (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
     }
@@ -2218,8 +2379,7 @@ async function fetchStatus() {
       errBox.innerHTML = "";
       for (const e of data.errors.slice().reverse()) {
         const div = document.createElement("div");
-        div.style.cssText = "padding:3px 0; font-size:13px;" +
-          (e.tier === "PERSISTENT" ? "color:var(--err)" : "color:var(--muted)");
+        div.className = "admin-error-item" + (e.tier === "PERSISTENT" ? " admin-error-item--persistent" : "");
         div.textContent = "[" + (e.tier === "PERSISTENT" ? "需处理" : "临时") + "] " + e.msg +
           "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + "）";
         errBox.appendChild(div);
@@ -2278,17 +2438,31 @@ function renderStorage(st) {
   for (const [k, item] of Object.entries(cats)) {
     const card = document.createElement("div");
     const canClean = cleanableCats.has(k) && (item.bytes > 0 || (item.count && item.count > 0));
-    card.style.cssText = "background:var(--card-soft); border:1px solid var(--border-soft); border-radius:var(--radius-sm); padding:10px 14px; display:flex; flex-direction:column; gap:4px;";
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-size:12.5px; color:var(--muted); font-weight:500;">${esc(item.name)}</span>
-        <span style="font-size:11px; padding:1px 6px; border-radius:10px; background:${item.color}22; color:${item.color}; font-weight:600;">${item.count !== undefined ? item.count + ' 项' : ''}</span>
-      </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
-        <div style="font-size:16px; font-weight:700; color:var(--text);">${esc(item.human)}</div>
-        ${canClean ? `<button class="btn small" style="padding:2px 8px; font-size:11px; color:var(--err); border-color:rgba(239,68,68,0.3); background:transparent;" onclick="cleanStorage('${k}', '${esc(item.name)}')">🗑️ 清理</button>` : ''}
-      </div>
-    `;
+    card.className = "admin-storage-card";
+    card.style.setProperty("--storage-color", item.color || "var(--accent)");
+    const heading = document.createElement("div");
+    heading.className = "admin-storage-card-heading";
+    const name = document.createElement("span");
+    name.textContent = item.name || k;
+    const count = document.createElement("span");
+    count.className = "admin-storage-card-count";
+    count.textContent = item.count !== undefined ? item.count + " 项" : "";
+    heading.append(name, count);
+    const summary = document.createElement("div");
+    summary.className = "admin-storage-card-summary";
+    const size = document.createElement("div");
+    size.className = "admin-storage-card-size";
+    size.textContent = item.human || "—";
+    summary.appendChild(size);
+    if (canClean) {
+      const clean = document.createElement("button");
+      clean.className = "btn small admin-storage-clean";
+      clean.type = "button";
+      clean.textContent = "🗑️ 清理";
+      clean.addEventListener("click", () => cleanStorage(k, item.name || k));
+      summary.appendChild(clean);
+    }
+    card.append(heading, summary);
     container.appendChild(card);
   }
 }
@@ -2589,8 +2763,8 @@ function renderGeneral() {
   const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
-  if ($("btnClearGeminiKey")) $("btnClearGeminiKey").style.display = envStatus.GEMINI_API_KEY ? "inline-block" : "none";
-  if ($("btnClearZhipuKey")) $("btnClearZhipuKey").style.display = envStatus.ZHIPU_API_KEY ? "inline-block" : "none";
+  if ($("btnClearGeminiKey")) $("btnClearGeminiKey").hidden = !envStatus.GEMINI_API_KEY;
+  if ($("btnClearZhipuKey")) $("btnClearZhipuKey").hidden = !envStatus.ZHIPU_API_KEY;
   const tgNotice = $("tgTokenMigrationNotice");
   if (tgNotice) {
     const legacy = !!envStatus.legacy_tg_token;
@@ -2625,36 +2799,36 @@ function renderQqBots() {
       const tdName = document.createElement("td");
       // 改名会改变密钥在 .env 里的变量名，提醒一次避免"改完密钥就丢了"
       const originalName = bot.name;
-      tdName.appendChild(mkInput(bot.name || "", (v) => {
+      tdName.appendChild(mkTableInput(bot.name || "", (v) => {
         bot.name = v.trim().toLowerCase();
         if (bot.name && bot.name !== originalName && st && st.client_secret) {
           $("qqBotHint").innerHTML = "⚠️ 改名后密钥变量名变为 <code>" +
             esc(bot.name.toUpperCase()) + "_CLIENT_SECRET</code>，" +
             "保存后需要重新填一次 Client Secret。";
         }
-      }, "official_bot1", "width:115px"));
+      }, "official_bot1", "admin-table-input--id"));
       const tdRemark = document.createElement("td");
-      tdRemark.appendChild(mkInput(bot.remark || "", (v) => {
+      tdRemark.appendChild(mkTableInput(bot.remark || "", (v) => {
         const t = v.trim();
         if (t) bot.remark = t; else delete bot.remark;
         markDirty();
         renderSocialPushTargets();
-      }, "例如：5期生群", "width:125px"));
+      }, "例如：5期生群", "admin-table-input--remark"));
       const tdApp = document.createElement("td");
-      tdApp.appendChild(mkInput(bot.app_id || "", (v) => {
+      tdApp.appendChild(mkTableInput(bot.app_id || "", (v) => {
         const t = v.trim(); if (t) bot.app_id = t; else delete bot.app_id;
-      }, "102012345", "width:110px"));
+      }, "102012345", "admin-table-input--app"));
       const tdOpenid = document.createElement("td");
-      const openidInput = mkInput(bot.target_openid || "", (v) => {
+      const openidInput = mkTableInput(bot.target_openid || "", (v) => {
         const t = v.trim(); if (t) bot.target_openid = t; else delete bot.target_openid;
-      }, "ABCDEF0123...", "width:150px");
+      }, "ABCDEF0123...", "admin-table-input--openid");
       tdOpenid.appendChild(openidInput);
 
       // 群 OpenID
       const tdGroupOpenid = document.createElement("td");
-      const gidInput = mkInput(bot.group_openid || "", (v) => {
+      const gidInput = mkTableInput(bot.group_openid || "", (v) => {
         const t = v.trim(); if (t) bot.group_openid = t; else delete bot.group_openid;
-      }, "群 OpenID", "width:130px");
+      }, "群 OpenID", "admin-table-input--group-openid");
       tdGroupOpenid.appendChild(gidInput);
 
       const tdSub = document.createElement("td");
@@ -2665,7 +2839,7 @@ function renderQqBots() {
 
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
-      tdSecret.style.whiteSpace = "nowrap";
+      tdSecret.className = "admin-nowrap";
       const secretSet = (st && st.secret_env === secretVar && st.client_secret)
         || secretsWritten.has(bot.name);
       tdSecret.title = secretVar;
@@ -2690,10 +2864,10 @@ function renderQqBots() {
       const tdState = document.createElement("td");
       if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
       else if (st) tdState.innerHTML = '<span class="cred miss">✗ 不完整</span>';
-      else tdState.innerHTML = '<span class="cred" style="color:var(--muted)">未保存</span>';
+      else tdState.innerHTML = '<span class="admin-status-badge muted">未保存</span>';
 
       const tdOps = document.createElement("td");
-      tdOps.style.whiteSpace = "nowrap";
+      tdOps.className = "admin-nowrap";
       if (canCaptureOpenid) {
         tdOps.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput, gidInput)));
         tdOps.appendChild(document.createTextNode(" "));
@@ -2742,14 +2916,14 @@ function renderQqBots() {
     // 旧模式：.env 编号槽位，只读展示（只取真正的遗留槽位）
     for (const bot of qqBotStatus.filter((s) => !s.declared)) {
       const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
-      const badge = (v) => unused ? '<span class="cred" style="color:var(--muted)">—</span>'
+      const badge = (v) => unused ? '<span class="admin-status-badge muted">—</span>'
         : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
       let state;
       if (bot.ok) state = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
       else if (!unused) state = '<span class="cred miss">✗ 不完整</span>';
-      else state = '<span class="cred" style="color:var(--muted)">未使用</span>';
+      else state = '<span class="admin-status-badge muted">未使用</span>';
       const tr = document.createElement("tr");
-      tr.innerHTML = "<td><b>" + esc(bot.name) + "</b> <span style='color:var(--muted);font-size:11px'>(.env 槽位)</span></td>" +
+      tr.innerHTML = "<td><b>" + esc(bot.name) + "</b> <span class='admin-legacy-slot'>(.env 槽位)</span></td>" +
         "<td>" + badge(bot.app_id) + "</td>" +
         "<td>" + badge(bot.target_openid) + "</td>" +
         "<td>" + badge(bot.client_secret) + " </td>" +
@@ -3621,7 +3795,7 @@ function renderAccounts() {
 
     // 账号 ID
     const tdId = document.createElement("td");
-    tdId.innerHTML = '<span style="font-family:var(--mono);font-weight:600;color:var(--text-strong);">' + esc(id) + '</span>';
+    tdId.innerHTML = '<span class="admin-cell-id">' + esc(id) + '</span>';
 
     // 团体
     const tdGroup = document.createElement("td");
@@ -3629,16 +3803,16 @@ function renderAccounts() {
 
     // 登录方式
     const tdAuth = document.createElement("td");
-    tdAuth.innerHTML = '<span style="font-family:var(--mono);font-size:12px;color:var(--muted);">' + esc(acc.auth || "web") + '</span>';
+    tdAuth.innerHTML = '<span class="admin-cell-meta">' + esc(acc.auth || "web") + '</span>';
 
     // App 标签
     const tdTag = document.createElement("td");
-    tdTag.innerHTML = '<span style="font-size:12px;color:var(--muted);">' + esc(acc.app_tag || "—") + '</span>';
+    tdTag.innerHTML = '<span class="admin-cell-label">' + esc(acc.app_tag || "—") + '</span>';
 
     // 凭证 (.env) 专属状态操作胶囊按钮
     const st = credStatus[id];
     const tdCred = document.createElement("td");
-    tdCred.style.whiteSpace = "nowrap";
+    tdCred.className = "admin-nowrap";
     const credBtn = document.createElement("button");
     credBtn.type = "button";
 
@@ -3666,18 +3840,16 @@ function renderAccounts() {
 
     // 操作列：横向整齐排列
     const tdOps = document.createElement("td");
-    tdOps.style.whiteSpace = "nowrap";
+    tdOps.className = "admin-nowrap";
 
     const opsWrap = document.createElement("div");
-    opsWrap.style.display = "inline-flex";
-    opsWrap.style.alignItems = "center";
-    opsWrap.style.gap = "6px";
+    opsWrap.className = "admin-row-actions";
 
     // 1. 握手测试
     const btnVerify = document.createElement("button");
     btnVerify.className = "btn small";
     btnVerify.type = "button";
-    btnVerify.innerHTML = '<span style="font-size:12px;">⚡</span><span>握手测试</span>';
+    btnVerify.innerHTML = '<span class="admin-button-icon">⚡</span><span>握手测试</span>';
     btnVerify.onclick = async () => {
       btnVerify.disabled = true;
       const oldHtml = btnVerify.innerHTML;
@@ -3714,7 +3886,7 @@ function renderAccounts() {
     const btnEdit = document.createElement("button");
     btnEdit.className = "btn small";
     btnEdit.type = "button";
-    btnEdit.innerHTML = '<span style="font-size:11px;">✏️</span><span>编辑</span>';
+    btnEdit.innerHTML = '<span class="admin-button-icon">✏️</span><span>编辑</span>';
     btnEdit.onclick = () => openAccountDialog(id);
 
     // 3. 删除
@@ -4201,19 +4373,19 @@ function renderNapcat() {
     const tr = document.createElement("tr");
     
     const tdId = document.createElement("td");
-    tdId.appendChild(mkInput(r.group_id || "", (v) => {
+    tdId.appendChild(mkTableInput(r.group_id || "", (v) => {
       const n = parseInt(v.trim(), 10);
       if (Number.isFinite(n)) r.group_id = n;
       else r.group_id = null;
-    }, "12345678", "width:120px"));
+    }, "12345678", "admin-table-input--napcat-id"));
 
     const tdRemark = document.createElement("td");
-    tdRemark.appendChild(mkInput(r.remark || "", (v) => {
+    tdRemark.appendChild(mkTableInput(r.remark || "", (v) => {
       const t = v.trim();
       if (t) r.remark = t; else delete r.remark;
       markDirty();
       renderSocialPushTargets();
-    }, "例如：乃木坂主群", "width:130px"));
+    }, "例如：乃木坂主群", "admin-table-input--napcat-remark"));
     
     const tdSub = document.createElement("td");
     const rLabel = r.remark ? `${r.remark} (${r.group_id || '#' + (idx + 1)})` : (r.group_id || "#" + (idx + 1));
@@ -4246,28 +4418,28 @@ function renderTGBots() {
     const tr = document.createElement("tr");
     
     const tdName = document.createElement("td");
-    tdName.appendChild(mkInput(b.name || "", (v) => {
+    tdName.appendChild(mkTableInput(b.name || "", (v) => {
       b.name = v.trim().toLowerCase(); 
       markDirty();
-    }, "tg_main", "width:95px"));
+    }, "tg_main", "admin-table-input--tg-name"));
 
     const tdRemark = document.createElement("td");
-    tdRemark.appendChild(mkInput(b.remark || "", (v) => {
+    tdRemark.appendChild(mkTableInput(b.remark || "", (v) => {
       const t = v.trim();
       if (t) b.remark = t; else delete b.remark;
       markDirty();
       renderSocialPushTargets();
-    }, "例如：频道A", "width:105px"));
+    }, "例如：频道A", "admin-table-input--tg-remark"));
     
     const tdChat = document.createElement("td");
-    tdChat.appendChild(mkInput(b.target_chat || "", (v) => {
+    tdChat.appendChild(mkTableInput(b.target_chat || "", (v) => {
       b.target_chat = v.trim(); 
       markDirty();
-    }, "-10012345678", "width:115px"));
+    }, "-10012345678", "admin-table-input--tg-chat"));
     
     const secretVar = tgTokenEnvKey(b.name);
     const tdSecret = document.createElement("td");
-    tdSecret.style.whiteSpace = "nowrap";
+    tdSecret.className = "admin-nowrap";
     const tokenState = statusByName[b.name] || {};
     const isConfigured = !!tokenState.configured;
     tdSecret.title = secretVar ? ("写入 .env: " + secretVar) : "先填写有效 Bot 名称";
@@ -4297,7 +4469,7 @@ function renderTGBots() {
       const clearBtn = document.createElement("button");
       clearBtn.className = "btn small danger";
       clearBtn.type = "button";
-      clearBtn.style.cssText = "margin-left:6px; padding:3px 7px; font-size:11px;";
+      clearBtn.className = "btn small danger admin-secret-clear";
       clearBtn.textContent = "清空";
       clearBtn.onclick = async (e) => {
         e.preventDefault();
@@ -4414,21 +4586,21 @@ function renderMembers() {
     const tr = document.createElement("tr");
 
     const tdId = document.createElement("td");
-    const idInput = mkInput(m.id || "", (v) => {
+    const idInput = mkTableInput(m.id || "", (v) => {
       m.id = v.trim();
       updateSubBadge();
-    }, "55 (可空)", "width:75px");
+    }, "55 (可空)", "admin-table-input--member-id");
     tdId.appendChild(idInput);
 
     const tdName = document.createElement("td");
-    tdName.appendChild(mkInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里 奈央", "max-width:130px"));
+    tdName.appendChild(mkTableInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里 奈央", "admin-table-input--member-name"));
 
     const tdAcc = document.createElement("td");
     const accWrap = document.createElement("div");
-    accWrap.style.cssText = "display:flex; align-items:center; gap:8px; flex-wrap:nowrap;";
+    accWrap.className = "admin-member-account";
 
     const sel = document.createElement("select");
-    sel.style.cssText = "width:138px; min-width:130px; flex-shrink:0;";
+    sel.className = "admin-compact-select";
     const optNone = document.createElement("option");
     optNone.value = ""; optNone.textContent = "(无 - 纯社媒/博客)";
     sel.appendChild(optNone);
@@ -4452,23 +4624,22 @@ function renderMembers() {
 
     // 订阅状态徽章展示（横向单行并排，保持整行高度完全平齐一致）
     const subBadge = document.createElement("div");
-    subBadge.className = "member-sub-badge";
-    subBadge.style.cssText = "display:inline-flex; align-items:center; white-space:nowrap; flex-shrink:0;";
+    subBadge.className = "member-sub-badge admin-member-sub-badge";
 
     function updateSubBadge() {
       const accId = String(m.account || "").trim();
       const mid = String(m.id != null ? m.id : "").trim();
       if (!accId) {
-        subBadge.innerHTML = '<span style="font-size:11.5px; padding:2px 7px; border-radius:6px; background:rgba(255,255,255,0.04); color:var(--muted); border:1px solid rgba(255,255,255,0.08);">🌐 纯社媒/博客</span>';
+        subBadge.innerHTML = '<span class="is-neutral">🌐 纯社媒/博客</span>';
         return;
       }
       if (!mid) {
-        subBadge.innerHTML = '<span style="font-size:11.5px; padding:2px 6px; border-radius:6px; background:rgba(255,255,255,0.04); color:var(--muted); opacity:0.8;">⚠️ 待填ID</span>';
+        subBadge.innerHTML = '<span class="is-neutral">⚠️ 待填ID</span>';
         return;
       }
       const s = (subscriptions || {})[accId + ":" + mid];
       if (!s) {
-        subBadge.innerHTML = '<span style="font-size:11.5px; padding:2px 7px; border-radius:6px; background:rgba(255,255,255,0.04); color:var(--muted); border:1px solid var(--border);" title="未检测到活跃订阅，抓取引擎将跳过日常轮询">⚪ 未订阅</span>';
+        subBadge.innerHTML = '<span class="is-neutral" title="未检测到活跃订阅，抓取引擎将跳过日常轮询">⚪ 未订阅</span>';
       } else if (s.state === "active") {
         let renewTxt = "";
         if (s.end_at) {
@@ -4477,13 +4648,13 @@ function renderMembers() {
             if (!isNaN(d.getTime())) renewTxt = " · 至 " + (d.getMonth() + 1) + "/" + d.getDate();
           } catch(_) {}
         }
-        subBadge.innerHTML = '<span style="font-size:11.5px; font-weight:600; padding:2px 7px; border-radius:6px; background:rgba(16,185,129,0.12); color:#10b981; border:1px solid rgba(16,185,129,0.25); display:inline-flex; align-items:center; gap:3px;">🌟 已订阅' + renewTxt + '</span>';
+        subBadge.innerHTML = '<span class="is-active">🌟 已订阅' + renewTxt + '</span>';
       } else if (s.state === "expired") {
-        subBadge.innerHTML = '<span style="font-size:11.5px; font-weight:600; padding:2px 7px; border-radius:6px; background:rgba(245,158,11,0.12); color:#f59e0b; border:1px solid rgba(245,158,11,0.25); display:inline-flex; align-items:center; gap:3px;" title="离线模式：跳过日常实时轮询，保留历史归档与社媒监控">⏳ 曾订阅 (离线)</span>';
+        subBadge.innerHTML = '<span class="is-expired" title="离线模式：跳过日常实时轮询，保留历史归档与社媒监控">⏳ 曾订阅 (离线)</span>';
       } else if (s.state === "closed") {
-        subBadge.innerHTML = '<span style="font-size:11.5px; padding:2px 6px; border-radius:6px; background:rgba(255,255,255,0.06); color:var(--muted); border:1px solid rgba(255,255,255,0.1);" title="已毕业/关闭">⚫ 离线/已关闭</span>';
+        subBadge.innerHTML = '<span class="is-neutral" title="已毕业/关闭">⚫ 离线/已关闭</span>';
       } else {
-        subBadge.innerHTML = '<span style="font-size:11.5px; padding:2px 6px; border-radius:6px; background:rgba(255,255,255,0.04); color:var(--muted); border:1px solid var(--border);" title="未订阅，跳过日常抓取">⚪ ' + esc(s.state || "未订阅") + '</span>';
+        subBadge.innerHTML = '<span class="is-neutral" title="未订阅，跳过日常抓取">⚪ ' + esc(s.state || "未订阅") + '</span>';
       }
     }
     updateSubBadge();
@@ -4498,36 +4669,35 @@ function renderMembers() {
     const liveList = soc.tiktok_live || [];
 
     const badgeContainer = document.createElement("div");
-    badgeContainer.style.cssText = "display:flex; align-items:center; gap:6px; flex-wrap:wrap;";
+    badgeContainer.className = "admin-member-social";
 
     if (xList.length) {
       const b = document.createElement("span");
-      b.style.cssText = "background:rgba(29,161,242,0.12); color:#1d9bf0; padding:2px 6px; border-radius:4px; font-size:11.5px; font-weight:500;";
+      b.className = "social-badge social-badge--x";
       b.textContent = "𝕏 @" + xList.join(", @");
       badgeContainer.appendChild(b);
     }
     if (igList.length) {
       const b = document.createElement("span");
-      b.style.cssText = "background:rgba(225,48,108,0.12); color:#e1306c; padding:2px 6px; border-radius:4px; font-size:11.5px; font-weight:500;";
+      b.className = "social-badge social-badge--ig";
       b.textContent = "📸 @" + igList.join(", @");
       badgeContainer.appendChild(b);
     }
     if (ttList.length || liveList.length) {
       const b = document.createElement("span");
-      b.style.cssText = "background:rgba(254,44,85,0.12); color:#fe2c55; padding:2px 6px; border-radius:4px; font-size:11.5px; font-weight:500;";
+      b.className = "social-badge social-badge--tt";
       const allTt = [...new Set([...ttList, ...liveList])];
       b.textContent = "🎵 @" + allTt.join(", @");
       badgeContainer.appendChild(b);
     }
     if (!xList.length && !igList.length && !ttList.length && !liveList.length) {
       const b = document.createElement("span");
-      b.style.cssText = "color:var(--muted); font-size:12px;";
+      b.className = "social-empty";
       b.textContent = "未绑定";
       badgeContainer.appendChild(b);
     }
 
     const btnSoc = mkBtn("⚙️ 绑定社媒", () => openMemberSocialDialog(m, idx), "small");
-    btnSoc.style.cssText = "margin-left:auto; padding:2px 8px; font-size:11.5px;";
     badgeContainer.appendChild(btnSoc);
     tdSocial.appendChild(badgeContainer);
 
@@ -5757,7 +5927,6 @@ function mkBtn(text, onClick, extraCls) {
   const b = document.createElement("button");
   b.className = "btn small" + (extraCls ? " " + extraCls : "");
   b.type = "button";
-  b.style.whiteSpace = "nowrap";
   if (typeof text === "string" && text.includes("<")) b.innerHTML = text;
   else b.textContent = text;
   b.addEventListener("click", onClick);
@@ -5767,8 +5936,7 @@ function mkDelBtn(onClick, label = "删除") {
   const b = document.createElement("button");
   b.className = "btn small danger";
   b.type = "button";
-  b.style.whiteSpace = "nowrap";
-  b.innerHTML = '<span style="font-size:11px;">🗑️</span><span>' + esc(label) + '</span>';
+  b.innerHTML = '<span class="admin-button-icon">🗑️</span><span>' + esc(label) + '</span>';
   b.title = label;
   b.addEventListener("click", onClick);
   return b;
@@ -5780,6 +5948,11 @@ function mkInput(value, onChange, placeholder, style) {
   if (placeholder) input.placeholder = placeholder;
   if (style) input.style.cssText = style;
   input.addEventListener("input", () => { onChange(input.value, input); markDirty(); });
+  return input;
+}
+function mkTableInput(value, onChange, placeholder, className) {
+  const input = mkInput(value, onChange, placeholder);
+  input.className = "admin-table-input" + (className ? " " + className : "");
   return input;
 }
 
