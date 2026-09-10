@@ -145,6 +145,19 @@ def _api_payload(path: str) -> dict:
         }
     if path == "/api/subscriptions":
         return {"ok": True, "subscriptions": {}}
+    if path == "/api/members":
+        return {
+            "ok": True,
+            "members": [
+                {"id": "1", "name": "示例订阅成员", "state": "open", "is_subscribed": True, "sub_end": "2026-10-01"},
+                {"id": "2", "name": "示例历史成员", "state": "closed", "is_past_subscribed": True, "sub_start": "2025-01-01", "sub_end": "2025-06-01"},
+                {"id": "3", "name": "示例在籍成员", "state": "open"},
+            ],
+            "total": 3,
+            "subscribed_count": 1,
+            "past_subscribed_count": 1,
+            "open_count": 2,
+        }
     if path == "/api/social/ig_session":
         return {"ok": True, "configured": False}
     if path == "/api/status":
@@ -282,9 +295,17 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                                     children: [...card.children].map((el) => el.className),
                                     headingHasCount: !!card.querySelector('.admin-storage-card-heading .admin-storage-card-count'),
                                     metaCount: card.querySelectorAll('.admin-storage-card-meta .admin-storage-card-count').length,
-                                    actionCount: card.querySelectorAll(':scope > .admin-storage-card-actions').length,
+                                    actionCount: card.querySelectorAll('.admin-storage-card-meta > .admin-storage-card-actions').length,
+                                    countActionSameRow: !!card.querySelector('.admin-storage-card-meta > .admin-storage-card-count') &&
+                                        !!card.querySelector('.admin-storage-card-meta > .admin-storage-card-actions'),
                                     cleanInActions: [...card.querySelectorAll('.admin-storage-clean')].every((button) =>
                                         button.parentElement?.classList.contains('admin-storage-card-actions')),
+                                    cleanRowsOverlap: [...card.querySelectorAll('.admin-storage-clean')].map((button) => {
+                                        const count = card.querySelector('.admin-storage-card-count');
+                                        const countRect = count?.getBoundingClientRect();
+                                        const buttonRect = button.getBoundingClientRect();
+                                        return countRect ? buttonRect.top < countRect.bottom && buttonRect.bottom > countRect.top : false;
+                                    }),
                                     right: card.getBoundingClientRect().right,
                                 })),
                             };
@@ -296,7 +317,9 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         assert card["headingHasCount"] is False
                         assert card["metaCount"] == 1
                         assert card["actionCount"] == 1
+                        assert card["countActionSameRow"] is True
                         assert card["cleanInActions"] is True
+                        assert all(card["cleanRowsOverlap"])
                         assert card["right"] <= metrics["viewportWidth"] + 1
                 elif tab == "monitors":
                     page.wait_for_function(
@@ -306,17 +329,23 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                     members = page.evaluate(
                         """() => {
                             const table = document.querySelector('.member-table');
+                            const tableWrap = table?.closest('.table-wrap');
                             const row = document.querySelector('#memberRows tr');
                             const cells = row ? [...row.children] : [];
+                            const accountCell = row?.querySelector('td:nth-child(2)');
+                            const subscriptionCell = row?.querySelector('td:nth-child(3)');
+                            const accountReadonly = row?.querySelector('td:nth-child(2) .admin-member-account-readonly');
+                            const accountPoolId = document.querySelector('#accountRows .admin-cell-id');
                             const accountActions = [...document.querySelectorAll('#accountRows td:last-child .admin-row-actions')];
                             const memberActions = [...document.querySelectorAll('#memberRows td:last-child .admin-row-actions')];
                             const box = (el) => {
                                 const r = el.getBoundingClientRect();
-                                return {left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+                                return {left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width};
                             };
                             return {
                                 tableDisplay: table ? getComputedStyle(table).display : '',
                                 tableMinWidth: table ? getComputedStyle(table).minWidth : '',
+                                theadDisplay: table ? getComputedStyle(table.querySelector('thead')).display : '',
                                 rowDisplay: row ? getComputedStyle(row).display : '',
                                 areas: row ? getComputedStyle(row).gridTemplateAreas : '',
                                 labels: cells.map((cell) => cell.dataset.label || ''),
@@ -324,24 +353,116 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                                 memberActionCount: memberActions.length,
                                 accountActionBoxes: accountActions.map(box),
                                 memberActionBoxes: memberActions.map(box),
+                                accountBox: accountCell ? box(accountCell) : null,
+                                subscriptionBox: subscriptionCell ? box(subscriptionCell) : null,
+                                accountReadonlyBox: accountReadonly ? box(accountReadonly) : null,
+                                accountReadonlyStyle: accountReadonly ? {
+                                    display: getComputedStyle(accountReadonly).display,
+                                    background: getComputedStyle(accountReadonly).backgroundColor,
+                                    borderTopWidth: getComputedStyle(accountReadonly).borderTopWidth,
+                                    fontFamily: getComputedStyle(accountReadonly).fontFamily,
+                                    fontSize: getComputedStyle(accountReadonly).fontSize,
+                                    color: getComputedStyle(accountReadonly).color,
+                                    fontWeight: getComputedStyle(accountReadonly).fontWeight,
+                                } : null,
+                                accountPoolIdStyle: accountPoolId ? {
+                                    display: getComputedStyle(accountPoolId).display,
+                                    background: getComputedStyle(accountPoolId).backgroundColor,
+                                    borderTopWidth: getComputedStyle(accountPoolId).borderTopWidth,
+                                    fontFamily: getComputedStyle(accountPoolId).fontFamily,
+                                    fontSize: getComputedStyle(accountPoolId).fontSize,
+                                    color: getComputedStyle(accountPoolId).color,
+                                    fontWeight: getComputedStyle(accountPoolId).fontWeight,
+                                } : null,
+                                subscriptionJustify: subscriptionCell ? getComputedStyle(subscriptionCell).justifyContent : '',
+                                subscriptionTextAlign: subscriptionCell ? getComputedStyle(subscriptionCell).textAlign : '',
                                 tableBox: table ? box(table) : null,
+                                tableWrapBox: tableWrap ? box(tableWrap) : null,
                             };
                         }"""
                     )
                     assert members["accountActionCount"] >= 1
                     assert members["memberActionCount"] >= 1
                     if viewport_name == "mobile":
-                        assert members["tableMinWidth"] in {"0px", "auto"}
-                        assert members["rowDisplay"] == "grid"
-                        assert members["labels"] == ["成员 ID", "姓名", "社交账号绑定", "Message 账号", "订阅状态", "操作"]
-                        assert '"social social"' in members["areas"]
-                        assert '"account subscription"' in members["areas"]
-                        assert members["tableBox"]["right"] <= metrics["viewportWidth"] + 1
-                    else:
-                        assert members["tableMinWidth"] == "1000px"
+                        assert members["tableMinWidth"] == "760px"
+                        assert members["theadDisplay"] == "table-header-group"
                         assert members["rowDisplay"] == "table-row"
+                        assert members["labels"] == ["姓名", "Message 账号", "订阅状态", "操作"]
+                        assert members["tableBox"]["width"] >= 760
+                        assert members["tableWrapBox"]["right"] <= metrics["viewportWidth"] + 1
+                        assert members["tableBox"]["right"] > members["tableWrapBox"]["right"]
+                        assert members["accountBox"]["right"] <= members["tableBox"]["right"] + 1
+                        assert members["subscriptionBox"]["right"] <= members["tableBox"]["right"] + 1
+                        assert members["subscriptionBox"]["top"] == members["accountBox"]["top"]
+                        assert members["accountReadonlyBox"]["right"] <= members["accountBox"]["right"] + 1
+                        assert members["subscriptionTextAlign"] == "left"
+                    else:
+                        assert members["tableMinWidth"] == "760px"
+                        assert members["rowDisplay"] == "table-row"
+                    assert members["accountReadonlyStyle"]["display"] == "inline"
+                    assert members["accountReadonlyStyle"]["borderTopWidth"] == "0px"
+                    assert members["accountReadonlyStyle"]["fontWeight"] in {"600", "bold"}
+                    assert members["accountReadonlyStyle"] == members["accountPoolIdStyle"]
                     for action_box in members["accountActionBoxes"] + members["memberActionBoxes"]:
                         assert action_box["right"] >= action_box["left"]
+                    page.locator("#btnPickMember").click()
+                    page.locator("#memberPickDialog[open]").wait_for(state="visible", timeout=5000)
+                    picker = page.evaluate(
+                        """() => ({
+                            groups: [...document.querySelectorAll('#pickGroupChips .chip')].map((chip) => chip.textContent),
+                            unavailableGroups: [...document.querySelectorAll('#pickGroupChips .chip.is-unavailable')].map((chip) => chip.textContent),
+                            accounts: [...document.querySelectorAll('#pickAccountChips .chip')].map((chip) => chip.textContent),
+                            selectedGroup: document.querySelector('#pickGroupChips')?.dataset.value || '',
+                            selectedAccount: document.querySelector('#pickAccountChips')?.dataset.value || '',
+                            fetchDisabled: !!document.querySelector('#btnFetchMembers')?.disabled,
+                            dialogWidth: document.querySelector('#memberPickDialog')?.getBoundingClientRect().width || 0,
+                            dialogOverflow: (() => {
+                                const dialog = document.querySelector('#memberPickDialog');
+                                return dialog ? dialog.scrollWidth > dialog.clientWidth + 1 : false;
+                            })(),
+                            stepsColumns: getComputedStyle(document.querySelector('.member-pick-steps')).gridTemplateColumns,
+                            accountDirection: getComputedStyle(document.querySelector('.member-pick-account-row')).flexDirection,
+                        })"""
+                    )
+                    assert len(picker["groups"]) == 4
+                    assert picker["accounts"] == ["demo_main"]
+                    assert picker["selectedGroup"] == "nogizaka46"
+                    assert picker["selectedAccount"] == "demo_main"
+                    assert picker["fetchDisabled"] is False
+                    assert len(picker["unavailableGroups"]) == 3
+                    assert picker["dialogWidth"] <= metrics["viewportWidth"] + 1
+                    assert picker["dialogOverflow"] is False
+                    if viewport_name == "mobile":
+                        assert len(picker["stepsColumns"].split()) == 1
+                        assert picker["accountDirection"] == "column"
+                    else:
+                        assert len(picker["stepsColumns"].split()) == 2
+                        assert picker["accountDirection"] == "row"
+                    page.locator("#btnFetchMembers").click()
+                    page.locator("#memberPickList .member-pick-row").first.wait_for(state="visible", timeout=5000)
+                    fetched = page.evaluate(
+                        """() => ({
+                            rows: [...document.querySelectorAll('#memberPickList .member-pick-row')].map((row) => ({
+                                state: row.dataset.state,
+                                hasName: !!row.querySelector('.member-pick-name'),
+                                hasStatus: !!row.querySelector('.member-pick-status-badge'),
+                                hasInlineStyle: row.hasAttribute('style'),
+                            })),
+                            hintHasStats: !!document.querySelector('#memberPickHint .member-pick-stat--subscribed'),
+                            listOverflow: (() => {
+                                const list = document.querySelector('#memberPickList');
+                                return list ? list.scrollWidth > list.clientWidth + 1 : false;
+                            })(),
+                        })"""
+                    )
+                    assert len(fetched["rows"]) == 1
+                    assert fetched["rows"][0]["state"] == "open"
+                    assert fetched["rows"][0]["hasName"] is True
+                    assert fetched["rows"][0]["hasStatus"] is True
+                    assert fetched["rows"][0]["hasInlineStyle"] is False
+                    assert fetched["hintHasStats"] is True
+                    assert fetched["listOverflow"] is False
+                    page.locator("#memberPickClose").click()
                 elif tab == "channels":
                     actions = page.evaluate(
                         """() => [...document.querySelectorAll('#qqBotRows .admin-row-actions, #napcatRows .admin-row-actions, #tgBotRows .admin-row-actions, #cmdOpenidList .admin-row-actions')].map((wrap) => ({
@@ -361,6 +482,34 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         assert action["buttons"]
                         assert all(button["width"] > 0 and button["height"] > 0 for button in action["buttons"])
                         assert action["wrap"]["right"] >= action["wrap"]["left"]
+                    napcat = page.evaluate(
+                        """() => {
+                            const grid = document.querySelector('.napcat-endpoint-grid');
+                            const fields = grid ? [...grid.querySelectorAll(':scope > .field')] : [];
+                            const inputs = fields.map((field) => field.querySelector('input'));
+                            const rects = inputs.map((input) => {
+                                const r = input.getBoundingClientRect();
+                                return {left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+                            });
+                            const note = document.querySelector('.napcat-endpoint-note');
+                            const gridRect = grid?.getBoundingClientRect();
+                            return {
+                                columns: grid ? getComputedStyle(grid).gridTemplateColumns : '',
+                                rects,
+                                noteText: note?.textContent?.trim() || '',
+                                gridRight: gridRect?.right || 0,
+                            };
+                        }"""
+                    )
+                    assert len(napcat["rects"]) == 2
+                    assert napcat["noteText"] == "NapCat 不在本机时填写媒体地址；共享文件系统可留空。"
+                    assert napcat["gridRight"] <= metrics["viewportWidth"] + 1
+                    if viewport_name == "mobile":
+                        assert len(napcat["columns"].split()) == 1
+                        assert napcat["rects"][1]["top"] > napcat["rects"][0]["top"]
+                    else:
+                        assert len(napcat["columns"].split()) == 2
+                        assert abs(napcat["rects"][1]["top"] - napcat["rects"][0]["top"]) <= 2
                 elif tab == "social":
                     schedule = page.evaluate(
                         """() => {
@@ -415,6 +564,167 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                 else:
                     _assert_screenshot(actual, baseline)
 
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+@pytest.mark.parametrize("viewport_name", ("desktop", "mobile"))
+def test_admin_history_actions_align_with_table_header(admin_static_server, viewport_name):
+    """历史快照的操作按钮必须落在“操作”表头对应的单元格内。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport=VIEWPORTS[viewport_name],
+                color_scheme="dark",
+                locale="zh-CN",
+                device_scale_factor=1,
+            )
+            context.add_init_script("localStorage.setItem('sakamichiTheme', 'dark');")
+
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                payload = _api_payload(path)
+                if path == "/api/config/history":
+                    payload = {
+                        "ok": True,
+                        "history": [
+                            {"name": "config-a.json", "mtime_epoch": 1789000000, "size": 1024},
+                            {"name": "config-b.json", "mtime_epoch": 1788996400, "size": 8192},
+                        ],
+                    }
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(payload, ensure_ascii=False),
+                )
+
+            page = context.new_page()
+            page.route("**/api/**", handle_api)
+            page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
+            page.add_style_tag(content="*{animation:none!important;transition:none!important;caret-color:transparent!important}")
+            page.locator("#tab-status.active .admin-module").first.wait_for(state="visible", timeout=10000)
+            page.locator('.nav-tab[data-tab="advanced"]').click()
+            page.locator("#tab-advanced.active .admin-module").first.wait_for(state="visible", timeout=10000)
+            page.locator("#historyRows tr").first.wait_for(state="visible", timeout=5000)
+            layout = page.evaluate(
+                """() => {
+                    const table = document.querySelector('.admin-history-table');
+                    const header = table?.querySelector('thead th:last-child');
+                    const rows = [...(table?.querySelectorAll('tbody tr') || [])];
+                    const box = (el) => {
+                        const r = el.getBoundingClientRect();
+                        return {left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height};
+                    };
+                    return {
+                        viewportWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        tableMinWidth: table ? getComputedStyle(table).minWidth : '',
+                        header: header ? box(header) : null,
+                        rows: rows.map((row) => {
+                            const cell = row.lastElementChild;
+                            const actions = cell?.querySelector('.admin-row-actions');
+                            return {
+                                cellDisplay: cell ? getComputedStyle(cell).display : '',
+                                cell: cell ? box(cell) : null,
+                                actions: actions ? box(actions) : null,
+                            };
+                        }),
+                    };
+                }"""
+            )
+            assert layout["scrollWidth"] <= layout["viewportWidth"] + 1
+            assert layout["header"]
+            assert layout["rows"]
+            for row in layout["rows"]:
+                assert row["cellDisplay"] == "table-cell"
+                assert abs(row["cell"]["left"] - layout["header"]["left"]) <= 1
+                assert row["actions"]["left"] >= row["cell"]["left"]
+                assert row["actions"]["right"] <= row["cell"]["right"] + 1
+                assert row["actions"]["top"] >= row["cell"]["top"]
+            if viewport_name == "mobile":
+                assert layout["tableMinWidth"] == "520px"
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def test_admin_mobile_openid_cards_keep_information_and_actions_separate(admin_static_server):
+    """长 OpenID 在手机端独占信息行，操作栏不与身份信息争抢宽度。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport=VIEWPORTS["mobile"],
+                color_scheme="dark",
+                locale="zh-CN",
+                device_scale_factor=1,
+            )
+            context.add_init_script("localStorage.setItem('sakamichiTheme', 'dark');")
+
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            page = context.new_page()
+            page.route("**/api/**", handle_api)
+            page.goto(f"{admin_static_server}/#tab=channels", wait_until="domcontentloaded")
+            page.add_style_tag(content="*{animation:none!important;transition:none!important;caret-color:transparent!important}")
+            page.locator("#tab-channels.active .admin-module").first.wait_for(state="visible", timeout=10000)
+            page.evaluate(
+                """() => {
+                    window._cmdOpenids = [
+                        {type: "group", name: "示例群聊", openid: "AC2E2DCA8F90C0B6D0_LONG_OPENID"},
+                        {type: "user", name: "示例用户", openid: "DB1F400710798AC0C45D71AE1EFF1C8A"},
+                    ];
+                    renderCmdOpenids();
+                }"""
+            )
+            page.locator("#cmdOpenidList .cmd-openid-card").first.wait_for(state="visible", timeout=5000)
+            layout = page.evaluate(
+                """() => {
+                    const card = document.querySelector('#cmdOpenidList .cmd-openid-card');
+                    const main = card?.querySelector('.cmd-openid-main');
+                    const code = card?.querySelector('.cmd-openid-code');
+                    const actions = card?.querySelector('.cmd-openid-actions');
+                    const box = (el) => {
+                        const r = el.getBoundingClientRect();
+                            return {left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height};
+                    };
+                    return {
+                        viewportWidth: window.innerWidth,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        cardDirection: card ? getComputedStyle(card).flexDirection : '',
+                        cardAlign: card ? getComputedStyle(card).alignItems : '',
+                        mainDisplay: main ? getComputedStyle(main).display : '',
+                        codeBox: code ? box(code) : null,
+                        mainBox: main ? box(main) : null,
+                        actionsBox: actions ? box(actions) : null,
+                        buttons: [...(actions?.querySelectorAll('.btn') || [])].map(box),
+                    };
+                }"""
+            )
+            assert layout["scrollWidth"] <= layout["viewportWidth"] + 1
+            assert layout["cardDirection"] == "column"
+            assert layout["cardAlign"] == "stretch"
+            assert layout["mainDisplay"] == "grid"
+            assert layout["codeBox"]["right"] <= layout["mainBox"]["right"] + 1
+            assert layout["actionsBox"]["top"] >= layout["codeBox"]["bottom"]
+            assert layout["actionsBox"]["right"] <= layout["viewportWidth"] + 1
+            assert all(button["width"] > 0 and button["height"] >= 40 for button in layout["buttons"])
             context.close()
             browser.close()
     except Exception as exc:

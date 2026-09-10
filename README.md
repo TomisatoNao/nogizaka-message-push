@@ -311,7 +311,7 @@ python tools/manage_users.py reset
   - **Instagram**：公开帖子 / Reel / 图片优先使用匿名 Embed 解析（即使私有 `media/info` 返回 403 也可继续）；Feed 与 24h 快拍（Story）仍需有效 Cookies，内置安全频控限流熔断；
   - **TikTok**：短视频、图文幻灯片及原声音频无水印提取；
 - **TikTok Live 直播开播守护**：8 秒超轻量探测（单次约 120 字节），开播瞬间毫秒级捕获 HLS/FLV 流并拉起 ffmpeg 无损切片录制，优雅停机保护 Moov Atom；
-- **成员与账号解耦**：支持监控未开通 Message 的毕业成员、其他偶像团体（=LOVE / 48系等）的纯社媒与博客动态。
+- **成员目录与社媒分层**：Message 监控成员仅从乃木坂46、樱坂46、日向坂46及 yodel 的官方账号目录同步；X / Instagram / TikTok 等其他社媒账号统一在动态监控页面配置。
 
 ### 4. AI 双引擎翻译与全渠道格式化排版
 - **Gemini + 智谱清言 双引擎轮流调度**：支持两家大模型均匀交替轮询（Round-Robin），并在遇到额度超限或网络故障时秒级自动容灾切换；
@@ -351,7 +351,7 @@ flowchart LR
 ```
 
 - **全渠道备注支持**：每个群、每个 Bot 均支持直观备注（如 `乃木坂主群`、`5期生频道`），管理端与弹窗清晰展示；
-- **独立过滤与订阅开关**：各通道可独立勾选接收的内容类型，并设置 `member_filter`、`blog_filter`、`social_filter`。
+- **独立过滤与订阅开关**：各通道可独立勾选接收的内容类型，并设置 `member_filter`、`blog_filter`、`social_filter`；新建 QQ 官方 Bot、NapCat 路由或 Telegram Bot 默认不订阅任何内容，按需增量勾选，已有配置保持不变。
 
 社媒动态的事件总线由四个可替换边界组成：`MessagePreparationService` 负责翻译、
 Alt 文本和正文格式化；`RoutePlanner` 负责过滤器与目标路由；`DeliveryService`

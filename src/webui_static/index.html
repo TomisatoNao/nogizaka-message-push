@@ -37,6 +37,11 @@
   .admin-control-group,
   .admin-data-group,
   .admin-account-group { min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
+  /* NapCat 的两个地址属于同一组端点配置：标签短而稳定，输入框保持同一基线。 */
+  .napcat-endpoint-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; align-items: start; min-width: 0; }
+  .napcat-endpoint-grid > .field,
+  .napcat-endpoint-grid > .field > input { min-width: 0; }
+  .napcat-endpoint-note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; }
   .admin-control-group { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
   .admin-control-group .switch { flex: 0 0 auto; width: auto; white-space: normal; line-height: 1.4; }
   .admin-compact-switch .track { transform: scale(.8); transform-origin: left center; }
@@ -69,6 +74,14 @@
   .admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; width: max-content; max-width: 100%; }
   .admin-row-actions .btn { min-height: 36px; flex: 0 0 auto; }
   .admin-row-actions--account { gap: 8px; }
+  /* 表格单元格不能复用对话框的 .actions（该类是 flex 容器，会破坏 table 行列对齐）。 */
+  .admin-table-actions-cell { display: table-cell; width: 1%; min-width: max-content; padding-inline: 12px; white-space: nowrap; vertical-align: middle; }
+  .admin-table-actions-cell > .admin-row-actions { justify-content: flex-start; }
+  .admin-history-table { min-width: 520px; }
+  .admin-history-table th:first-child,
+  .admin-history-table td:first-child,
+  .admin-history-table th:nth-child(2),
+  .admin-history-table td:nth-child(2) { white-space: nowrap; }
   .admin-button-icon { font-size: 11px; }
   .admin-cell-id { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text-strong); }
   .admin-cell-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
@@ -85,8 +98,6 @@
   .admin-table-input--tg-name { width: 95px; }
   .admin-table-input--tg-remark { width: 105px; }
   .admin-table-input--tg-chat { width: 115px; }
-  .admin-table-input--member-id { width: 75px; }
-  .admin-table-input--member-name { max-width: 130px; }
   .admin-secret-clear { margin-left: 6px; padding: 3px 7px; font-size: 11px; }
   .admin-field-grid--compact { margin-bottom: 12px; }
   .admin-note--flush { margin: 0; }
@@ -95,24 +106,19 @@
   .admin-credential-name { min-width: 180px; color: var(--muted); font-size: 12.5px; }
   .admin-proxy-result { margin-top: 4px; }
   .admin-settings-note { margin: 10px 0 0; }
-  .admin-member-account { display: flex; align-items: center; min-width: 0; }
-  .admin-member-account select { width: 190px; min-width: 170px; max-width: 220px; }
-  .admin-member-social-cell { min-width: 285px; }
-  .admin-member-account-cell { min-width: 205px; }
-  .admin-member-subscription-cell { min-width: 150px; }
+  .admin-member-account { display: block; min-width: 0; }
+  .admin-member-readonly { display: inline-flex; align-items: center; min-width: 0; min-height: 36px; color: var(--text); line-height: 1.4; }
+  .admin-member-name { font-weight: 600; }
+  /* Message 账号列与账号池的“账号 ID”列使用同一纯文本语义，不再额外包一层胶囊。 */
+  .admin-member-account-readonly { display: inline; min-height: 0; max-width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-strong); font-family: var(--mono); font-size: 12px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+  .admin-member-account-cell { min-width: 210px; }
+  .admin-member-subscription-cell { min-width: 175px; }
   .admin-member-actions-cell { min-width: 92px; }
   .admin-member-sub-badge { display: inline-flex; align-items: center; white-space: nowrap; flex: 0 0 auto; }
   .admin-member-sub-badge > span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; }
   .admin-member-sub-badge .is-neutral { color: var(--muted); background: color-mix(in srgb, var(--border) 28%, transparent); border: 1px solid var(--border-soft); }
   .admin-member-sub-badge .is-active { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 25%, transparent); font-weight: 600; }
   .admin-member-sub-badge .is-expired { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); font-weight: 600; }
-  .admin-member-social { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-  .admin-member-social .social-badge { padding: 2px 6px; border-radius: 4px; font-size: 11.5px; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
-  .admin-member-social .social-badge--x { background: rgba(29,161,242,.12); color: #1d9bf0; }
-  .admin-member-social .social-badge--ig { background: rgba(225,48,108,.12); color: #e1306c; }
-  .admin-member-social .social-badge--tt { background: rgba(254,44,85,.12); color: #fe2c55; }
-  .admin-member-social .social-empty { color: var(--muted); font-size: 12px; }
-  .admin-member-social .btn { margin-left: auto; padding: 2px 8px; font-size: 11.5px; }
   .admin-storage-summary { margin-bottom: 14px; }
   .admin-storage-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; font-size: 13px; }
   .admin-storage-summary-row strong { color: var(--text); }
@@ -125,10 +131,10 @@
   .admin-storage-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 11px 14px 10px; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
   .admin-storage-card-heading { color: var(--muted); font-size: 12.5px; font-weight: 500; line-height: 1.4; }
   .admin-storage-card-size { color: var(--text); font-size: 16px; font-weight: 700; line-height: 1.35; font-variant-numeric: tabular-nums; }
-  .admin-storage-card-meta { min-height: 22px; display: flex; align-items: center; justify-content: flex-start; }
+  .admin-storage-card-meta { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
   .admin-storage-card-count { padding: 1px 6px; border-radius: 10px; color: var(--storage-color, var(--accent)); background: color-mix(in srgb, var(--storage-color, var(--accent)) 14%, transparent); font-size: 11px; font-weight: 600; white-space: nowrap; }
-  .admin-storage-card-actions { min-height: 32px; display: flex; align-items: flex-end; justify-content: flex-end; }
-  .admin-storage-card-actions.is-empty { visibility: hidden; pointer-events: none; }
+  .admin-storage-card-actions { min-height: 0; display: inline-flex; align-items: center; justify-content: flex-end; margin-left: auto; }
+  .admin-storage-card-actions.is-empty { display: none; }
   .admin-storage-clean { min-height: 32px; padding: 4px 10px; color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, var(--border)); background: transparent; font-size: 11px; }
   .admin-channel-switches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .admin-channel-switches .switch { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 55%, transparent); }
@@ -359,8 +365,6 @@
   td input.admin-table-input--tg-name { width: 95px; max-width: 95px; }
   td input.admin-table-input--tg-remark { width: 105px; max-width: 105px; }
   td input.admin-table-input--tg-chat { width: 115px; max-width: 115px; }
-  td input.admin-table-input--member-id { width: 75px; max-width: 75px; }
-  td input.admin-table-input--member-name { max-width: 130px; }
   .table-wrap { overflow-x: auto; }
   /* 状态表在窄屏仍保持列语义，容器负责横向滚动，避免表头/数值逐字换行。 */
   .status-table { min-width: 560px; }
@@ -392,27 +396,24 @@
   .delivery-backlog[data-tone="warn"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft)); }
   .delivery-backlog[data-tone="ok"] { color: var(--ok); }
   .delivery-backlog-actions { margin-top: 8px; display: flex; justify-content: flex-end; }
-  /* 监控成员表按“身份 → 社媒 → Message 账号 → 订阅 → 操作”保持稳定列宽，
-     避免 table auto layout 在窄屏把编辑框或状态挤成不可读的窄列。 */
-  .member-table { min-width: 1000px; }
-  .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 95px; min-width: 95px; }
-  .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 145px; min-width: 145px; }
-  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 285px; min-width: 285px; }
-  .member-table th:nth-child(4), .member-table td:nth-child(4) { width: 205px; min-width: 205px; }
-  .member-table th:nth-child(5), .member-table td:nth-child(5) { width: 155px; min-width: 155px; }
-  .member-table th:nth-child(6), .member-table td:nth-child(6) { width: 92px; min-width: 92px; text-align: center; }
-  .member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }
-  .member-table td:nth-child(6) .admin-row-actions { justify-content: center; }
+  /* 成员表只展示官方目录同步的姓名/Message 账号，内部 ID 仍由配置保留但不展示。 */
+  .member-table { min-width: 760px; }
+  .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 190px; min-width: 190px; }
+  .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 230px; min-width: 230px; }
+  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 195px; min-width: 195px; }
+  .member-table th:nth-child(4), .member-table td:nth-child(4) { width: 105px; min-width: 105px; text-align: center; }
+  .member-table td:nth-child(4) .admin-row-actions { justify-content: center; }
   .account-table { min-width: 900px; }
   .account-table th:last-child, .account-table td:last-child { min-width: 280px; }
   .account-table td:last-child .admin-row-actions { max-width: none; }
 
-  /* OpenID 白名单卡片：左侧信息和右侧操作分别拥有可收缩/换行能力，
-     避免长 OpenID 覆盖复制、编辑和删除按钮。 */
-  .cmd-openid-card > .cmd-openid-main { min-width: 0; flex: 1 1 320px; flex-wrap: wrap; }
-  .cmd-openid-card .cmd-openid-name { min-width: 0; max-width: 170px; }
-  .cmd-openid-card .cmd-openid-code { min-width: 0; max-width: 100%; flex: 1 1 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cmd-openid-card > .cmd-openid-actions { flex: 0 0 auto; flex-wrap: wrap; }
+  /* OpenID 白名单卡片：信息区和操作区是两个清晰的层级，避免长 OpenID 覆盖按钮。 */
+  .cmd-openid-card { display: flex; align-items: center; justify-content: space-between; min-width: 0; padding: 9px 12px; background: var(--card-solid); border: 1px solid var(--border-soft); border-radius: 8px; gap: 10px; flex-wrap: wrap; }
+  .cmd-openid-main { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 320px; flex-wrap: wrap; }
+  .cmd-openid-type { flex-shrink: 0; padding: 2px 7px; font-size: 11px; }
+  .cmd-openid-name { min-width: 0; max-width: 170px; color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmd-openid-code { min-width: 0; max-width: 100%; flex: 1 1 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, monospace; font-size: 12px; color: var(--muted); background: var(--bg); padding: 2.5px 8px; border-radius: 4px; border: 1px solid var(--border-soft); letter-spacing: 0.5px; user-select: all; cursor: pointer; }
+  .cmd-openid-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 0 auto; min-width: 0; }
   .btn { border: 1px solid var(--border); background: var(--card-solid); color: var(--text);
     padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
     font-family: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
@@ -515,6 +516,94 @@
   dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
 
+  /* Message 成员拉取弹窗：用“步骤卡片 → 结果工具栏 → 成员列表”的层级替代
+     通用提示盒，避免团体/账号标签看起来像可编辑输入框。 */
+  #memberPickDialog.member-pick-dialog {
+    width: min(640px, calc(100vw - 32px));
+    max-width: 640px;
+    padding: 22px 24px 20px;
+  }
+  .member-pick-dialog h3 { margin: 0; font-size: 17px; line-height: 1.4; }
+  .member-pick-intro { margin: 5px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+  .member-pick-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0 14px; }
+  .member-pick-step {
+    min-width: 0;
+    padding: 13px 14px 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--card-soft) 72%, transparent);
+  }
+  .member-pick-step-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .member-pick-step-index {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; flex: 0 0 24px;
+    border-radius: 50%; color: var(--accent); background: var(--accent-soft);
+    font-size: 12px; font-weight: 700;
+  }
+  .member-pick-step-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .member-pick-step-label { color: var(--text); font-size: 13px; font-weight: 650; line-height: 1.4; }
+  .member-pick-step-detail { color: var(--muted); font-size: 11px; line-height: 1.4; }
+  .member-pick-step .chips { gap: 7px; margin-top: 11px; }
+  .member-pick-step .chip {
+    min-height: 36px; padding: 7px 11px; border-radius: 8px;
+    font-size: 12.5px; line-height: 1.35; white-space: nowrap;
+  }
+  .member-pick-step .chip.is-unavailable { color: var(--muted); border-style: dashed; opacity: .58; }
+  .member-pick-account-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; margin-top: 11px; }
+  .member-pick-account-chips { flex: 1 1 auto; min-width: 0; align-content: flex-start; }
+  .member-pick-account-empty {
+    display: flex; align-items: center; min-height: 36px; width: 100%;
+    padding: 7px 10px; border: 1px dashed var(--border);
+    border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--card-soft) 70%, transparent);
+    font-size: 12px; line-height: 1.4;
+  }
+  .member-pick-fetch { flex: 0 0 auto; min-height: 36px; white-space: nowrap; }
+  .member-pick-toolbar {
+    display: none; align-items: center; justify-content: space-between; gap: 9px;
+    flex-wrap: wrap; margin-bottom: 10px; padding: 9px 11px;
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--card-soft) 78%, transparent);
+  }
+  .member-pick-filter-chips { flex: 1 1 100%; min-width: 0; gap: 5px; }
+  .member-pick-filter-chips .chip { min-height: 30px; padding: 5px 8px; font-size: 11.5px; }
+  .member-pick-toolbar-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
+  .member-pick-toolbar-actions .btn { min-height: 34px; }
+  .member-pick-action--subscribed, .member-pick-action--past { display: none; }
+  .member-pick-action--subscribed { color: #fff; background: linear-gradient(135deg, #8b5cf6, #ec4899); border-color: transparent; font-weight: 600; }
+  .member-pick-action--past { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, var(--border-soft)); font-weight: 600; }
+  .member-pick-list {
+    display: flex; flex-direction: column; gap: 7px; min-width: 0; max-height: 52vh;
+    overflow-y: auto; padding: 2px; margin: 0 -2px; overscroll-behavior: contain;
+  }
+  .member-pick-row {
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 9px;
+    background: color-mix(in srgb, var(--card-soft) 82%, transparent);
+  }
+  .member-pick-row.is-subscribed { border-color: rgba(236, 72, 153, .45); background: linear-gradient(90deg, rgba(139, 92, 246, .12), rgba(236, 72, 153, .08)); }
+  .member-pick-row.is-past-subscribed { border-color: rgba(245, 158, 11, .35); background: rgba(245, 158, 11, .07); }
+  .member-pick-avatar { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; object-fit: cover; background: var(--border); }
+  .member-pick-avatar.is-hidden { display: none; }
+  .member-pick-info { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+  .member-pick-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .member-pick-name { color: var(--text); font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+  .member-pick-status-badge { display: inline-flex; align-items: center; gap: 2px; padding: 1px 7px; border-radius: 9px; font-size: 11px; line-height: 1.35; white-space: nowrap; }
+  .member-pick-status-badge.is-subscribed { color: #fff; background: linear-gradient(135deg, #8b5cf6, #ec4899); box-shadow: 0 1px 4px rgba(236, 72, 153, .3); font-weight: 600; }
+  .member-pick-status-badge.is-past-subscribed { color: #f59e0b; background: rgba(245, 158, 11, .18); border: 1px solid rgba(245, 158, 11, .35); font-weight: 600; }
+  .member-pick-status-badge.is-open { color: #10b981; background: rgba(16, 185, 129, .15); }
+  .member-pick-status-badge.is-closed { color: var(--muted); background: rgba(255, 255, 255, .05); }
+  .member-pick-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  .member-pick-date--active { color: #f472b6; font-size: 11px; font-weight: 500; }
+  .member-pick-date--past { color: #f59e0b; font-size: 11px; }
+  .member-pick-add { flex: 0 0 auto; min-height: 34px; }
+  .member-pick-empty { padding: 28px 8px; color: var(--muted); font-size: 13px; line-height: 1.5; text-align: center; }
+  .member-pick-hint { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--card-soft) 72%, transparent); font-size: 12px; line-height: 1.6; }
+  .member-pick-hint b { color: var(--text); }
+  .member-pick-stat--subscribed { color: #f472b6; font-weight: 600; }
+  .member-pick-stat--past { color: #f59e0b; font-weight: 600; }
+  .member-pick-hint-detail { color: var(--muted); font-size: 11.5px; }
+  .member-pick-footer { margin-top: 16px !important; }
+
   /* 可折叠帮助提示盒（Help Box） */
   details.help-box {
     background: color-mix(in srgb, var(--card-soft) 85%, transparent);
@@ -554,6 +643,7 @@
     .admin-summary-grid--status { grid-template-columns: minmax(148px, max-content) minmax(0, 1fr); }
     .admin-summary-grid--status .admin-summary-item:last-child { grid-column: 1 / -1; }
     .admin-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
+    .napcat-endpoint-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .admin-channel-switches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .admin-module-heading > h2 { flex-basis: 220px; }
     .settings-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -591,13 +681,14 @@
     .admin-channel-switches { grid-template-columns: 1fr; gap: 10px; }
     .admin-summary-grid--status { grid-template-columns: 1fr; }
     .admin-field-grid input[type=number] { max-width: none; }
+    .napcat-endpoint-grid { grid-template-columns: 1fr; gap: 10px; }
     .admin-summary-item { padding: 10px 12px; }
-    .admin-member-social .btn { margin-left: 0; min-height: 36px; }
     .admin-whitelist { padding: 12px; }
     .admin-whitelist-heading { align-items: flex-start; }
     .admin-whitelist-tools { width: 100%; }
     .admin-whitelist-tools .btn { flex: 1 1 auto; min-height: 40px; }
     .admin-storage-summary-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .admin-storage-card-meta { gap: 8px; }
     .admin-storage-clean { min-height: 40px; }
     .system-settings-card { padding: 16px 14px; }
     .system-settings-card > h2 { font-size: 13px; }
@@ -655,51 +746,51 @@
     .table-wrap { -webkit-overflow-scrolling: touch; }
     th, td { padding: 8px 9px; font-size: 13px; }
     td input, td select { min-width: 0; width: 100%; }
-    /* 成员管理在手机端改成单行卡片，避免用户在 1000px 宽表格中寻找订阅和社媒列。 */
-    .member-table { min-width: 0; width: 100%; border-collapse: separate; border-spacing: 0; }
-    .member-table thead { display: none; }
-    .member-table tbody { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
-    .member-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); grid-template-areas:
-      "name id" "social social" "account subscription" "actions actions";
-      gap: 9px 10px; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
-      background: color-mix(in srgb, var(--card-soft) 72%, transparent); }
+    /* 成员管理与账号池保持同一套表格语义：一名成员一行，窄屏由表格容器横向滚动。 */
+    .member-table { min-width: 760px; width: 100%; border-collapse: collapse; }
+    .member-table thead { display: table-header-group; }
+    .member-table tbody { display: table-row-group; }
+    .member-table tbody tr { display: table-row; }
     .member-table tbody tr:last-child td { border-bottom: 0; }
-    .member-table tbody td { width: auto !important; min-width: 0 !important; max-width: none; padding: 0; border: 0; text-align: left !important; vertical-align: top; }
-    .member-table tbody td::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--muted); font-size: 10.5px; line-height: 1.35; }
-    .member-table tbody td:nth-child(1) { grid-area: id; text-align: right !important; }
-    .member-table tbody td:nth-child(2) { grid-area: name; }
-    .member-table tbody td:nth-child(3) { grid-area: social; }
-    .member-table tbody td:nth-child(4) { grid-area: account; }
-    .member-table tbody td:nth-child(5) { grid-area: subscription; align-self: end; }
-    .member-table tbody td:nth-child(6) { grid-area: actions; padding-top: 2px; border-top: 1px solid var(--border-soft); }
-    .member-table tbody td:nth-child(1)::before { text-align: right; }
-    .member-table tbody td:nth-child(5)::before { text-align: right; }
-    .member-table tbody td:nth-child(6)::before { margin-top: 8px; }
-    .member-table td:nth-child(2) input { width: 100%; min-width: 0; max-width: none; }
-    .member-table .admin-member-account select { width: 100%; min-width: 0; max-width: none; }
-    .member-table .admin-member-sub-badge { justify-content: flex-end; max-width: 100%; }
-    .member-table .admin-member-sub-badge > span { max-width: 100%; overflow-wrap: anywhere; white-space: normal; text-align: right; }
-    .member-table .admin-member-social { align-items: flex-start; }
-    .member-table .admin-member-social .btn { margin-left: auto; }
-    .member-table .admin-member-actions-cell .admin-row-actions { width: 100%; justify-content: flex-start; }
+    .member-table tbody td { display: table-cell; width: auto !important; min-width: 0 !important; max-width: none; padding: 8px 9px; border-bottom: 1px solid var(--border-soft); text-align: left !important; vertical-align: middle; }
+    .member-table tbody td::before { content: none; display: none; }
+    .member-table tbody td:nth-child(1) { text-align: left !important; }
+    .member-table tbody td:nth-child(4) { padding-top: 8px; border-top: 0; text-align: center !important; }
+    .member-table .admin-member-account-readonly { max-width: 210px; }
+    .member-table .admin-member-sub-badge { justify-content: flex-start; max-width: none; }
+    .member-table .admin-member-sub-badge > span { max-width: none; overflow-wrap: normal; white-space: nowrap; text-align: left; }
+    .member-table td.admin-member-actions-cell .admin-row-actions { width: max-content; max-width: none; justify-content: center; margin-inline: auto; }
 
-    /* 白名单卡片在手机端改为上下两行：OpenID 信息在上，操作按钮在下。 */
-    .cmd-openid-card { align-items: flex-start !important; }
+    /* 白名单卡片在手机端改为信息网格 + 操作栏：长 OpenID 独占一行，按钮不再挤在信息旁。 */
+    .cmd-openid-card { flex-direction: column !important; align-items: stretch !important; gap: 10px !important; padding: 12px !important; }
     .cmd-openid-card > .cmd-openid-main {
-      width: 100%; flex: 1 1 100%; align-items: flex-start; row-gap: 6px;
+      display: grid !important; grid-template-columns: auto minmax(0, 1fr); width: 100%; flex: 1 1 100%; align-items: center !important; gap: 8px !important;
     }
-    .cmd-openid-card .cmd-openid-name { flex: 0 1 auto; max-width: min(170px, 48vw); }
-    .cmd-openid-card .cmd-openid-code { flex: 1 1 160px; max-width: 100%; }
+    .cmd-openid-card .cmd-openid-type { grid-column: 1; }
+    .cmd-openid-card .cmd-openid-name { grid-column: 2; max-width: none; min-width: 0; }
+    .cmd-openid-card .cmd-openid-code { grid-column: 1 / -1; width: 100%; max-width: none; min-width: 0; }
     .cmd-openid-card > .cmd-openid-actions {
-      width: 100%; flex: 1 1 100%; justify-content: flex-start; gap: 6px;
+      width: 100%; flex: 0 0 auto; justify-content: flex-start; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-soft);
     }
-    .cmd-openid-card > .cmd-openid-actions .btn { flex: 0 0 auto; }
+    .cmd-openid-card > .cmd-openid-actions .btn { flex: 0 0 auto; min-height: 40px; }
 
     /* 弹窗不溢出窄屏 */
     dialog { min-width: 0; width: min(92vw, 600px); padding: 16px 14px; }
     #secretDialog { width: min(92vw, 600px); }
     dialog .grid { grid-template-columns: 1fr; }
-    #memberPickList { min-width: 0; }
+    #memberPickDialog.member-pick-dialog { width: min(94vw, 640px); padding: 18px 14px 16px; }
+    .member-pick-dialog h3 { font-size: 16px; }
+    .member-pick-steps { grid-template-columns: 1fr; gap: 10px; margin-top: 14px; }
+    .member-pick-step { padding: 12px; }
+    .member-pick-account-row { align-items: stretch; flex-direction: column; gap: 8px; }
+    .member-pick-fetch { width: 100%; justify-content: center; min-height: 40px; }
+    .member-pick-toolbar { align-items: stretch; }
+    .member-pick-toolbar-actions { width: 100%; }
+    .member-pick-toolbar-actions .btn { flex: 1 1 auto; min-height: 40px; }
+    .member-pick-row { align-items: flex-start; gap: 8px; padding: 9px; }
+    .member-pick-avatar { width: 32px; height: 32px; flex-basis: 32px; }
+    .member-pick-row .member-pick-add { align-self: center; min-height: 38px; }
+    .member-pick-footer { margin-top: 14px !important; }
 
     /* 底部保存条 + 安全区 */
     footer.savebar {
@@ -887,12 +978,11 @@
     <div class="empty" hidden="" id="accountEmpty">还没有账号，点下面添加一个。</div>
   </div>
 
-  <!-- Card 2: 监控成员与社媒绑定配置 -->
+  <!-- Card 2: Message 监控成员目录（姓名与账号来自官方目录） -->
   <div class="card admin-module">
     <div class="admin-module-heading">
-      <h2>👥 监控成员与社媒绑定配置 <span class="tooltip-icon" title="成员 ID 可用 python tools/list_members.py <账号ID> 查询；若无 Message 账号可选择「(无)」，并在该行直接绑定该成员的 X / IG / TikTok 社媒账号。">ℹ️</span></h2>
+      <h2>👥 Message 监控成员目录 <span class="tooltip-icon" title="成员姓名、内部 ID 和 Message 账号均来自所选官方账号的成员目录；内部 ID 仅用于同步，不在此处展示。社媒账号请在动态监控页面配置。">ℹ️</span></h2>
       <div class="admin-actions">
-        <button class="btn" id="btnAddMember" type="button">＋ 手动添加成员</button>
         <button class="btn" id="btnPickMember" type="button">📋 从账号拉取成员列表</button>
         <button class="btn small" id="btnSyncSubs" type="button">🔄 刷新订阅状态</button>
       </div>
@@ -902,9 +992,7 @@
       <table class="member-table">
         <thead>
           <tr>
-            <th>成员 ID</th>
-            <th>名字</th>
-            <th>社交账号绑定 (X / IG / TikTok)</th>
+            <th>姓名</th>
             <th>Message 账号</th>
             <th>订阅状态</th>
             <th>操作</th>
@@ -914,7 +1002,8 @@
       </table>
       </div>
     </div>
-    <div class="empty" hidden="" id="memberEmpty">还没有监控成员。</div>
+    <p class="hint admin-note">成员只能从乃木坂46、日向坂46、樱坂46或 yodel 的 Message 账号官方目录添加；姓名与账号为只读，社媒监控请到“动态监控”配置。</p>
+    <div class="empty" hidden="" id="memberEmpty">还没有监控成员，请从支持的 Message 账号拉取。</div>
   </div>
 </section>
 <!-- ── 推送通道 ─────────────────────────────── -->
@@ -929,7 +1018,7 @@
   <div class="card admin-module">
     <div class="admin-module-heading">
       <h2>🤖 QQ 官方 Bot 列表（密钥存 .env）</h2>
-      <div class="admin-actions"><button class="btn" id="btnAddQqBot" type="button">＋ 添加 QQ Bot</button></div>
+      <div class="admin-actions"><button class="btn" id="btnAddQqBot" type="button" title="新建 Bot 默认不订阅任何内容，请按需增量勾选">＋ 添加 QQ Bot</button></div>
     </div>
     <div class="admin-data-group">
       <div class="table-wrap">
@@ -952,7 +1041,7 @@
       </div>
     </div>
     <p class="hint admin-note" id="qqBotHint">
-      Client Secret 由对应行「填写」保存到 <code>.env</code>；多个私聊或群聊目标请添加多行并分别设置 OpenID 与订阅规则。
+      Client Secret 由对应行「填写」保存到 <code>.env</code>；多个私聊或群聊目标请添加多行并分别设置 OpenID 与订阅规则。新建 Bot 默认不订阅任何内容，请按需增量勾选。
     </p>
 
     <div class="admin-submodule">
@@ -1002,18 +1091,18 @@
   <div class="card admin-module">
     <div class="admin-module-heading">
       <h2>🐱 NapCat 群推送路由 (独立解耦)</h2>
-      <div class="admin-actions"><button class="btn" id="btnAddNapcat" type="button">➕ 添加 NapCat 路由</button></div>
+      <div class="admin-actions"><button class="btn" id="btnAddNapcat" type="button" title="新建路由默认不订阅任何内容，请按需增量勾选">➕ 添加 NapCat 路由</button></div>
     </div>
-    <div class="admin-account-group">
-      <div class="admin-field-grid">
-        <label class="field">NapCat OneBot HTTP API 地址
+    <div class="admin-account-group napcat-endpoint-group">
+      <div class="napcat-endpoint-grid">
+        <label class="field">NapCat API 地址
           <input id="napcatApi" placeholder="例如: http://127.0.0.1:3000/send_group_msg" type="text"/>
         </label>
-        <label class="field">远程媒体访问基地址（NapCat 不在本机时填写）
+        <label class="field">媒体访问基地址（可选）
           <input id="napcatMediaBaseUrl" placeholder="例如: http://192.168.22.13:46046" type="text"/>
-          <small class="hint">跨容器或跨主机时必须填写 NapCat 可访问的媒体地址；同一共享文件系统可留空。</small>
         </label>
       </div>
+      <p class="hint napcat-endpoint-note">NapCat 不在本机时填写媒体地址；共享文件系统可留空。</p>
     </div>
     <div class="admin-data-group">
       <div class="table-wrap">
@@ -1031,7 +1120,7 @@
       </div>
     </div>
     <p class="hint admin-note">
-      API 地址可填写基础地址或完整的 <code>/send_group_msg</code> 接口；不同群组可通过各自的订阅规则分别接收消息。
+      API 地址可填写基础地址或完整的 <code>/send_group_msg</code> 接口；不同群组可通过各自的订阅规则分别接收消息。新建路由默认不订阅任何内容，请按需增量勾选。
     </p>
   </div>
 
@@ -1039,7 +1128,7 @@
   <div class="card admin-module">
     <div class="admin-module-heading">
       <h2>✈️ Telegram Bots (独立解耦，凭证存 .env)</h2>
-      <div class="admin-actions"><button class="btn" id="btnAddTGBot" type="button">➕ 添加 TG Bot</button></div>
+      <div class="admin-actions"><button class="btn" id="btnAddTGBot" type="button" title="新建 Bot 默认不订阅任何内容，请按需增量勾选">➕ 添加 TG Bot</button></div>
     </div>
     <div id="tgTokenMigrationNotice" class="hint admin-note" hidden></div>
     <div class="admin-data-group">
@@ -1060,7 +1149,7 @@
       </div>
     </div>
     <p class="hint admin-note">
-      每个 Bot 使用独立的 <code>.env</code> Token；Target Chat ID 支持个人、群组和频道，多个目标请添加多行。
+      每个 Bot 使用独立的 <code>.env</code> Token；Target Chat ID 支持个人、群组和频道，多个目标请添加多行。新建 Bot 默认不订阅任何内容，请按需增量勾选。
     </p>
   </div>
 
@@ -1169,7 +1258,7 @@
           </label>
         </div>
         <div class="monitor-account-group">
-          <label class="field">全局补充监控账号（已在成员管理中绑定的账号无需在此重复填写）
+          <label class="field">社媒监控账号（每行一个；仅在此处配置 X 账号）
             <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
           </label>
         </div>
@@ -1202,7 +1291,7 @@
           </label>
         </div>
         <div class="monitor-account-group">
-          <label class="field">全局补充监控账号（已在成员管理中绑定的账号无需在此重复填写）
+          <label class="field">社媒监控账号（每行一个；仅在此处配置 Instagram 账号）
             <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
           </label>
         </div>
@@ -1517,7 +1606,7 @@
     <div class="admin-module-heading"><h2>📦 历史版本（配置自动快照）</h2></div>
     <div class="admin-data-group">
       <div class="table-wrap">
-      <table>
+      <table class="admin-history-table">
         <thead><tr><th>快照时间</th><th>大小</th><th>操作</th></tr></thead>
         <tbody id="historyRows"></tbody>
       </table>
@@ -1769,46 +1858,47 @@
   </div>
 </dialog>
 <!-- 成员选择对话框 -->
-<dialog id="memberPickDialog" style="max-width: 580px; width: 95%;">
-<h3 style="margin-bottom: 12px;">从账号拉取成员列表</h3>
-<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px">
-<div class="chips" id="pickAccountChips"></div>
-<button class="btn primary small" id="btnFetchMembers">🔍 拉取成员</button>
-</div>
-<div id="memberPickToolbar" style="display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px; padding:6px 10px; background:var(--card-soft, rgba(255,255,255,0.03)); border-radius:8px; border:1px solid var(--border)">
-  <div class="chips" id="memberPickFilterChips" style="gap:5px;"></div>
-  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-    <button class="btn small" id="btnAddAllSubscribed" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; font-weight:600; border:none; display:none;">✨ 一键添加已订阅</button>
-    <button class="btn small" id="btnAddAllPastSubscribed" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.35); font-weight:600; display:none;">📥 一键添加曾订阅(离线归档)</button>
+<dialog id="memberPickDialog" class="member-pick-dialog" aria-labelledby="memberPickTitle">
+  <div class="member-pick-header">
+    <h3 id="memberPickTitle">从 Message 账号拉取成员</h3>
+    <p class="member-pick-intro">成员姓名与编号来自官方目录，只需选择团体和对应账号即可。</p>
   </div>
-</div>
-<div id="memberPickList" style="max-height:52vh; overflow-y:auto; min-width:320px; display:flex; flex-direction:column; gap:6px;"></div>
-<p class="hint" id="memberPickHint" style="margin-top:10px;">选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。</p>
-<div class="actions">
-<button class="btn" id="memberPickClose">关闭</button>
-</div>
-</dialog>
-<!-- 成员社媒账号绑定对话框 -->
-<dialog id="memberSocialDialog">
-  <h3 id="memberSocialTitle">绑定社交账号</h3>
-  <div class="dialog-note" id="memberSocialHint">设置该成员在各平台的社交账号。留空表示该平台不监控此成员。</div>
-  <div class="grid" style="grid-template-columns: 1fr; gap: 12px; margin-top: 12px;">
-    <label class="field">𝕏 (Twitter) 用户名（逗号分隔，可不带 @）
-      <input id="memSocialX" placeholder="例: 345__chan" type="text"/>
-    </label>
-    <label class="field">📸 Instagram 用户名（逗号分隔）
-      <input id="memSocialIg" placeholder="例: 345insta 或 tomisato.nao_official" type="text"/>
-    </label>
-    <label class="field">🎵 TikTok 用户名（短视频）
-      <input id="memSocialTiktok" placeholder="例: 345__chan" type="text"/>
-    </label>
-    <label class="field">🎥 TikTok Live 直播用户名（留空默认同短视频）
-      <input id="memSocialLive" placeholder="例: 345__chan" type="text"/>
-    </label>
+  <div class="member-pick-steps">
+    <section class="member-pick-step" aria-labelledby="memberPickGroupLabel">
+      <div class="member-pick-step-heading">
+        <span class="member-pick-step-index" aria-hidden="true">1</span>
+        <div class="member-pick-step-copy">
+          <span class="member-pick-step-label" id="memberPickGroupLabel">选择团体</span>
+          <span class="member-pick-step-detail">仅支持官方成员目录</span>
+        </div>
+      </div>
+      <div class="chips" id="pickGroupChips" role="group" aria-label="成员团体"></div>
+    </section>
+    <section class="member-pick-step" aria-labelledby="memberPickAccountLabel">
+      <div class="member-pick-step-heading">
+        <span class="member-pick-step-index" aria-hidden="true">2</span>
+        <div class="member-pick-step-copy">
+          <span class="member-pick-step-label" id="memberPickAccountLabel">选择 Message 账号</span>
+          <span class="member-pick-step-detail">账号必须属于所选团体</span>
+        </div>
+      </div>
+      <div class="member-pick-account-row">
+        <div class="chips member-pick-account-chips" id="pickAccountChips" role="group" aria-label="Message 账号"></div>
+        <button class="btn primary small member-pick-fetch" id="btnFetchMembers" type="button">🔍 拉取成员</button>
+      </div>
+    </section>
   </div>
-  <div class="actions" style="margin-top: 16px;">
-    <button class="btn" id="memSocialCancel" type="button">取消</button>
-    <button class="btn primary" id="memSocialSave" type="button">确定保存</button>
+  <div id="memberPickToolbar" class="member-pick-toolbar">
+    <div class="chips member-pick-filter-chips" id="memberPickFilterChips" role="group" aria-label="成员筛选"></div>
+    <div class="member-pick-toolbar-actions">
+      <button class="btn small member-pick-action--subscribed" id="btnAddAllSubscribed" type="button">✨ 一键添加已订阅</button>
+      <button class="btn small member-pick-action--past" id="btnAddAllPastSubscribed" type="button">📥 一键添加曾订阅(离线归档)</button>
+    </div>
+  </div>
+  <div id="memberPickList" class="member-pick-list" aria-live="polite"></div>
+  <p class="member-pick-hint" id="memberPickHint" aria-live="polite">选择团体和对应账号后点「拉取」；需要该账号凭证可用。</p>
+  <div class="actions member-pick-footer">
+    <button class="btn" id="memberPickClose" type="button">关闭</button>
   </div>
 </dialog>
 <!-- 通道订阅与过滤规则配置对话框 -->
@@ -2611,7 +2701,7 @@ function renderStorage(st) {
     size.className = "admin-storage-card-size";
     size.textContent = item.human || "—";
 
-    // 项目数和清理动作各自占独立行，避免移动端在卡片右侧形成“徽章 + 按钮”混排。
+    // 项目数与可清理动作共用一行，卡片高度由内容自然决定。
     const meta = document.createElement("div");
     meta.className = "admin-storage-card-meta";
     const count = document.createElement("span");
@@ -2631,7 +2721,8 @@ function renderStorage(st) {
     } else {
       actions.classList.add("is-empty");
     }
-    card.append(heading, size, meta, actions);
+    meta.appendChild(actions);
+    card.append(heading, size, meta);
     container.appendChild(card);
   }
 }
@@ -3201,7 +3292,7 @@ $("qqBotSave").addEventListener("click", async () => {
     if (res.qq_bot_status) qqBotStatus = res.qq_bot_status;
     secretsWritten.add(name);   // 保存前 status 里查不到，前端自己记住
 
-    const bot = { name: name, app_id: appId };
+    const bot = { ...createIncrementalSubscriptionDefaults(), name: name, app_id: appId };
     if (remark) bot.remark = remark;
     if (openid) {
       const openidType = document.querySelector('input[name="qqBotOpenidType"]:checked').value;
@@ -4109,7 +4200,7 @@ function renderAccounts() {
 }
 
 // 单选按钮组（替代 <dialog> 里的原生 <select> —— 其弹出层在部分 Chrome 版本点不开）
-function chipGroup(containerId, options, value) {
+function chipGroup(containerId, options, value, onChange) {
   const box = $(containerId);
   box.innerHTML = "";
   box.dataset.value = value;
@@ -4117,11 +4208,13 @@ function chipGroup(containerId, options, value) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "chip" + (val === value ? " active" : "");
+    b.dataset.value = val;
     b.textContent = label;
     b.addEventListener("click", () => {
       box.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
       b.classList.add("active");
       box.dataset.value = val;
+      if (typeof onChange === "function") onChange(val);
     });
     box.appendChild(b);
   }
@@ -4568,7 +4661,7 @@ function renderNapcat() {
     }));
 
     const tdAct = document.createElement("td");
-    tdAct.className = "actions";
+    tdAct.className = "admin-table-actions-cell";
     const actWrap = document.createElement("div");
     actWrap.className = "admin-row-actions";
     const btnDel = mkDelBtn(() => {
@@ -4663,7 +4756,7 @@ function renderTGBots() {
     }));
     
     const tdAct = document.createElement("td");
-    tdAct.className = "actions";
+    tdAct.className = "admin-table-actions-cell";
     const actWrap = document.createElement("div");
     actWrap.className = "admin-row-actions";
     const btnDel = mkDelBtn(() => {
@@ -4680,17 +4773,26 @@ function renderTGBots() {
   });
 }
 
+// 新建路由/Bot 采用增量授权：显式写入全部 false，避免缺字段的旧配置兼容默认值造成误订阅。
+const INCREMENTAL_SUBSCRIPTION_DEFAULTS = Object.freeze({
+  push_message: false,
+  push_blog: false,
+  push_x: false,
+  push_instagram: false,
+  push_tiktok: false,
+  push_live: false,
+  push_alert: false,
+});
+
+function createIncrementalSubscriptionDefaults() {
+  return { ...INCREMENTAL_SUBSCRIPTION_DEFAULTS };
+}
+
 $("btnAddNapcat").addEventListener("click", () => {
   config.napcat_routes = config.napcat_routes || [];
   config.napcat_routes.push({
+    ...createIncrementalSubscriptionDefaults(),
     group_id: null,
-    push_message: true,
-    push_blog: false,
-    push_x: true,
-    push_instagram: true,
-    push_tiktok: true,
-    push_live: true,
-    push_alert: false,
     member_filter: [],
     blog_filter: [],
     social_filter: []
@@ -4701,15 +4803,9 @@ $("btnAddNapcat").addEventListener("click", () => {
 $("btnAddTGBot").addEventListener("click", () => {
   config.tg_bots = config.tg_bots || [];
   config.tg_bots.push({
+    ...createIncrementalSubscriptionDefaults(),
     name: "tg_bot" + (config.tg_bots.length+1),
     target_chat: "",
-    push_message: true,
-    push_blog: false,
-    push_x: true,
-    push_instagram: true,
-    push_tiktok: true,
-    push_live: true,
-    push_alert: false,
     member_filter: [],
     blog_filter: [],
     social_filter: []
@@ -4718,70 +4814,33 @@ $("btnAddTGBot").addEventListener("click", () => {
 });
 
 // ── Members ──────────────────────────────────
-let currentSocialMember = null;
-function openMemberSocialDialog(m, idx) {
-  currentSocialMember = m;
-  const memName = m.name || m.id || ("成员 #" + (idx + 1));
-  $("memberSocialTitle").textContent = "绑定社交账号 - " + memName;
-  const soc = m.social || {};
-  $("memSocialX").value = (soc.x || []).join(", ");
-  $("memSocialIg").value = (soc.instagram || []).join(", ");
-  $("memSocialTiktok").value = (soc.tiktok || []).join(", ");
-  $("memSocialLive").value = (soc.tiktok_live || []).join(", ");
-  $("memberSocialDialog").showModal();
-}
-
-$("memSocialCancel").addEventListener("click", () => $("memberSocialDialog").close());
-$("memSocialSave").addEventListener("click", () => {
-  if (!currentSocialMember) return;
-  const parseHandles = (str) => Array.from(new Set(str.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean)));
-  const x = parseHandles($("memSocialX").value);
-  const ig = parseHandles($("memSocialIg").value);
-  const tiktok = parseHandles($("memSocialTiktok").value);
-  const live = parseHandles($("memSocialLive").value);
-
-  const soc = {};
-  if (x.length) soc.x = x;
-  if (ig.length) soc.instagram = ig;
-  if (tiktok.length) soc.tiktok = tiktok;
-  if (live.length) soc.tiktok_live = live;
-
-  if (Object.keys(soc).length > 0) {
-    currentSocialMember.social = soc;
-  } else {
-    delete currentSocialMember.social;
-  }
-  markDirty();
-  renderMembers();
-  $("memberSocialDialog").close();
-});
-
+// 成员姓名、成员 ID 和 Message 账号均由官方目录同步；ID 只保留在配置中供抓取/订阅使用。
 function renderMembers() {
   const tbody = $("memberRows");
   tbody.innerHTML = "";
   const monitor = config.monitor || [];
   $("memberEmpty").hidden = monitor.length > 0;
-  const accountIds = Object.keys(config.accounts || {});
   monitor.forEach((m, idx) => {
     const tr = document.createElement("tr");
 
-    const tdId = document.createElement("td");
-    tdId.dataset.label = "成员 ID";
-    const idInput = mkTableInput(m.id || "", (v) => {
-      m.id = v.trim();
-      updateSubBadge();
-    }, "55 (可空)", "admin-table-input--member-id");
-    tdId.appendChild(idInput);
-
     const tdName = document.createElement("td");
     tdName.dataset.label = "姓名";
-    tdName.appendChild(mkTableInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里 奈央", "admin-table-input--member-name"));
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "admin-member-readonly admin-member-name";
+    nameSpan.textContent = String(m.name || "").trim() || "未同步成员";
+    if (!String(m.name || "").trim()) nameSpan.title = "请从 Message 账号官方目录重新拉取成员";
+    tdName.appendChild(nameSpan);
 
     const tdAcc = document.createElement("td");
     tdAcc.className = "admin-member-account-cell";
     tdAcc.dataset.label = "Message 账号";
     const accWrap = document.createElement("div");
     accWrap.className = "admin-member-account";
+    const accountSpan = document.createElement("span");
+    accountSpan.className = "admin-member-readonly admin-member-account-readonly";
+    accountSpan.textContent = String(m.account || "").trim() || "未关联账号";
+    if (!String(m.account || "").trim()) accountSpan.title = "请从支持的 Message 账号官方目录添加成员";
+    accWrap.appendChild(accountSpan);
 
     const tdSub = document.createElement("td");
     tdSub.className = "admin-member-subscription-cell";
@@ -4789,38 +4848,15 @@ function renderMembers() {
     const subBadge = document.createElement("div");
     subBadge.className = "member-sub-badge admin-member-sub-badge";
 
-    const sel = document.createElement("select");
-    sel.className = "admin-compact-select";
-    const optNone = document.createElement("option");
-    optNone.value = ""; optNone.textContent = "(无 - 纯社媒/博客)";
-    sel.appendChild(optNone);
-    for (const aid of accountIds) {
-      const opt = document.createElement("option");
-      opt.value = aid; opt.textContent = aid;
-      sel.appendChild(opt);
-    }
-    if (m.account && !accountIds.includes(m.account)) {
-      const opt = document.createElement("option");
-      opt.value = m.account; opt.textContent = m.account + " (未定义!)";
-      sel.appendChild(opt);
-    }
-    sel.value = m.account || "";
-    sel.addEventListener("change", () => {
-      m.account = sel.value;
-      markDirty();
-      updateSubBadge();
-    });
-    accWrap.appendChild(sel);
-
     function updateSubBadge() {
       const accId = String(m.account || "").trim();
       const mid = String(m.id != null ? m.id : "").trim();
       if (!accId) {
-        subBadge.innerHTML = '<span class="is-neutral">🌐 纯社媒/博客</span>';
+        subBadge.innerHTML = '<span class="is-neutral">⚠️ 未关联 Message 账号</span>';
         return;
       }
       if (!mid) {
-        subBadge.innerHTML = '<span class="is-neutral">⚠️ 待填ID</span>';
+        subBadge.innerHTML = '<span class="is-neutral">⚠️ 未同步官方 ID</span>';
         return;
       }
       const s = (subscriptions || {})[accId + ":" + mid];
@@ -4847,62 +4883,12 @@ function renderMembers() {
     tdAcc.appendChild(accWrap);
     tdSub.appendChild(subBadge);
 
-    const tdSocial = document.createElement("td");
-    tdSocial.className = "admin-member-social-cell";
-    tdSocial.dataset.label = "社交账号绑定";
-    const soc = m.social || {};
-    const xList = soc.x || [];
-    const igList = soc.instagram || [];
-    const ttList = soc.tiktok || [];
-    const liveList = soc.tiktok_live || [];
-
-    const badgeContainer = document.createElement("div");
-    badgeContainer.className = "admin-member-social";
-
-    if (xList.length) {
-      const b = document.createElement("span");
-      b.className = "social-badge social-badge--x";
-      b.textContent = "𝕏 @" + xList.join(", @");
-      badgeContainer.appendChild(b);
-    }
-    if (igList.length) {
-      const b = document.createElement("span");
-      b.className = "social-badge social-badge--ig";
-      b.textContent = "📸 @" + igList.join(", @");
-      badgeContainer.appendChild(b);
-    }
-    if (ttList.length || liveList.length) {
-      const b = document.createElement("span");
-      b.className = "social-badge social-badge--tt";
-      const allTt = [...new Set([...ttList, ...liveList])];
-      b.textContent = "🎵 @" + allTt.join(", @");
-      badgeContainer.appendChild(b);
-    }
-    if (!xList.length && !igList.length && !ttList.length && !liveList.length) {
-      const b = document.createElement("span");
-      b.className = "social-empty";
-      b.textContent = "未绑定";
-      badgeContainer.appendChild(b);
-    }
-
-    const btnSoc = mkBtn("⚙️ 绑定社媒", () => openMemberSocialDialog(m, idx), "small");
-    badgeContainer.appendChild(btnSoc);
-    tdSocial.appendChild(badgeContainer);
-
     const tdOps = document.createElement("td");
     tdOps.className = "admin-member-actions-cell";
     tdOps.dataset.label = "操作";
     const opsWrap = document.createElement("div");
     opsWrap.className = "admin-row-actions";
     opsWrap.appendChild(mkDelBtn(async () => {
-      // 空白草稿行（未填 ID 且未填名字）直接删除，无需弹窗确认
-      if (!m.id && !m.name) {
-        const curIdx = (config.monitor || []).indexOf(m);
-        if (curIdx >= 0) config.monitor.splice(curIdx, 1);
-        else config.monitor.splice(idx, 1);
-        markDirty(); renderMembers();
-        return;
-      }
       const displayName = m.name || m.id || "未命名成员";
       if (!(await uiConfirm("确定删除监控成员「" + displayName + "」吗？",
                             { title: "删除成员", yesText: "删除", danger: true }))) return;
@@ -4913,21 +4899,64 @@ function renderMembers() {
     }));
     tdOps.appendChild(opsWrap);
 
-    tr.append(tdId, tdName, tdSocial, tdAcc, tdSub, tdOps);
+    tr.append(tdName, tdAcc, tdSub, tdOps);
     tbody.appendChild(tr);
   });
   // 成员变动后同步刷新 Bot 的推送成员选择面板
   renderQqBots();
 }
 // ── 成员选择器 ───────────────────────────────────
+const SUPPORTED_MEMBER_GROUPS = [
+  ["nogizaka46", "乃木坂46"],
+  ["hinatazaka46", "日向坂46"],
+  ["sakurazaka46", "樱坂46"],
+  ["yodel", "yodel"],
+];
+const SUPPORTED_MEMBER_GROUP_SET = new Set(SUPPORTED_MEMBER_GROUPS.map(([value]) => value));
+function getMemberAccountGroup(accountId) {
+  const acc = (config.accounts || {})[accountId] || {};
+  return String(acc.group || acc.group_type || "").trim().toLowerCase();
+}
+function getSupportedMemberAccounts(group) {
+  return Object.keys(config.accounts || {})
+    .filter((id) => SUPPORTED_MEMBER_GROUP_SET.has(getMemberAccountGroup(id)))
+    .filter((id) => !group || getMemberAccountGroup(id) === group);
+}
+function monitorEntryFromFetchedMember(member) {
+  const id = String(member && member.id != null ? member.id : "").trim();
+  const name = String(member && member.name != null ? member.name : "").trim();
+  if (!id || !name || !_currentFetchedAccount ||
+      !SUPPORTED_MEMBER_GROUP_SET.has(getMemberAccountGroup(_currentFetchedAccount))) return null;
+  return { id, name, account: _currentFetchedAccount, groups: [] };
+}
+function addFetchedMembers(members) {
+  const existing = new Set((config.monitor || []).map((m) => String(m.account || "") + ":" + String(m.id || "")));
+  const entries = [];
+  for (const member of members || []) {
+    const entry = monitorEntryFromFetchedMember(member);
+    if (!entry) continue;
+    const key = entry.account + ":" + entry.id;
+    if (existing.has(key)) continue;
+    existing.add(key);
+    entries.push(entry);
+  }
+  if (entries.length) {
+    config.monitor = config.monitor || [];
+    config.monitor.push(...entries);
+    markDirty();
+    renderMembers();
+  }
+  return entries;
+}
 let _currentFetchedMembers = [];
 let _currentFetchedAccount = "";
+let _currentFetchedGroup = "";
 let _memberPickFilter = "all"; // "subscribed" | "past_subscribed" | "open" | "all"
 
 function renderMemberPickItems() {
   const list = $("memberPickList");
   list.innerHTML = "";
-  const already = () => new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
+  const already = new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
 
   let filtered = _currentFetchedMembers.slice();
   if (_memberPickFilter === "subscribed") {
@@ -4950,7 +4979,7 @@ function renderMemberPickItems() {
 
   if (!filtered.length) {
     const emptyDiv = document.createElement("div");
-    emptyDiv.style.cssText = "text-align:center; padding:28px 0; color:var(--muted); font-size:13px;";
+    emptyDiv.className = "member-pick-empty";
     emptyDiv.textContent = _memberPickFilter === "subscribed"
       ? "🌟 当前账号下暂无正在订阅中的成员"
       : (_memberPickFilter === "past_subscribed" ? "⏳ 当前账号下暂无曾经订阅/离线记录" : "暂无符合条件的成员");
@@ -4963,68 +4992,62 @@ function renderMemberPickItems() {
     const isSub = !!m.is_subscribed;
     const isPastSub = !!m.is_past_subscribed;
     const isOpen = m.state === "open";
-
-    row.style.cssText = "display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; border:1px solid " +
-      (isSub ? "rgba(236, 72, 153, 0.45)" : (isPastSub ? "rgba(245, 158, 11, 0.35)" : "var(--border)")) +
-      "; background:" +
-      (isSub ? "linear-gradient(90deg, rgba(139, 92, 246, 0.12), rgba(236, 72, 153, 0.08))" :
-       (isPastSub ? "rgba(245, 158, 11, 0.07)" : "var(--card-soft, rgba(255,255,255,0.02))")) + ";";
+    row.className = "member-pick-row" + (isSub ? " is-subscribed" : (isPastSub ? " is-past-subscribed" : ""));
+    row.dataset.memberId = String(m.id || "");
+    row.dataset.state = m.state || "";
 
     // 头像 Thumbnail
     const avatar = document.createElement("img");
-    avatar.style.cssText = "width:34px; height:34px; border-radius:50%; object-fit:cover; background:var(--border); flex-shrink:0;";
+    avatar.className = "member-pick-avatar";
+    avatar.alt = String(m.name || "成员头像");
     if (m.thumbnail) {
       avatar.src = m.thumbnail;
-      avatar.onerror = () => { avatar.style.display = "none"; };
+      avatar.onerror = () => { avatar.classList.add("is-hidden"); };
     } else {
-      avatar.style.display = "none";
+      avatar.classList.add("is-hidden");
     }
 
     // 信息容器
     const info = document.createElement("div");
-    info.style.cssText = "flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;";
+    info.className = "member-pick-info";
 
     const nameRow = document.createElement("div");
-    nameRow.style.cssText = "display:flex; align-items:center; gap:6px; flex-wrap:wrap;";
-
-    const idSpan = document.createElement("span");
-    idSpan.style.cssText = "font-family:monospace; font-size:11px; opacity:0.6; padding:1px 4px; background:rgba(255,255,255,0.06); border-radius:4px;";
-    idSpan.textContent = "#" + m.id;
+    nameRow.className = "member-pick-name-row";
 
     const nameSpan = document.createElement("span");
-    nameSpan.style.cssText = "font-weight:600; font-size:13.5px;";
-    nameSpan.textContent = m.name;
+    nameSpan.className = "member-pick-name";
+    nameSpan.textContent = String(m.name || "未命名成员");
 
-    nameRow.append(idSpan, nameSpan);
-
+    nameRow.append(nameSpan);
     // 状态 Badge 标签
     if (isSub) {
       const subBadge = document.createElement("span");
-      subBadge.style.cssText = "font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px; background:linear-gradient(135deg, #8b5cf6, #ec4899); color:#fff; display:inline-flex; align-items:center; gap:2px; box-shadow:0 1px 4px rgba(236,72,153,0.3);";
+      subBadge.className = "member-pick-status-badge is-subscribed";
       subBadge.textContent = "🌟 当前订阅";
       nameRow.appendChild(subBadge);
     } else if (isPastSub) {
       const expBadge = document.createElement("span");
-      expBadge.style.cssText = "font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px; background:rgba(245, 158, 11, 0.18); color:#f59e0b; border:1px solid rgba(245, 158, 11, 0.35); display:inline-flex; align-items:center; gap:2px;";
+      expBadge.className = "member-pick-status-badge is-past-subscribed";
       expBadge.textContent = "⏳ 曾订阅 (离线可归档)";
       nameRow.appendChild(expBadge);
     } else if (isOpen) {
       const openBadge = document.createElement("span");
-      openBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(16,185,129,0.15); color:#10b981;";
+      openBadge.className = "member-pick-status-badge is-open";
       openBadge.textContent = "🟢 在籍";
       nameRow.appendChild(openBadge);
     } else {
       const gradBadge = document.createElement("span");
-      gradBadge.style.cssText = "font-size:11px; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.05); color:var(--muted);";
+      gradBadge.className = "member-pick-status-badge is-closed";
       gradBadge.textContent = "⚫ 离线/已关闭";
       nameRow.appendChild(gradBadge);
     }
 
     // 副信息（期数、到期时间/历史订阅起止等）
     const metaRow = document.createElement("div");
-    metaRow.style.cssText = "font-size:11.5px; color:var(--muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap;";
+    metaRow.className = "member-pick-meta";
     if (m.tags && m.tags.length) {
       const tagSpan = document.createElement("span");
+      tagSpan.className = "member-pick-tags";
       tagSpan.textContent = m.tags.join(" · ");
       metaRow.appendChild(tagSpan);
     }
@@ -5033,7 +5056,7 @@ function renderMemberPickItems() {
         const d = new Date(m.sub_end);
         if (!isNaN(d.getTime())) {
           const endSpan = document.createElement("span");
-          endSpan.style.cssText = "color:#f472b6; font-size:11px; font-weight:500;";
+          endSpan.className = "member-pick-date--active";
           endSpan.textContent = "📅 续费期至 " + (d.getMonth() + 1) + "月" + d.getDate() + "日";
           metaRow.appendChild(endSpan);
         }
@@ -5051,7 +5074,7 @@ function renderMemberPickItems() {
         }
         if (parts.length) {
           const timeSpan = document.createElement("span");
-          timeSpan.style.cssText = "color:#f59e0b; font-size:11px;";
+          timeSpan.className = "member-pick-date--past";
           timeSpan.textContent = "📅 曾订阅区间: " + parts.join(" ~ ");
           metaRow.appendChild(timeSpan);
         }
@@ -5060,14 +5083,13 @@ function renderMemberPickItems() {
     info.append(nameRow, metaRow);
 
     // 操作按钮
-    const isAdded = already().has(_currentFetchedAccount + ":" + m.id);
+    const isAdded = already.has(_currentFetchedAccount + ":" + m.id);
     const btn = mkBtn(isAdded ? "✓ 已添加" : "+ 添加", () => {
-      config.monitor = config.monitor || [];
-      config.monitor.push({ id: m.id, name: m.name, account: _currentFetchedAccount, groups: [] });
-      markDirty(); renderMembers();
-      btn.textContent = "✓ 已添加"; btn.disabled = true; btn.className = "btn small";
+      const added = addFetchedMembers([m]);
+      if (!added.length) return;
+      btn.textContent = "✓ 已添加"; btn.disabled = true; btn.className = "btn small member-pick-add";
     });
-    btn.className = isAdded ? "btn small" : (isSub ? "btn primary small" : (isPastSub ? "btn small" : "btn small"));
+    btn.className = isAdded ? "btn small member-pick-add" : (isSub ? "btn primary small member-pick-add" : "btn small member-pick-add");
     if (isAdded) btn.disabled = true;
 
     row.append(avatar, info, btn);
@@ -5075,56 +5097,103 @@ function renderMemberPickItems() {
   }
 }
 
-$("btnPickMember").addEventListener("click", () => {
-  const ids = Object.keys(config.accounts || {});
-  if (!ids.length) { uiAlert("先在账号池添加账号"); return; }
-  chipGroup("pickAccountChips", ids.map((id) => [id, id]), ids[0]);
+function renderMemberPickAccountChips(group) {
+  const accountBox = $("pickAccountChips");
+  const ids = getSupportedMemberAccounts(group);
+  accountBox.innerHTML = "";
+  accountBox.dataset.value = ids[0] || "";
+  if (ids.length) {
+    chipGroup("pickAccountChips", ids.map((id) => [id, id]), ids[0]);
+  } else {
+    const empty = document.createElement("span");
+    empty.className = "member-pick-account-empty";
+    empty.textContent = "该团体尚未配置 Message 账号";
+    accountBox.appendChild(empty);
+  }
+  $("btnFetchMembers").disabled = ids.length === 0;
+  _currentFetchedAccount = "";
+  _currentFetchedMembers = [];
   $("memberPickList").innerHTML = "";
   $("memberPickToolbar").style.display = "none";
-  $("memberPickHint").textContent = "选择账号后点「拉取」；需要该账号凭证可用（主程序运行中或已填凭证）。";
+  $("memberPickHint").textContent = ids.length
+    ? "选择该团体的 Message 账号后点「拉取」；成员信息来自官方目录。"
+    : "该团体暂无可用的 Message 账号，请先在账号池添加并配置凭证。";
+}
+
+function markUnavailableMemberGroupChips() {
+  const box = $("pickGroupChips");
+  if (!box) return;
+  box.querySelectorAll(".chip").forEach((chip) => {
+    const available = getSupportedMemberAccounts(chip.dataset.value).length > 0;
+    chip.classList.toggle("is-unavailable", !available);
+    chip.dataset.available = String(available);
+    if (available) {
+      chip.removeAttribute("title");
+    } else {
+      chip.title = "该团体尚未配置 Message 账号";
+    }
+  });
+}
+
+$("btnPickMember").addEventListener("click", () => {
+  const ids = getSupportedMemberAccounts();
+  if (!ids.length) {
+    uiAlert("请先在账号池添加乃木坂46、日向坂46、樱坂46或 yodel 的 Message 账号", "暂时无法拉取成员");
+    return;
+  }
+  const availableGroups = SUPPORTED_MEMBER_GROUPS.filter(([group]) => getSupportedMemberAccounts(group).length);
+  _currentFetchedGroup = availableGroups[0][0];
+  chipGroup("pickGroupChips", SUPPORTED_MEMBER_GROUPS, _currentFetchedGroup, (group) => {
+    _currentFetchedGroup = group;
+    renderMemberPickAccountChips(group);
+    markUnavailableMemberGroupChips();
+  });
+  markUnavailableMemberGroupChips();
+  renderMemberPickAccountChips(_currentFetchedGroup);
+  $("memberPickList").innerHTML = "";
+  $("memberPickToolbar").style.display = "none";
+  $("memberPickHint").textContent = "选择团体和对应账号后点「拉取」；成员信息来自官方目录。";
   $("memberPickDialog").showModal();
 });
 $("memberPickClose").addEventListener("click", () => $("memberPickDialog").close());
 
 $("btnAddAllSubscribed").addEventListener("click", () => {
-  const already = new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
-  const toAdd = _currentFetchedMembers.filter(m => m.is_subscribed && !already.has(_currentFetchedAccount + ":" + m.id));
-  if (!toAdd.length) {
+  const toAdd = _currentFetchedMembers.filter(m => m.is_subscribed);
+  const added = addFetchedMembers(toAdd);
+  if (!added.length) {
     uiAlert("所有已订阅成员均已在监控列表中！", "无需重复添加");
     return;
   }
-  config.monitor = config.monitor || [];
-  for (const m of toAdd) {
-    config.monitor.push({ id: m.id, name: m.name, account: _currentFetchedAccount, groups: [] });
-  }
-  markDirty();
-  renderMembers();
   renderMemberPickItems();
-  msg("✅ 已成功添加 " + toAdd.length + " 位已订阅成员到监控列表！", "ok");
+  msg("✅ 已成功添加 " + added.length + " 位已订阅成员到监控列表！", "ok");
 });
 
 $("btnAddAllPastSubscribed").addEventListener("click", () => {
-  const already = new Set((config.monitor || []).map((m) => m.account + ":" + m.id));
-  const toAdd = _currentFetchedMembers.filter(m => m.is_past_subscribed && !already.has(_currentFetchedAccount + ":" + m.id));
-  if (!toAdd.length) {
+  const toAdd = _currentFetchedMembers.filter(m => m.is_past_subscribed);
+  const added = addFetchedMembers(toAdd);
+  if (!added.length) {
     uiAlert("所有曾订阅/离线成员均已在监控列表中！", "无需重复添加");
     return;
   }
-  config.monitor = config.monitor || [];
-  for (const m of toAdd) {
-    config.monitor.push({ id: m.id, name: m.name, account: _currentFetchedAccount, groups: [] });
-  }
-  markDirty();
-  renderMembers();
   renderMemberPickItems();
-  msg("✅ 已成功添加 " + toAdd.length + " 位曾订阅成员（用于离线历史归档）！", "ok");
+  msg("✅ 已成功添加 " + added.length + " 位曾订阅成员（用于离线历史归档）！", "ok");
 });
 
 $("btnFetchMembers").addEventListener("click", async () => {
+  const group = $("pickGroupChips").dataset.value || "";
   const account = $("pickAccountChips").dataset.value;
   const list = $("memberPickList");
   list.innerHTML = "";
   $("memberPickToolbar").style.display = "none";
+  if (!SUPPORTED_MEMBER_GROUP_SET.has(group)) {
+    $("memberPickHint").textContent = "请先选择受支持的团体。";
+    return;
+  }
+  if (!account || getMemberAccountGroup(account) !== group) {
+    $("memberPickHint").textContent = "请选择该团体下的 Message 账号。";
+    return;
+  }
+  _currentFetchedGroup = group;
   $("memberPickHint").textContent = "正在拉取成员目录与订阅状态…";
   let data;
   try {
@@ -5151,9 +5220,9 @@ $("btnFetchMembers").addEventListener("click", async () => {
   const totalCount = data.total !== undefined ? data.total : _currentFetchedMembers.length;
 
   $("memberPickHint").innerHTML = "📊 <b>" + account + "</b>：共 " + totalCount + " 项 · " +
-    "<span style='color:#f472b6; font-weight:600;'>🌟 当前订阅 " + subCount + " 人</span> · " +
-    "<span style='color:#f59e0b; font-weight:600;'>⏳ 曾订阅(离线归档) " + pastCount + " 人</span> · " +
-    "🟢 在籍 " + openCount + " 人。<br><span style='color:var(--muted); font-size:12px;'>💡 曾订阅成员亦可添加用于离线归档同步历史消息。</span>";
+    "<span class=\"member-pick-stat--subscribed\">🌟 当前订阅 " + subCount + " 人</span> · " +
+    "<span class=\"member-pick-stat--past\">⏳ 曾订阅(离线归档) " + pastCount + " 人</span> · " +
+    "🟢 在籍 " + openCount + " 人。<br><span class=\"member-pick-hint-detail\">💡 曾订阅成员亦可添加用于离线归档同步历史消息。</span>";
 
   // 渲染筛选 Chips
   const filterChips = $("memberPickFilterChips");
@@ -5199,13 +5268,6 @@ $("btnFetchMembers").addEventListener("click", async () => {
 
   $("memberPickToolbar").style.display = "flex";
   renderMemberPickItems();
-});
-
-$("btnAddMember").addEventListener("click", () => {
-  config.monitor = config.monitor || [];
-  const firstAccount = Object.keys(config.accounts || {})[0] || "";
-  config.monitor.push({ id: "", name: "", account: firstAccount, groups: [] });
-  markDirty(); renderMembers();
 });
 
 $("btnSyncSubs").addEventListener("click", async () => {
@@ -5732,27 +5794,22 @@ function renderCmdOpenids() {
   list.forEach((item, idx) => {
     const card = document.createElement("div");
     card.className = "cmd-openid-card";
-    card.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--card-solid); border: 1px solid var(--border-soft); border-radius: 8px; gap: 10px; flex-wrap: wrap;";
 
     const left = document.createElement("div");
     left.className = "cmd-openid-main";
-    left.style.cssText = "display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap;";
 
     const typeTag = document.createElement("span");
     const isGroup = item.type === "group";
-    typeTag.className = "sub-filter-tag " + (isGroup ? "" : "all");
-    typeTag.style.cssText = "font-size: 11px; flex-shrink: 0; padding: 2px 7px;";
+    typeTag.className = "sub-filter-tag cmd-openid-type " + (isGroup ? "" : "all");
     typeTag.textContent = isGroup ? "👥 群聊" : "👤 私聊";
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "cmd-openid-name";
-    nameSpan.style.cssText = "font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
     nameSpan.textContent = item.name || (isGroup ? "未命名群聊" : "未命名用户");
     nameSpan.title = item.name || "";
 
     const code = document.createElement("code");
     code.className = "cmd-openid-code";
-    code.style.cssText = "font-family: Consolas, monospace; font-size: 12px; color: var(--muted); background: var(--bg); padding: 2.5px 8px; border-radius: 4px; border: 1px solid var(--border-soft); letter-spacing: 0.5px; user-select: all; cursor: pointer;";
     code.textContent = item.openid;
     code.title = "点击复制 OpenID";
     code.onclick = () => {
@@ -5764,7 +5821,6 @@ function renderCmdOpenids() {
 
     const right = document.createElement("div");
     right.className = "cmd-openid-actions";
-    right.style.cssText = "display: flex; align-items: center; gap: 6px; flex-wrap: wrap;";
 
     const btnCopy = document.createElement("button");
     btnCopy.className = "btn small";
@@ -5932,7 +5988,7 @@ async function refreshUsers() {
                                    : '<span class="admin-status-badge muted">viewer</span>') +
       "</td><td>" + esc(when) + "</td>";
     const td = document.createElement("td");
-    td.className = "actions admin-nowrap";
+    td.className = "admin-table-actions-cell admin-nowrap";
     const actions = document.createElement("div");
     actions.className = "admin-row-actions";
     actions.appendChild(mkBtn("改密码", () => openSecretDialog(
@@ -6086,7 +6142,7 @@ async function refreshHistory() {
     const when = new Date(h.mtime_epoch * 1000).toLocaleString();
     tr.innerHTML = "<td>" + esc(when) + "</td><td>" + (h.size / 1024).toFixed(1) + " KB</td>";
     const td = document.createElement("td");
-    td.className = "actions admin-nowrap";
+    td.className = "admin-table-actions-cell admin-nowrap";
     const actions = document.createElement("div");
     actions.className = "admin-row-actions";
     actions.append(

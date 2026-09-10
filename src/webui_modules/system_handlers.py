@@ -27,6 +27,7 @@ from src.utils import format_bytes, get_storage_breakdown, clean_storage_categor
 from src.webui_modules.static_handler import send_json
 
 _TAIL_READ_BYTES = 262144  # 256KB
+_SUPPORTED_MEMBER_GROUPS = frozenset({"nogizaka46", "hinatazaka46", "sakurazaka46", "yodel"})
 
 
 def tail_file(path: Path, max_lines: int) -> list[str]:
@@ -262,6 +263,16 @@ def handle_members(handler, load_raw_config_fn) -> None:
     if account not in raw.get("accounts", {}):
         send_json(handler, {"ok": False, "errors": [f"未知账号: {account!r}"]}, 400)
         return
+    account_config = raw.get("accounts", {}).get(account) or {}
+    group = str(account_config.get("group") or account_config.get("group_type") or "").strip().lower()
+    if group not in _SUPPORTED_MEMBER_GROUPS:
+        send_json(handler, {
+            "ok": False,
+            "errors": [
+                f"账号 {account!r} 不支持成员目录拉取：请使用乃木坂46、日向坂46、樱坂46或 yodel 账号"
+            ],
+        }, 400)
+        return
 
     try:
         # 管理端运行在 HTTP 线程中，不能复用主事件循环中的 AsyncClient。
@@ -333,6 +344,7 @@ def handle_members(handler, load_raw_config_fn) -> None:
         send_json(handler, {
             "ok": True,
             "account": account,
+            "group": group,
             "total": len(slim),
             "subscribed_count": subscribed_count,
             "past_subscribed_count": past_subscribed_count,

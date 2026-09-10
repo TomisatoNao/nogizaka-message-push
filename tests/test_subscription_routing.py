@@ -25,6 +25,7 @@ def test_subscription_dialog_explains_empty_filters_and_direct_delivery():
 
 
 def test_subscription_ui_defaults_match_backend_compatibility_defaults():
+    """缺字段的旧配置继续使用兼容默认值，避免历史路由被静默改动。"""
     html = HTML_PATH.read_text(encoding="utf-8")
     definition_lines = {
         line.strip()
@@ -45,3 +46,23 @@ def test_subscription_ui_defaults_match_backend_compatibility_defaults():
             and f"def: {default}" in line
             for line in definition_lines
         )
+
+
+def test_new_channel_targets_start_with_incremental_zero_subscriptions():
+    """新建的 QQ/NapCat/TG 目标显式关闭全部订阅，按需增量勾选。"""
+    html = HTML_PATH.read_text(encoding="utf-8")
+
+    defaults_start = html.index("const INCREMENTAL_SUBSCRIPTION_DEFAULTS")
+    defaults_end = html.index("function createIncrementalSubscriptionDefaults", defaults_start)
+    defaults = html[defaults_start:defaults_end]
+    for key in (
+        "push_message", "push_blog", "push_x", "push_instagram",
+        "push_tiktok", "push_live", "push_alert",
+    ):
+        assert f"{key}: false" in defaults
+
+    # QQ 官方 Bot、NapCat 路由、Telegram Bot 三个新增入口共用同一份
+    # 显式关闭的默认对象；现有配置仍由兼容默认逻辑负责展示和运行。
+    assert html.count("...createIncrementalSubscriptionDefaults()") == 3
+    for add_id in ("btnAddQqBot", "btnAddNapcat", "btnAddTGBot"):
+        assert add_id in html

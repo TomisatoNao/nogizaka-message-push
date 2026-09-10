@@ -124,7 +124,7 @@ def test_member_handler_uses_current_directory_api(monkeypatch):
 
     handler = _ResponseHandler()
     handler.path = "/api/members?account=demo"
-    system_handlers.handle_members(handler, lambda: {"accounts": {"demo": {}}})
+    system_handlers.handle_members(handler, lambda: {"accounts": {"demo": {"group": "nogizaka46"}}})
     payload = json.loads(handler.wfile.getvalue())
 
     assert payload["ok"]
@@ -134,6 +134,21 @@ def test_member_handler_uses_current_directory_api(monkeypatch):
     assert payload["open_count"] == 1
     assert payload["members"][0]["is_subscribed"]
     assert payload["members"][1]["is_past_subscribed"]
+    assert payload["group"] == "nogizaka46"
+
+
+def test_member_handler_rejects_unsupported_account_group():
+    """成员目录只能从四个官方 Message 团体账号拉取。"""
+    handler = _ResponseHandler()
+    handler.path = "/api/members?account=instagram_only"
+    system_handlers.handle_members(
+        handler,
+        lambda: {"accounts": {"instagram_only": {"group": "other"}}},
+    )
+    payload = json.loads(handler.wfile.getvalue())
+
+    assert payload["ok"] is False
+    assert any("不支持成员目录拉取" in error for error in payload["errors"])
 
 
 def test_test_push_normalizes_legacy_official_channel():
@@ -256,7 +271,7 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
         "stNapcatHealth", "stDeliveryBacklog", "btnCopyDeliveryDiag", "stDiskTotal",
         "stDiskFree", "stDiskPercent", "stDiskBar", "stAppTotal", "stStorageGrid", "stErrors",
         "accountRows", "accountEmpty", "btnAddAccount", "memberRows", "memberEmpty",
-        "btnAddMember", "btnPickMember", "btnSyncSubs", "channelSwitches", "qqBotRows",
+        "btnPickMember", "btnSyncSubs", "pickGroupChips", "pickAccountChips", "channelSwitches", "qqBotRows",
         "btnAddQqBot", "qqBotHint", "cmdOn", "cmdOptionsBlock", "cmdMode", "cmdWhitelistWrap",
         "cmdWhitelistCountBadge", "btnSyncBotOpenids", "btnAddCmdOpenid", "cmdModeHintBanner",
         "cmdOpenidList", "napcatApi", "napcatMediaBaseUrl", "napcatRows", "btnAddNapcat",
@@ -268,7 +283,7 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
         ".admin-module", ".admin-module-heading", ".admin-control-group",
         ".admin-data-group", ".admin-actions", ".admin-field-grid",
         ".admin-summary-grid", ".admin-status-badge", ".admin-channel-switches",
-        ".admin-member-account", ".admin-member-subscription-cell", ".admin-storage-grid",
+        ".admin-member-account", ".admin-member-readonly", ".admin-member-subscription-cell", ".admin-storage-grid",
         ".admin-storage-card-actions", ".admin-row-actions",
     ):
         assert selector in html
@@ -279,6 +294,32 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
     assert ".table-wrap { overflow-x: auto; }" in html
     assert "function mkTableInput(" in html
     assert "className = \"admin-table-input\"" in html
+
+
+def test_napcat_endpoint_fields_share_aligned_responsive_group():
+    """NapCat 地址字段使用紧凑的双列端点组，窄屏再单列。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    assert 'class="napcat-endpoint-grid"' in html
+    assert "napcat-endpoint-note" in html
+    assert 'class="field">NapCat API 地址' in html
+    assert 'class="field">媒体访问基地址（可选）' in html
+    assert "NapCat 不在本机时填写媒体地址；共享文件系统可留空。" in html
+    assert "跨容器或跨主机时必须填写 NapCat 可访问的媒体地址" not in html
+    assert ".napcat-endpoint-grid { display: grid; grid-template-columns: repeat(2" in html
+    assert ".napcat-endpoint-grid { grid-template-columns: 1fr; gap: 10px; }" in html
+
+
+def test_table_action_cells_keep_table_column_alignment():
+    """表格操作单元格不能继承对话框 .actions 的 flex 布局。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    assert ".admin-table-actions-cell { display: table-cell;" in html
+    assert 'class="admin-history-table"' in html
+    assert 'td.className = "admin-table-actions-cell admin-nowrap"' in html
+    assert 'tdAct.className = "admin-table-actions-cell"' in html
+    assert 'td.className = "actions admin-nowrap"' not in html
+    assert 'tdAct.className = "actions"' not in html
 
 
 def test_admin_stage6_user_system_advanced_layout_contract():
@@ -897,26 +938,44 @@ def test_mobile_header_2row_layout_and_actions_guard():
 def test_admin_mobile_member_and_openid_layout_guards_are_present():
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
 
-    # 桌面/平板表格保留稳定列宽；手机端切换为带字段标签的成员卡片。
+    # 各尺寸均保留稳定列宽；手机端与账号池一样由表格容器负责横向滚动。
     assert '<table class="member-table">' in html
-    assert ".member-table { min-width: 1000px; }" in html
-    assert ".member-table { min-width: 0; width: 100%;" in html
-    assert ".member-table tbody tr { display: grid;" in html
-    assert '"social social" "account subscription" "actions actions"' in html
-    assert 'tdSocial.className = "admin-member-social-cell"' in html
-    assert 'tdSub.className = "admin-member-subscription-cell"' in html
-    assert 'tdId.dataset.label = "成员 ID"' in html
+    assert ".member-table { min-width: 760px; }" in html
+    assert ".member-table { min-width: 760px; width: 100%; border-collapse: collapse; }" in html
+    assert ".member-table thead { display: table-header-group; }" in html
+    assert ".member-table tbody tr { display: table-row; }" in html
+    assert ".member-table tbody td::before { content: none; display: none; }" in html
+    assert 'tdName.dataset.label = "姓名"' in html
     assert 'tdAcc.dataset.label = "Message 账号"' in html
     assert 'tdSub.dataset.label = "订阅状态"' in html
-    assert 'tdSocial.dataset.label = "社交账号绑定"' in html
-    assert 'tr.append(tdId, tdName, tdSocial, tdAcc, tdSub, tdOps)' in html
+    assert 'tdOps.dataset.label = "操作"' in html
+    assert 'tr.append(tdName, tdAcc, tdSub, tdOps)' in html
+    assert 'className = "admin-member-readonly admin-member-name"' in html
+    assert 'className = "admin-member-readonly admin-member-account-readonly"' in html
+    assert ".admin-member-account-readonly { display: inline; min-height: 0;" in html
+    assert "background: transparent; color: var(--text-strong); font-family: var(--mono);" in html
+    assert 'mkTableInput(m.id' not in html
+    assert 'mkTableInput(m.name' not in html
+    assert 'm.name = v.trim()' not in html
+    assert 'm.account = sel.value' not in html
+    assert 'id="btnAddMember"' not in html
+    assert 'memberSocialDialog' not in html
+    assert 'memSocial' not in html
+    assert 'const SUPPORTED_MEMBER_GROUPS = [' in html
+    for group in ("nogizaka46", "hinatazaka46", "sakurazaka46", "yodel"):
+        assert f'["{group}"' in html
+    assert 'chipGroup("pickGroupChips"' in html
+    assert 'getSupportedMemberAccounts(group)' in html
+    assert 'getMemberAccountGroup(account) !== group' in html
+    assert 'SUPPORTED_MEMBER_GROUP_SET.has(getMemberAccountGroup(_currentFetchedAccount))' in html
 
-    # 存储卡片将项目数、容量和清理动作分成独立语义行。
+    # 存储卡片将容量作为主体，项目数与清理动作放在同一条元信息行。
     assert ".admin-storage-card-meta" in html
     assert ".admin-storage-card-actions" in html
     assert ".admin-storage-card-summary" not in html
     assert "actions.classList.add(\"is-empty\")" in html
-    assert "card.append(heading, size, meta, actions)" in html
+    assert "meta.appendChild(actions)" in html
+    assert "card.append(heading, size, meta)" in html
 
     # 账号/用户/历史及各推送路由共用横向操作组，避免按钮被挤成竖列。
     assert ".admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap;" in html
@@ -928,7 +987,49 @@ def test_admin_mobile_member_and_openid_layout_guards_are_present():
     assert 'code.className = "cmd-openid-code"' in html
     assert 'right.className = "cmd-openid-actions"' in html
     assert ".cmd-openid-card > .cmd-openid-actions" in html
-    assert "width: 100%; flex: 1 1 100%; justify-content: flex-start" in html
+    assert "width: 100%; flex: 0 0 auto; justify-content: flex-start" in html
+    assert "display: grid !important; grid-template-columns: auto minmax(0, 1fr)" in html
+
+
+def test_member_picker_uses_step_layout_and_shared_result_components():
+    """成员拉取弹窗应以步骤卡片表达选择流程，并将结果项交给统一 CSS 管理。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    dialog_start = html.index('<dialog id="memberPickDialog"')
+    dialog_end = html.index("</dialog>", dialog_start)
+    dialog = html[dialog_start:dialog_end]
+    assert 'class="member-pick-dialog"' in dialog
+    assert 'aria-labelledby="memberPickTitle"' in dialog
+    assert 'class="member-pick-steps"' in dialog
+    assert 'class="member-pick-step"' in dialog
+    assert 'class="member-pick-account-row"' in dialog
+    assert 'class="member-pick-list"' in dialog
+    assert "style=" not in dialog
+
+    for selector in (
+        ".member-pick-dialog", ".member-pick-steps", ".member-pick-step",
+        ".member-pick-account-row", ".member-pick-toolbar", ".member-pick-row",
+        ".member-pick-status-badge", ".member-pick-account-empty",
+    ):
+        assert selector in html
+    assert ".member-pick-step .chip.is-unavailable" in html
+    assert "function markUnavailableMemberGroupChips()" in html
+    assert "member-pick-stat--subscribed" in html
+    assert "member-pick-hint-detail" in html
+
+    render_start = html.index("function renderMemberPickItems()")
+    render_end = html.index("function renderMemberPickAccountChips", render_start)
+    render_fn = html[render_start:render_end]
+    assert "style.cssText" not in render_fn
+    assert "member-pick-row" in render_fn
+    assert "member-pick-status-badge" in render_fn
+    assert "member-pick-date--active" in render_fn
+    assert "member-pick-date--past" in render_fn
+
+    # 桌面/平板双列，手机单列；账号与拉取按钮在手机端改为上下堆叠。
+    assert ".member-pick-steps { display: grid; grid-template-columns: repeat(2" in html
+    assert ".member-pick-steps { grid-template-columns: 1fr;" in html
+    assert ".member-pick-account-row { align-items: stretch; flex-direction: column;" in html
 
 
 def test_admin_restart_and_reload_controls_relocated():
