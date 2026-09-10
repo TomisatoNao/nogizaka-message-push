@@ -131,6 +131,7 @@ def list_members() -> list[str]:
                 return [r[0] for r in rows]
         except sqlite3.Error as ex:
             log_all(f"⚠️ 查询归档成员列表异常: {ex}", is_debug=True)
+
     root = _get_archive_root()
     if not root.is_dir():
         return []
@@ -155,35 +156,108 @@ def _month_count(json_path: Path) -> int:
     return count
 
 
-def list_months(member_dir: str) -> list[dict]:
-    """返回 [{year, month, count}]，新的在前。支持 mtime 缓存与快速统计。"""
+def list_months(
+    member_dir: str,
+    type_filter: set[str] | None = None,
+    id_filter: set[str] | None = None,
+) -> list[dict]:
+    """返回 [{year, month, count}]，新的在前。支持 mtime 缓存与类型/收藏复合统计。"""
     root = _get_archive_root() / member_dir
+    base_months: list[dict] = []
     if root.is_dir():
-        out = []
         for year_dir in sorted((d for d in root.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
             for month_dir in sorted((d for d in year_dir.iterdir() if d.is_dir() and d.name.isdigit()), reverse=True):
                 json_path = month_dir / "messages.json"
                 if not json_path.is_file():
                     continue
-                out.append({"year": int(year_dir.name), "month": int(month_dir.name),
-                            "count": _month_count(json_path)})
-        if out:
-            return out
+                base_months.append({
+                    "year": int(year_dir.name),
+                    "month": int(month_dir.name),
+                    "count": _month_count(json_path),
+                })
+    if not base_months:
+        conn = _get_init_db()
+        if conn:
+            try:
+                rows = conn.execute("""
+                    SELECT year, month, COUNT(*) FROM messages
+                    WHERE member_dir = ?
+                    GROUP BY year, month
+                    ORDER BY year DESC, month DESC;
+                """, (member_dir,)).fetchall()
+                if rows:
+                    base_months = [{"year": r[0], "month": r[1], "count": r[2]} for r in rows]
+            except Exception:
+                pass
 
+    if not base_months:
+        return []
+
+    # 若没有任何筛选条件，直接返回基础月份统计
+    if type_filter is None and id_filter is None:
+        return base_months
+
+    # 若指定了收藏 ID 过滤且集合为空，各月份计数均为 0
+    if id_filter is not None and len(id_filter) == 0:
+        return [{"year": m["year"], "month": m["month"], "count": 0} for m in base_months]
+
+    counts_map: dict[tuple[int, int], int] | None = {}
     conn = _get_init_db()
     if conn:
         try:
-            rows = conn.execute("""
-                SELECT year, month, COUNT(*) FROM messages
-                WHERE member_dir = ?
-                GROUP BY year, month
-                ORDER BY year DESC, month DESC;
-            """, (member_dir,)).fetchall()
-            if rows:
-                return [{"year": r[0], "month": r[1], "count": r[2]} for r in rows]
-        except Exception:  # nosec B110
-            pass
-    return []
+            if id_filter is not None:
+                chunk = list(id_filter)
+                for start in range(0, len(chunk), 400):
+                    sub_ids = chunk[start:start + 400]
+                    placeholders = ",".join("?" for _ in sub_ids)
+                    params: list[any] = [member_dir, *sub_ids]
+                    sql = f"SELECT year, month, COUNT(*) FROM messages WHERE member_dir = ? AND id IN ({placeholders})"
+                    if type_filter:
+                        t_placeholders = ",".join("?" for _ in type_filter)
+                        sql += f" AND type IN ({t_placeholders})"
+                        params.extend(list(type_filter))
+                    sql += " GROUP BY year, month;"
+                    rows = conn.execute(sql, params).fetchall()
+                    for y, mo, c in rows:
+                        counts_map[(y, mo)] = counts_map.get((y, mo), 0) + c
+            else:
+                placeholders = ",".join("?" for _ in type_filter)
+                rows = conn.execute(
+                    f"SELECT year, month, COUNT(*) FROM messages WHERE member_dir = ? AND type IN ({placeholders}) GROUP BY year, month;",
+                    [member_dir, *type_filter],
+                ).fetchall()
+                for y, mo, c in rows:
+                    counts_map[(y, mo)] = c
+        except Exception as e:
+            log_all(f"⚠️ SQLite 复合月份计数失败，降级扫描 JSON: {e}", is_debug=True)
+            counts_map = None
+
+    if counts_map is None:
+        counts_map = {}
+        for m in base_months:
+            json_path = root / str(m["year"]) / f"{m['month']:02d}" / "messages.json"
+            if not json_path.is_file():
+                json_path = root / str(m["year"]) / str(m["month"]) / "messages.json"
+            if not json_path.is_file():
+                continue
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    msgs = json.load(f)
+            except (OSError, ValueError):
+                msgs = []
+            c = 0
+            for msg in msgs:
+                if id_filter is not None and str(msg.get("id")) not in id_filter:
+                    continue
+                if type_filter is not None and msg.get("type") not in type_filter:
+                    continue
+                c += 1
+            counts_map[(m["year"], m["month"])] = c
+
+    return [
+        {"year": m["year"], "month": m["month"], "count": counts_map.get((m["year"], m["month"]), 0)}
+        for m in base_months
+    ]
 
 
 def _jst_date(utc_str: str) -> str:
@@ -196,10 +270,61 @@ def _jst_date(utc_str: str) -> str:
     return (dt + timedelta(hours=9)).strftime("%Y-%m-%d")
 
 
-def day_counts(member_dir: str, type_filter: set[str] | None = None) -> dict[str, int]:
-    """全档按 JST 日期统计消息数（日历视图用），逐月 mtime 缓存。
-    type_filter 为 None 统计全部类型，否则只计入指定类型集合。"""
+def day_counts(
+    member_dir: str,
+    type_filter: set[str] | None = None,
+    id_filter: set[str] | None = None,
+) -> dict[str, int]:
+    """全档按 JST 日期统计消息数（日历视图用），支持类型与收藏复合过滤。
+    type_filter 为 None 统计全部类型，否则只计入指定类型集合。
+    id_filter 为 None 统计全部消息，否则只计入指定 ID 集合（如用户收藏）。"""
     out: dict[str, int] = {}
+    if id_filter is not None and len(id_filter) == 0:
+        return out
+
+    if id_filter is not None:
+        conn = _get_init_db()
+        if conn:
+            try:
+                chunk = list(id_filter)
+                for start in range(0, len(chunk), 400):
+                    sub_ids = chunk[start:start + 400]
+                    placeholders = ",".join("?" for _ in sub_ids)
+                    params: list[any] = [member_dir, *sub_ids]
+                    sql = f"SELECT published_at, updated_at, type FROM messages WHERE member_dir = ? AND id IN ({placeholders})"
+                    if type_filter:
+                        t_placeholders = ",".join("?" for _ in type_filter)
+                        sql += f" AND type IN ({t_placeholders})"
+                        params.extend(list(type_filter))
+                    rows = conn.execute(sql, params).fetchall()
+                    for r in rows:
+                        d = _jst_date(r[0] or r[1] or "")
+                        if d:
+                            out[d] = out.get(d, 0) + 1
+                return out
+            except Exception as e:
+                log_all(f"⚠️ SQLite 复合日历统计失败，降级扫描 JSON: {e}", is_debug=True)
+
+        root = _get_archive_root() / member_dir
+        if not root.is_dir():
+            return out
+        for json_path in root.glob("[0-9]*/[0-9]*/messages.json"):
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    msgs = json.load(f)
+            except (OSError, ValueError):
+                continue
+            for m in msgs:
+                if str(m.get("id")) not in id_filter:
+                    continue
+                if type_filter is not None and m.get("type") not in type_filter:
+                    continue
+                d = _jst_date(m.get("published_at") or m.get("updated_at", ""))
+                if d:
+                    out[d] = out.get(d, 0) + 1
+        return out
+
+    # id_filter is None: 常规统计模式（逐月 mtime 缓存）
     root = _get_archive_root() / member_dir
     if not root.is_dir():
         return out

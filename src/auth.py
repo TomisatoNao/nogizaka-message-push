@@ -142,6 +142,23 @@ def get_auth_db() -> sqlite3.Connection:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_username ON refresh_tokens(username);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_message_interactions (
+                username TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                member_dir TEXT NOT NULL DEFAULT '',
+                member_name TEXT NOT NULL DEFAULT '',
+                is_favorite INTEGER NOT NULL DEFAULT 0,
+                is_liked INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, message_id)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_fav ON user_message_interactions(username, is_favorite, updated_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_like ON user_message_interactions(username, is_liked, updated_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_member ON user_message_interactions(username, member_dir);")
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
@@ -500,6 +517,13 @@ def delete_user(username: str) -> tuple[bool, str]:
     save_users(users)
     destroy_user_sessions(username)
     destroy_user_refresh_tokens(username)
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                conn.execute("DELETE FROM user_message_interactions WHERE username = ?;", (username,))
+        except sqlite3.Error:
+            pass
     return True, f"已删除用户: {username}"
 
 
@@ -818,3 +842,213 @@ def refresh_token_count() -> int:
             return int(row[0]) if row else 0
         except Exception:
             return 0
+
+
+# ================================================================
+# 消息互动管理（收藏 Favorite ⭐ / 点赞 Like ❤️）
+# ================================================================
+
+def set_user_message_interaction(
+    username: str,
+    message_id: str,
+    member_dir: str = "",
+    member_name: str = "",
+    action: str = "favorite",
+    value: bool = True,
+) -> dict:
+    """设置或取消当前用户的消息收藏 (favorite) 或点赞 (like)。"""
+    if not username or not message_id:
+        return {"ok": False, "error": "缺少 username 或 message_id"}
+    action = str(action or "").lower().strip()
+    if action not in {"favorite", "like"}:
+        return {"ok": False, "error": f"无效的交互类型: {action!r}"}
+
+    val_int = 1 if bool(value) else 0
+    now = time.time()
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT is_favorite, is_liked, member_dir, member_name FROM user_message_interactions WHERE username = ? AND message_id = ?;",
+                (username, str(message_id)),
+            )
+            row = cur.fetchone()
+            if row:
+                fav = row[0]
+                like = row[1]
+                m_dir = member_dir or row[2]
+                m_name = member_name or row[3]
+                if action == "favorite":
+                    fav = val_int
+                else:
+                    like = val_int
+                with conn:
+                    conn.execute(
+                        """
+                        UPDATE user_message_interactions
+                        SET is_favorite = ?, is_liked = ?, member_dir = ?, member_name = ?, updated_at = ?
+                        WHERE username = ? AND message_id = ?;
+                        """,
+                        (fav, like, m_dir, m_name, now, username, str(message_id)),
+                    )
+            else:
+                fav = val_int if action == "favorite" else 0
+                like = val_int if action == "like" else 0
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO user_message_interactions
+                        (username, message_id, member_dir, member_name, is_favorite, is_liked, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                        """,
+                        (username, str(message_id), member_dir, member_name, fav, like, now, now),
+                    )
+            return {
+                "ok": True,
+                "message_id": str(message_id),
+                "is_favorite": bool(fav),
+                "is_liked": bool(like),
+                "updated_at": now,
+            }
+        except Exception as e:
+            log_all(f"⚠️ 更新消息交互状态失败 ({username}, {message_id}): {e}", is_error=True)
+            return {"ok": False, "error": str(e)}
+
+
+def get_user_message_interactions(
+    username: str,
+    message_ids: list[str] | set[str] | tuple[str, ...],
+) -> dict[str, dict]:
+    """批量获取用户对指定消息列表的交互状态字典: {message_id: {'is_favorite': bool, 'is_liked': bool}}。"""
+    if not username or not message_ids:
+        return {}
+    clean_ids = [str(mid) for mid in message_ids if mid]
+    if not clean_ids:
+        return {}
+
+    conn = get_auth_db()
+    result: dict[str, dict] = {}
+    with _lock:
+        try:
+            for start in range(0, len(clean_ids), 400):
+                chunk = clean_ids[start:start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT message_id, is_favorite, is_liked
+                    FROM user_message_interactions
+                    WHERE username = ? AND message_id IN ({placeholders});
+                    """,
+                    [username, *chunk],
+                )
+                for r in cur.fetchall():
+                    result[r[0]] = {
+                        "is_favorite": bool(r[1]),
+                        "is_liked": bool(r[2]),
+                    }
+        except Exception as e:
+            log_all(f"⚠️ 批量获取消息交互状态失败: {e}", is_error=True)
+    return result
+
+
+def list_user_interacted_messages(
+    username: str,
+    action: str = "favorite",
+    member_dir: str = "",
+    page: int = 1,
+    per_page: int = 50,
+    order: str = "desc",
+) -> tuple[list[dict], int]:
+    """分页查询用户收藏或点赞的消息记录元数据列表及总数。"""
+    if not username:
+        return [], 0
+    action = str(action or "").lower().strip()
+    if action not in {"favorite", "like"}:
+        action = "favorite"
+
+    col = "is_favorite" if action == "favorite" else "is_liked"
+    order_dir = "ASC" if str(order).lower() == "asc" else "DESC"
+    page = max(1, int(page))
+    per_page = max(1, min(200, int(per_page)))
+    offset = (page - 1) * per_page
+
+    conn = get_auth_db()
+    records: list[dict] = []
+    total = 0
+    with _lock:
+        try:
+            cur = conn.cursor()
+            if member_dir:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM user_message_interactions WHERE username = ? AND {col} = 1 AND member_dir = ?;",
+                    (username, member_dir),
+                )
+                total = cur.fetchone()[0]
+                cur.execute(
+                    f"""
+                    SELECT message_id, member_dir, member_name, is_favorite, is_liked, updated_at
+                    FROM user_message_interactions
+                    WHERE username = ? AND {col} = 1 AND member_dir = ?
+                    ORDER BY updated_at {order_dir}
+                    LIMIT ? OFFSET ?;
+                    """,
+                    (username, member_dir, per_page, offset),
+                )
+            else:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM user_message_interactions WHERE username = ? AND {col} = 1;",
+                    (username,),
+                )
+                total = cur.fetchone()[0]
+                cur.execute(
+                    f"""
+                    SELECT message_id, member_dir, member_name, is_favorite, is_liked, updated_at
+                    FROM user_message_interactions
+                    WHERE username = ? AND {col} = 1
+                    ORDER BY updated_at {order_dir}
+                    LIMIT ? OFFSET ?;
+                    """,
+                    (username, per_page, offset),
+                )
+            for r in cur.fetchall():
+                records.append({
+                    "message_id": r[0],
+                    "member_dir": r[1],
+                    "member_name": r[2],
+                    "is_favorite": bool(r[3]),
+                    "is_liked": bool(r[4]),
+                    "interacted_at": float(r[5]),
+                })
+        except Exception as e:
+            log_all(f"⚠️ 列出用户消息交互记录失败: {e}", is_error=True)
+    return records, total
+
+
+def get_user_favorite_message_ids(
+    username: str,
+    member_dir: str = "",
+) -> set[str]:
+    """获取指定用户收藏的所有消息 ID 集合。若指定 member_dir 则仅返回该成员下的收藏消息 ID。"""
+    if not username:
+        return set()
+    conn = get_auth_db()
+    with _lock:
+        try:
+            cur = conn.cursor()
+            if member_dir:
+                cur.execute(
+                    "SELECT message_id FROM user_message_interactions WHERE username = ? AND member_dir = ? AND is_favorite = 1;",
+                    (username, member_dir),
+                )
+            else:
+                cur.execute(
+                    "SELECT message_id FROM user_message_interactions WHERE username = ? AND is_favorite = 1;",
+                    (username,),
+                )
+            return {str(r[0]) for r in cur.fetchall()}
+        except Exception as e:
+            log_all(f"⚠️ 获取用户收藏消息 ID 集合失败 ({username}): {e}", is_error=True)
+            return set()
+

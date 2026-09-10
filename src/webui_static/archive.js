@@ -13,6 +13,7 @@ let curBlogGroup = "";   // 非空 = 博客模式
 let months = [];         // [{year, month, count}] 新的在前
 let curYM = null;        // {year, month}
 let curType = "";
+let isFavFilter = false; // 是否开启收藏筛选
 const MESSAGE_ORDER_DEFAULT = "desc";
 let messageOrder = (() => {
   try {
@@ -490,8 +491,9 @@ async function loadCalendar() {
   if (calendarAbort) calendarAbort.abort();
   calendarAbort = new AbortController();
   try {
-    const data = await api("/api/archive/calendar?member=" + encodeURIComponent(curMember) +
-                           "&type=" + curType, { signal: calendarAbort.signal });
+    let calUrl = "/api/archive/calendar?member=" + encodeURIComponent(curMember) + "&type=" + curType;
+    if (isFavFilter) calUrl += "&favorite=1";
+    const data = await api(calUrl, { signal: calendarAbort.signal });
     if (version !== calendarVersion) return;
     dayCounts = data.ok ? data.days : {};
   } catch (e) {
@@ -2048,6 +2050,40 @@ function _replaceImgUrls(html, images, paths) {
 
 // Removed old renderBlogBubble
 
+async function loadMonths(preserveSelected = true) {
+  if (!curMember) return [];
+  const version = memberVersion;
+  try {
+    let mUrl = "/api/archive/months?member=" + encodeURIComponent(curMember);
+    if (curType) mUrl += "&type=" + encodeURIComponent(curType);
+    if (isFavFilter) mUrl += "&favorite=1";
+    const data = await api(mUrl);
+    if (version !== memberVersion) return [];
+    months = data.ok ? data.months : [];
+    syncMessageMonthFooter();
+    const sel = $("monthSelect");
+    const prevVal = sel ? sel.value : "";
+    if (sel) {
+      sel.innerHTML = "";
+      for (const m of months) {
+        const opt = document.createElement("option");
+        opt.value = m.year + "-" + m.month;
+        opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
+        sel.appendChild(opt);
+      }
+      if (preserveSelected && prevVal && months.some(m => (m.year + "-" + m.month) === prevVal)) {
+        sel.value = prevVal;
+      } else if (curYM && months.some(m => (m.year + "-" + m.month) === (curYM.year + "-" + curYM.month))) {
+        sel.value = curYM.year + "-" + curYM.month;
+      }
+    }
+    return months;
+  } catch (e) {
+    if (e.name === "AbortError" || version !== memberVersion) return [];
+    return [];
+  }
+}
+
 async function selectMember(name, keepHash) {
   const version = ++memberVersion;
   curMode = "msg";
@@ -2059,34 +2095,13 @@ async function selectMember(name, keepHash) {
   curBlogGroup = "";     // 切换到成员模式，清空博客分组
   hideMessageMonthFooter();
   syncChipHighlight();  // 同步 chip 高亮
-  if (!keepHash) searchQuery = "";
+  if (!keepHash) {
+    searchQuery = "";
+  }
   syncSearchInput();
-  let data;
-  try {
-    data = await api("/api/archive/months?member=" + encodeURIComponent(name));
-  } catch (e) {
-    if (e.name === "AbortError" || version !== memberVersion) return;
-    months = [];
-    hideMessageMonthFooter();
-    $("monthSelect").innerHTML = "";
-    $("stats").textContent = "";
-    resetContent();
-    $("emptyHint").textContent = "成员「" + name + "」不可用：" + e.message + "。请重新选择成员。";
-    $("emptyHint").hidden = false;
-    return;
-  }
+  const loadedMonths = await loadMonths(false);
   if (version !== memberVersion) return;
-  months = data.ok ? data.months : [];
-  syncMessageMonthFooter();
-  const sel = $("monthSelect");
-  sel.innerHTML = "";
-  for (const m of months) {
-    const opt = document.createElement("option");
-    opt.value = m.year + "-" + m.month;
-    opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
-    sel.appendChild(opt);
-  }
-  if (!months.length) {
+  if (!loadedMonths.length) {
     hideMessageMonthFooter();
     resetContent();
     $("stats").textContent = "";
@@ -2096,7 +2111,7 @@ async function selectMember(name, keepHash) {
   }
   loadCalendar();   // 后台拉全档按天计数，不阻塞时间线
   const wanted = keepHash ? readHashYM() : null;
-  const pick = (wanted && months.find((m) => m.year === wanted.year && m.month === wanted.month)) || months[0];
+  const pick = (wanted && loadedMonths.find((m) => m.year === wanted.year && m.month === wanted.month)) || loadedMonths[0];
   await selectMonth(pick.year, pick.month);
   if (searchQuery) startSearch(searchQuery, false);
 }
@@ -2113,6 +2128,7 @@ function syncHash() {
   if (!curYM) return;
   const p = new URLSearchParams({ member: curMember, y: curYM.year, m: curYM.month });
   if (curType) p.set("t", curType);
+  if (isFavFilter) p.set("fav", "1");
   if (searchQuery) p.set("q", searchQuery);
   // asc 不是默认值时写入路由，分享链接能恢复用户的阅读顺序；desc 保持旧链接简洁。
   if (messageOrder !== MESSAGE_ORDER_DEFAULT) p.set("order", messageOrder);
@@ -2178,13 +2194,18 @@ async function loadPage() {
   const version = contentVersion;
   contentAbort = new AbortController();
   setPageLoading(true);
+  const favParam = isFavFilter ? "&favorite=1" : "";
   const url = searchQuery
     ? "/api/archive/search?member=" + encodeURIComponent(curMember) +
       "&q=" + encodeURIComponent(searchQuery) +
-      "&type=" + curType + "&order=" + messageOrder + "&page=" + page + "&per_page=50"
+      "&type=" + curType +
+      favParam +
+      "&order=" + messageOrder + "&page=" + page + "&per_page=50"
     : "/api/archive/messages?member=" + encodeURIComponent(curMember) +
       "&year=" + curYM.year + "&month=" + curYM.month +
-      "&type=" + curType + "&order=" + messageOrder + "&page=" + page + "&per_page=50";
+      "&type=" + curType +
+      favParam +
+      "&order=" + messageOrder + "&page=" + page + "&per_page=50";
   let data;
   try {
     data = await api(url, { signal: contentAbort.signal });
@@ -2203,9 +2224,15 @@ async function loadPage() {
       (data.capped ? "（已达上限，仅显示" + (messageOrder === "asc" ? "最早" : "最新") + " 500 条）" : "");
     if (!data.messages.length && page === 1) showEmpty("没有匹配「" + searchQuery + "」的消息");
   } else {
-    $("stats").textContent = curYM.year + "/" + curYM.month + " · " + data.total + " 条 · " + messageOrderLabel();
+    const typeMap = { text: "文字", picture: "图片", video: "视频", voice: "语音" };
+    const filterParts = [];
+    if (curType && typeMap[curType]) filterParts.push(typeMap[curType]);
+    if (isFavFilter) filterParts.push("已收藏");
+    const filterDesc = filterParts.join(" · ");
+    const filterSuffix = filterDesc ? "（" + filterDesc + "）" : "";
+    $("stats").textContent = curYM.year + "/" + curYM.month + filterSuffix + " · " + data.total + " 条 · " + messageOrderLabel();
     if (!data.messages.length && page === 1) {
-      showEmpty("本月没有" + (curType ? "该类型的" : "") + "消息");
+      showEmpty("本月没有" + (filterDesc ? filterDesc + "的" : "") + "消息");
     }
   }
   for (const msg of data.messages) renderBubble(msg);
@@ -2477,6 +2504,15 @@ function renderBubble(msg) {
   }
   let copyHtml = hasText ? '<button type="button" class="copy-btn" title="复制整条消息与译文">📋 复制</button>' : '';
 
+  let favHtml = "";
+  if (window._isLoggedIn) {
+    const isFav = Boolean(msg.is_favorite);
+    favHtml =
+      '<button type="button" class="msg-action-btn fav-btn' + (isFav ? ' active' : '') + '" title="' + (isFav ? '取消收藏' : '收藏') + '" aria-label="收藏">' +
+        '<span class="btn-icon">' + (isFav ? '⭐' : '☆') + '</span>' +
+      '</button>';
+  }
+
   let html = '<div class="msg-header">' +
     '<div class="msg-meta-left">' +
       '<span class="pub-time" title="官方审核发布时间 (JST): ' + fmtCopyTime(msg.published_at) + '">' + pubTimeStr + '</span>' +
@@ -2484,6 +2520,7 @@ function renderBubble(msg) {
       uploadBadgeHtml +
     '</div>' +
     '<div class="msg-meta-right">' +
+      favHtml +
       jumpHtml +
       copyHtml +
     '</div>' +
@@ -2663,6 +2700,16 @@ function renderBubble(msg) {
     b.appendChild(tagsDiv);
   }
 
+  if (window._isLoggedIn) {
+    const favBtn = b.querySelector(".fav-btn");
+    if (favBtn) {
+      favBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleMessageFavorite(msg, favBtn);
+      });
+    }
+  }
+
   const copyBtn = b.querySelector(".copy-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
@@ -2821,6 +2868,99 @@ document.addEventListener("keydown", (e) => {
 
 
 // ── 控件 ─────────────────────────────────────────
+// ── 复合筛选协同更新（月份选择器、日历与消息列表全同步） ─────────────
+async function refreshFilteredView() {
+  page = 1;
+  resetContent();
+  syncHash();
+  // 并行更新月份下拉框计数值与日历标记
+  await Promise.all([
+    loadMonths(true),
+    loadCalendar(),
+  ]);
+  if (searchQuery) {
+    startSearch(searchQuery, false);
+  } else {
+    await loadPage();
+  }
+}
+
+// ── 消息收藏互动控制（仅登录用户可见与操作） ─────────────────
+async function toggleMessageFavorite(msg, btn) {
+  if (!window._isLoggedIn) return;
+  const currentVal = Boolean(msg.is_favorite);
+  const newVal = !currentVal;
+
+  btn.classList.add("anim-pop");
+  setTimeout(() => btn.classList.remove("anim-pop"), 400);
+
+  msg.is_favorite = newVal;
+  btn.classList.toggle("active", newVal);
+  btn.title = newVal ? "取消收藏" : "收藏";
+  const iconEl = btn.querySelector(".btn-icon");
+  if (iconEl) iconEl.textContent = newVal ? "⭐" : "☆";
+
+  try {
+    const res = await api("/api/archive/message/interaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message_id: msg.id,
+        member: curMember || msg.member || "",
+        action: "favorite",
+        value: newVal,
+      }),
+    });
+    if (res && res.ok) {
+      msg.is_favorite = Boolean(res.is_favorite);
+      showToast(newVal ? "⭐ 已加入收藏" : "已取消收藏", "ok");
+      // 实时同步更新月份选择器条数与日历标记
+      loadMonths(true);
+      loadCalendar();
+    } else {
+      msg.is_favorite = currentVal;
+      btn.classList.toggle("active", currentVal);
+      btn.title = currentVal ? "取消收藏" : "收藏";
+      if (iconEl) iconEl.textContent = currentVal ? "⭐" : "☆";
+      showToast("操作失败：" + ((res && res.errors) ? res.errors.join("；") : "网络异常"), "error");
+    }
+  } catch (e) {
+    msg.is_favorite = currentVal;
+    btn.classList.toggle("active", currentVal);
+    if (iconEl) iconEl.textContent = currentVal ? "⭐" : "☆";
+    showToast("操作失败：" + e.message, "error");
+  }
+}
+
+function initInteractionChips() {
+  const chipFav = $("chipFav");
+  if (chipFav) {
+    chipFav.addEventListener("click", () => {
+      isFavFilter = !isFavFilter;
+      chipFav.classList.toggle("active", isFavFilter);
+      refreshFilteredView();
+    });
+  }
+  const menuFav = $("menuMyFavorites");
+  if (menuFav) {
+    menuFav.addEventListener("click", async () => {
+      if ($("userDropdown")) $("userDropdown").classList.remove("open");
+      if (curMode !== "msg") switchMainTab("msg");
+      isFavFilter = true;
+      if (chipFav) chipFav.classList.toggle("active", true);
+      await refreshFilteredView();
+      // 如果当前选中的月份没有收藏（count === 0），自动跳转到最近一个有收藏的月份
+      const currentOpt = months.find(m => curYM && m.year === curYM.year && m.month === curYM.month);
+      if (!currentOpt || currentOpt.count === 0) {
+        const firstWithFav = months.find(m => m.count > 0);
+        if (firstWithFav) {
+          await selectMonth(firstWithFav.year, firstWithFav.month);
+        }
+      }
+    });
+  }
+}
+
 function initTypeChips() {
   const box = $("typeChips");
   for (const [val, label] of TYPES) {
@@ -2830,9 +2970,7 @@ function initTypeChips() {
     b.addEventListener("click", () => {
       curType = val;
       box.querySelectorAll(".chip").forEach((c, i) => c.classList.toggle("active", TYPES[i][0] === val));
-      loadCalendar();                                     // 日历计数跟随类型筛选
-      if (searchQuery) startSearch(searchQuery);          // 搜索模式下重搜（带新类型）
-      else if (curYM) selectMonth(curYM.year, curYM.month);
+      refreshFilteredView();
     });
     box.appendChild(b);
   }
@@ -3035,6 +3173,8 @@ async function initAuth() {
       const adminLink = $("adminLink");
       if (!me.auth_enabled) { 
         window._isLoggedIn = true; 
+        const ichips = $("interactionChips");
+        if (ichips) { ichips.hidden = false; ichips.style.display = "inline-flex"; }
         _updateAdminUI(true);
         if (adminLink) {
           adminLink.hidden = false;
@@ -3049,6 +3189,8 @@ async function initAuth() {
       }
       if (me.user) {
         window._isLoggedIn = true;
+        const ichips = $("interactionChips");
+        if (ichips) { ichips.hidden = false; ichips.style.display = "inline-flex"; }
         $("whoami").textContent = me.user.username;
         if ($("userMenuName")) $("userMenuName").textContent = "👤 " + me.user.username;
         if ($("userMenuRole")) $("userMenuRole").textContent = me.user.role === "admin" ? "系统管理员" : "普通用户";
@@ -3067,6 +3209,8 @@ async function initAuth() {
         }
       } else {
         window._isLoggedIn = false;
+        const ichips = $("interactionChips");
+        if (ichips) { ichips.hidden = true; ichips.style.display = "none"; }
         $("whoami").textContent = "";
         if ($("userDropdown")) { $("userDropdown").hidden = true; $("userDropdown").style.display = "none"; }
         $("logoutBtn").hidden = true;
@@ -3901,9 +4045,13 @@ async function boot() {
   }
 
   curType = p.get("t") || "";
+  isFavFilter = p.get("fav") === "1";
+  const initialChipFav = $("chipFav");
+  if (initialChipFav) initialChipFav.classList.toggle("active", isFavFilter);
   searchQuery = normalizedQuery(p.get("q"));
   syncSearchInput();
   initTypeChips();
+  initInteractionChips();
   initMessageOrder();
 
   // 首页数据不依赖成员选择器，直接与认证/成员列表并行，避免首屏串行等待。

@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260906_1">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260910_3">
+<link rel="stylesheet" href="/static/archive.css?v=20260911_1">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -72,6 +72,10 @@
           <div class="user-info-name" id="userMenuName"></div>
           <div class="user-info-role" id="userMenuRole"></div>
         </div>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item" id="menuMyFavorites" type="button">
+          <span class="icon">⭐</span> 我的收藏消息
+        </button>
         <div class="dropdown-divider"></div>
         <button class="dropdown-item" id="changePwBtn" type="button">
           <span class="icon">🔑</span> 修改登录密码
@@ -175,6 +179,9 @@
       <button class="order-btn" type="button" data-order="asc" aria-pressed="false">从早到晚</button>
     </div>
     <div class="chips" id="typeChips"></div>
+    <div class="chips interaction-chips" id="interactionChips" hidden style="display:none;">
+      <button class="chip chip-fav" id="chipFav" type="button" title="只查看我收藏的消息"><span class="chip-icon">⭐</span> 收藏</button>
+    </div>
     <span class="stats" id="stats"></span>
   </div>
   <div class="toolbar">
@@ -485,7 +492,7 @@
 </dialog>
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
-<script src="/static/archive.js?v=20260910_3"></script>
+<script src="/static/archive.js?v=20260911_1"></script>
 
 </body>
 </html>

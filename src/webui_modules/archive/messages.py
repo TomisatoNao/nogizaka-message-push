@@ -11,12 +11,14 @@ from urllib.parse import parse_qs, unquote
 
 import config.config as cfg
 from src import archive as _archive
+from src import auth as _auth
 from src.audit import record_event
 from src.webui_modules.archive.common import (
     ARCHIVE_TYPES,
     _archive_write_lock,
     _send_json_resp,
 )
+from src.webui_modules.auth_handlers import current_user, get_client_ip
 from src.webui_modules.media_service import serve_file_range
 
 
@@ -101,7 +103,29 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         if not member or member not in _archive.list_members():
             _send_json_resp(handler, {"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
             return True
-        _send_json_resp(handler, {"ok": True, "member": member, "months": _archive.list_months(member)})
+
+        type_filter = qp("type")
+        wanted = None
+        if type_filter:
+            if type_filter not in ARCHIVE_TYPES:
+                _send_json_resp(handler, {"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
+                return True
+            wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
+
+        fav_raw = qp("favorite")
+        is_fav = fav_raw.lower() in {"1", "true", "yes"} if fav_raw else False
+        fav_ids = None
+        if is_fav:
+            user = current_user(handler)
+            if not user and not getattr(cfg, "AUTH_ENABLED", False):
+                user = {"username": "local", "role": "admin"}
+            if user and user.get("username"):
+                fav_ids = _auth.get_user_favorite_message_ids(user["username"], member)
+            else:
+                fav_ids = set()
+
+        months_data = _archive.list_months(member, type_filter=wanted, id_filter=fav_ids)
+        _send_json_resp(handler, {"ok": True, "member": member, "months": months_data})
         return True
 
     # 4. 消息分页
@@ -126,6 +150,9 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             return True
 
         type_filter = qp("type")
+        fav_raw = qp("favorite")
+        is_fav = fav_raw.lower() in {"1", "true", "yes"} if fav_raw else False
+
         msgs = _archive.load_month(member, year, month)
         if type_filter:
             if type_filter not in ARCHIVE_TYPES:
@@ -134,6 +161,17 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
             msgs = [m for m in msgs if m.get("type") in wanted]
 
+        req_user = current_user(handler)
+        if not req_user and not getattr(cfg, "AUTH_ENABLED", False):
+            req_user = {"username": "local", "role": "admin"}
+
+        if is_fav:
+            if req_user and req_user.get("username"):
+                fav_ids = _auth.get_user_favorite_message_ids(req_user["username"], member)
+                msgs = [m for m in msgs if str(m.get("id")) in fav_ids]
+            else:
+                msgs = []
+
         if order == "desc":
             msgs.reverse()
 
@@ -141,6 +179,17 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         total = len(msgs)
         start = (page - 1) * per_page
         grp = _archive.infer_member_group(member)
+        paged_msgs = msgs[start:start + per_page]
+
+        # 批量附带当前登录用户的收藏/点赞状态
+        req_user = current_user(handler)
+        if not req_user and not getattr(cfg, "AUTH_ENABLED", False):
+            req_user = {"username": "local", "role": "admin"}
+        interactions = {}
+        if req_user and req_user.get("username"):
+            msg_ids = [str(m.get("id")) for m in paged_msgs if m.get("id")]
+            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids)
+
         slim = [{
             "id": m.get("id"),
             "type": m.get("type"),
@@ -155,12 +204,165 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             "download_failed": bool(m.get("_download_failed")),
             "w": m.get("thumbnail_width"),
             "h": m.get("thumbnail_height"),
-        } for m in msgs[start:start + per_page]]
+            "is_favorite": interactions.get(str(m.get("id")), {}).get("is_favorite", False),
+            "is_liked": interactions.get(str(m.get("id")), {}).get("is_liked", False),
+        } for m in paged_msgs]
 
         _send_json_resp(handler, {
             "ok": True, "member": member, "group": grp, "year": year, "month": month,
             "total": total, "page": page, "order": order,
             "total_pages": max(1, -(-total // per_page)), "messages": slim,
+        })
+        return True
+
+    # 4.1 消息收藏与点赞状态切换（仅限有账号已登录用户）
+    if sub in ("message/interaction", "message/star"):
+        user = current_user(handler)
+        if not user and not getattr(cfg, "AUTH_ENABLED", False):
+            user = {"username": "local", "role": "admin"}
+        if not user or not user.get("username"):
+            _send_json_resp(handler, {"ok": False, "errors": ["请先登录账号后再进行收藏或点赞操作"]}, 401)
+            return True
+
+        body = read_body_json_fn()
+        if body is None:
+            return True
+        if not isinstance(body, dict):
+            _send_json_resp(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+            return True
+
+        msg_id = str(body.get("message_id") or body.get("id") or "").strip()
+        if not msg_id:
+            _send_json_resp(handler, {"ok": False, "errors": ["缺少 message_id"]}, 400)
+            return True
+
+        action = str(body.get("action") or "favorite").strip().lower()
+        if action not in {"favorite", "like"}:
+            _send_json_resp(handler, {"ok": False, "errors": [f"未知操作类型: {action!r}"]}, 400)
+            return True
+
+        val_raw = body.get("value", True)
+        val = val_raw if isinstance(val_raw, bool) else str(val_raw).lower() in {"1", "true", "yes", "on"}
+
+        raw_m = str(body.get("member") or body.get("member_name") or "").strip()
+        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        res = _auth.set_user_message_interaction(
+            username=user["username"],
+            message_id=msg_id,
+            member_dir=member,
+            member_name=raw_m or member,
+            action=action,
+            value=val,
+        )
+        if not res.get("ok"):
+            _send_json_resp(handler, {"ok": False, "errors": [res.get("error", "操作失败")]}, 500)
+            return True
+
+        try:
+            source_ip = get_client_ip(handler)
+            record_event(
+                f"archive.message.{action}",
+                outcome="success",
+                actor=user.get("username"),
+                source_ip=source_ip,
+                target=f"{member}/{msg_id}" if member else msg_id,
+                details={"value": val},
+            )
+        except Exception:
+            pass
+
+        _send_json_resp(handler, {
+            "ok": True,
+            "message_id": msg_id,
+            "action": action,
+            "is_favorite": res["is_favorite"],
+            "is_liked": res["is_liked"],
+        })
+        return True
+
+    # 4.2 消息收藏与点赞列表全历史筛选（仅限有账号已登录用户）
+    if sub in ("messages/interactions", "messages/starred"):
+        user = current_user(handler)
+        if not user and not getattr(cfg, "AUTH_ENABLED", False):
+            user = {"username": "local", "role": "admin"}
+        if not user or not user.get("username"):
+            _send_json_resp(handler, {"ok": False, "errors": ["请先登录账号后再查看收藏或点赞消息"]}, 401)
+            return True
+
+        action = str(qp("action") or qp("filter") or qp("type") or "favorite").strip().lower()
+        if action not in {"favorite", "like"}:
+            action = "favorite"
+
+        raw_m = qp("member")
+        member_dir = _archive.member_dir_name(raw_m) if raw_m else ""
+
+        try:
+            page = max(1, int(qp("page", "1")))
+            per_page = min(200, max(1, int(qp("per_page", "50"))))
+        except ValueError:
+            _send_json_resp(handler, {"ok": False, "errors": ["page/per_page 必须是数字"]}, 400)
+            return True
+
+        order = qp("order", "desc").strip().lower()
+        if order not in {"asc", "desc"}:
+            order = "desc"
+
+        records, total = _auth.list_user_interacted_messages(
+            username=user["username"],
+            action=action,
+            member_dir=member_dir,
+            page=page,
+            per_page=per_page,
+            order=order,
+        )
+
+        msg_ids = [r["message_id"] for r in records]
+        loaded_msgs = _archive.load_messages_by_ids(member_dir if member_dir else None, msg_ids)
+        loaded_map = {str(m.get("id")): m for m in loaded_msgs}
+
+        show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
+        slim = []
+        for r in records:
+            mid = r["message_id"]
+            m = loaded_map.get(mid) or {}
+            m_dir = m.get("_member_dir") or r.get("member_dir") or member_dir
+            m_name = m.get("_member_name") or r.get("member_name") or m_dir
+            grp = _archive.infer_member_group(m_dir) if m_dir else ""
+            local_f = m.get("_local_file")
+            media_url = f"/api/archive/media/{m_dir}/{local_f}" if (local_f and m_dir) else None
+            slim.append({
+                "id": mid,
+                "member": m_dir,
+                "member_name": m_name,
+                "group": grp,
+                "type": m.get("type") or "text",
+                "text": m.get("text", ""),
+                "translation": m.get("_translation", ""),
+                "tags": m.get("_tags", "") if show_auto_tags else "",
+                "custom_tags": m.get("_custom_tags", ""),
+                "published_at": m.get("published_at") or m.get("updated_at", ""),
+                "upload_at": _archive.extract_upload_time(m) if m else "",
+                "year": m.get("_year"),
+                "month": m.get("_month"),
+                "media_url": media_url,
+                "download_failed": bool(m.get("_download_failed")),
+                "w": m.get("thumbnail_width"),
+                "h": m.get("thumbnail_height"),
+                "is_favorite": r["is_favorite"],
+                "is_liked": r["is_liked"],
+                "interacted_at": r["interacted_at"],
+            })
+
+        _send_json_resp(handler, {
+            "ok": True,
+            "action": action,
+            "member": member_dir,
+            "total": total,
+            "page": page,
+            "order": order,
+            "per_page": per_page,
+            "total_pages": max(1, -(-total // per_page)),
+            "messages": slim,
         })
         return True
 
@@ -178,7 +380,24 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 _send_json_resp(handler, {"ok": False, "errors": [f"未知类型: {type_filter!r}"]}, 400)
                 return True
             wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
-        _send_json_resp(handler, {"ok": True, "member": member, "days": _archive.day_counts(member, type_filter=wanted)})
+
+        fav_raw = qp("favorite")
+        is_fav = fav_raw.lower() in {"1", "true", "yes"} if fav_raw else False
+        fav_ids = None
+        if is_fav:
+            user = current_user(handler)
+            if not user and not getattr(cfg, "AUTH_ENABLED", False):
+                user = {"username": "local", "role": "admin"}
+            if user and user.get("username"):
+                fav_ids = _auth.get_user_favorite_message_ids(user["username"], member)
+            else:
+                fav_ids = set()
+
+        _send_json_resp(handler, {
+            "ok": True,
+            "member": member,
+            "days": _archive.day_counts(member, type_filter=wanted, id_filter=fav_ids),
+        })
         return True
 
     # 6. FTS5 全文搜索
@@ -216,10 +435,31 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
 
         hits = _archive.search(member, query, type_filter=wanted, order=order)
+
+        fav_raw = qp("favorite")
+        is_fav = fav_raw.lower() in {"1", "true", "yes"} if fav_raw else False
+        req_user = current_user(handler)
+        if not req_user and not getattr(cfg, "AUTH_ENABLED", False):
+            req_user = {"username": "local", "role": "admin"}
+
+        if is_fav:
+            if req_user and req_user.get("username"):
+                fav_ids = _auth.get_user_favorite_message_ids(req_user["username"], member)
+                hits = [m for m in hits if str(m.get("id")) in fav_ids]
+            else:
+                hits = []
+
         show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
         grp = _archive.infer_member_group(member)
         total = len(hits)
         start = (page - 1) * per_page
+        paged_hits = hits[start:start + per_page]
+
+        interactions = {}
+        if req_user and req_user.get("username"):
+            msg_ids = [str(m.get("id")) for m in paged_hits if m.get("id")]
+            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids)
+
         slim = [{
             "id": m.get("id"),
             "type": m.get("type"),
@@ -236,7 +476,9 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             "h": m.get("thumbnail_height"),
             "year": m.get("_year"),
             "month": m.get("_month"),
-        } for m in hits[start:start + per_page]]
+            "is_favorite": interactions.get(str(m.get("id")), {}).get("is_favorite", False),
+            "is_liked": interactions.get(str(m.get("id")), {}).get("is_liked", False),
+        } for m in paged_hits]
 
         _send_json_resp(handler, {
             "ok": True, "member": member, "group": grp, "q": query, "total": total,
@@ -298,7 +540,6 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 json.dump(msgs, f, ensure_ascii=False, indent=2)
             os.replace(tmp, json_path)
         try:
-            from src.webui_modules.auth_handlers import current_user, get_client_ip
             user = current_user(handler) or {}
             source_ip = get_client_ip(handler)
             record_event("archive.custom_tags", outcome="success", actor=user.get("username"),

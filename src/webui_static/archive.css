@@ -2746,3 +2746,60 @@ html.view-blog #blogGrid { display: block !important; }
     cursor: pointer;
     width: 100%;
   }
+
+/* 消息收藏操作按钮（⭐ 收藏） */
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 80%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all var(--tr);
+  font-size: 13px;
+  user-select: none;
+  line-height: 1;
+}
+.msg-action-btn:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  transform: scale(1.08);
+}
+.msg-action-btn.active {
+  border-color: transparent;
+}
+.msg-action-btn.fav-btn.active {
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.28);
+}
+.msg-action-btn.anim-pop {
+  animation: popAction 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes popAction {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+/* 收藏筛选 Chips (⭐ 收藏) */
+.chips.interaction-chips {
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+  display: inline-flex;
+  gap: 4px;
+}
+.chip.chip-fav.active {
+  background: rgba(245, 158, 11, 0.18) !important;
+  color: #f59e0b !important;
+  border-color: rgba(245, 158, 11, 0.48) !important;
+  font-weight: 650;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+}
