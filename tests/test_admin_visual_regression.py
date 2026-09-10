@@ -266,6 +266,138 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                 if tab == "status":
                     assert len(metrics["startupItems"]) == 3
                     assert metrics["startupItems"][0] <= (300 if viewport_name != "mobile" else metrics["viewportWidth"])
+                    # 存储卡片的容量、项目数和清理动作必须是稳定的语义行；
+                    # 这部分在移动端通常位于首屏以下，单纯的顶端截图覆盖不到。
+                    page.wait_for_function(
+                        "() => document.querySelectorAll('#stStorageGrid .admin-storage-card').length >= 2",
+                        timeout=5000,
+                    )
+                    storage = page.evaluate(
+                        """() => {
+                            const grid = document.querySelector('#stStorageGrid');
+                            const cards = [...(grid?.querySelectorAll('.admin-storage-card') || [])];
+                            return {
+                                gridWidth: grid?.getBoundingClientRect().width || 0,
+                                cards: cards.map((card) => ({
+                                    children: [...card.children].map((el) => el.className),
+                                    headingHasCount: !!card.querySelector('.admin-storage-card-heading .admin-storage-card-count'),
+                                    metaCount: card.querySelectorAll('.admin-storage-card-meta .admin-storage-card-count').length,
+                                    actionCount: card.querySelectorAll(':scope > .admin-storage-card-actions').length,
+                                    cleanInActions: [...card.querySelectorAll('.admin-storage-clean')].every((button) =>
+                                        button.parentElement?.classList.contains('admin-storage-card-actions')),
+                                    right: card.getBoundingClientRect().right,
+                                })),
+                            };
+                        }"""
+                    )
+                    assert storage["cards"]
+                    assert storage["gridWidth"] <= metrics["viewportWidth"] + 1
+                    for card in storage["cards"]:
+                        assert card["headingHasCount"] is False
+                        assert card["metaCount"] == 1
+                        assert card["actionCount"] == 1
+                        assert card["cleanInActions"] is True
+                        assert card["right"] <= metrics["viewportWidth"] + 1
+                elif tab == "monitors":
+                    page.wait_for_function(
+                        "() => document.querySelectorAll('#memberRows tr').length >= 1",
+                        timeout=5000,
+                    )
+                    members = page.evaluate(
+                        """() => {
+                            const table = document.querySelector('.member-table');
+                            const row = document.querySelector('#memberRows tr');
+                            const cells = row ? [...row.children] : [];
+                            const accountActions = [...document.querySelectorAll('#accountRows td:last-child .admin-row-actions')];
+                            const memberActions = [...document.querySelectorAll('#memberRows td:last-child .admin-row-actions')];
+                            const box = (el) => {
+                                const r = el.getBoundingClientRect();
+                                return {left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+                            };
+                            return {
+                                tableDisplay: table ? getComputedStyle(table).display : '',
+                                tableMinWidth: table ? getComputedStyle(table).minWidth : '',
+                                rowDisplay: row ? getComputedStyle(row).display : '',
+                                areas: row ? getComputedStyle(row).gridTemplateAreas : '',
+                                labels: cells.map((cell) => cell.dataset.label || ''),
+                                accountActionCount: accountActions.length,
+                                memberActionCount: memberActions.length,
+                                accountActionBoxes: accountActions.map(box),
+                                memberActionBoxes: memberActions.map(box),
+                                tableBox: table ? box(table) : null,
+                            };
+                        }"""
+                    )
+                    assert members["accountActionCount"] >= 1
+                    assert members["memberActionCount"] >= 1
+                    if viewport_name == "mobile":
+                        assert members["tableMinWidth"] in {"0px", "auto"}
+                        assert members["rowDisplay"] == "grid"
+                        assert members["labels"] == ["成员 ID", "姓名", "社交账号绑定", "Message 账号", "订阅状态", "操作"]
+                        assert '"social social"' in members["areas"]
+                        assert '"account subscription"' in members["areas"]
+                        assert members["tableBox"]["right"] <= metrics["viewportWidth"] + 1
+                    else:
+                        assert members["tableMinWidth"] == "1000px"
+                        assert members["rowDisplay"] == "table-row"
+                    for action_box in members["accountActionBoxes"] + members["memberActionBoxes"]:
+                        assert action_box["right"] >= action_box["left"]
+                elif tab == "channels":
+                    actions = page.evaluate(
+                        """() => [...document.querySelectorAll('#qqBotRows .admin-row-actions, #napcatRows .admin-row-actions, #tgBotRows .admin-row-actions, #cmdOpenidList .admin-row-actions')].map((wrap) => ({
+                            display: getComputedStyle(wrap).display,
+                            flexWrap: getComputedStyle(wrap).flexWrap,
+                            wrap: (() => { const r = wrap.getBoundingClientRect(); return {left: r.left, right: r.right}; })(),
+                            buttons: [...wrap.querySelectorAll('.btn')].map((button) => {
+                                const r = button.getBoundingClientRect();
+                                return {width: r.width, height: r.height, top: r.top};
+                            }),
+                        }))"""
+                    )
+                    assert actions
+                    for action in actions:
+                        assert action["display"] in {"inline-flex", "flex"}
+                        assert action["flexWrap"] == "nowrap"
+                        assert action["buttons"]
+                        assert all(button["width"] > 0 and button["height"] > 0 for button in action["buttons"])
+                        assert action["wrap"]["right"] >= action["wrap"]["left"]
+                elif tab == "social":
+                    schedule = page.evaluate(
+                        """() => {
+                            const groups = [...document.querySelectorAll('.admin-schedule-group')];
+                            return groups.map((group) => {
+                                const fields = [...group.querySelectorAll('.admin-schedule-fields > .schedule-field')];
+                                const inputs = fields.map((field) => field.querySelector('input'));
+                                const rects = inputs.map((input) => {
+                                    const r = input.getBoundingClientRect();
+                                    return {left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+                                });
+                                const gr = group.getBoundingClientRect();
+                                return {fieldCount: fields.length, rects, groupRight: gr.right};
+                            });
+                        }"""
+                    )
+                    assert len(schedule) == 2
+                    for group in schedule:
+                        assert group["fieldCount"] == 2
+                        assert group["rects"][1]["top"] - group["rects"][0]["top"] <= 2
+                        assert all(rect["right"] <= group["groupRight"] + 1 for rect in group["rects"])
+                elif tab in {"users", "advanced"}:
+                    # 用户和历史记录表的动态操作也必须通过统一操作组承载；
+                    # 历史记录为空时允许没有操作行，但一旦有行就不能回退到空格分隔按钮。
+                    selector = "#userRows .admin-row-actions" if tab == "users" else "#historyRows .admin-row-actions"
+                    row_actions = page.evaluate(
+                        """(selector) => [...document.querySelectorAll(selector)].map((wrap) => ({
+                            display: getComputedStyle(wrap).display,
+                            flexWrap: getComputedStyle(wrap).flexWrap,
+                            buttonCount: wrap.querySelectorAll('.btn').length,
+                        }))""",
+                        selector,
+                    )
+                    for action in row_actions:
+                        assert action["display"] in {"inline-flex", "flex"}
+                        assert action["flexWrap"] == "nowrap"
+                        assert action["buttonCount"] >= 1
                 if viewport_name == "mobile":
                     assert all(height >= 40 for height in metrics["touchTargets"])
                 for module in metrics["modules"]:

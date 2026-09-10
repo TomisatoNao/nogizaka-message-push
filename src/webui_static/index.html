@@ -66,7 +66,9 @@
   .admin-status-badge.muted { color: var(--muted); background: color-mix(in srgb, var(--border) 40%, transparent); }
   .admin-legacy-slot { color: var(--muted); font-size: 11px; }
   .admin-table-actions { margin-top: 12px; }
-  .admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; width: max-content; max-width: 100%; }
+  .admin-row-actions .btn { min-height: 36px; flex: 0 0 auto; }
+  .admin-row-actions--account { gap: 8px; }
   .admin-button-icon { font-size: 11px; }
   .admin-cell-id { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text-strong); }
   .admin-cell-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
@@ -93,8 +95,12 @@
   .admin-credential-name { min-width: 180px; color: var(--muted); font-size: 12.5px; }
   .admin-proxy-result { margin-top: 4px; }
   .admin-settings-note { margin: 10px 0 0; }
-  .admin-member-account { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
-  .admin-member-account select { width: 138px; min-width: 130px; flex: 0 0 138px; }
+  .admin-member-account { display: flex; align-items: center; min-width: 0; }
+  .admin-member-account select { width: 190px; min-width: 170px; max-width: 220px; }
+  .admin-member-social-cell { min-width: 285px; }
+  .admin-member-account-cell { min-width: 205px; }
+  .admin-member-subscription-cell { min-width: 150px; }
+  .admin-member-actions-cell { min-width: 92px; }
   .admin-member-sub-badge { display: inline-flex; align-items: center; white-space: nowrap; flex: 0 0 auto; }
   .admin-member-sub-badge > span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; }
   .admin-member-sub-badge .is-neutral { color: var(--muted); background: color-mix(in srgb, var(--border) 28%, transparent); border: 1px solid var(--border-soft); }
@@ -116,13 +122,14 @@
   .admin-storage-footnote { margin-top: 6px; color: var(--muted); font-size: 11.5px; }
   .admin-storage-footnote strong { color: var(--text); }
   .admin-storage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-  .admin-storage-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
-  .admin-storage-card-heading,
-  .admin-storage-card-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .admin-storage-card-heading { color: var(--muted); font-size: 12.5px; font-weight: 500; }
-  .admin-storage-card-count { padding: 1px 6px; border-radius: 10px; color: var(--storage-color, var(--accent)); background: color-mix(in srgb, var(--storage-color, var(--accent)) 14%, transparent); font-size: 11px; font-weight: 600; }
-  .admin-storage-card-size { color: var(--text); font-size: 16px; font-weight: 700; }
-  .admin-storage-clean { padding: 2px 8px; color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, var(--border)); background: transparent; font-size: 11px; }
+  .admin-storage-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 11px 14px 10px; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+  .admin-storage-card-heading { color: var(--muted); font-size: 12.5px; font-weight: 500; line-height: 1.4; }
+  .admin-storage-card-size { color: var(--text); font-size: 16px; font-weight: 700; line-height: 1.35; font-variant-numeric: tabular-nums; }
+  .admin-storage-card-meta { min-height: 22px; display: flex; align-items: center; justify-content: flex-start; }
+  .admin-storage-card-count { padding: 1px 6px; border-radius: 10px; color: var(--storage-color, var(--accent)); background: color-mix(in srgb, var(--storage-color, var(--accent)) 14%, transparent); font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .admin-storage-card-actions { min-height: 32px; display: flex; align-items: flex-end; justify-content: flex-end; }
+  .admin-storage-card-actions.is-empty { visibility: hidden; pointer-events: none; }
+  .admin-storage-clean { min-height: 32px; padding: 4px 10px; color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, var(--border)); background: transparent; font-size: 11px; }
   .admin-channel-switches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .admin-channel-switches .switch { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 55%, transparent); }
   .admin-submodule { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
@@ -175,6 +182,7 @@
   .admin-user-table td:first-child { min-width: 150px; }
   .admin-user-table td:nth-child(2) { min-width: 110px; }
   .admin-user-table td:nth-child(3) { min-width: 180px; white-space: nowrap; }
+  .admin-user-table th:last-child, .admin-user-table td:last-child { min-width: 220px; }
   .admin-user-empty { text-align: center; }
   .admin-table-state { color: var(--muted); padding: 14px 4px; text-align: center; }
   .admin-table-state--error { color: var(--err); text-align: left; }
@@ -255,12 +263,16 @@
   .monitor-credential-detail { margin-top: 4px; color: var(--muted); font-size: 12px; }
   .monitor-credential-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .monitor-credential-clear { display: none; }
-  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: start; gap: 12px 16px; }
+  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: stretch; }
+  .admin-schedule-group { min-width: 0; margin: 0; padding: 11px 12px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
+  .admin-schedule-group legend { padding: 0 6px; color: var(--text); font-size: 12px; font-weight: 650; }
+  .admin-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .schedule-card .schedule-grid .field { min-width: 0; }
   .schedule-card .schedule-grid .schedule-field { width: 100%; }
-  .schedule-card .schedule-grid .schedule-field input { max-width: 180px; text-align: center; font-variant-numeric: tabular-nums; }
+  .schedule-card .schedule-grid .schedule-field input { max-width: 110px; text-align: left; font-variant-numeric: tabular-nums; }
   .schedule-card .schedule-state { margin: 12px 0 0; padding: 9px 12px; color: var(--muted); background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.55; }
   .schedule-card .schedule-state strong { color: var(--accent); }
+  .admin-schedule-note { margin: 10px 0 0; }
   .schedule-pause-toggle { margin-top: 12px; }
   .status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 100%; }
   .status-actions [hidden] { display: none !important; }
@@ -380,13 +392,20 @@
   .delivery-backlog[data-tone="warn"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft)); }
   .delivery-backlog[data-tone="ok"] { color: var(--ok); }
   .delivery-backlog-actions { margin-top: 8px; display: flex; justify-content: flex-end; }
-  /* 监控成员表中姓名是可编辑字段；给第二列明确的最小宽度，避免窄屏下
-     table auto layout 将输入框压缩为几乎不可见，导致“姓名不显示”。 */
+  /* 监控成员表按“身份 → 社媒 → Message 账号 → 订阅 → 操作”保持稳定列宽，
+     避免 table auto layout 在窄屏把编辑框或状态挤成不可读的窄列。 */
+  .member-table { min-width: 1000px; }
   .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 95px; min-width: 95px; }
   .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 145px; min-width: 145px; }
-  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 290px; min-width: 290px; }
-  .member-table th:nth-child(5), .member-table td:nth-child(5) { width: 75px; min-width: 75px; text-align: center; }
+  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 285px; min-width: 285px; }
+  .member-table th:nth-child(4), .member-table td:nth-child(4) { width: 205px; min-width: 205px; }
+  .member-table th:nth-child(5), .member-table td:nth-child(5) { width: 155px; min-width: 155px; }
+  .member-table th:nth-child(6), .member-table td:nth-child(6) { width: 92px; min-width: 92px; text-align: center; }
   .member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }
+  .member-table td:nth-child(6) .admin-row-actions { justify-content: center; }
+  .account-table { min-width: 900px; }
+  .account-table th:last-child, .account-table td:last-child { min-width: 280px; }
+  .account-table td:last-child .admin-row-actions { max-width: none; }
 
   /* OpenID 白名单卡片：左侧信息和右侧操作分别拥有可收缩/换行能力，
      避免长 OpenID 覆盖复制、编辑和删除按钮。 */
@@ -537,7 +556,6 @@
     .admin-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
     .admin-channel-switches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .admin-module-heading > h2 { flex-basis: 220px; }
-    .admin-member-account { align-items: flex-start; flex-wrap: wrap; }
     .settings-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .settings-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
     .settings-control-group { gap: 10px 14px; }
@@ -548,7 +566,7 @@
     .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
     .monitor-project-heading h3 { flex: 1 1 100%; }
     .monitor-project-heading > .switch { flex: 1 1 100%; width: 100%; white-space: normal; }
-    .schedule-card .schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .schedule-card .schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
   }
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
@@ -562,7 +580,8 @@
     .admin-module-heading > .admin-actions,
     .admin-module-heading > .status-actions { width: 100%; justify-content: flex-start; }
     .admin-actions .btn,
-    .status-actions .btn { min-height: 40px; }
+    .status-actions .btn,
+    .admin-row-actions .btn { min-height: 40px; }
     .admin-control-group,
     .admin-data-group,
     .admin-account-group { padding: 10px 12px; }
@@ -573,14 +592,13 @@
     .admin-summary-grid--status { grid-template-columns: 1fr; }
     .admin-field-grid input[type=number] { max-width: none; }
     .admin-summary-item { padding: 10px 12px; }
-    .admin-member-account { align-items: flex-start; flex-wrap: wrap; }
-    .admin-member-account select { flex: 1 1 180px; width: auto; min-width: 0; }
     .admin-member-social .btn { margin-left: 0; min-height: 36px; }
     .admin-whitelist { padding: 12px; }
     .admin-whitelist-heading { align-items: flex-start; }
     .admin-whitelist-tools { width: 100%; }
     .admin-whitelist-tools .btn { flex: 1 1 auto; min-height: 40px; }
     .admin-storage-summary-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .admin-storage-clean { min-height: 40px; }
     .system-settings-card { padding: 16px 14px; }
     .system-settings-card > h2 { font-size: 13px; }
     .settings-scope-note { margin: -2px 0 12px; font-size: 11.5px; line-height: 1.55; }
@@ -590,7 +608,9 @@
     .settings-field-grid { grid-template-columns: 1fr; gap: 12px; }
     .grid { grid-template-columns: 1fr; gap: 12px; }
     .monitor-card .monitor-grid { grid-template-columns: 1fr; gap: 12px; }
-    .schedule-card .schedule-grid { grid-template-columns: 1fr; gap: 12px; }
+    .schedule-card .schedule-grid { grid-template-columns: 1fr; gap: 10px; }
+    .admin-schedule-group { padding: 10px 10px 11px; }
+    .admin-schedule-fields { gap: 8px; }
     .monitor-project { padding: 12px; }
     .monitor-project h3 { font-size: 12.5px; }
     .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
@@ -619,6 +639,7 @@
     .monitor-account-group { grid-template-columns: 1fr; gap: 10px; }
     .monitor-project .field > input[type=number] { max-width: none; }
     .schedule-card .schedule-grid .schedule-field { width: 100%; }
+    .schedule-card .schedule-grid .schedule-field input { max-width: none; }
 
     /* min/max、起/止等成对输入始终保持一行；输入框平分剩余空间。 */
     .pair { flex-wrap: nowrap; width: 100%; min-width: 0; }
@@ -634,10 +655,33 @@
     .table-wrap { -webkit-overflow-scrolling: touch; }
     th, td { padding: 8px 9px; font-size: 13px; }
     td input, td select { min-width: 0; width: 100%; }
-    .member-table { min-width: 900px; }
-    .member-table th:nth-child(1), .member-table td:nth-child(1) { min-width: 95px; }
-    .member-table th:nth-child(2), .member-table td:nth-child(2) { min-width: 145px; }
-    .member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }
+    /* 成员管理在手机端改成单行卡片，避免用户在 1000px 宽表格中寻找订阅和社媒列。 */
+    .member-table { min-width: 0; width: 100%; border-collapse: separate; border-spacing: 0; }
+    .member-table thead { display: none; }
+    .member-table tbody { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+    .member-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); grid-template-areas:
+      "name id" "social social" "account subscription" "actions actions";
+      gap: 9px 10px; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--card-soft) 72%, transparent); }
+    .member-table tbody tr:last-child td { border-bottom: 0; }
+    .member-table tbody td { width: auto !important; min-width: 0 !important; max-width: none; padding: 0; border: 0; text-align: left !important; vertical-align: top; }
+    .member-table tbody td::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--muted); font-size: 10.5px; line-height: 1.35; }
+    .member-table tbody td:nth-child(1) { grid-area: id; text-align: right !important; }
+    .member-table tbody td:nth-child(2) { grid-area: name; }
+    .member-table tbody td:nth-child(3) { grid-area: social; }
+    .member-table tbody td:nth-child(4) { grid-area: account; }
+    .member-table tbody td:nth-child(5) { grid-area: subscription; align-self: end; }
+    .member-table tbody td:nth-child(6) { grid-area: actions; padding-top: 2px; border-top: 1px solid var(--border-soft); }
+    .member-table tbody td:nth-child(1)::before { text-align: right; }
+    .member-table tbody td:nth-child(5)::before { text-align: right; }
+    .member-table tbody td:nth-child(6)::before { margin-top: 8px; }
+    .member-table td:nth-child(2) input { width: 100%; min-width: 0; max-width: none; }
+    .member-table .admin-member-account select { width: 100%; min-width: 0; max-width: none; }
+    .member-table .admin-member-sub-badge { justify-content: flex-end; max-width: 100%; }
+    .member-table .admin-member-sub-badge > span { max-width: 100%; overflow-wrap: anywhere; white-space: normal; text-align: right; }
+    .member-table .admin-member-social { align-items: flex-start; }
+    .member-table .admin-member-social .btn { margin-left: auto; }
+    .member-table .admin-member-actions-cell .admin-row-actions { width: 100%; justify-content: flex-start; }
 
     /* 白名单卡片在手机端改为上下两行：OpenID 信息在上，操作按钮在下。 */
     .cmd-openid-card { align-items: flex-start !important; }
@@ -825,7 +869,7 @@
     </div>
     <div class="admin-data-group">
       <div class="table-wrap">
-      <table>
+      <table class="account-table">
         <thead>
           <tr>
             <th>账号 ID</th>
@@ -860,8 +904,9 @@
           <tr>
             <th>成员 ID</th>
             <th>名字</th>
-            <th>Message 账号 &amp; 订阅状态</th>
             <th>社交账号绑定 (X / IG / TikTok)</th>
+            <th>Message 账号</th>
+            <th>订阅状态</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -1026,20 +1071,31 @@
   <div class="card admin-module monitor-card schedule-card">
     <h2>🕘 全局监控调度 <span class="settings-unit">（JST / UTC+9）</span></h2>
     <p class="settings-scope-note">统一控制 Message、官方博客、X、Instagram、TikTok 和 TikTok Live 的自动轮询。休眠只暂停新的内容抓取，不影响健康检查、告警、手动操作或已经开始的直播录制。小时字段按 JST 的 0–23 输入，0 表示午夜 00:00。</p>
-    <div class="schedule-grid">
-      <label class="field schedule-field">日间开始（JST 小时）
-        <input id="scheduleDayStart" max="23" min="0" type="number"/>
-      </label>
-      <label class="field schedule-field">深夜开始（JST 小时）
-        <input id="scheduleNightStart" max="23" min="0" type="number"/>
-      </label>
-      <label class="field schedule-field">休眠开始（JST 小时）
-        <input id="sleepStart" max="23" min="0" type="number"/>
-      </label>
-      <label class="field schedule-field">休眠结束（JST 小时）
-        <input id="sleepEnd" max="23" min="0" type="number"/>
-      </label>
+    <div class="schedule-grid admin-schedule-grid">
+      <fieldset class="admin-schedule-group" aria-label="轮询运行时段">
+        <legend>轮询运行时段</legend>
+        <div class="admin-schedule-fields">
+          <label class="field schedule-field">日间开始（JST 小时）
+            <input id="scheduleDayStart" max="23" min="0" type="number"/>
+          </label>
+          <label class="field schedule-field">深夜开始（JST 小时）
+            <input id="scheduleNightStart" max="23" min="0" type="number"/>
+          </label>
+        </div>
+      </fieldset>
+      <fieldset class="admin-schedule-group" aria-label="休眠窗口">
+        <legend>休眠窗口</legend>
+        <div class="admin-schedule-fields">
+          <label class="field schedule-field">休眠开始（JST 小时）
+            <input id="sleepStart" max="23" min="0" type="number"/>
+          </label>
+          <label class="field schedule-field">休眠结束（JST 小时）
+            <input id="sleepEnd" max="23" min="0" type="number"/>
+          </label>
+        </div>
+      </fieldset>
     </div>
+    <p class="hint admin-schedule-note">深夜轮询区间为“深夜开始 → 休眠开始”及“休眠结束 → 日间开始”；休眠开关开启后，休眠窗口只暂停新的内容抓取。</p>
     <label class="switch schedule-pause-toggle"><input id="schedulePause" type="checkbox"/><span class="track"></span>休眠时段暂停所有内容监控</label>
     <div id="scheduleState" class="schedule-state" aria-live="polite">当前有效时段：—</div>
   </div>
@@ -2549,25 +2605,33 @@ function renderStorage(st) {
     heading.className = "admin-storage-card-heading";
     const name = document.createElement("span");
     name.textContent = item.name || k;
-    const count = document.createElement("span");
-    count.className = "admin-storage-card-count";
-    count.textContent = item.count !== undefined ? item.count + " 项" : "";
-    heading.append(name, count);
-    const summary = document.createElement("div");
-    summary.className = "admin-storage-card-summary";
+    heading.appendChild(name);
+
     const size = document.createElement("div");
     size.className = "admin-storage-card-size";
     size.textContent = item.human || "—";
-    summary.appendChild(size);
+
+    // 项目数和清理动作各自占独立行，避免移动端在卡片右侧形成“徽章 + 按钮”混排。
+    const meta = document.createElement("div");
+    meta.className = "admin-storage-card-meta";
+    const count = document.createElement("span");
+    count.className = "admin-storage-card-count";
+    count.textContent = item.count !== undefined ? item.count + " 项" : "—";
+    meta.appendChild(count);
+
+    const actions = document.createElement("div");
+    actions.className = "admin-storage-card-actions";
     if (canClean) {
       const clean = document.createElement("button");
       clean.className = "btn small admin-storage-clean";
       clean.type = "button";
       clean.textContent = "🗑️ 清理";
       clean.addEventListener("click", () => cleanStorage(k, item.name || k));
-      summary.appendChild(clean);
+      actions.appendChild(clean);
+    } else {
+      actions.classList.add("is-empty");
     }
-    card.append(heading, summary);
+    card.append(heading, size, meta, actions);
     container.appendChild(card);
   }
 }
@@ -2973,11 +3037,12 @@ function renderQqBots() {
 
       const tdOps = document.createElement("td");
       tdOps.className = "admin-nowrap";
+      const opsWrap = document.createElement("div");
+      opsWrap.className = "admin-row-actions";
       if (canCaptureOpenid) {
-        tdOps.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput, gidInput)));
-        tdOps.appendChild(document.createTextNode(" "));
+        opsWrap.appendChild(mkBtn("🎯 获取 OpenID", () => openOpenidDialog(bot, openidInput, gidInput)));
       }
-      tdOps.appendChild(mkDelBtn(async () => {
+      opsWrap.appendChild(mkDelBtn(async () => {
         const upper = (bot.name || "").toUpperCase();
         if (!(await uiConfirm(
           "删除官方 Bot " + (bot.name || "#" + idx) + "？\n" +
@@ -3007,6 +3072,7 @@ function renderQqBots() {
         markDirty(); renderQqBots();
         msg("已删除，点「保存并热重载」生效", "ok");
       }));
+      tdOps.appendChild(opsWrap);
 
       tr.append(tdName, tdRemark, tdApp, tdOpenid, tdGroupOpenid, tdSub, tdSecret, tdState, tdOps);
       tbody.appendChild(tr);
@@ -3039,7 +3105,9 @@ function renderQqBots() {
            help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }], null)));
       // 遗留槽位没有 config.json 记录，删除 = 清掉 .env 里的三个变量
       const slotNo = bot.name.replace("BOT", "");
-      tr.cells[5].appendChild(mkDelBtn(async () => {
+      const legacyOps = document.createElement("div");
+      legacyOps.className = "admin-row-actions";
+      legacyOps.appendChild(mkDelBtn(async () => {
         if (!(await uiConfirm(
           "清除 .env 里 " + bot.name + " 的配置？\n将删除 QQ_OFFICIAL_" + bot.name +
           "_APP_ID / _CLIENT_SECRET / _TARGET_OPENID 三个变量。",
@@ -3062,6 +3130,7 @@ function renderQqBots() {
           msg("清除失败：" + e.message, "err");
         }
       }, "清除"));
+      tr.cells[5].appendChild(legacyOps);
       tbody.appendChild(tr);
     }
   }
@@ -3948,7 +4017,7 @@ function renderAccounts() {
     tdOps.className = "admin-nowrap";
 
     const opsWrap = document.createElement("div");
-    opsWrap.className = "admin-row-actions";
+    opsWrap.className = "admin-row-actions admin-row-actions--account";
 
     // 1. 握手测试
     const btnVerify = document.createElement("button");
@@ -4500,13 +4569,16 @@ function renderNapcat() {
 
     const tdAct = document.createElement("td");
     tdAct.className = "actions";
+    const actWrap = document.createElement("div");
+    actWrap.className = "admin-row-actions";
     const btnDel = mkDelBtn(() => {
       const curIdx = (config.napcat_routes || []).indexOf(r);
       if (curIdx >= 0) config.napcat_routes.splice(curIdx, 1);
       else config.napcat_routes.splice(idx, 1);
       markDirty(); renderNapcat();
     });
-    tdAct.appendChild(btnDel);
+    actWrap.appendChild(btnDel);
+    tdAct.appendChild(actWrap);
     
     tr.append(tdId, tdRemark, tdSub, tdAct);
     tbody.appendChild(tr);
@@ -4592,13 +4664,16 @@ function renderTGBots() {
     
     const tdAct = document.createElement("td");
     tdAct.className = "actions";
+    const actWrap = document.createElement("div");
+    actWrap.className = "admin-row-actions";
     const btnDel = mkDelBtn(() => {
       const curIdx = (config.tg_bots || []).indexOf(b);
       if (curIdx >= 0) config.tg_bots.splice(curIdx, 1);
       else config.tg_bots.splice(idx, 1);
       markDirty(); renderTGBots();
     });
-    tdAct.appendChild(btnDel);
+    actWrap.appendChild(btnDel);
+    tdAct.appendChild(actWrap);
     
     tr.append(tdName, tdRemark, tdChat, tdSecret, tdSub, tdAct);
     tbody.appendChild(tr);
@@ -4691,6 +4766,7 @@ function renderMembers() {
     const tr = document.createElement("tr");
 
     const tdId = document.createElement("td");
+    tdId.dataset.label = "成员 ID";
     const idInput = mkTableInput(m.id || "", (v) => {
       m.id = v.trim();
       updateSubBadge();
@@ -4698,11 +4774,20 @@ function renderMembers() {
     tdId.appendChild(idInput);
 
     const tdName = document.createElement("td");
+    tdName.dataset.label = "姓名";
     tdName.appendChild(mkTableInput(m.name || "", (v) => { m.name = v.trim(); }, "冨里 奈央", "admin-table-input--member-name"));
 
     const tdAcc = document.createElement("td");
+    tdAcc.className = "admin-member-account-cell";
+    tdAcc.dataset.label = "Message 账号";
     const accWrap = document.createElement("div");
     accWrap.className = "admin-member-account";
+
+    const tdSub = document.createElement("td");
+    tdSub.className = "admin-member-subscription-cell";
+    tdSub.dataset.label = "订阅状态";
+    const subBadge = document.createElement("div");
+    subBadge.className = "member-sub-badge admin-member-sub-badge";
 
     const sel = document.createElement("select");
     sel.className = "admin-compact-select";
@@ -4726,10 +4811,6 @@ function renderMembers() {
       updateSubBadge();
     });
     accWrap.appendChild(sel);
-
-    // 订阅状态徽章展示（横向单行并排，保持整行高度完全平齐一致）
-    const subBadge = document.createElement("div");
-    subBadge.className = "member-sub-badge admin-member-sub-badge";
 
     function updateSubBadge() {
       const accId = String(m.account || "").trim();
@@ -4763,10 +4844,12 @@ function renderMembers() {
       }
     }
     updateSubBadge();
-    accWrap.appendChild(subBadge);
     tdAcc.appendChild(accWrap);
+    tdSub.appendChild(subBadge);
 
     const tdSocial = document.createElement("td");
+    tdSocial.className = "admin-member-social-cell";
+    tdSocial.dataset.label = "社交账号绑定";
     const soc = m.social || {};
     const xList = soc.x || [];
     const igList = soc.instagram || [];
@@ -4807,7 +4890,11 @@ function renderMembers() {
     tdSocial.appendChild(badgeContainer);
 
     const tdOps = document.createElement("td");
-    tdOps.appendChild(mkDelBtn(async () => {
+    tdOps.className = "admin-member-actions-cell";
+    tdOps.dataset.label = "操作";
+    const opsWrap = document.createElement("div");
+    opsWrap.className = "admin-row-actions";
+    opsWrap.appendChild(mkDelBtn(async () => {
       // 空白草稿行（未填 ID 且未填名字）直接删除，无需弹窗确认
       if (!m.id && !m.name) {
         const curIdx = (config.monitor || []).indexOf(m);
@@ -4824,8 +4911,9 @@ function renderMembers() {
       else config.monitor.splice(idx, 1);
       markDirty(); renderMembers();
     }));
+    tdOps.appendChild(opsWrap);
 
-    tr.append(tdId, tdName, tdAcc, tdSocial, tdOps);
+    tr.append(tdId, tdName, tdSocial, tdAcc, tdSub, tdOps);
     tbody.appendChild(tr);
   });
   // 成员变动后同步刷新 Bot 的推送成员选择面板
@@ -5844,31 +5932,33 @@ async function refreshUsers() {
                                    : '<span class="admin-status-badge muted">viewer</span>') +
       "</td><td>" + esc(when) + "</td>";
     const td = document.createElement("td");
-    td.appendChild(mkBtn("改密码", () => openSecretDialog(
+    td.className = "actions admin-nowrap";
+    const actions = document.createElement("div");
+    actions.className = "admin-row-actions";
+    actions.appendChild(mkBtn("改密码", () => openSecretDialog(
       "重置密码：" + u.username,
       "保存后该用户所有已登录会话立即失效，需用新密码重新登录。",
       [{ env: "__password__", label: "新密码", required: true,
          help: "至少 " + minPwLen + " 位。" }],
       null, { userAction: { action: "passwd", username: u.username } })));
-    td.appendChild(document.createTextNode(" "));
     // 最后一个 admin 不给降级入口；其余可切换角色
     const canToggle = !(u.role === "admin" && adminCount <= 1);
     if (canToggle) {
       const target = u.role === "admin" ? "viewer" : "admin";
-      td.appendChild(mkBtn("改为 " + target, async () => {
+      actions.appendChild(mkBtn("改为 " + target, async () => {
         if (!(await uiConfirm("把 " + u.username + " 的角色改为 " + target + "？",
                               { title: "修改角色", yesText: "确定" }))) return;
         await userAction({ action: "role", username: u.username, role: target });
       }));
-      td.appendChild(document.createTextNode(" "));
     }
     if (!u.is_me && canToggle) {
-      td.appendChild(mkDelBtn(async () => {
+      actions.appendChild(mkDelBtn(async () => {
         if (!(await uiConfirm("删除用户 " + u.username + "？该账号将立即失去访问权限。",
                               { title: "删除用户", yesText: "删除", danger: true }))) return;
         await userAction({ action: "delete", username: u.username });
       }));
     }
+    td.appendChild(actions);
     tr.appendChild(td);
     tbody.appendChild(tr);
   }
@@ -5996,11 +6086,14 @@ async function refreshHistory() {
     const when = new Date(h.mtime_epoch * 1000).toLocaleString();
     tr.innerHTML = "<td>" + esc(when) + "</td><td>" + (h.size / 1024).toFixed(1) + " KB</td>";
     const td = document.createElement("td");
-    td.append(
+    td.className = "actions admin-nowrap";
+    const actions = document.createElement("div");
+    actions.className = "admin-row-actions";
+    actions.append(
       mkBtn("查看", () => viewHistory(h.name, when)),
-      document.createTextNode(" "),
       mkBtn("恢复", () => restoreHistory(h.name, when)),
     );
+    td.appendChild(actions);
     tr.appendChild(td);
     tbody.appendChild(tr);
   }

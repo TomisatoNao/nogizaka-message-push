@@ -209,7 +209,11 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert ".monitor-field-pair input { flex: 0 1 90px; width: 90px;" in html
     assert "class=\"monitor-project message-project\"" in html
     assert ".monitor-project.message-project { grid-column: 1 / -1; }" in html
-    assert ".schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: start;" in html
+    assert ".schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in html
+    assert ".admin-schedule-group" in html
+    assert ".admin-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in html
+    assert "轮询运行时段" in html and "休眠窗口" in html
+    assert "深夜轮询区间为“深夜开始 → 休眠开始”" in html
     assert "0 表示午夜 00:00" in html
     assert "end && n === 0 ? \"24:00\"" in html
     assert 'class="monitor-project monitor-project--full"' in html
@@ -264,7 +268,8 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
         ".admin-module", ".admin-module-heading", ".admin-control-group",
         ".admin-data-group", ".admin-actions", ".admin-field-grid",
         ".admin-summary-grid", ".admin-status-badge", ".admin-channel-switches",
-        ".admin-member-account", ".admin-storage-grid",
+        ".admin-member-account", ".admin-member-subscription-cell", ".admin-storage-grid",
+        ".admin-storage-card-actions", ".admin-row-actions",
     ):
         assert selector in html
     assert ".admin-field-grid { display: grid; grid-template-columns: repeat(3" in html
@@ -892,10 +897,31 @@ def test_mobile_header_2row_layout_and_actions_guard():
 def test_admin_mobile_member_and_openid_layout_guards_are_present():
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
 
-    # 姓名列必须保留足够宽度；否则移动端 table auto layout 会把 input 压成空白窄框。
+    # 桌面/平板表格保留稳定列宽；手机端切换为带字段标签的成员卡片。
     assert '<table class="member-table">' in html
-    assert ".member-table { min-width: 900px; }" in html
-    assert ".member-table td:nth-child(2) input { width: 130px; min-width: 130px; max-width: 130px; }" in html
+    assert ".member-table { min-width: 1000px; }" in html
+    assert ".member-table { min-width: 0; width: 100%;" in html
+    assert ".member-table tbody tr { display: grid;" in html
+    assert '"social social" "account subscription" "actions actions"' in html
+    assert 'tdSocial.className = "admin-member-social-cell"' in html
+    assert 'tdSub.className = "admin-member-subscription-cell"' in html
+    assert 'tdId.dataset.label = "成员 ID"' in html
+    assert 'tdAcc.dataset.label = "Message 账号"' in html
+    assert 'tdSub.dataset.label = "订阅状态"' in html
+    assert 'tdSocial.dataset.label = "社交账号绑定"' in html
+    assert 'tr.append(tdId, tdName, tdSocial, tdAcc, tdSub, tdOps)' in html
+
+    # 存储卡片将项目数、容量和清理动作分成独立语义行。
+    assert ".admin-storage-card-meta" in html
+    assert ".admin-storage-card-actions" in html
+    assert ".admin-storage-card-summary" not in html
+    assert "actions.classList.add(\"is-empty\")" in html
+    assert "card.append(heading, size, meta, actions)" in html
+
+    # 账号/用户/历史及各推送路由共用横向操作组，避免按钮被挤成竖列。
+    assert ".admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap;" in html
+    assert ".admin-row-actions--account" in html
+    assert ".account-table th:last-child, .account-table td:last-child { min-width: 280px; }" in html
 
     # OpenID 卡片的信息区与操作区必须可被移动端 CSS 独立换行，防止按钮覆盖长 ID。
     assert 'left.className = "cmd-openid-main"' in html
