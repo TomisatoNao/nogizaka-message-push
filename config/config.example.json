@@ -162,5 +162,7 @@
 
   // ── AI 图片打标签（默认关闭）──
   "image_tagging": false,
-  "qq_send_interval": 1.5
+  "qq_send_interval": 1.5,
+  // 单个 NapCat 路由的发送总预算（秒）；不改变账号级发送间隔
+  "napcat_send_timeout_seconds": 45
 }

@@ -9,7 +9,7 @@ import httpx
 
 import config.config as cfg
 from src.logger import log_all
-from src.platforms.napcat import send_qq_message
+from src.platforms.napcat import record_send_timeout, send_qq_message
 from src.platforms import qq_official
 from src.platforms.qq_official import get_configured_bots, has_bots
 from src.platforms import tgbot
@@ -39,6 +39,9 @@ class DeliveryReport:
     """一条消息在多个已匹配目标上的投递结果。"""
 
     attempts: tuple[DeliveryAttempt, ...]
+    # 即使路由因前序消息失败或幂等状态而被本次跳过，也保留完整的
+    # 匹配集合；队列协调器据此区分“没有路由”和“还有待补偿路由”。
+    matched_route_ids: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -57,6 +60,18 @@ class DeliveryReport:
     def failure_count(self) -> int:
         return sum(not attempt.ok for attempt in self.attempts)
 
+    @property
+    def matched_count(self) -> int:
+        return len(self.matched_route_ids) or len(self.attempts)
+
+    @property
+    def attempted_count(self) -> int:
+        return len(self.attempts)
+
+    @property
+    def skipped_count(self) -> int:
+        return max(0, self.matched_count - self.attempted_count)
+
 
 def _classify_delivery_exception(exc: Exception) -> str:
     """将跨通道异常压缩为稳定、安全的错误码。"""
@@ -69,6 +84,23 @@ def _classify_delivery_exception(exc: Exception) -> str:
     return "unexpected_error"
 
 
+def _route_timeout_seconds(channel: str) -> float | None:
+    """返回通道级投递预算。
+
+    NapCat 的 OneBot 请求可能在 HTTP 已连通但 QQNT 无响应时长时间等待，
+    因而需要独立于共享客户端的单路预算。其它通道继续使用各自的 SDK
+    超时策略，避免把媒体上传等既有行为意外截短。
+    """
+
+    if channel != "napcat":
+        return None
+    raw = getattr(cfg, "NAPCAT_SEND_TIMEOUT_SECONDS", 45.0)
+    try:
+        return max(1.0, min(300.0, float(raw)))
+    except (TypeError, ValueError):
+        return 45.0
+
+
 async def _run_delivery(
     channel: str,
     route_id: str,
@@ -77,12 +109,24 @@ async def _run_delivery(
     sender: Callable[[], Awaitable[bool]],
     *,
     known_error: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> DeliveryAttempt:
     """执行单个路由，确保一个协程异常不会吞掉同批其他通道。"""
     if known_error:
         return DeliveryAttempt(channel, route_id, label, target, False, known_error)
     try:
-        ok = bool(await sender())
+        budget = _route_timeout_seconds(channel) if timeout_seconds is None else timeout_seconds
+        if budget is not None:
+            ok = bool(await asyncio.wait_for(sender(), timeout=budget))
+        else:
+            ok = bool(await sender())
+    except asyncio.TimeoutError:
+        # 整条 NapCat 路由预算到期时，send_qq_message 可能正在等待
+        # QQNT，取消路径不会回到其正常结果分支；补记一次超时，驱动
+        # NapCat 熔断与独立发送健康状态。
+        if channel == "napcat":
+            record_send_timeout(target)
+        return DeliveryAttempt(channel, route_id, label, target, False, "timeout")
     except Exception as exc:  # 外部 SDK / 网络调用的边界，必须隔离单路失败
         error_code = _classify_delivery_exception(exc)
         return DeliveryAttempt(channel, route_id, label, target, False, error_code)
@@ -105,6 +149,12 @@ def _record_delivery_report(context: str, report: DeliveryReport) -> None:
 
     failed = [attempt for attempt in report.attempts if not attempt.ok]
     if not failed:
+        if report.skipped_count:
+            log_all(
+                f"ℹ️ [{context}] 路由幂等跳过 | 匹配 {report.matched_count}，"
+                f"尝试 {report.attempted_count}，跳过 {report.skipped_count}",
+                is_debug=True,
+            )
         return
 
     details = "; ".join(
@@ -113,7 +163,8 @@ def _record_delivery_report(context: str, report: DeliveryReport) -> None:
     )
     state = "部分目标失败" if report.ok else "全部目标失败"
     log_all(
-        f"⚠️ [{context}] {state}，成功 {report.success_count}/{len(report.attempts)}；{details}",
+        f"⚠️ [{context}] {state}，匹配 {report.matched_count}，尝试 {report.attempted_count}，"
+        f"成功 {report.success_count}，失败 {report.failure_count}，跳过 {report.skipped_count}；{details}",
         is_error=True,
     )
     health.get_tracker().record_error(
@@ -134,6 +185,42 @@ def enabled_channels() -> list[str]:
     return channels
 
 
+def matching_member_route_ids(member: dict) -> tuple[str, ...]:
+    """返回成员当前配置下匹配到的稳定路由 ID。
+
+    该函数只做路由规划，不执行网络请求；消息队列可以先登记每个 lane
+    的待处理状态，再决定本轮哪些路由实际尝试发送。
+    """
+
+    m_name = member.get("m_name") or member.get("name") or "未知成员"
+    m_id = member.get("m_id") or member.get("id")
+    matched: set[str] = set()
+
+    if getattr(cfg, "ENABLE_NAPCAT_QQ", False):
+        for route in getattr(cfg, "NAPCAT_ROUTES", []):
+            if not route.get("push_message", True):
+                continue
+            gid = route.get("group_id")
+            if gid and match_member_filter(m_name, route.get("member_filter") or [], m_id):
+                matched.add(f"napcat:{gid}")
+
+    if getattr(cfg, "ENABLE_QQ_OFFICIAL_BOT", False):
+        for bot in get_configured_bots():
+            if not bot.push_message or not match_member_filter(m_name, bot.member_filter, m_id):
+                continue
+            if bot.target_openid:
+                matched.add(f"official:{bot.name}:private")
+            if bot.group_openid:
+                matched.add(f"official:{bot.name}:group")
+
+    if getattr(cfg, "ENABLE_TG_BOT", False):
+        for bot in tgbot.get_configured_bots():
+            if bot.target_chat and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
+                matched.add(f"tg:{bot.name}")
+
+    return tuple(sorted(matched))
+
+
 async def send_member_message_detailed(
     member: dict, message_chain: list[dict], *, skip_route_ids: set[str] | None = None
 ) -> DeliveryReport:
@@ -145,6 +232,7 @@ async def send_member_message_detailed(
     m_name = member.get("m_name") or member.get("name") or "未知成员"
     m_id = member.get("m_id") or member.get("id")
     skip_route_ids = skip_route_ids or set()
+    matched_route_ids = matching_member_route_ids(member)
     tasks: list[Awaitable[DeliveryAttempt]] = []
 
     # 1. NapCat QQ 路由并发任务
@@ -223,9 +311,9 @@ async def send_member_message_detailed(
                 ))
 
     if not tasks:
-        return DeliveryReport(())
+        return DeliveryReport((), matched_route_ids)
 
-    report = DeliveryReport(tuple(await asyncio.gather(*tasks)))
+    report = DeliveryReport(tuple(await asyncio.gather(*tasks)), matched_route_ids)
     _record_delivery_report(f"成员消息 | {m_name}", report)
     return report
 
@@ -640,7 +728,20 @@ async def send_blog_post(post: dict) -> bool:
                     log_all(f"⚠️ NapCat 博客推送失败 [{r_label}]: {type(e).__name__}", is_error=True)
                     return False
 
-            tasks.append(_send_napcat_blog())
+            async def _send_napcat_blog_bounded(send=_send_napcat_blog, target_gid=gid):
+                try:
+                    return await asyncio.wait_for(
+                        send(), timeout=_route_timeout_seconds("napcat")
+                    )
+                except asyncio.TimeoutError:
+                    record_send_timeout(target_gid)
+                    log_all(
+                        f"⏱️ NapCat 博客路由超时 | 群 {target_gid} | error=timeout",
+                        is_error=True,
+                    )
+                    return False
+
+            tasks.append(_send_napcat_blog_bounded())
 
     # ----------------------------------------------------
     # Channel 3: Telegram 并发分发

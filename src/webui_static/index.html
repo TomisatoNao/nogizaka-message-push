@@ -115,6 +115,21 @@
   .status-table td:nth-child(4) {
     white-space: normal; overflow-wrap: anywhere;
   }
+  .napcat-health {
+    margin-top: 12px; padding: 10px 14px; border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm); background: var(--card-soft); color: var(--muted);
+    font-size: 12.5px; line-height: 1.6;
+  }
+  .napcat-health[data-tone="ok"] { color: var(--ok); }
+  .napcat-health[data-tone="warn"] { color: var(--warn); }
+  .napcat-health[data-tone="err"] { color: var(--err); }
+  .delivery-backlog {
+    margin-top: 8px; padding: 8px 14px; border: 1px dashed var(--border-soft);
+    border-radius: var(--radius-sm); color: var(--muted); font-size: 12px; line-height: 1.6;
+  }
+  .delivery-backlog[data-tone="warn"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft)); }
+  .delivery-backlog[data-tone="ok"] { color: var(--ok); }
+  .delivery-backlog-actions { margin-top: 8px; display: flex; justify-content: flex-end; }
   /* 监控成员表中姓名是可编辑字段；给第二列明确的最小宽度，避免窄屏下
      table auto layout 将输入框压缩为几乎不可见，导致“姓名不显示”。 */
   .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 95px; min-width: 95px; }
@@ -415,6 +430,15 @@
         <thead><tr><th>通道</th><th>成功 / 总数</th><th>状态</th><th>最近错误</th></tr></thead>
         <tbody id="stChannels"></tbody>
       </table>
+    </div>
+    <div id="stNapcatHealth" class="napcat-health" role="status" aria-live="polite">
+      🐱 NapCat 状态：等待探测结果…
+    </div>
+    <div id="stDeliveryBacklog" class="delivery-backlog" role="status" aria-live="polite">
+      🧭 路由补偿：暂无待处理数据
+    </div>
+    <div class="delivery-backlog-actions">
+      <button class="btn small" id="btnCopyDeliveryDiag" type="button">📋 复制脱敏诊断摘要</button>
     </div>
   </div>
 
@@ -842,6 +866,9 @@
       </label>
       <label class="field">QQ 发送间隔（秒）
         <input id="qqSendInterval" min="0" step="0.1" type="number"/>
+      </label>
+      <label class="field">NapCat 单路超时（秒）
+        <input id="napcatSendTimeout" max="300" min="1" type="number"/>
       </label>
     </div>
   </div>
@@ -1839,6 +1866,7 @@ window.addEventListener("hashchange", () => {
 // ── 状态页 ───────────────────────────────────────
 let statusTimer = null, countdownTimer = null;
 let stNextCycle = null, stClockDelta = 0, stCycleCount = 0;
+let latestStatusData = null;
 
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
@@ -1856,6 +1884,7 @@ async function fetchStatus() {
   let data;
   try { data = await api("/api/status"); } catch (e) { return; }
   if (!data.ok) return;
+  latestStatusData = data;
   stClockDelta = data.now_epoch - Date.now() / 1000;
   stNextCycle = data.next_cycle;
   stCycleCount = data.cycle_count;
@@ -1911,6 +1940,67 @@ async function fetchStatus() {
         "</td><td>" + esc(c.last_error || "—") + "</td></tr>";
     }
   }
+
+  const napcatHealth = $("stNapcatHealth");
+  if (napcatHealth) {
+    const session = data.napcat_session || {};
+    const send = data.napcat_send || {};
+    const sessionLabels = {
+      online: "在线",
+      offline: "离线",
+      auth_failed: "鉴权失败",
+      unreachable: "接口不可达",
+      unknown: "未知",
+    };
+    const sendLabels = {
+      ready: "发送正常",
+      degraded: "发送受限（熔断/等待恢复）",
+      failed: "最近发送失败",
+      unknown: "尚未发生真实发送",
+    };
+    const apiText = session.api_reachable === true ? "可达" :
+      session.api_reachable === false ? "不可达" : "未知";
+    const sessionText = sessionLabels[String(session.state || "unknown")] || "未知";
+    const sendText = sendLabels[String(send.state || "unknown")] || "未知";
+    const details = [];
+    if (session.state !== "online" && session.reason) details.push("会话原因 " + String(session.reason));
+    if (send.last_error) details.push("错误 " + String(send.last_error));
+    if (Number.isFinite(Number(send.consecutive_failures)) && Number(send.consecutive_failures) > 0)
+      details.push("连续失败 " + Number(send.consecutive_failures) + " 次");
+    if (Number.isFinite(Number(send.last_elapsed_ms)))
+      details.push("最近耗时 " + Math.round(Number(send.last_elapsed_ms)) + "ms");
+    napcatHealth.textContent = "🐱 NapCat：API " + apiText + " · QQ 会话 " + sessionText +
+      " · 实际发送 " + sendText + (details.length ? "（" + details.join(" · ") + "）" : "");
+    const tone = send.state === "ready" && session.state === "online" ? "ok" :
+      send.state === "failed" || session.state === "unreachable" || session.state === "auth_failed" ? "err" : "warn";
+    napcatHealth.dataset.tone = tone;
+  }
+
+  const backlogBox = $("stDeliveryBacklog");
+  if (backlogBox) {
+    const backlog = data.delivery_backlog || {};
+    const routes = Math.max(0, Number(backlog.routes) || 0);
+    const messages = Math.max(0, Number(backlog.messages) || 0);
+    const members = Math.max(0, Number(backlog.members) || 0);
+    const suspendedRoutes = Math.max(0, Number(backlog.suspended_routes) || 0);
+    const suspendedMessages = Math.max(0, Number(backlog.suspended_messages) || 0);
+    if (!routes && !suspendedRoutes) {
+      backlogBox.textContent = "🧭 路由补偿：暂无待处理数据";
+      backlogBox.dataset.tone = "ok";
+    } else if (routes) {
+      backlogBox.textContent = "🧭 路由补偿：" + messages + " 条消息 · " + routes +
+        " 个路由 · 涉及 " + members + " 位成员（恢复后按各路由顺序补发）" +
+        (suspendedRoutes ? "；另有 " + suspendedMessages + " 条消息暂存于已停用路由" : "");
+      backlogBox.dataset.tone = "warn";
+    } else {
+      backlogBox.textContent = "🧭 路由补偿：当前无活动积压；已停用路由暂存 " +
+        suspendedMessages + " 条消息（重新启用原路由后恢复）";
+      backlogBox.dataset.tone = "warn";
+    }
+  }
+
+  const copyDiag = $("btnCopyDeliveryDiag");
+  if (copyDiag) copyDiag.disabled = false;
 
   const members = $("stMembers");
   if (members) {
@@ -2081,6 +2171,49 @@ function testPushPrefill(channel) {
     sel.appendChild(opt);
   }
 }
+function buildDeliveryDiagnosticSummary() {
+  const data = latestStatusData || {};
+  const session = data.napcat_session || {};
+  const send = data.napcat_send || {};
+  const backlog = data.delivery_backlog || {};
+  const monitor = data.monitor || {};
+  return [
+    "Sakamichi NapCat 投递诊断摘要",
+    "时间: " + new Date().toISOString(),
+    "启动状态: " + String((data.startup || {}).state || "unknown"),
+    "监控: " + String(monitor.monitor_reason || "unknown"),
+    "NapCat API: " + (session.api_reachable === true ? "reachable" : session.api_reachable === false ? "unreachable" : "unknown"),
+    "QQ 会话: " + String(session.state || "unknown"),
+    "实际发送: " + String(send.state || "unknown"),
+    "最近错误: " + String(send.last_error || "none"),
+    "连续失败: " + String(Number(send.consecutive_failures) || 0),
+    "路由补偿: " + String(Number(backlog.messages) || 0) + " messages / " +
+      String(Number(backlog.routes) || 0) + " routes / " + String(Number(backlog.members) || 0) + " members",
+    "暂停保留: " + String(Number(backlog.suspended_messages) || 0) + " messages / " +
+      String(Number(backlog.suspended_routes) || 0) + " routes",
+  ].join("\n");
+}
+
+$("btnCopyDeliveryDiag").addEventListener("click", async () => {
+  const text = buildDeliveryDiagnosticSummary();
+  const btn = $("btnCopyDeliveryDiag");
+  btn.disabled = true;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const area = document.createElement("textarea");
+      area.value = text; area.style.position = "fixed"; area.style.opacity = "0";
+      document.body.appendChild(area); area.select(); document.execCommand("copy"); area.remove();
+    }
+    msg("✅ 已复制脱敏诊断摘要（不含 Token、正文或本地路径）", "ok");
+  } catch (e) {
+    msg("复制诊断摘要失败，请手动查看状态和日志", "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $("btnTestPush").addEventListener("click", () => {
   const ch = (config.channels || {});
   const enabled = [];
@@ -2200,6 +2333,7 @@ function renderGeneral() {
   $("blogNightMin").value = bni[0]; $("blogNightMax").value = bni[1];
   $("alertCooldown").value = config.alert_cooldown ?? 3600;
   $("qqSendInterval").value = config.qq_send_interval ?? 1.5;
+  $("napcatSendTimeout").value = config.napcat_send_timeout_seconds ?? 45;
   $("translateOn").checked = config.translate !== false;
   $("geminiMinInterval").value = config.gemini_min_interval ?? 7.0;
   $("translateTimeout").value = config.translate_timeout ?? 30;
@@ -2556,6 +2690,7 @@ function collectGeneral() {
   };
   config.alert_cooldown = num("alertCooldown") ?? 3600;
   config.qq_send_interval = num("qqSendInterval", true) ?? 1.5;
+  config.napcat_send_timeout_seconds = num("napcatSendTimeout") ?? 45;
   config.translate = $("translateOn").checked;
   config.gemini_min_interval = num("geminiMinInterval", true) ?? 7.0;
   config.translate_timeout = num("translateTimeout") ?? 30;

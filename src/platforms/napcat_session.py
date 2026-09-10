@@ -29,6 +29,8 @@ class NapCatSessionSnapshot:
     reason: str = ""
     checked_at: float = 0.0
     consecutive_failures: int = 0
+    # 追加在末尾，保持旧版位置参数构造的兼容性。
+    api_reachable: bool | None = None
 
 
 class NapCatSessionAlertTracker:
@@ -187,8 +189,10 @@ class NapCatSessionMonitor:
 
     async def check_once(self) -> NapCatSessionSnapshot:
         endpoint, headers = resolve_status_endpoint(self._api_url)
+        api_reachable: bool | None = None
         try:
             response = await self._client.get(endpoint, headers=headers)
+            api_reachable = bool(getattr(response, "status_code", 0))
             try:
                 body = response.json()
             except Exception:
@@ -201,12 +205,15 @@ class NapCatSessionMonitor:
             self._consecutive_failures = self._consecutive_failures + 1 if state == "unreachable" else 0
         except httpx.TimeoutException:
             state, online, reason = "unreachable", None, "请求超时"
+            api_reachable = False
             self._consecutive_failures += 1
         except (httpx.RequestError, OSError):
             state, online, reason = "unreachable", None, "网络不可达"
+            api_reachable = False
             self._consecutive_failures += 1
         except Exception as exc:
             state, online, reason = "unknown", None, type(exc).__name__
+            api_reachable = None
             self._consecutive_failures = 0
             self._emit_log(
                 f"⚠️ NapCat 会话探针异常 | error={_safe_reason(reason)}",
@@ -216,6 +223,7 @@ class NapCatSessionMonitor:
         snapshot = NapCatSessionSnapshot(
             state=state,
             online=online,
+            api_reachable=api_reachable,
             reason=reason,
             checked_at=time.time(),
             consecutive_failures=self._consecutive_failures,

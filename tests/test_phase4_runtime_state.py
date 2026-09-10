@@ -333,3 +333,165 @@ async def test_message_retry_skips_routes_persisted_as_successful(monkeypatch):
 
     assert result is True
     assert seen_skip_sets == [delivered]
+
+
+@pytest.mark.asyncio
+async def test_route_lane_failure_does_not_block_healthy_route(monkeypatch):
+    """较早消息的 NapCat 失败时，TG lane 仍按顺序处理后续消息。"""
+
+    from src import fetcher
+    from src.notifier import DeliveryAttempt, DeliveryReport
+
+    attempts: list[tuple[str, set[str]]] = []
+    successful: list[tuple[str, set[str]]] = []
+    pending: list[tuple[str, set[str], set[str]]] = []
+    saved_ids: list[str] = []
+
+    async def archive_message(*_args, **_kwargs):
+        return None
+
+    async def send_message(_member, _chain, *, skip_route_ids=None):
+        skipped = set(skip_route_ids or set())
+        message_id = str(_chain[0].get("data", {}).get("text", ""))
+        attempts.append((message_id, skipped))
+        matched = ("napcat:1", "tg:main")
+        route_attempts = []
+        if "napcat:1" not in skipped:
+            route_attempts.append(
+                DeliveryAttempt("napcat", "napcat:1", "NapCat", "群 1", False, "timeout")
+            )
+        if "tg:main" not in skipped:
+            route_attempts.append(
+                DeliveryAttempt("tg", "tg:main", "TG", "Chat 1", True, None)
+            )
+        return DeliveryReport(tuple(route_attempts), matched)
+
+    def mark_ok(_group, _member, message_id, route_ids, **_kwargs):
+        successful.append((str(message_id), set(route_ids)))
+
+    def mark_pending(_group, _member, message_id, _message_time, route_ids, *, errors=None, attempted_route_ids=None):
+        pending.append((str(message_id), set(route_ids), set(attempted_route_ids or set())))
+
+    monkeypatch.setattr(fetcher.cfg, "ENABLE_TRANSLATION", False, raising=False)
+    monkeypatch.setattr(fetcher.cfg, "QQ_SEND_INTERVAL", 0, raising=False)
+    monkeypatch.setattr(fetcher.archive, "archive_message", archive_message)
+    monkeypatch.setattr(fetcher, "build_message_chain", lambda _name, _updated, msg, *_args, **_kwargs: [
+        {"type": "text", "data": {"text": str(msg["id"])}}
+    ])
+    monkeypatch.setattr(fetcher, "successful_routes", lambda *_args: set())
+    monkeypatch.setattr(fetcher, "mark_successful_routes", mark_ok)
+    monkeypatch.setattr(fetcher, "mark_pending_routes", mark_pending)
+    monkeypatch.setattr(fetcher, "save_sent_id", lambda _g, _m, message_id, *_args: saved_ids.append(str(message_id)))
+    monkeypatch.setattr(fetcher, "send_member_message_detailed", send_message)
+    monkeypatch.setattr(fetcher.archive, "set_timeline_watermark", lambda *_args: None)
+
+    member = {"m_name": "测试成员", "group_type": "nogizaka46", "m_id": "1"}
+    messages = [
+        {"id": "m1", "updated_at": "2026-09-08T00:01:00Z", "text": "one"},
+        {"id": "m2", "updated_at": "2026-09-08T00:02:00Z", "text": "two"},
+        {"id": "m3", "updated_at": "2026-09-08T00:03:00Z", "text": "three"},
+    ]
+    result = await fetcher._push_member_messages(
+        member, messages, [], set(), ["2026-09-08T00:00:00Z"], "", None
+    )
+
+    assert result is False
+    assert [item[0] for item in attempts] == ["m1", "m2", "m3"]
+    assert attempts[0][1] == set()
+    assert attempts[1][1] == {"napcat:1"}
+    assert attempts[2][1] == {"napcat:1"}
+    assert [item[0] for item in successful] == ["m1", "m2", "m3"]
+    assert all(item[1] == {"napcat:1"} for item in pending)
+    assert pending[0][2] == {"napcat:1"}
+    assert saved_ids == []
+
+
+def test_pending_route_suspend_and_resume_preserves_recovery_state(tmp_path, monkeypatch):
+    """停用路由不再反复回放；恢复同一 ID 后仍可补偿且不丢记录。"""
+
+    import config.config as cfg
+    from src import archive, delivery_state
+
+    monkeypatch.setattr(cfg, "ARCHIVE_DIR", str(tmp_path), raising=False)
+    archive.close_db()
+    try:
+        delivery_state.mark_pending_routes(
+            "nogizaka46",
+            "member-1",
+            "message-1",
+            "2026-09-08T00:01:00Z",
+            {"napcat:123"},
+            errors={"napcat:123": "qq_send_network_error"},
+            attempted_route_ids={"napcat:123"},
+        )
+        assert delivery_state.pending_route_count("nogizaka46", "member-1") == 1
+
+        changed = delivery_state.reconcile_pending_routes(
+            "nogizaka46", "member-1", {"tg:main"}
+        )
+        assert changed == {"suspended": 1, "resumed": 0}
+        assert delivery_state.pending_routes_for_member("nogizaka46", "member-1") == []
+        suspended = delivery_state.pending_routes_for_member(
+            "nogizaka46", "member-1", include_suspended=True
+        )
+        assert len(suspended) == 1
+        assert suspended[0]["route_state"] == "suspended"
+        assert suspended[0]["attempts"] == 1
+        assert delivery_state.pending_backlog_summary("nogizaka46", "member-1") == {
+            "routes": 0,
+            "messages": 0,
+            "members": 0,
+            "suspended_routes": 1,
+            "suspended_messages": 1,
+            "suspended_members": 1,
+        }
+
+        changed = delivery_state.reconcile_pending_routes(
+            "nogizaka46", "member-1", {"napcat:123"}
+        )
+        assert changed == {"suspended": 0, "resumed": 1}
+        pending = delivery_state.pending_routes_for_member("nogizaka46", "member-1")
+        assert [row["message_id"] for row in pending] == ["message-1"]
+        assert pending[0]["route_state"] == "pending"
+        assert pending[0]["last_error"] == "qq_send_network_error"
+    finally:
+        archive.close_db()
+
+
+def test_successful_route_advances_to_next_pending_message(tmp_path, monkeypatch):
+    """补偿 lane 成功一条后，阻塞指针应指向下一条而不是整条清空。"""
+
+    import config.config as cfg
+    from src import archive, delivery_state
+
+    monkeypatch.setattr(cfg, "ARCHIVE_DIR", str(tmp_path), raising=False)
+    archive.close_db()
+    try:
+        delivery_state.mark_pending_routes(
+            "nogizaka46", "member-2", "message-1", "2026-09-08T00:01:00Z",
+            {"napcat:123"}, errors={"napcat:123": "timeout"},
+            attempted_route_ids={"napcat:123"},
+        )
+        delivery_state.mark_pending_routes(
+            "nogizaka46", "member-2", "message-2", "2026-09-08T00:02:00Z",
+            {"napcat:123"},
+        )
+        delivery_state.mark_successful_routes(
+            "nogizaka46", "member-2", "message-1", {"napcat:123"},
+            message_time="2026-09-08T00:01:00Z",
+        )
+        lane = delivery_state.route_lane_snapshot("nogizaka46", "member-2")
+        assert lane[0]["last_success_message_id"] == "message-1"
+        assert lane[0]["blocked_message_id"] == "message-2"
+        assert lane[0]["pending_count"] == 1
+
+        delivery_state.mark_successful_routes(
+            "nogizaka46", "member-2", "message-2", {"napcat:123"},
+            message_time="2026-09-08T00:02:00Z",
+        )
+        lane = delivery_state.route_lane_snapshot("nogizaka46", "member-2")
+        assert lane[0]["last_success_message_id"] == "message-2"
+        assert lane[0]["blocked_message_id"] is None
+        assert lane[0]["pending_count"] == 0
+    finally:
+        archive.close_db()

@@ -55,7 +55,12 @@ class NapCatSendGate:
     ``rich media transfer failed`` 则只标记为媒体失败，不误判为掉线。
     """
 
-    _TRANSPORT_ERRORS = frozenset({"network_error", "timeout", "upstream_error"})
+    _TRANSPORT_ERRORS = frozenset({
+        "network_error",
+        "timeout",
+        "upstream_error",
+        "qq_send_network_error",
+    })
     _SESSION_ERRORS = frozenset({"qq_offline", "auth_failed", "rate_limited"})
 
     def __init__(
@@ -71,6 +76,11 @@ class NapCatSendGate:
         self._blocked_reason: str = ""
         self._failure_streak = 0
         self._session_state = "unknown"
+        self._last_error: str | None = None
+        self._last_target: str | None = None
+        self._last_attempt_at: float | None = None
+        self._last_success_at: float | None = None
+        self._last_elapsed_ms: float | None = None
         self._cooldown_seconds = max(5.0, float(cooldown_seconds))
         self._failure_threshold = max(1, int(failure_threshold))
         self._last_skip_log_at: float | None = None
@@ -121,10 +131,28 @@ class NapCatSendGate:
         self._blocked_until = time.monotonic() + duration
         self._blocked_reason = str(reason or "unknown")
 
-    def record(self, outcome: NapCatSendOutcome) -> None:
+    def record(
+        self,
+        outcome: NapCatSendOutcome,
+        *,
+        target: object | None = None,
+        elapsed_ms: float | None = None,
+        attempted: bool = True,
+    ) -> None:
         """根据一次完整发送结果更新熔断状态。"""
 
+        if attempted:
+            self._last_attempt_at = time.monotonic()
+            self._last_target = str(target) if target is not None else None
+            self._last_elapsed_ms = (
+                round(max(0.0, float(elapsed_ms)), 1)
+                if elapsed_ms is not None
+                else None
+            )
+
         if outcome.ok:
+            self._last_error = None
+            self._last_success_at = time.monotonic()
             self._failure_streak = 0
             # 探针明确报告掉线时，不能被一个并发中的“恰好成功”请求清除；
             # 必须等会话监控确认 online 后再解除熔断。
@@ -134,6 +162,12 @@ class NapCatSendGate:
             return
 
         code = outcome.error_code or "delivery_failed"
+        if code == "circuit_open":
+            # 熔断期间的快速跳过不应再次递增失败次数或延长冷却窗口。
+            if not self._last_error:
+                self._last_error = code
+            return
+        self._last_error = code
         if code in self._SESSION_ERRORS:
             # 会话/鉴权问题不应继续重试；限流给一个更短的冷却窗口。
             self.block(code, cooldown_seconds=30.0 if code == "rate_limited" else None)
@@ -143,7 +177,7 @@ class NapCatSendGate:
         elif code in self._TRANSPORT_ERRORS:
             self._failure_streak += 1
             if self._failure_streak >= self._failure_threshold:
-                self.block("transport_error")
+                self.block(code)
         else:
             # 媒体格式/尺寸等业务失败不影响后续文本或其它媒体发送。
             self._failure_streak = 0
@@ -154,9 +188,13 @@ class NapCatSendGate:
         normalized = str(state or "unknown").lower()
         self._session_state = normalized
         if normalized == "online":
-            self._failure_streak = 0
-            self._blocked_until = None
-            self._blocked_reason = ""
+            # 会话探针在线并不等于 QQNT 发送链路恢复。只有探针之前明确
+            # 判定为离线/鉴权失败时，online 才能解除对应的会话熔断；
+            # 发送网络错误的熔断必须等待冷却或实际发送成功来解除。
+            if self._blocked_reason in {"qq_offline", "auth_failed"}:
+                self._failure_streak = 0
+                self._blocked_until = None
+                self._blocked_reason = ""
         elif normalized in {"offline", "auth_failed"}:
             self.block(normalized)
 
@@ -167,6 +205,12 @@ class NapCatSendGate:
             "retry_after_seconds": round(self.retry_after(), 1),
             "failure_streak": self._failure_streak,
             "session_state": self._session_state,
+            "failure_threshold": self._failure_threshold,
+            "last_error": self._last_error,
+            "last_target": self._last_target,
+            "last_attempt_at": self._last_attempt_at,
+            "last_success_at": self._last_success_at,
+            "last_elapsed_ms": self._last_elapsed_ms,
             "last_request_at": self._last_request_at,
             "send_interval_seconds": _configured_send_interval(),
         }
@@ -201,10 +245,18 @@ def _safe_excerpt(value: object, limit: int = 240) -> str:
 
 def _body_excerpt(body: object, fallback: str = "") -> str:
     if isinstance(body, dict):
-        for key in ("message", "wording", "msg", "error", "errMsg"):
-            value = body.get(key)
-            if value:
-                return _safe_excerpt(value)
+        containers = [body]
+        nested = body.get("data")
+        if isinstance(nested, dict):
+            containers.append(nested)
+        values: list[str] = []
+        for container in containers:
+            for key in ("message", "wording", "msg", "error", "errMsg"):
+                value = container.get(key)
+                if value:
+                    values.append(str(value))
+        if values:
+            return _safe_excerpt(" | ".join(values))
     return _safe_excerpt(fallback)
 
 
@@ -212,6 +264,11 @@ def _classify_error(status_code: int, body: object = None, text: str = "") -> st
     """把 HTTP/OneBot 失败映射为稳定的内部错误分类。"""
 
     excerpt = _body_excerpt(body, text).lower()
+    result_codes: set[str] = set()
+    if isinstance(body, dict):
+        for container in (body, body.get("data")):
+            if isinstance(container, dict) and container.get("result") is not None:
+                result_codes.add(str(container.get("result")).strip())
     if status_code in {401, 403} or "token verify failed" in excerpt:
         return "auth_failed"
     if status_code == 429:
@@ -229,6 +286,14 @@ def _classify_error(status_code: int, body: object = None, text: str = "") -> st
         )
     ):
         return "qq_offline"
+    if (
+        "1006514" in result_codes
+        or "1006514" in excerpt
+        or "网络连接异常" in excerpt
+        or "network connection error" in excerpt
+        or "network connection abnormal" in excerpt
+    ):
+        return "qq_send_network_error"
     if "rich media transfer failed" in excerpt or "media transfer failed" in excerpt:
         return "media_transfer_failed"
     if 500 <= status_code <= 599:
@@ -251,6 +316,50 @@ def get_send_gate_snapshot() -> dict[str, object]:
     """返回账号级发送门闩状态，供健康页/测试使用。"""
 
     return _send_gate.snapshot()
+
+
+def _record_send_health(
+    outcome: NapCatSendOutcome,
+    group_id: object,
+    elapsed_ms: float | None,
+    *,
+    attempted: bool = True,
+) -> None:
+    """将实际发送结果写入独立的 NapCat 发送状态。
+
+    发送模块不能依赖 WebUI 或具体调用方来记录状态，否则 WebUI 测试、
+    定时监控、社交媒体和告警发送会产生不一致的健康结果。这里采用延迟
+    导入，避免模块初始化阶段形成循环依赖；状态写入失败也不能影响投递。
+    """
+
+    try:
+        from src import health
+
+        health.get_tracker().record_napcat_send(
+            outcome.ok,
+            outcome.error_code or None,
+            target=group_id,
+            elapsed_ms=elapsed_ms,
+            attempted=attempted,
+        )
+    except Exception:
+        # 健康记录属于旁路观测，不能改变发送结果。
+        pass
+
+
+def record_send_timeout(group_id: object | None = None, elapsed_ms: float | None = None) -> None:
+    """记录调用方施加的单路超时。
+
+    ``notifier`` 对 NapCat 路由设置的是整个投递预算；预算触发时，正在
+    等待的协程会被取消，未必能回到 ``send_qq_message`` 的正常结果分支。
+    由调用方补记一次稳定的 ``timeout``，让熔断、健康页和后续告警仍能看到
+    这次真实的失败，而不会把“超时取消”误当成尚未发生。
+    """
+
+    outcome = NapCatSendOutcome(False, "timeout")
+    elapsed = max(0.0, float(elapsed_ms)) if elapsed_ms is not None else None
+    _send_gate.record(outcome, target=group_id, elapsed_ms=elapsed)
+    _record_send_health(outcome, group_id, elapsed)
 
 
 def set_session_state(state: str) -> None:
@@ -489,18 +598,35 @@ async def _post_message_detailed(
 async def _post_message(group_id: int, message_chain: list[dict], max_retries: int) -> bool:
     """兼容旧调用方的布尔发送接口。"""
 
+    started = time.monotonic()
     async with _send_gate:
         if _send_gate.is_blocked():
             if _send_gate.should_log_skip():
+                snapshot = _send_gate.snapshot()
                 log_all(
                     "⏸️ NapCat 发送已熔断，跳过请求 | "
-                    f"reason={_send_gate.snapshot().get('blocked_reason')} | "
+                    f"reason={snapshot.get('blocked_reason')} | "
                     f"retry_after={_send_gate.retry_after():.1f}s",
                     is_warning=True,
                 )
+            outcome = NapCatSendOutcome(False, "circuit_open")
+            _send_gate.record(
+                outcome,
+                target=group_id,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+                attempted=False,
+            )
+            _record_send_health(
+                outcome,
+                group_id,
+                (time.monotonic() - started) * 1000,
+                attempted=False,
+            )
             return False
         outcome = await _post_message_detailed(group_id, message_chain, max_retries)
-        _send_gate.record(outcome)
+        elapsed_ms = (time.monotonic() - started) * 1000
+        _send_gate.record(outcome, target=group_id, elapsed_ms=elapsed_ms)
+        _record_send_health(outcome, group_id, elapsed_ms)
         if not outcome.ok:
             log_all(
                 f"❌ QQ 消息发送彻底失败 | error_code={outcome.error_code}",
@@ -515,6 +641,7 @@ async def send_qq_message(
     max_retries: int = 3,
 ) -> bool:
     batches = _split_video_record_chain(message_chain)
+    started = time.monotonic()
     async with _send_gate:
         if _send_gate.is_blocked():
             if _send_gate.should_log_skip():
@@ -525,16 +652,33 @@ async def send_qq_message(
                     f"retry_after={snapshot.get('retry_after_seconds')}s",
                     is_warning=True,
                 )
+            outcome = NapCatSendOutcome(False, "circuit_open")
+            elapsed_ms = (time.monotonic() - started) * 1000
+            _send_gate.record(
+                outcome,
+                target=group_id,
+                elapsed_ms=elapsed_ms,
+                attempted=False,
+            )
+            _record_send_health(outcome, group_id, elapsed_ms, attempted=False)
             return False
 
         for batch in batches:
             outcome = await _post_message_detailed(group_id, batch, max_retries)
-            _send_gate.record(outcome)
+            _send_gate.record(
+                outcome,
+                target=group_id,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+            )
             if not outcome.ok:
+                elapsed_ms = (time.monotonic() - started) * 1000
+                _record_send_health(outcome, group_id, elapsed_ms)
                 log_all(
                     f"❌ QQ 消息发送彻底失败 | error_code={outcome.error_code}",
                     is_error=True,
                 )
                 return False
 
+    elapsed_ms = (time.monotonic() - started) * 1000
+    _record_send_health(NapCatSendOutcome(True), group_id, elapsed_ms)
     return True

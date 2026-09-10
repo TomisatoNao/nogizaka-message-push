@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import os
 from pathlib import Path
 import signal
@@ -229,14 +230,12 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
                 body,
                 getattr(resp, "text", ""),
             )
-            if state == "online" or (resp.status_code == 200 and state == "unknown"):
-                log_all(
-                    "🟢 NapCat QQ 连通正常"
-                    + ("（接口未返回 online 字段）" if state == "unknown" else "")
-                )
+            if state == "online":
+                log_all("🟢 NapCat QQ 会话探针正常（实际发送状态待真实投递确认）")
                 health.get_tracker().record_channel("napcat", True)
                 health.get_tracker().record_napcat_session(
                     state,
+                    api_reachable=bool(getattr(resp, "status_code", 0)),
                     online=online,
                     reason=reason or "启动探针通过",
                 )
@@ -244,15 +243,36 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
                 log_all("🟡 NapCat QQ 接口可达，但 QQ 账号当前离线", is_warning=True)
                 health.get_tracker().record_channel("napcat", False, "QQ 账号离线")
                 health.get_tracker().record_napcat_session(
-                    state, online=online, reason=reason or "QQ 账号离线"
+                    state,
+                    api_reachable=bool(getattr(resp, "status_code", 0)),
+                    online=online,
+                    reason=reason or "QQ 账号离线",
                 )
                 all_ok = False
                 degraded_reasons.append("NapCat QQ 账号离线")
+            elif state == "unknown":
+                # HTTP 200 但响应缺少可验证的 online 字段时，不能再把
+                # “接口有响应”当成“QQ 会话正常”，否则实际 sendMsg
+                # 失败会被健康页掩盖。
+                log_all(
+                    f"🟡 NapCat QQ 接口可达，但会话状态未知（HTTP {resp.status_code}）",
+                    is_warning=True,
+                )
+                health.get_tracker().record_channel("napcat", False, "status_unknown")
+                health.get_tracker().record_napcat_session(
+                    state,
+                    api_reachable=bool(getattr(resp, "status_code", 0)),
+                    online=online,
+                    reason=reason or "响应缺少 online 状态",
+                )
+                all_ok = False
+                degraded_reasons.append("NapCat 会话状态未知")
             else:
                 log_all(f"🟡 NapCat QQ 返回 HTTP {resp.status_code}，可能运行异常", is_error=True)
                 health.get_tracker().record_channel("napcat", False, f"HTTP {resp.status_code}")
                 health.get_tracker().record_napcat_session(
                     state,
+                    api_reachable=bool(getattr(resp, "status_code", 0)),
                     online=online,
                     reason=reason or f"HTTP {resp.status_code}",
                 )
@@ -262,7 +282,10 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
             log_all(f"🔴 NapCat QQ 无法连接 ({type(e).__name__})，请确认 napcat/lagrange 已启动", is_error=True)
             health.get_tracker().record_channel("napcat", False, "无法连接")
             health.get_tracker().record_napcat_session(
-                "unreachable", reason="启动探针无法连接", consecutive_failures=1
+                "unreachable",
+                api_reachable=False,
+                reason="启动探针无法连接",
+                consecutive_failures=1,
             )
             all_ok = False
             degraded_reasons.append("NapCat 无法连接")
@@ -558,8 +581,40 @@ def handle_test_push(channel: str, target: str, text: str, loop: asyncio.Abstrac
         else:
             return False, f"不支持的通道: {channel}"
         fut = asyncio.run_coroutine_threadsafe(coro, active_loop)
-        ok = fut.result(timeout=45)
-        err = "" if ok else "发送失败（详见日志）"
+        wait_timeout = 45.0
+        if channel == "napcat":
+            try:
+                wait_timeout = min(
+                    305.0,
+                    max(1.0, float(getattr(cfg, "NAPCAT_SEND_TIMEOUT_SECONDS", 45))) + 5.0,
+                )
+            except (TypeError, ValueError):
+                wait_timeout = 50.0
+        ok = fut.result(timeout=wait_timeout)
+        if ok:
+            err = ""
+        elif channel == "napcat":
+            # NapCat 的 HTTP 接口可能返回 200，但 QQNT 业务层仍然失败。
+            # 将稳定错误码带回测试推送响应，避免管理员只能再去翻日志。
+            snapshot = napcat.get_send_gate_snapshot()
+            error_code = (
+                snapshot.get("last_error")
+                or snapshot.get("blocked_reason")
+                or "delivery_failed"
+            )
+            err = f"{error_code}（NapCat 接口可达，但 QQNT 发送未完成）"
+        else:
+            err = "发送失败（详见日志）"
+    except FutureTimeoutError:
+        if channel == "napcat":
+            try:
+                fut.cancel()
+            except (UnboundLocalError, AttributeError):
+                pass
+            napcat.record_send_timeout(target)
+            ok, err = False, "timeout（NapCat 单路发送超时，已记录并进入恢复流程）"
+        else:
+            ok, err = False, "timeout（发送超时）"
     except Exception as e:
         ok, err = False, f"{type(e).__name__}: {e}"
     health.get_tracker().record_channel(channel, ok, err or None)
@@ -748,6 +803,7 @@ async def main() -> None:
             async def _on_napcat_snapshot(snapshot) -> None:
                 health.get_tracker().record_napcat_session(
                     snapshot.state,
+                    api_reachable=snapshot.api_reachable,
                     online=snapshot.online,
                     reason=snapshot.reason,
                     checked_at=snapshot.checked_at,

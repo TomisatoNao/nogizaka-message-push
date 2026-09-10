@@ -132,7 +132,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 监控成员 ──",  ["monitor"]),
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
 ]
-_OPTIONAL_ORDER = ["qq_send_interval", "translate", "image_tagging", "gemini_models", "gemini_min_interval", "translate_timeout"]
+_OPTIONAL_ORDER = ["qq_send_interval", "napcat_send_timeout_seconds", "translate", "image_tagging", "gemini_models", "gemini_min_interval", "translate_timeout"]
 _OPTIONAL_COMMENT = "── 可选覆盖 ──（不写则用内置默认值）"
 
 

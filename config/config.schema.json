@@ -484,6 +484,11 @@
       "type": "number",
       "minimum": 0
     },
+    "napcat_send_timeout_seconds": {
+      "type": "number",
+      "minimum": 1,
+      "description": "单个 NapCat 路由发送（含有限重试）的最大等待时间（秒）"
+    },
     "member_fetch_timeout_seconds": {
       "type": "number",
       "minimum": 1,

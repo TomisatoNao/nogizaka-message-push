@@ -91,6 +91,7 @@ async def test_session_monitor_reports_online_then_offline_and_notifies():
 
     assert first.state == "online"
     assert first.online is True
+    assert first.api_reachable is True
     assert second.state == "offline"
     assert second.online is False
     assert [item.state for item in snapshots] == ["online", "offline"]
@@ -109,7 +110,9 @@ async def test_session_monitor_classifies_auth_and_network_failures():
 
     assert auth.state == "auth_failed"
     assert auth.online is None
+    assert auth.api_reachable is True
     assert network.state == "unreachable"
+    assert network.api_reachable is False
     assert network.consecutive_failures == 1
 
 

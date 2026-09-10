@@ -87,6 +87,22 @@ def handle_status(handler, on_poll_cb=None) -> None:
     from src.health import get_tracker
     snap = get_tracker().snapshot()
 
+    # 路由 lane 的待补偿状态来自持久化投递表，不混入内存通道成功率；
+    # 即使服务重启，状态页也能显示仍有多少消息/路由等待恢复。
+    try:
+        from src.delivery_state import pending_backlog_summary
+
+        snap["delivery_backlog"] = pending_backlog_summary()
+    except Exception:
+        snap["delivery_backlog"] = {
+            "routes": 0,
+            "messages": 0,
+            "members": 0,
+            "suspended_routes": 0,
+            "suspended_messages": 0,
+            "suspended_members": 0,
+        }
+
     try:
         from config import credentials as creds_mod
         import config.config as cfg
@@ -348,9 +364,27 @@ def handle_test_push(handler, body: dict, on_test_push_cb) -> None:
         return
     ok, err = on_test_push_cb(channel, target, text)
     if not ok:
-        send_json(handler, {"ok": False, "errors": [f"推送失败: {err}"]}, 502)
+        safe_error = str(err or "delivery_failed")[:240]
+        error_code = safe_error.split("（", 1)[0].strip() or "delivery_failed"
+        send_json(handler, {
+            "ok": False,
+            "errors": [f"推送失败: {safe_error}"],
+            "error_code": error_code,
+            "channel": channel,
+            "target": target,
+            "suggestion": (
+                "检查 NapCat QQNT 会话和 OneBot sendMsg 日志"
+                if channel == "napcat"
+                else "检查目标配置、凭证和上游服务日志"
+            ),
+        }, 502)
         return
-    send_json(handler, {"ok": True, "message": "测试推送成功发送"})
+    send_json(handler, {
+        "ok": True,
+        "message": "测试推送成功发送",
+        "channel": channel,
+        "target": target,
+    })
 
 
 def handle_openid_status(handler, on_openid_cb) -> None:

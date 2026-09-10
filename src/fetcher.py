@@ -2,6 +2,8 @@
 # fetcher.py — 核心抓取逻辑：拉取成员消息并分发推送
 # ============================================================
 import asyncio
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 import os
 import random
 from datetime import datetime, timedelta, timezone
@@ -19,8 +21,14 @@ from config.credentials import (
 )
 from src.dedup import load_sent_ids, save_sent_id
 from src.translator import translate_text_with_model
-from src.notifier import send_member_message_detailed
-from src.delivery_state import mark_successful_routes, successful_routes
+from src.notifier import matching_member_route_ids, send_member_message_detailed
+from src.delivery_state import (
+    mark_pending_routes,
+    mark_successful_routes,
+    pending_routes_for_member,
+    reconcile_pending_routes,
+    successful_routes,
+)
 from src.health import ErrorTier, get_tracker as _health_tracker
 from src.platforms.napcat import build_message_chain
 
@@ -30,6 +38,78 @@ _semaphore:   asyncio.Semaphore  = None   # type: ignore
 
 MAX_FETCH_ATTEMPTS = 2
 RETRY_BASE_DELAY = 2.0   # 基础退避秒数，实际延迟 = base * 2^(attempt-1) + jitter
+
+
+@dataclass
+class _DeliveryLaneContext:
+    """单成员本轮的路由 lane 协调状态。
+
+    ``blocked_routes`` 只在当前成员循环内阻止同一路由越过失败消息；
+    每条待处理记录同时写入 SQLite，下一轮/重启后可继续补偿。
+    """
+
+    blocked_routes: set[str] = field(default_factory=set)
+    unresolved: dict[str, str] = field(default_factory=dict)
+    handled_count: int = 0
+
+
+_delivery_lane_context: ContextVar[_DeliveryLaneContext | None] = ContextVar(
+    "delivery_lane_context", default=None
+)
+
+
+async def _maybe_alert_napcat_lane_failure(
+    member: dict,
+    route_ids: set[str],
+    errors: dict[str, str],
+) -> None:
+    """熔断后通过仍可用的告警路由通知 NapCat lane 积压。"""
+
+    napcat_routes = sorted(route for route in route_ids if route.startswith("napcat:"))
+    if not napcat_routes:
+        return
+    try:
+        from src.platforms.napcat import get_send_gate_snapshot
+
+        gate = get_send_gate_snapshot()
+        threshold = int(gate.get("failure_threshold") or 3)
+        streak = int(gate.get("failure_streak") or 0)
+        blocked = bool(gate.get("blocked_until"))
+        if streak < threshold and not blocked:
+            return
+        tracker = _health_tracker()
+        cooldown = getattr(cfg, "ALERT_COOLDOWN_SECONDS", 3600)
+        if not tracker.alert_due("napcat_delivery", cooldown):
+            return
+        from src.notifier import send_alert_message
+
+        member_name = str(member.get("m_name") or member.get("name") or "未知成员")
+        error_codes = sorted({errors.get(route) for route in napcat_routes if errors.get(route)})
+        error_text = ", ".join(error_codes[:3]) or str(gate.get("last_error") or "delivery_failed")
+        text = (
+            f"NapCat 路由已连续失败（成员：{member_name}，路由：{', '.join(napcat_routes[:3])}）。"
+            f"错误：{error_text}；当前待补偿消息将按顺序保留。请检查 NapCat/QQNT 会话。"
+        )
+        try:
+            delivered = await asyncio.wait_for(send_alert_message(0, text), timeout=10.0)
+        except Exception as exc:
+            log_all(
+                f"⚠️ NapCat 投递告警发送异常 | error={type(exc).__name__}",
+                is_warning=True,
+            )
+        else:
+            log_all(
+                f"{'✅' if delivered else '⚠️'} NapCat 投递告警{'已发送' if delivered else '未送达'} | "
+                f"member={member_name}",
+                is_debug=bool(delivered),
+                is_warning=not delivered,
+            )
+    except Exception as exc:
+        # 告警属于旁路能力，任何配置/状态读取异常不能影响 lane 推进。
+        log_all(
+            f"⚠️ NapCat 投递告警准备失败 | error={type(exc).__name__}",
+            is_warning=True,
+        )
 
 
 def initialize(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> None:
@@ -71,7 +151,8 @@ async def _handle_message(member: dict, msg: dict,
                            id_list: list, id_set: set, l_time_ref: list) -> bool:
     """
     翻译 → 推送各通道 → 记录状态。
-    返回 True 表示本条处理成功，False 表示发送失败需中断本轮。
+    返回 True 表示本条所有匹配路由均完成；在路由 lane 模式下，False
+    只表示本条仍有待补偿路由，不会阻止其它健康 lane 处理后续消息。
     l_time_ref 是单元素列表，用于在此函数内修改外层的 l_time 变量。
     """
     m_name     = member["m_name"]
@@ -82,8 +163,13 @@ async def _handle_message(member: dict, msg: dict,
     msg_id        = str(msg.get("id") or updated)
     original_text = msg.get("text", "")
 
+    lane_context = _delivery_lane_context.get()
+
     if msg_id in id_set:
         l_time_ref[0] = updated
+        if lane_context is not None:
+            lane_context.handled_count += 1
+            lane_context.unresolved.pop(msg_id, None)
         return True
 
     # 翻译
@@ -113,24 +199,85 @@ async def _handle_message(member: dict, msg: dict,
     # 推送各通道（若含有媒体，各通道直接复用本地素材，免去重复网络请求）
     chain = build_message_chain(m_name, updated, msg, translated, model_name=trans_model)
     delivered_routes = successful_routes(group_type, m_id, msg_id)
+    skip_routes = set(delivered_routes)
+    if lane_context is not None:
+        # 同一成员本轮内，某路由一旦在较早消息失败，就不能越过它发送
+        # 后续消息；其它路由不受影响。
+        skip_routes.update(lane_context.blocked_routes)
     report = await send_member_message_detailed(
-        member, chain, skip_route_ids=delivered_routes
+        member, chain, skip_route_ids=skip_routes
     )
-    mark_successful_routes(
-        group_type, m_id, msg_id,
-        {attempt.route_id for attempt in report.attempts if attempt.ok},
-    )
-    if report.failure_count:
-        log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息推送失败，保留时间戳等待下次重试", is_error=True)
-        return False
-    else:
-        log_all(f"📤 [成员ID: {m_id} | 名字: {m_name}] 成功分发 1 条消息 (ID: {msg_id})", is_debug=True)
+    successful = {attempt.route_id for attempt in report.attempts if attempt.ok}
+    attempted = {attempt.route_id for attempt in report.attempts}
+    failed_attempts = {
+        attempt.route_id: str(attempt.error_code or "delivery_failed")
+        for attempt in report.attempts
+        if not attempt.ok
+    }
 
-    save_sent_id(group_type, m_id, msg_id, id_list, id_set)
+    if lane_context is None:
+        # 兼容直接调用 _handle_message 的旧入口；真正的成员循环会在
+        # 下方使用 route lane 语义，不改变旧测试/插件的布尔契约。
+        mark_successful_routes(group_type, m_id, msg_id, successful)
+        if report.failure_count:
+            log_all(
+                f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息推送失败，保留时间戳等待下次重试",
+                is_error=True,
+            )
+            return False
+        log_all(
+            f"📤 [成员ID: {m_id} | 名字: {m_name}] 成功分发 1 条消息 (ID: {msg_id})",
+            is_debug=True,
+        )
+        save_sent_id(group_type, m_id, msg_id, id_list, id_set)
+        l_time_ref[0] = updated
+        delay = max(0, cfg.QQ_SEND_INTERVAL + random.uniform(-0.3, 0.5))  # nosec B311
+        await asyncio.sleep(delay)
+        return True
+
+    matched = set(report.matched_route_ids)
+    if not matched:
+        # 兼容自定义/旧版 notifier 返回只有 attempts 的报告。
+        matched.update(attempted)
+    completed = set(delivered_routes) | successful
+    pending = matched - completed
+    if successful:
+        mark_successful_routes(
+            group_type, m_id, msg_id, successful, message_time=updated
+        )
+    if pending:
+        mark_pending_routes(
+            group_type,
+            m_id,
+            msg_id,
+            updated,
+            pending,
+            errors=failed_attempts,
+            attempted_route_ids=set(failed_attempts),
+        )
+        # 失败路由及其后续消息都留在该 lane 的队列中，不能乱序越过。
+        lane_context.blocked_routes.update(failed_attempts)
+        lane_context.unresolved[msg_id] = str(updated or "")
+        log_all(
+            f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 消息部分投递，"
+            f"健康路由继续，待补偿 {len(pending)} 个路由 (ID: {msg_id})",
+            is_error=True,
+        )
+        await _maybe_alert_napcat_lane_failure(member, pending, failed_attempts)
+    else:
+        lane_context.unresolved.pop(msg_id, None)
+        log_all(
+            f"📤 [成员ID: {m_id} | 名字: {m_name}] 成功分发 1 条消息 (ID: {msg_id})",
+            is_debug=True,
+        )
+        save_sent_id(group_type, m_id, msg_id, id_list, id_set)
+
+    lane_context.handled_count += 1
     l_time_ref[0] = updated
     delay = max(0, cfg.QQ_SEND_INTERVAL + random.uniform(-0.3, 0.5))  # nosec B311 -- 基于配置值随机微调
-    await asyncio.sleep(delay)
-    return True
+    if report.attempts:
+        await asyncio.sleep(delay)
+    return not pending
 
 
 # ──────────────────────────────────────────────
@@ -192,6 +339,19 @@ async def _fetch_member_messages(
                 archive.set_timeline_watermark(group_type, m_id, l_time)
         except (OSError, UnicodeError) as exc:
             log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 读取旧时间水位线失败: {type(exc).__name__}: {exc}", is_error=True)
+
+    # 路由 lane 的失败消息不能依赖上游 timeline 长期保留；优先把最早
+    # 待补偿时间拉回查询窗口，并在成功响应后从本地归档索引恢复消息。
+    # 路由配置可能在 NapCat 故障期间被关闭、删除或改过滤条件。先同步
+    # 活跃 route_id：停用路由的历史记录保留在 SQLite，但进入 suspended
+    # 状态，不再把成员时间水位永久拉回；恢复同一 route_id 时自动重试。
+    active_route_ids = set(matching_member_route_ids(member))
+    reconcile_pending_routes(group_type, m_id, active_route_ids)
+    pending_rows = pending_routes_for_member(group_type, m_id)
+    pending_message_ids = [str(row.get("message_id") or "") for row in pending_rows]
+    pending_times = [str(row.get("message_time") or "") for row in pending_rows if row.get("message_time")]
+    if pending_times and (not l_time or min(pending_times) < str(l_time)):
+        l_time = min(pending_times)
 
     is_first_fetch = False
     if not l_time:
@@ -268,6 +428,25 @@ async def _fetch_member_messages(
                     log_all(f"🚨 [成员ID: {m_id} | 名字: {m_name}] API 响应 HTTP 200 但不是合法 JSON", is_error=True)
                     _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "API 响应非 JSON")
                     return None
+
+                if pending_message_ids:
+                    # 归档索引只存消息本体，投递状态表仍不携带正文；
+                    # API 返回的新版本优先，归档记录用于补齐被截断的历史。
+                    archived_pending = archive.load_messages_by_ids(m_name, pending_message_ids)
+                    if archived_pending:
+                        existing_ids = {
+                            str(item.get("id") or item.get("updated_at") or "")
+                            for item in msgs
+                        }
+                        msgs.extend(
+                            item for item in archived_pending
+                            if str(item.get("id") or item.get("updated_at") or "") not in existing_ids
+                        )
+                        log_all(
+                            f"♻️ [成员ID: {m_id} | 名字: {m_name}] 恢复待投递消息 "
+                            f"{len(archived_pending)} 条",
+                            is_debug=True,
+                        )
 
                 # 首次加入监控时，额外尝试拉取过去 24 小时历史消息 (/past_messages)
                 if is_first_fetch:
@@ -406,17 +585,22 @@ async def _push_member_messages(member: dict, new_msgs: list,
                                  l_time_ref: list,
                                  time_file: str, file_lock) -> bool:
     """
-    Phase 2（串行推送）：按时间顺序逐条推送 → 写时间戳。
-    返回 True 表示全部推送成功，False 表示有消息推送失败。
+    Phase 2（按路由 lane 推送）：消息仍按时间顺序准备，但每个路由
+    只允许在自己的前序消息完成后继续；某路由失败不会阻断其它路由。
+    返回 True 表示本批没有待补偿路由，False 表示仍有持久化积压。
     """
     m_name = member["m_name"]
     truly_new = [m for m in new_msgs
                  if str(m.get("id") or m.get("updated_at", "")) not in id_set]
-
+    lane_context = _DeliveryLaneContext()
+    context_token = _delivery_lane_context.set(lane_context)
     try:
         for msg in new_msgs:
+            handled_before = lane_context.handled_count
             ok = await _handle_message(member, msg, id_list, id_set, l_time_ref)
-            if not ok:
+            if not ok and lane_context.handled_count == handled_before:
+                # 旧扩展/单测可能替换了只返回 bool 的 _handle_message；
+                # 无法获得 lane 结果时保持原先的“失败即停”安全语义。
                 archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
                 if time_file:
                     await write_time_record(time_file, file_lock, l_time_ref[0])
@@ -431,12 +615,24 @@ async def _push_member_messages(member: dict, new_msgs: list,
         archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
         _health_tracker().record_member_push(m_name, False)
         raise
+    finally:
+        _delivery_lane_context.reset(context_token)
 
+    # 待补偿路由已写入 delivery_pending_routes，成员总水位可以推进到
+    # 本批最后一条；下一次抓取会按最早 pending 时间回放归档消息。
     archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
     if time_file:
         await write_time_record(time_file, file_lock, l_time_ref[0])
 
     new_count = len(truly_new)
+    if lane_context.unresolved:
+        log_all(
+            f"⚠️ {m_name} 已处理 {new_count} 条消息，"
+            f"待补偿 {len(lane_context.unresolved)} 条消息/路由 lane",
+            is_error=True,
+        )
+        _health_tracker().record_member_push(m_name, False)
+        return False
     if new_count > 0:
         log_all(f"✅ {m_name} 推送 {new_count} 条新消息")
     _health_tracker().record_member_push(m_name, True)

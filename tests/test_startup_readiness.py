@@ -114,6 +114,36 @@ async def test_enabled_channel_transport_failure_remains_error(monkeypatch):
     assert health.get_tracker().snapshot()["startup"]["state"] == "DEGRADED"
 
 
+@pytest.mark.asyncio
+async def test_http_200_without_online_state_is_not_reported_as_healthy(monkeypatch):
+    monkeypatch.setattr(app.cfg, "ENABLE_NAPCAT_QQ", True)
+    monkeypatch.setattr(app.cfg, "ENABLE_QQ_OFFICIAL_BOT", False)
+    monkeypatch.setattr(app.cfg, "ENABLE_TG_BOT", False)
+    monkeypatch.setattr(app.cfg, "MESSAGE_MONITOR_ENABLED", False)
+    monkeypatch.setattr(app.cfg, "MONITOR_LIST", [])
+    monkeypatch.setattr(app.cfg, "BLOG_MONITOR", {"enabled": False})
+    monkeypatch.setattr(app.cfg, "PLATFORMS", {})
+    monkeypatch.setattr(app.cfg, "QQ_BOT_API", "http://127.0.0.1:3000/send_group_msg")
+
+    class _UnknownClient:
+        async def get(self, *_args, **_kwargs):
+            return type("Response", (), {
+                "status_code": 200,
+                "text": "{}",
+                "json": lambda self: {"status": "ok", "retcode": 0, "data": {}},
+            })()
+
+    logs: list[tuple[str, dict]] = []
+    monkeypatch.setattr(app, "log_all", lambda content, **kwargs: logs.append((str(content), kwargs)))
+    health.initialize()
+
+    result = await app._health_check(_UnknownClient())
+
+    assert result is False
+    assert any(item.get("is_warning") and "状态未知" in text for text, item in logs)
+    assert health.get_tracker().snapshot()["startup"]["state"] == "DEGRADED"
+
+
 def test_warning_log_is_not_written_to_error_stream(monkeypatch, capsys):
     """WARN 应进入系统日志/实时日志，而不是错误日志文件。"""
     class _Sink:
@@ -153,6 +183,8 @@ def test_health_snapshot_exposes_startup_state():
     snapshot = health.get_tracker().snapshot()
     assert snapshot["startup"]["state"] == "READY"
     assert snapshot["startup"]["reasons"] == []
+    assert snapshot["napcat_session"]["api_reachable"] is None
+    assert snapshot["napcat_send"]["state"] == "unknown"
 
 
 def test_status_page_exposes_startup_state():
@@ -161,6 +193,20 @@ def test_status_page_exposes_startup_state():
     )
     assert 'id="stStartup"' in html
     assert 'startup.state' in html
+
+
+def test_status_page_exposes_separate_napcat_readiness_states():
+    html = (Path(__file__).resolve().parent.parent / "src" / "webui_static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="stNapcatHealth"' in html
+    assert "api_reachable" in html
+    assert "napcat_send" in html
+    assert 'id="napcatSendTimeout"' in html
+    assert 'id="stDeliveryBacklog"' in html
+    assert "delivery_backlog" in html
+    assert 'id="btnCopyDeliveryDiag"' in html
+    assert "buildDeliveryDiagnosticSummary" in html
 
 
 def test_initial_admin_banner_is_emitted_once():
@@ -231,4 +277,3 @@ def test_health_probe_distinguishes_starting_from_ready():
             assert body["ready"] is True
     finally:
         server.shutdown()
-

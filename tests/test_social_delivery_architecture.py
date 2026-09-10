@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import pytest
 
@@ -108,6 +109,36 @@ def test_delivery_service_returns_no_route_without_invoking_adapter():
     assert adapter.calls == []
 
 
+def test_social_napcat_route_timeout_is_bounded(monkeypatch):
+    timed_out_targets = []
+
+    class _HangingAdapter:
+        async def send_post(self, _target, _text, _media):
+            await asyncio.sleep(1)
+            return True
+
+    route = PlannedRoute(
+        "napcat:123",
+        _HangingAdapter(),
+        DeliveryTarget("napcat", "123", "groups"),
+    )
+    monkeypatch.setattr(
+        "src.platforms.napcat.record_send_timeout",
+        timed_out_targets.append,
+    )
+    service = DeliveryService(
+        {"napcat_send_timeout_seconds": 0.01},
+        planner=_Planner([route]),
+        logger=lambda *_a, **_k: None,
+    )
+
+    result = service.deliver_post(_post(), "统一正文", archive=False)
+
+    assert result.outcome == "failed"
+    assert result.errors == ("napcat:123: timeout",)
+    assert timed_out_targets == ["123"]
+
+
 @pytest.mark.parametrize("platform", ["x", "instagram", "tiktok", "tiktok_live"])
 def test_route_planner_respects_per_platform_subscription_switch(platform):
     """自动社媒路由必须由对应的 push_* 开关控制，不能把关闭误当成全量订阅。"""
@@ -180,4 +211,3 @@ async def test_qq_official_adapter_supports_direct_target_and_official_target():
     )
     assert await adapter.send_text(t2, "hello group") is True
     assert bot.sent_texts[-1] == ("groups", "group456", "hello group")
-

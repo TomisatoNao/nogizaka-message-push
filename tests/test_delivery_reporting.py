@@ -126,3 +126,25 @@ def test_successful_route_is_not_sent_again_on_retry(monkeypatch) -> None:
 
     assert all(attempt.route_id != "tg:tg-test" for attempt in report.attempts)
     assert report.ok is False
+
+
+def test_napcat_route_timeout_is_bounded(monkeypatch) -> None:
+    timed_out_targets = []
+    monkeypatch.setattr(notifier, "record_send_timeout", timed_out_targets.append)
+
+    async def hanging_sender():
+        await asyncio.sleep(1)
+        return True
+
+    attempt = asyncio.run(notifier._run_delivery(
+        "napcat",
+        "napcat:123",
+        "NapCat",
+        "群 123",
+        hanging_sender,
+        timeout_seconds=0.01,
+    ))
+
+    assert attempt.ok is False
+    assert attempt.error_code == "timeout"
+    assert timed_out_targets == ["群 123"]

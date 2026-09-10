@@ -90,6 +90,9 @@ _DEFAULTS: dict = {
     "token_refresh_network_cooldown_seconds": 90,
     "token_refresh_max_cooldown_seconds":     600,
     "qq_send_interval":         1.5,
+    # 单个 NapCat 路由的发送总预算；覆盖 HTTP 请求及内部有限重试，
+    # 防止 QQNT 无响应时占住成员投递任务。
+    "napcat_send_timeout_seconds": 45,
     "token_refresh_before_seconds": 300,
     "backtrack_hours":          24,
     # 轮询节奏（config.json 的 day_interval / night_interval / sleep_hours 可覆盖）
@@ -591,6 +594,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "token_refresh_network_cooldown_seconds": "TOKEN_REFRESH_NETWORK_COOLDOWN_SECONDS",
     "token_refresh_max_cooldown_seconds":     "TOKEN_REFRESH_MAX_COOLDOWN_SECONDS",
     "qq_send_interval":             "QQ_SEND_INTERVAL",
+    "napcat_send_timeout_seconds":  "NAPCAT_SEND_TIMEOUT_SECONDS",
     "token_refresh_before_seconds": "TOKEN_REFRESH_BEFORE_SECONDS",
     "cred_dir":                     "CRED_DIR",
     "time_record_dir":              "TIME_RECORD_DIR",

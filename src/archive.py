@@ -70,6 +70,7 @@ __all__ = [
     "initialize",
     "list_members",
     "list_months",
+    "load_messages_by_ids",
     "load_archived_ids",
     "load_month",
     "member_dir_name",
@@ -594,6 +595,66 @@ def load_month(m_name: str, year: int, month: int) -> list[dict]:
     except OSError as e:
         log_all(f"⚠️ 归档读取失败 {json_path}: {e}", is_error=True)
         return []
+
+
+def load_messages_by_ids(m_name: str, message_ids: list[str] | set[str] | tuple[str, ...]) -> list[dict]:
+    """从 SQLite 归档索引恢复指定消息的原始记录。
+
+    路由补偿只保存消息 ID，不在投递状态表复制正文/媒体 URL；恢复时从
+    归档的 ``raw_json`` 读取完整消息，并补上 SQLite 中已回填的翻译和本地
+    媒体路径。找不到的消息会被忽略，让调用方继续依赖 API 的历史回放。
+    """
+
+    if not m_name or not message_ids:
+        return []
+    normalized = list(dict.fromkeys(str(item) for item in message_ids if str(item)))
+    if not normalized:
+        return []
+    conn = init_db()
+    if conn is None:
+        return []
+    member_dir = member_dir_name(m_name)
+    records: list[dict] = []
+    try:
+        # SQLite 默认变量数有限制，分块读取，避免大批积压恢复失败。
+        for start in range(0, len(normalized), 400):
+            chunk = normalized[start:start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                f"""
+                SELECT id, published_at, updated_at, text, translation,
+                       type, local_file, raw_json
+                FROM messages
+                WHERE member_dir=? AND id IN ({placeholders})
+                """,
+                [member_dir, *chunk],
+            ).fetchall()
+            for row in rows:
+                try:
+                    record = json.loads(row[7]) if row[7] else {}
+                except (TypeError, ValueError):
+                    record = {}
+                if not isinstance(record, dict):
+                    record = {}
+                record.setdefault("id", str(row[0]))
+                if row[1] and not record.get("published_at"):
+                    record["published_at"] = row[1]
+                if row[2] and not record.get("updated_at"):
+                    record["updated_at"] = row[2]
+                if row[3] is not None and "text" not in record:
+                    record["text"] = row[3]
+                if row[5] and not record.get("type"):
+                    record["type"] = row[5]
+                if row[4] and not record.get("_translation"):
+                    record["_translation"] = row[4]
+                if row[6] and not record.get("_local_file"):
+                    record["_local_file"] = row[6]
+                records.append(record)
+    except (sqlite3.Error, OSError) as exc:
+        log_all(f"⚠️ 恢复待投递归档消息失败: {type(exc).__name__}", is_error=True)
+        return []
+    records.sort(key=lambda item: (str(item.get("updated_at") or ""), str(item.get("id") or "")))
+    return records
 
 
 def _sync_write_json(tmp_path: Path, json_path: Path, data: list[dict]) -> None:

@@ -61,6 +61,7 @@ class HealthTracker:
         self._members: dict[str, MemberStats] = {}
         self._errors: deque[tuple[str, ErrorTier, int]] = deque()  # (msg, tier, cycle)
         self._alert_cooldowns: dict[str, float] = {}
+        self._alert_last_sent: dict[str, float] = {}
 
         self._cycle_count: int = 0
         self._start_time: float = 0.0
@@ -75,9 +76,22 @@ class HealthTracker:
         self._startup_updated_at: float = 0.0
         self._napcat_session: dict[str, object] = {
             "state": "unknown",
+            "api_reachable": None,
             "online": None,
             "reason": "尚未探测",
             "checked_at": None,
+            "consecutive_failures": 0,
+        }
+        # ``get_status`` 只能说明 QQ 会话探针的结果，不能代表实际的
+        # ``send_group_msg`` 已经可用。发送状态单独维护，避免健康页把
+        # “会话在线但发送失败”误报成完整正常。
+        self._napcat_send: dict[str, object] = {
+            "state": "unknown",
+            "last_error": None,
+            "last_target": None,
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "last_elapsed_ms": None,
             "consecutive_failures": 0,
         }
 
@@ -117,9 +131,19 @@ class HealthTracker:
             self._start_time = time.monotonic()
             self._napcat_session = {
                 "state": "unknown",
+                "api_reachable": None,
                 "online": None,
                 "reason": "尚未探测",
                 "checked_at": None,
+                "consecutive_failures": 0,
+            }
+            self._napcat_send = {
+                "state": "unknown",
+                "last_error": None,
+                "last_target": None,
+                "last_attempt_at": None,
+                "last_success_at": None,
+                "last_elapsed_ms": None,
                 "consecutive_failures": 0,
             }
 
@@ -147,6 +171,7 @@ class HealthTracker:
         self,
         state: str,
         *,
+        api_reachable: bool | None = None,
         online: bool | None = None,
         reason: str = "",
         checked_at: float | None = None,
@@ -161,6 +186,7 @@ class HealthTracker:
         with self._lock:
             self._napcat_session = {
                 "state": normalized,
+                "api_reachable": api_reachable if isinstance(api_reachable, bool) else None,
                 "online": online if isinstance(online, bool) else None,
                 "reason": str(reason or ""),
                 "checked_at": checked_at if checked_at is not None else time.time(),
@@ -172,6 +198,58 @@ class HealthTracker:
 
         with self._lock:
             return dict(self._napcat_session)
+
+    def record_napcat_send(
+        self,
+        ok: bool,
+        error_code: str | None = None,
+        *,
+        target: object | None = None,
+        elapsed_ms: float | None = None,
+        attempted: bool = True,
+    ) -> None:
+        """记录 NapCat 实际发送状态，与会话探针严格分离。
+
+        ``attempted=False`` 用于熔断期间的快速跳过：它会更新当前状态和
+        原因，但不把跳过误算成一次真实 HTTP 发送，也不递增连续失败次数。
+        """
+
+        now = time.time()
+        code = str(error_code or "delivery_failed") if not ok else None
+        with self._lock:
+            current = self._napcat_send
+            current["last_target"] = str(target) if target is not None else None
+            if attempted:
+                current["last_attempt_at"] = now
+                current["last_elapsed_ms"] = (
+                    round(max(0.0, float(elapsed_ms)), 1)
+                    if elapsed_ms is not None
+                    else None
+                )
+            if ok:
+                current["state"] = "ready"
+                current["last_error"] = None
+                current["last_success_at"] = now
+                current["consecutive_failures"] = 0
+                return
+
+            if code == "circuit_open":
+                # 熔断跳过不是新的根因；保留最近一次真实失败码，便于页面和
+                # 告警回答“为什么熔断”，仅在没有根因时显示 circuit_open。
+                current["state"] = "degraded"
+                if not current.get("last_error"):
+                    current["last_error"] = code
+            else:
+                current["state"] = "failed"
+                current["last_error"] = code
+            if attempted:
+                current["consecutive_failures"] = int(current.get("consecutive_failures") or 0) + 1
+
+    def napcat_send_snapshot(self) -> dict:
+        """返回最近一次 NapCat 实际发送状态快照。"""
+
+        with self._lock:
+            return dict(self._napcat_send)
 
     # ── 巡查生命周期 ─────────────────────────────────
 
@@ -328,6 +406,32 @@ class HealthTracker:
         with self._lock:
             self._alert_cooldowns[acc_id] = remaining
 
+    def alert_due(self, key: str, cooldown_seconds: float) -> bool:
+        """原子地判断并占用一个告警冷却窗口。"""
+
+        name = str(key or "default")
+        try:
+            cooldown = max(0.0, float(cooldown_seconds))
+        except (TypeError, ValueError):
+            cooldown = 0.0
+        now = time.time()
+        with self._lock:
+            previous = self._alert_last_sent.get(name)
+            if previous is not None and now - previous < cooldown:
+                self._alert_cooldowns[name] = max(0.0, cooldown - (now - previous))
+                return False
+            self._alert_last_sent[name] = now
+            self._alert_cooldowns[name] = cooldown
+            return True
+
+    def clear_alert_cooldown(self, key: str) -> None:
+        """清除告警冷却，供故障恢复事件重新通知。"""
+
+        name = str(key or "default")
+        with self._lock:
+            self._alert_last_sent.pop(name, None)
+            self._alert_cooldowns.pop(name, None)
+
     def record_error(self, msg: str, tier: ErrorTier) -> None:
         with self._lock:
             while len(self._errors) >= self._error_buffer:
@@ -351,6 +455,7 @@ class HealthTracker:
                 "next_cycle": dict(self._next_cycle) if self._next_cycle else None,
                 "startup": self.startup_snapshot(),
                 "napcat_session": self.napcat_session_snapshot(),
+                "napcat_send": self.napcat_send_snapshot(),
                 "monitor": monitor,
                 # 顶层别名便于旧版状态页/脚本逐步迁移，不破坏原有字段。
                 "monitor_healthy": monitor["monitor_healthy"],
@@ -440,6 +545,19 @@ class HealthTracker:
                 "unreachable": "接口不可达 ⚠️",
             }
             lines.append(f"  NapCat: {state_labels.get(napcat_state, napcat_state)}")
+
+        napcat_send = self._napcat_send
+        send_state = napcat_send.get("state")
+        if send_state and send_state != "unknown":
+            send_labels = {
+                "ready": "发送正常 ✅",
+                "degraded": "发送受限 ⚠️",
+                "failed": "发送失败 ⚠️",
+            }
+            send_line = f"  NapCat发送: {send_labels.get(send_state, send_state)}"
+            if napcat_send.get("last_error"):
+                send_line += f" ({napcat_send['last_error']})"
+            lines.append(send_line)
 
         # 5. 近期错误（仅 PERSISTENT 存在时展开，或最近 5 条皆有）
         recent_window = self._summary_interval

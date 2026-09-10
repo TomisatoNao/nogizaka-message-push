@@ -166,6 +166,17 @@ class DeliveryService:
     def archive_service(self) -> ArchiveService:
         return self._archive
 
+    def _route_timeout_seconds(self, route: PlannedRoute) -> float | None:
+        """返回社交投递路由的总预算；目前只约束 NapCat。"""
+
+        if getattr(route.target, "channel", "") != "napcat":
+            return None
+        raw = self._runtime.value("napcat_send_timeout_seconds", 45.0)
+        try:
+            return max(1.0, min(300.0, float(raw)))
+        except (TypeError, ValueError):
+            return 45.0
+
     @staticmethod
     def _dispatch_async(coro):
         """兼容同步监控线程和已有 asyncio loop 的调用方。"""
@@ -204,23 +215,31 @@ class DeliveryService:
             f"route_id={route.route_id}"
         )
         self._log(f"📤 [社媒推送] 开始投递 | {context}", is_debug=True)
-        try:
+
+        async def _invoke_adapter() -> bool:
             send_post = getattr(route.adapter, "send_post", None)
             if callable(send_post):
-                sent = await self._maybe_await(
+                return bool(await self._maybe_await(
                     send_post(route.target, full_text, media)
-                )
+                ))
+            sent = await self._maybe_await(
+                route.adapter.send_text(route.target, full_text)
+            )
+            if sent:
+                for item in media:
+                    sent = await self._maybe_await(
+                        route.adapter.send_media(route.target, item)
+                    )
+                    if not sent:
+                        break
+            return bool(sent)
+
+        try:
+            timeout = self._route_timeout_seconds(route)
+            if timeout is None:
+                sent = await _invoke_adapter()
             else:
-                sent = await self._maybe_await(
-                    route.adapter.send_text(route.target, full_text)
-                )
-                if sent:
-                    for item in media:
-                        sent = await self._maybe_await(
-                            route.adapter.send_media(route.target, item)
-                        )
-                        if not sent:
-                            break
+                sent = await asyncio.wait_for(_invoke_adapter(), timeout=timeout)
             attempt = _RouteAttempt(route.route_id, bool(sent))
             self._log(
                 f"{'✅' if attempt.ok else '⚠️'} [社媒推送] 路由{'成功' if attempt.ok else '失败'} | {context}",
@@ -228,6 +247,19 @@ class DeliveryService:
                 is_error=not attempt.ok,
             )
             return attempt
+        except asyncio.TimeoutError:
+            if getattr(route.target, "channel", "") == "napcat":
+                try:
+                    from src.platforms.napcat import record_send_timeout
+
+                    record_send_timeout(getattr(route.target, "target_id", None))
+                except Exception:
+                    pass
+            self._log(
+                f"⏱️ [社媒推送] 路由超时 | {context} | error=timeout",
+                is_error=True,
+            )
+            return _RouteAttempt(route.route_id, False, "timeout")
         except Exception as exc:  # 网络/第三方 SDK 异常必须隔离到单一路由
             error = type(exc).__name__
             self._log(
