@@ -24,7 +24,7 @@
              letter-spacing: .06em; text-transform: uppercase;
              display: flex; align-items: center; gap: 8px; }
   .card h2::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
-  /* 系统设置中的轮询卡片按“Message / 通道”分组，避免长说明把字段挤成不规则多列。 */
+  /* 系统设置与动态监控共用同一套“控制组 / 频率组 / 账号组”视觉语言。 */
   .system-settings-card > h2 { text-transform: none; letter-spacing: .02em; }
   .settings-unit { font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--muted); }
   .settings-scope-note { margin: -2px 0 16px; max-width: 780px; font-size: 12px; color: var(--muted); line-height: 1.6; }
@@ -34,32 +34,45 @@
   .settings-group-badge { padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-soft)); border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); font-size: 10.5px; font-weight: 600; }
   .settings-group.channels .settings-group-badge { color: var(--muted); border-color: var(--border-soft); background: color-mix(in srgb, var(--border) 35%, transparent); }
   .settings-group .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
-  /* 动态监控设置：每个项目拥有独立容器，长标题只能在自己的网格内收缩。 */
-  .monitor-card .monitor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; }
-  .monitor-card > .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; }
-  .monitor-card > .grid > .switch { white-space: normal; align-items: flex-start; line-height: 1.4; }
-  .monitor-project { min-width: 0; padding: 14px 16px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 58%, transparent); }
-  .monitor-project h3 { margin: 0 0 11px; color: var(--text); font-size: 13px; line-height: 1.45; font-weight: 650; }
+  .settings-field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 240px)); justify-content: start; gap: 12px 18px; }
+  .settings-field-grid > * { min-width: 0; }
+  .settings-field-grid input[type=number] { max-width: 240px; font-variant-numeric: tabular-nums; }
+  .settings-control-group { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
+  .settings-control-group .switch { flex: 0 0 auto; white-space: normal; align-items: flex-start; line-height: 1.4; }
+
+  /* 动态监控设置：每个项目拥有独立容器，内部再明确区分控制、频率和账号。 */
+  .monitor-card .monitor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; align-items: start; }
+  .monitor-project { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-soft)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 62%, transparent); }
+  .monitor-project--full,
   .monitor-project.message-project { grid-column: 1 / -1; }
-  .monitor-project-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; margin-bottom: 12px; }
-  .monitor-project-heading h3 { margin: 0; }
-  .monitor-project-heading .switch { flex: 0 0 auto; }
-  .monitor-project .monitor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; min-width: 0; }
-  .monitor-project .monitor-fields.single { grid-template-columns: minmax(0, 1fr); }
-  .monitor-project .switch { white-space: normal; align-items: flex-start; line-height: 1.4; width: 100%; }
-  .monitor-project .switch .track { margin-top: 1px; }
+  .monitor-project h3 { margin: 0; color: var(--text); font-size: 13px; line-height: 1.45; font-weight: 650; }
+  .monitor-project-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+  .monitor-project-heading h3 { flex: 1 1 auto; min-width: 0; overflow-wrap: normal; }
+  .monitor-project-heading > .switch { flex: 0 0 auto; width: auto; white-space: nowrap; }
+  .monitor-control-group,
+  .monitor-frequency-group,
+  .monitor-account-group,
+  .monitor-credential-group { min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
+  .monitor-control-group { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
+  .monitor-group-label { flex: 0 0 100%; color: var(--muted); font-size: 12px; line-height: 1.4; }
+  .monitor-control-group .switch { flex: 0 0 auto; width: auto; white-space: normal; align-items: flex-start; line-height: 1.4; }
+  .monitor-frequency-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+  .monitor-frequency-group.single { grid-template-columns: minmax(0, 1fr); }
+  .monitor-account-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .monitor-project .field { min-width: 0; }
   .monitor-project .field > input,
   .monitor-project .field > textarea,
   .monitor-project .pair { min-width: 0; }
-  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: center; gap: 12px 16px; }
+  .monitor-project .field > input[type=number] { max-width: 240px; font-variant-numeric: tabular-nums; }
+  .monitor-project .monitor-field-pair { width: 220px; max-width: 100%; }
+  .monitor-project .monitor-field-pair input { flex: 0 1 90px; width: 90px; text-align: center; font-variant-numeric: tabular-nums; }
+  .monitor-project .monitor-credential-group { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .monitor-project .monitor-credential-group > :first-child { flex: 1 1 320px; }
+  .monitor-project .monitor-credential-group > * { min-width: 0; }
+  .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: start; gap: 12px 16px; }
   .schedule-card .schedule-grid .field { min-width: 0; }
   .schedule-card .schedule-grid .schedule-field { width: 100%; }
   .schedule-card .schedule-grid .schedule-field input { max-width: 180px; text-align: center; font-variant-numeric: tabular-nums; }
-  .monitor-card .field > input[type=number] { max-width: 240px; font-variant-numeric: tabular-nums; }
-  .message-project .message-fields { grid-template-columns: repeat(2, minmax(220px, 280px)); justify-content: center; gap: 12px 18px; }
-  .message-project .message-fields .pair { width: 220px; max-width: 100%; }
-  .message-project .message-fields .pair input { flex: 0 1 90px; width: 90px; text-align: center; font-variant-numeric: tabular-nums; }
   .schedule-card .schedule-state { margin: 12px 0 0; padding: 9px 12px; color: var(--muted); background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.55; }
   .schedule-card .schedule-state strong { color: var(--accent); }
   .status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 100%; }
@@ -318,10 +331,13 @@
 
   @media (max-width: 900px) and (min-width: 641px) {
     .settings-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .settings-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
+    .settings-control-group { gap: 10px 14px; }
     .monitor-card .monitor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .monitor-card > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+    .monitor-project-heading h3 { flex: 1 1 100%; }
+    .monitor-project-heading > .switch { flex: 1 1 100%; width: 100%; white-space: normal; }
     .schedule-card .schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .message-project .message-fields { grid-template-columns: repeat(2, minmax(200px, 280px)); }
   }
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
@@ -336,24 +352,28 @@
     .settings-group { padding: 12px; }
     .settings-group-title { margin-bottom: 10px; }
     .settings-group .grid { grid-template-columns: 1fr; gap: 12px; }
+    .settings-field-grid { grid-template-columns: 1fr; gap: 12px; }
     .grid { grid-template-columns: 1fr; gap: 12px; }
     .monitor-card .monitor-grid { grid-template-columns: 1fr; gap: 12px; }
-    .monitor-card > .grid { grid-template-columns: 1fr; gap: 12px; }
     .schedule-card .schedule-grid { grid-template-columns: 1fr; gap: 12px; }
     .monitor-project { padding: 12px; }
-    .monitor-project .monitor-fields { grid-template-columns: 1fr; gap: 10px; }
     .monitor-project h3 { font-size: 12.5px; }
     .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
-    .monitor-card .field > input[type=number] { max-width: none; }
+    .monitor-project-heading h3 { flex: 1 1 100%; }
+    .monitor-project-heading > .switch { flex: 1 1 100%; width: 100%; white-space: normal; }
+    .settings-control-group { align-items: flex-start; gap: 10px 14px; }
+    .monitor-control-group { align-items: flex-start; }
+    .monitor-frequency-group,
+    .monitor-account-group { grid-template-columns: 1fr; gap: 10px; }
+    .monitor-project .field > input[type=number] { max-width: none; }
     .schedule-card .schedule-grid .schedule-field { width: 100%; }
 
     /* min/max、起/止等成对输入始终保持一行；输入框平分剩余空间。 */
     .pair { flex-wrap: nowrap; width: 100%; min-width: 0; }
     .pair input { flex: 1 1 0; width: auto; min-width: 0; }
     .pair > span { flex: 0 0 auto; white-space: nowrap; }
-    .message-project .message-fields { justify-content: stretch; }
-    .message-project .message-fields .pair { width: 100%; }
-    .message-project .message-fields .pair input { flex: 1 1 0; width: auto; }
+    .monitor-project .monitor-field-pair { width: 100%; }
+    .monitor-project .monitor-field-pair input { flex: 1 1 0; width: auto; }
 
     .btn { padding: 8px 12px; font-size: 13.5px; }
     .btn.small { padding: 6px 10px; font-size: 12.5px; }
@@ -775,12 +795,12 @@
           <h3>成员消息自动巡查</h3>
           <label class="switch"><input id="msgMonitorOn" type="checkbox"/><span class="track"></span>启用 Message 消息抓取</label>
         </div>
-        <div class="monitor-fields">
+        <div class="monitor-frequency-group" role="group" aria-label="Message 轮询频率">
           <label class="field">日间间隔（min / max 秒）
-            <span class="pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
+            <span class="pair monitor-field-pair"><input id="dayMin" min="1" type="number"/><span>–</span><input id="dayMax" min="1" type="number"/></span>
           </label>
           <label class="field">深夜间隔（min / max 秒）
-            <span class="pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
+            <span class="pair monitor-field-pair"><input id="nightMin" min="1" type="number"/><span>–</span><input id="nightMax" min="1" type="number"/></span>
           </label>
         </div>
       </div>
@@ -790,82 +810,105 @@
   <!-- Card 3: 📝 官方博客抓取设置 -->
   <div class="card monitor-card">
     <h2>📝 官方博客监控设置</h2>
-    <div class="grid">
-      <label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
-      <div style="display:flex; flex-direction:column; gap:4px;">
-        <span style="font-size:12.5px; color:var(--muted)">团体独立开关</span>
-        <div class="switch-group" style="margin-top:4px;">
-          <label class="switch"><input id="blogHinatazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>日向坂</label>
-          <label class="switch"><input id="blogNogizaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>乃木坂</label>
-          <label class="switch"><input id="blogSakurazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>樱坂</label>
+    <div class="monitor-grid">
+      <div class="monitor-project monitor-project--full">
+        <div class="monitor-project-heading">
+          <h3>博客内容抓取</h3>
+          <label class="switch"><input id="blogMonitorOn" type="checkbox"/><span class="track"></span>启用博客抓取</label>
         </div>
+        <div class="monitor-control-group" role="group" aria-label="博客团体开关">
+          <span class="monitor-group-label">团体独立开关</span>
+          <div class="switch-group">
+            <label class="switch"><input id="blogHinatazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>日向坂</label>
+            <label class="switch"><input id="blogNogizaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>乃木坂</label>
+            <label class="switch"><input id="blogSakurazaka" type="checkbox"/><span class="track" style="transform:scale(0.8); transform-origin:left center"></span>樱坂</label>
+          </div>
+        </div>
+        <div class="monitor-frequency-group" role="group" aria-label="博客轮询频率">
+          <label class="field">博客日间间隔（min / max 秒）
+            <span class="pair monitor-field-pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
+          </label>
+          <label class="field">博客深夜间隔（min / max 秒）
+            <span class="pair monitor-field-pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
+          </label>
+        </div>
+        <p class="hint" style="margin:0;">博客推送目标在「推送通道」页面的对应路由中配置。</p>
       </div>
-      <label class="field">博客日间间隔（min / max 秒）
-        <span class="pair"><input id="blogDayMin" min="1" type="number"/><span>–</span><input id="blogDayMax" min="1" type="number"/></span>
-      </label>
-      <label class="field">博客深夜间隔（min / max 秒）
-        <span class="pair"><input id="blogNightMin" min="1" type="number"/><span>–</span><input id="blogNightMax" min="1" type="number"/></span>
-      </label>
-
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
-      博客推送目标在「推送通道」页面的对应路由中配置。
-    </p>
   </div>
 
   <!-- Card 2: 𝕏 (Twitter) 监控设置 -->
   <div class="card monitor-card">
     <h2>𝕏 (Twitter) 监控设置</h2>
-    <div class="grid">
-      <label class="switch"><input id="socialXOn" type="checkbox"/><span class="track"></span>启用 𝕏 监控</label>
-      <label class="field">日间轮询间隔（秒）
-        <input id="socialXInterval" min="10" placeholder="60" type="number"/>
-      </label>
-      <label class="field">夜间轮询间隔（秒）
-        <input id="socialXNightInterval" min="10" placeholder="300" type="number"/>
-      </label>
-    </div>
-    <div style="margin-top:14px;">
-      <label class="field">全局补充监控账号（已在成员管理中绑定的账号无需在此重复填写）
-        <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
-      </label>
+    <div class="monitor-grid">
+      <div class="monitor-project monitor-project--full">
+        <div class="monitor-project-heading">
+          <h3>𝕏 内容监控</h3>
+          <label class="switch"><input id="socialXOn" type="checkbox"/><span class="track"></span>启用 𝕏 监控</label>
+        </div>
+        <div class="monitor-frequency-group" role="group" aria-label="X 轮询频率">
+          <label class="field">日间轮询间隔（秒）
+            <input id="socialXInterval" min="10" placeholder="60" type="number"/>
+          </label>
+          <label class="field">深夜轮询间隔（秒）
+            <input id="socialXNightInterval" min="10" placeholder="300" type="number"/>
+          </label>
+        </div>
+        <div class="monitor-account-group">
+          <label class="field">全局补充监控账号（已在成员管理中绑定的账号无需在此重复填写）
+            <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
+          </label>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- Card 3: 📸 Instagram 监控设置 -->
   <div class="card monitor-card">
     <h2>📸 Instagram 监控设置（Feed / Story / Reels）</h2>
-    <div class="grid">
-      <label class="switch"><input id="socialIgOn" type="checkbox"/><span class="track"></span>启用 Instagram 监控</label>
-      <label class="switch"><input id="socialIgFeed" type="checkbox"/><span class="track"></span>包含主页 Feed 动态</label>
-      <label class="switch"><input id="socialIgStories" type="checkbox"/><span class="track"></span>包含 24h Story 快拍</label>
-      <label class="field">日间轮询间隔（min / max 秒）
-        <span class="pair"><input id="socialIgInterval" min="60" placeholder="1800" type="number"/><span>–</span><input id="socialIgIntervalMax" min="60" placeholder="3600" type="number"/></span>
-      </label>
-      <label class="field">夜间轮询间隔（min / max 秒）
-        <span class="pair"><input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/><span>–</span><input id="socialIgNightIntervalMax" min="60" placeholder="10800" type="number"/></span>
-      </label>
-    </div>
-    <div style="margin-top:14px;">
-      <label class="field">全局补充监控账号（已在成员管理中绑定的账号无需在此重复填写）
-        <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
-      </label>
-    </div>
-    <p class="hint" style="margin:10px 0 0;">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
-    <div style="margin-top:14px; padding:14px 16px; background:var(--card-soft); border:1px solid var(--border-soft); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
-      <div>
-        <div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;">
-          <span>🍪 Instagram 登录凭证 (Cookies)</span>
-          <span id="igSessionStatus"></span>
+    <div class="monitor-grid">
+      <div class="monitor-project monitor-project--full">
+        <div class="monitor-project-heading">
+          <h3>Instagram 内容监控</h3>
+          <label class="switch"><input id="socialIgOn" type="checkbox"/><span class="track"></span>启用 Instagram 监控</label>
         </div>
-        <div id="igSessionDetail" style="font-size:12px; color:var(--muted); margin-top:4px;">
-          支持 Netscape / JSON / 完整 Cookies 格式；Story 需要登录 Cookie，公开 Feed 可免登录。
+        <div class="monitor-control-group" role="group" aria-label="Instagram 内容类型">
+          <span class="monitor-group-label">内容类型</span>
+          <div class="switch-group">
+            <label class="switch"><input id="socialIgFeed" type="checkbox"/><span class="track"></span>包含主页 Feed 动态</label>
+            <label class="switch"><input id="socialIgStories" type="checkbox"/><span class="track"></span>包含 24h Story 快拍</label>
+          </div>
         </div>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn small primary" id="btnFillIgSession" type="button">配置 Cookies</button>
-        <button class="btn small" id="btnCheckIgSession" type="button">检测连通性</button>
-        <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
+        <div class="monitor-frequency-group" role="group" aria-label="Instagram 轮询频率">
+          <label class="field">日间轮询间隔（min / max 秒）
+            <span class="pair monitor-field-pair"><input id="socialIgInterval" min="60" placeholder="1800" type="number"/><span>–</span><input id="socialIgIntervalMax" min="60" placeholder="3600" type="number"/></span>
+          </label>
+          <label class="field">深夜轮询间隔（min / max 秒）
+            <span class="pair monitor-field-pair"><input id="socialIgNightInterval" min="60" placeholder="5400" type="number"/><span>–</span><input id="socialIgNightIntervalMax" min="60" placeholder="10800" type="number"/></span>
+          </label>
+        </div>
+        <div class="monitor-account-group">
+          <label class="field">全局补充监控账号（已在成员管理中绑定的账号无需在此重复填写）
+            <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
+          </label>
+        </div>
+        <p class="hint" style="margin:0;">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
+        <div class="monitor-credential-group">
+          <div>
+            <div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;">
+              <span>🍪 Instagram 登录凭证 (Cookies)</span>
+              <span id="igSessionStatus"></span>
+            </div>
+            <div id="igSessionDetail" style="font-size:12px; color:var(--muted); margin-top:4px;">
+              支持 Netscape / JSON / 完整 Cookies 格式；Story 需要登录 Cookie，公开 Feed 可免登录。
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn small primary" id="btnFillIgSession" type="button">配置 Cookies</button>
+            <button class="btn small" id="btnCheckIgSession" type="button">检测连通性</button>
+            <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -875,31 +918,37 @@
     <h2>🎵 TikTok 短视频 & TikTok Live 自动录制</h2>
     <div class="monitor-grid">
       <div class="monitor-project">
-        <h3>🎵 TikTok 短视频</h3>
-        <div class="monitor-fields single">
+        <div class="monitor-project-heading">
+          <h3>🎵 TikTok 短视频</h3>
           <label class="switch"><input id="socialTiktokOn" type="checkbox"/><span class="track"></span>启用 TikTok 短视频监控</label>
+        </div>
+        <div class="monitor-frequency-group single" role="group" aria-label="TikTok 短视频轮询频率">
           <label class="field">日间/深夜轮询间隔（秒）
             <input id="socialTiktokInterval" min="30" placeholder="120" type="number"/>
           </label>
         </div>
+        <div class="monitor-account-group">
+          <label class="field">TikTok 短视频全局补充账号
+            <textarea id="socialTiktokAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
+          </label>
+        </div>
       </div>
       <div class="monitor-project">
-        <h3>🔴 TikTok Live</h3>
-        <div class="monitor-fields single">
+        <div class="monitor-project-heading">
+          <h3>🔴 TikTok Live</h3>
           <label class="switch"><input id="socialLiveOn" type="checkbox"/><span class="track"></span>启用直播探测与录制</label>
+        </div>
+        <div class="monitor-frequency-group single" role="group" aria-label="TikTok Live 探测频率">
           <label class="field">日间/深夜探测频率（秒）
             <input id="socialLiveInterval" min="5" placeholder="8" type="number"/>
           </label>
         </div>
+        <div class="monitor-account-group">
+          <label class="field">TikTok Live 直播全局补充账号
+            <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
+          </label>
+        </div>
       </div>
-    </div>
-    <div style="margin-top:14px;" class="grid">
-      <label class="field">TikTok 短视频全局补充账号
-        <textarea id="socialTiktokAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
-      </label>
-      <label class="field">TikTok Live 直播全局补充账号
-        <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
-      </label>
     </div>
   </div>
 
@@ -973,7 +1022,7 @@
       <div class="settings-group-title" id="deliverySettingsTitle">
         <span>告警与发送通道</span><span class="settings-group-badge">不控制抓取频率</span>
       </div>
-      <div class="grid">
+      <div class="settings-field-grid">
         <label class="field" title="相同告警的重复通知抑制时间，不影响任何轮询。">
           告警重复通知冷却（秒）
           <input id="alertCooldown" min="0" type="number"/>
@@ -992,7 +1041,9 @@
 
   <div class="card">
     <h2>🌐 多引擎 AI 翻译设置（Gemini + 智谱 GLM-4 智能轮番调度）</h2>
-    <div class="grid">
+    <div class="settings-group">
+      <div class="settings-group-title"><span>翻译运行参数</span><span class="settings-group-badge">仅影响翻译请求</span></div>
+      <div class="settings-field-grid">
       <label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 AI 智能翻译</label>
       <label class="field">调用限速间隔（秒）
         <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
@@ -1000,8 +1051,11 @@
       <label class="field">翻译单次超时（秒）
         <input id="translateTimeout" min="1" type="number"/>
       </label>
+      </div>
     </div>
-    <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+    <div class="settings-group" style="margin-top:12px;">
+      <div class="settings-group-title"><span>服务凭证</span></div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <span style="font-size:12.5px; color:var(--muted); min-width:180px;">Google Gemini Key (.env)</span>
         <span id="geminiKeyStatus"></span>
@@ -1013,6 +1067,7 @@
         <span id="zhipuKeyStatus"></span>
         <button class="btn small" id="btnFillZhipuKey" type="button">填写</button>
         <button class="btn small danger" id="btnClearZhipuKey" type="button" style="display:none;">清空</button>
+      </div>
       </div>
     </div>
   </div>
@@ -1032,23 +1087,34 @@
 
   <div class="card">
     <h2>💾 消息归档与每日摘要</h2>
-    <div class="grid">
-      <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
-      <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
-      <label class="switch"><input id="imageTaggingOn" type="checkbox"/><span class="track"></span>自动识别图片标签 (AI 打标)</label>
-      <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
-      <label class="field">摘要时间（JST 整点）
-        <input id="summaryHour" max="23" min="0" type="number"/>
-      </label>
+    <div class="settings-group">
+      <div class="settings-group-title"><span>归档内容</span></div>
+      <div class="settings-control-group">
+        <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
+        <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
+        <label class="switch"><input id="imageTaggingOn" type="checkbox"/><span class="track"></span>自动识别图片标签 (AI 打标)</label>
+      </div>
+    </div>
+    <div class="settings-group">
+      <div class="settings-group-title"><span>每日摘要</span></div>
+      <div class="settings-field-grid">
+        <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
+        <label class="field">摘要时间（JST 整点）
+          <input id="summaryHour" max="23" min="0" type="number"/>
+        </label>
+      </div>
     </div>
   </div>
 
   <div class="card">
     <h2>🖥️ 网页管理端服务配置</h2>
-    <div class="grid">
-      <label class="switch"><input id="webAdminOn" type="checkbox"/><span class="track"></span>启用 Web UI（下次重启生效）</label>
-      <label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
-      <label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
+    <div class="settings-group">
+      <div class="settings-group-title"><span>服务监听</span><span class="settings-group-badge">重启后生效</span></div>
+      <div class="settings-field-grid">
+        <label class="switch"><input id="webAdminOn" type="checkbox"/><span class="track"></span>启用 Web UI（下次重启生效）</label>
+        <label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
+        <label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
+      </div>
     </div>
     <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
       监听地址或端口修改需重启生效；绑定非 <code>127.0.0.1</code> 前，请先在 <code>.env</code> 设置 <code>WEB_ADMIN_TOKEN</code>。

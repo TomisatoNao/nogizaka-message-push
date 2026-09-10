@@ -170,7 +170,7 @@ def test_admin_frontend_config_and_dark_select_contracts():
     assert "同一个 timeline 请求的 Request Headers" not in html
     assert "必须包含 URL 与请求体" in html
     assert "Request Headers 文本" not in html
-    # 动态监控页集中展示全局时段、Message 与其它项目；系统页只保留发送层参数。
+    # 动态监控页集中展示全局时段、Message 与其它项目；系统页的运行参数按组展示。
     assert "全局监控调度" in html
     assert "Message 监控设置" in html
     assert "monitor_schedule" in html
@@ -189,18 +189,44 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
         "scheduleDayStart", "scheduleNightStart", "sleepStart", "sleepEnd",
         "schedulePause", "scheduleState", "msgMonitorOn", "dayMin", "dayMax",
         "nightMin", "nightMax",
+        "blogMonitorOn", "blogHinatazaka", "blogNogizaka", "blogSakurazaka",
+        "blogDayMin", "blogDayMax", "blogNightMin", "blogNightMax",
+        "socialXOn", "socialXInterval", "socialXNightInterval", "socialXAccounts",
+        "socialIgOn", "socialIgFeed", "socialIgStories", "socialIgInterval",
+        "socialIgIntervalMax", "socialIgNightInterval", "socialIgNightIntervalMax",
+        "socialIgAccounts", "socialTiktokOn", "socialTiktokInterval",
+        "socialTiktokAccounts", "socialLiveOn", "socialLiveInterval", "socialLiveAccounts",
     ):
-        assert f'id="{element_id}"' in html
+        assert html.count(f'id="{element_id}"') == 1
     assert "function updateScheduleState()" in html
     assert "config.monitor_schedule =" in html
     assert "monitor-project" in html
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
-    assert ".monitor-project .switch { white-space: normal" in html
+    assert ".monitor-project-heading h3 { flex: 1 1 auto; min-width: 0;" in html
+    assert ".monitor-project-heading > .switch { flex: 0 0 auto; width: auto;" in html
+    assert ".monitor-control-group .switch { flex: 0 0 auto; width: auto;" in html
+    assert ".monitor-frequency-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in html
+    assert ".monitor-field-pair input { flex: 0 1 90px; width: 90px;" in html
     assert "class=\"monitor-project message-project\"" in html
     assert ".monitor-project.message-project { grid-column: 1 / -1; }" in html
-    assert ".schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px));" in html
+    assert ".schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: start;" in html
     assert "0 表示午夜 00:00" in html
     assert "end && n === 0 ? \"24:00\"" in html
+    assert 'class="monitor-project monitor-project--full"' in html
+    assert 'class="monitor-control-group" role="group" aria-label="博客团体开关"' in html
+    assert 'class="monitor-frequency-group" role="group" aria-label="博客轮询频率"' in html
+    assert 'class="monitor-frequency-group" role="group" aria-label="Instagram 轮询频率"' in html
+    assert 'class="monitor-account-group"' in html
+    assert 'class="monitor-credential-group"' in html
+    assert 'class="settings-field-grid"' in html
+    assert 'class="settings-control-group"' in html
+    assert ".monitor-project-heading h3 { flex: 1 1 100%; }" in html
+    assert ".monitor-project-heading > .switch { flex: 1 1 100%; width: 100%;" in html
+    # TikTok / Live 的补充账号必须留在各自项目容器内，避免项目边界不清。
+    for account_id in ("socialTiktokAccounts", "socialLiveAccounts"):
+        project_start = html.rfind('<div class="monitor-project"', 0, html.index(f'id="{account_id}"'))
+        assert project_start >= 0
+        assert html.index(f'id="{account_id}"') < html.index('</div>\n      </div>', project_start)
     assert "告警重复通知冷却" in html
     assert "QQ / NapCat 发送节流间隔" in html
     assert "NapCat 单路发送超时" in html
