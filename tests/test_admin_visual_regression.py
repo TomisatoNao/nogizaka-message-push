@@ -25,7 +25,7 @@ VIEWPORTS = {
     "tablet": {"width": 768, "height": 1000},
     "mobile": {"width": 390, "height": 844},
 }
-TABS = ("status", "monitors", "channels", "social")
+TABS = ("status", "monitors", "channels", "social", "system", "users", "advanced")
 
 
 class _StaticHandler(SimpleHTTPRequestHandler):
@@ -125,7 +125,7 @@ def _fixture_config() -> dict:
 
 def _api_payload(path: str) -> dict:
     if path == "/api/auth/me":
-        return {"auth_enabled": False, "user": None}
+        return {"auth_enabled": True, "user": {"username": "demo_admin", "role": "admin"}}
     if path == "/api/config":
         return {
             "ok": True,
@@ -176,7 +176,14 @@ def _api_payload(path: str) -> dict:
             },
         }
     if path == "/api/users":
-        return {"ok": True, "users": []}
+        return {
+            "ok": True,
+            "min_password_len": 8,
+            "users": [
+                {"username": "demo_admin", "role": "admin", "created_at": 1788900000, "is_me": True},
+                {"username": "demo_viewer", "role": "viewer", "created_at": 1788800000, "is_me": False},
+            ],
+        }
     return {"ok": True}
 
 
@@ -249,11 +256,18 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                             return {headingWidth: h?.width || 0, actionsWidth: a?.width || 0, headingBottom: h?.bottom || 0, actionsTop: a?.top || 0};
                         }),
                         tableScrollContainers: document.querySelectorAll('section.tab.active .admin-data-group .table-wrap').length,
+                        startupItems: [...document.querySelectorAll('section.tab.active .admin-summary-grid--status .admin-summary-item')].map((el) => el.getBoundingClientRect().width),
+                        touchTargets: [...document.querySelectorAll('section.tab.active .admin-actions .btn, section.tab.active .status-actions .btn')].map((el) => el.getBoundingClientRect().height).filter((height) => height > 0),
                     })"""
                 )
                 assert metrics["scrollWidth"] <= metrics["viewportWidth"] + 1
                 assert metrics["modules"]
-                assert metrics["tableScrollContainers"] >= (1 if tab in {"status", "monitors", "channels"} else 0)
+                assert metrics["tableScrollContainers"] >= (1 if tab in {"status", "monitors", "channels", "users", "advanced"} else 0)
+                if tab == "status":
+                    assert len(metrics["startupItems"]) == 3
+                    assert metrics["startupItems"][0] <= (300 if viewport_name != "mobile" else metrics["viewportWidth"])
+                if viewport_name == "mobile":
+                    assert all(height >= 40 for height in metrics["touchTargets"])
                 for module in metrics["modules"]:
                     if module["actionsWidth"]:
                         assert module["headingWidth"] >= module["actionsWidth"]

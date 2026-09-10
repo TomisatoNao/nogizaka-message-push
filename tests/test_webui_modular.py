@@ -218,8 +218,8 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert 'class="monitor-frequency-group" role="group" aria-label="Instagram 轮询频率"' in html
     assert 'class="monitor-account-group"' in html
     assert 'class="monitor-credential-group"' in html
-    assert 'class="settings-field-grid"' in html
-    assert 'class="settings-control-group"' in html
+    assert "settings-field-grid" in html
+    assert "settings-control-group" in html
     assert ".monitor-project-heading h3 { flex: 1 1 100%; }" in html
     assert ".monitor-project-heading > .switch { flex: 1 1 100%; width: 100%;" in html
     # TikTok / Live 的补充账号必须留在各自项目容器内，避免项目边界不清。
@@ -274,6 +274,42 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
     assert ".table-wrap { overflow-x: auto; }" in html
     assert "function mkTableInput(" in html
     assert "className = \"admin-table-input\"" in html
+
+
+def test_admin_stage6_user_system_advanced_layout_contract():
+    """用户、系统、高级和社媒工具页共享模块层级且静态布局不依赖内联样式。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    assert 'class="admin-summary-grid admin-summary-grid--status"' in html
+    assert 'class="admin-summary-value admin-summary-state admin-status-badge muted"' in html
+    assert 'startupBox.className = "admin-summary-value admin-summary-state admin-status-badge " + tone;' in html
+
+    for section_id in ("tab-social", "tab-system", "tab-users", "tab-advanced"):
+        start = html.index(f'id="{section_id}"')
+        end = html.index("</section>", start)
+        section = html[start:end]
+        assert 'class="card admin-module' in section
+        assert "style=" not in section
+
+    for selector in (
+        ".admin-user-access", ".admin-user-table", ".admin-log-toolbar",
+        ".admin-editor-group", ".admin-social-tool-input", ".admin-social-targets",
+        ".admin-settings-group", ".admin-settings-title",
+    ):
+        assert selector in html
+
+    for element_id in (
+        "authArchivePublic", "userRows", "btnAddUser", "logSourceChips", "logErrOnly",
+        "logKeyword", "logFollow", "rawJson", "btnApplyJson", "btnResetJson",
+        "historyRows", "historyEmpty", "toolSocialUrl", "toolSocialChannelList",
+    ):
+        assert html.count(f'id="{element_id}"') == 1
+
+    assert ".admin-summary-grid--status { grid-template-columns: minmax(148px, max-content)" in html
+    assert ".admin-summary-grid--status { grid-template-columns: minmax(148px, max-content) minmax(0, 1fr); }" in html
+    assert ".admin-summary-grid--status { grid-template-columns: 1fr; }" in html
+    assert ".admin-user-table { min-width: 620px; }" in html
+    assert ".admin-log-keyword { width: min(220px, 100%);" in html
 
 
 def test_system_handlers_smart_parse():

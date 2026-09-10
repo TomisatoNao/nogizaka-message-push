@@ -52,10 +52,12 @@
   .admin-field-grid > * { min-width: 0; }
   .admin-field-grid input[type=number] { max-width: 240px; font-variant-numeric: tabular-nums; }
   .admin-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; min-width: 0; }
+  .admin-summary-grid--status { grid-template-columns: minmax(148px, max-content) minmax(0, 1fr) minmax(0, 1.15fr); }
   .admin-summary-item { min-width: 0; padding: 11px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 68%, transparent); }
   .admin-summary-label { display: block; margin-bottom: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
   .admin-summary-value { display: block; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.45; font-variant-numeric: tabular-nums; }
   .admin-summary-value.accent { color: var(--accent); }
+  .admin-summary-state { display: inline-flex; width: fit-content; max-width: 100%; vertical-align: middle; }
   .admin-summary-feedback { margin: 0; font-size: 13px; }
   .admin-status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
   .admin-status-badge.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
@@ -152,6 +154,74 @@
   .settings-control-group { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
   .settings-control-group .switch { flex: 0 0 auto; white-space: normal; align-items: flex-start; line-height: 1.4; }
 
+  /* 系统设置、用户和高级页的共享模块别名；保留 settings-* 兼容旧版结构。 */
+  .admin-settings-group { padding: 14px 16px 16px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 55%, transparent); }
+  .admin-settings-group + .admin-settings-group { margin-top: 12px; }
+  .admin-settings-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--text); font-size: 12.5px; font-weight: 650; }
+  .admin-settings-title .settings-group-badge { flex: 0 0 auto; }
+  .admin-settings-group .admin-field-grid { grid-template-columns: repeat(3, minmax(0, 240px)); }
+  .admin-settings-group .admin-control-group { padding: 0; border: 0; background: transparent; }
+  .admin-settings-group .admin-control-group .switch { flex: 0 0 auto; }
+
+  /* 用户页 */
+  .admin-user-access { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .admin-user-access-copy { flex: 1 1 320px; min-width: 0; }
+  .admin-user-access-title { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: 16px; line-height: 1.4; }
+  .admin-user-access-title > span:first-child { flex: 0 0 auto; }
+  .admin-user-access-note { margin: 6px 0 0; line-height: 1.6; }
+  .admin-link { color: var(--accent); font-weight: 600; }
+  .admin-user-access-toggle { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
+  .admin-user-table { min-width: 620px; }
+  .admin-user-table td:first-child { min-width: 150px; }
+  .admin-user-table td:nth-child(2) { min-width: 110px; }
+  .admin-user-table td:nth-child(3) { min-width: 180px; white-space: nowrap; }
+  .admin-user-empty { text-align: center; }
+  .admin-table-state { color: var(--muted); padding: 14px 4px; text-align: center; }
+  .admin-table-state--error { color: var(--err); text-align: left; }
+  .admin-user-current { margin-left: 6px; }
+
+  /* 高级页 */
+  .admin-log-toolbar { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .admin-log-toolbar .chips { flex: 1 1 220px; min-width: 0; }
+  .admin-log-keyword { width: min(220px, 100%); flex: 0 1 220px; }
+  .admin-log-filter-info { margin: 0; }
+  .admin-log-follow { margin-left: auto; }
+  .admin-editor-group { padding: 0; border: 0; background: transparent; }
+  .admin-editor-actions { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .admin-history-empty { margin-top: 10px; }
+  .admin-hint-flush { margin-top: 6px; margin-bottom: 0; }
+
+  /* 手动社媒工具 */
+  .admin-social-tool-intro { margin: 0 0 14px; font-size: 13px; }
+  .admin-social-tool-input { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+  .admin-social-url { flex: 1 1 280px; min-width: min(280px, 100%); font-size: 13.5px; }
+  .admin-social-tool-input .btn { white-space: nowrap; }
+  .admin-social-tool-options { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 12px; }
+  .admin-loading { display: none; color: var(--accent); font-size: 13px; font-weight: 600; }
+  .admin-social-targets { margin-top: 12px; padding: 10px 14px; background: var(--card-soft); border-radius: var(--radius-sm); border: 1px solid var(--border-soft); }
+  .admin-social-targets-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
+  .admin-social-targets-heading .btn { padding: 2px 8px; font-size: 11px; height: auto; }
+  .admin-social-channel-list { display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; }
+  .admin-social-channel-option { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12.5px; font-weight: 550; color: var(--text); }
+  .admin-social-channel-option--target { padding: 5px 10px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--card); }
+  .admin-social-no-targets { color: var(--muted); font-size: 12px; }
+  .admin-social-targets-note { margin-top: 8px; }
+  .admin-social-result { display: none; margin-top: 16px; padding: 16px; background: var(--card-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
+  .admin-social-result-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+  .admin-social-result-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .admin-social-platform { padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+  .admin-social-author { font-size: 14px; font-weight: 700; color: var(--text-strong); }
+  .admin-social-time { font-size: 12px; color: var(--muted); }
+  .admin-social-source-link { font-size: 12px; color: var(--accent); text-decoration: none; }
+  .admin-social-result-text { margin-bottom: 8px; font-size: 13.5px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+  .admin-social-translation { display: none; margin-bottom: 10px; padding: 8px 12px; border-left: 3px solid var(--ok); border-radius: 0 8px 8px 0; background: rgba(40,205,65,.08); }
+  .admin-social-translation-title { margin-bottom: 2px; color: var(--ok); font-size: 11.5px; font-weight: 650; }
+  .admin-social-translation-text { color: var(--ok); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+  .admin-social-result-media { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .admin-social-result-media img { width: 120px; height: 120px; object-fit: cover; border: 1px solid var(--border-soft); border-radius: 8px; }
+  .admin-social-video-link { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,.5); color: #fff; font-size: 12px; }
+  .admin-social-video-link a { color: #fff; text-decoration: underline; }
+
   /* 动态监控设置：每个项目拥有独立容器，内部再明确区分控制、频率和账号。 */
   .monitor-card .monitor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; align-items: start; }
   .monitor-project { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-soft)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 62%, transparent); }
@@ -181,6 +251,10 @@
   .monitor-project .monitor-credential-group { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .monitor-project .monitor-credential-group > :first-child { flex: 1 1 320px; }
   .monitor-project .monitor-credential-group > * { min-width: 0; }
+  .monitor-credential-title { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
+  .monitor-credential-detail { margin-top: 4px; color: var(--muted); font-size: 12px; }
+  .monitor-credential-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .monitor-credential-clear { display: none; }
   .schedule-card .schedule-grid { display: grid; grid-template-columns: repeat(4, minmax(132px, 180px)); justify-content: start; gap: 12px 16px; }
   .schedule-card .schedule-grid .field { min-width: 0; }
   .schedule-card .schedule-grid .schedule-field { width: 100%; }
@@ -458,6 +532,8 @@
 
   @media (max-width: 900px) and (min-width: 641px) {
     .admin-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-summary-grid--status { grid-template-columns: minmax(148px, max-content) minmax(0, 1fr); }
+    .admin-summary-grid--status .admin-summary-item:last-child { grid-column: 1 / -1; }
     .admin-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
     .admin-channel-switches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .admin-module-heading > h2 { flex-basis: 220px; }
@@ -465,6 +541,9 @@
     .settings-group .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .settings-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
     .settings-control-group { gap: 10px 14px; }
+    .admin-settings-group .admin-field-grid { grid-template-columns: repeat(2, minmax(0, 240px)); }
+    .admin-social-tool-input { gap: 8px; }
+    .admin-social-url { flex-basis: 240px; min-width: 240px; }
     .monitor-card .monitor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .monitor-project-heading { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
     .monitor-project-heading h3 { flex: 1 1 100%; }
@@ -491,6 +570,7 @@
     .admin-field-grid,
     .admin-summary-grid,
     .admin-channel-switches { grid-template-columns: 1fr; gap: 10px; }
+    .admin-summary-grid--status { grid-template-columns: 1fr; }
     .admin-field-grid input[type=number] { max-width: none; }
     .admin-summary-item { padding: 10px 12px; }
     .admin-member-account { align-items: flex-start; flex-wrap: wrap; }
@@ -517,6 +597,23 @@
     .monitor-project-heading h3 { flex: 1 1 100%; }
     .monitor-project-heading > .switch { flex: 1 1 100%; width: 100%; white-space: normal; }
     .settings-control-group { align-items: flex-start; gap: 10px 14px; }
+    .admin-settings-group { padding: 12px; }
+    .admin-settings-title { margin-bottom: 10px; }
+    .admin-settings-group .admin-field-grid { grid-template-columns: 1fr; gap: 12px; }
+    .admin-user-access { align-items: flex-start; }
+    .admin-user-access-title { font-size: 14px; }
+    .admin-user-access-toggle { width: 100%; }
+    .admin-log-toolbar { align-items: flex-start; }
+    .admin-log-toolbar .chips { flex-basis: 100%; }
+    .admin-log-keyword { flex: 1 1 180px; min-width: 160px; }
+    .admin-log-follow { margin-left: 0; }
+    .admin-social-tool-input { align-items: stretch; }
+    .admin-social-url { flex-basis: 100%; min-width: 0; }
+    .admin-social-tool-input .btn { flex: 1 1 auto; justify-content: center; min-height: 40px; }
+    .admin-social-tool-options { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .admin-social-targets { padding: 10px 12px; }
+    .admin-social-channel-list { gap: 8px 12px; }
+    .admin-social-result { padding: 12px; }
     .monitor-control-group { align-items: flex-start; }
     .monitor-frequency-group,
     .monitor-account-group { grid-template-columns: 1fr; gap: 10px; }
@@ -638,8 +735,8 @@
         <button class="btn small danger" hidden="" id="btnRestart" type="button" title="重启服务并重新加载凭证，运行中的任务将短暂中断">⟳ 重启主程序</button>
       </div>
     </div>
-    <div class="admin-summary-grid" role="group" aria-label="系统运行摘要">
-      <div class="admin-summary-item"><span class="admin-summary-label">启动状态</span><span id="stStartup" class="admin-summary-value cred">—</span></div>
+    <div class="admin-summary-grid admin-summary-grid--status" role="group" aria-label="系统运行摘要">
+      <div class="admin-summary-item"><span class="admin-summary-label">启动状态</span><span id="stStartup" class="admin-summary-value admin-summary-state admin-status-badge muted">—</span></div>
       <div class="admin-summary-item"><span class="admin-summary-label">巡查周期</span><span id="stCycle" class="admin-summary-value">—</span></div>
       <div class="admin-summary-item"><span class="admin-summary-label">下一次巡查倒计时</span><span id="stNext" class="admin-summary-value accent">—</span></div>
     </div>
@@ -1053,21 +1150,21 @@
             <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
           </label>
         </div>
-        <p class="hint" style="margin:0;">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
+        <p class="hint admin-note--flush">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
         <div class="monitor-credential-group">
           <div>
-            <div style="font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px;">
+            <div class="monitor-credential-title">
               <span>🍪 Instagram 登录凭证 (Cookies)</span>
               <span id="igSessionStatus"></span>
             </div>
-            <div id="igSessionDetail" style="font-size:12px; color:var(--muted); margin-top:4px;">
+            <div class="monitor-credential-detail" id="igSessionDetail">
               支持 Netscape / JSON / 完整 Cookies 格式；Story 需要登录 Cookie，公开 Feed 可免登录。
             </div>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div class="monitor-credential-actions">
             <button class="btn small primary" id="btnFillIgSession" type="button">配置 Cookies</button>
             <button class="btn small" id="btnCheckIgSession" type="button">检测连通性</button>
-            <button class="btn small danger" id="btnClearIgSession" type="button" style="display:none;">清空</button>
+            <button class="btn small danger monitor-credential-clear" id="btnClearIgSession" type="button">清空</button>
           </div>
         </div>
       </div>
@@ -1114,62 +1211,62 @@
   </div>
 
   <!-- Card 5: 🧰 实用工具 · 单条社媒链接解析与手动推送 -->
-  <div class="card">
+  <div class="card admin-module">
     <h2>🧰 实用工具 · 单条社媒链接解析与即时推送</h2>
-    <div style="font-size:13px; color:var(--muted); margin-bottom:14px;">
+    <div class="hint admin-social-tool-intro">
       支持输入 <b>X (Twitter) 推文</b>、<b>Instagram 帖子/Reel</b> 或 <b>TikTok 视频</b> 链接，抓取全部图片、最高画质原图、视频/音频及正文，并支持 AI 双语翻译与多通道广播推送。
     </div>
-    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:stretch;">
-      <input id="toolSocialUrl" type="text" placeholder="https://x.com/user/status/... 或 https://www.instagram.com/p/... 或 https://www.tiktok.com/@.../video/..." style="flex:1; min-width:280px; font-size:13.5px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; background:var(--card-soft); color:var(--text);" />
-      <button class="btn" id="btnToolSocialPaste" type="button" style="white-space:nowrap;">📋 粘贴</button>
-      <button class="btn" id="btnToolSocialParse" type="button" style="white-space:nowrap;">🔍 解析预览</button>
-      <button class="btn primary" id="btnToolSocialPush" type="button" style="white-space:nowrap;">🚀 一键推送至已选通道</button>
+    <div class="admin-social-tool-input">
+      <input class="admin-social-url" id="toolSocialUrl" type="text" placeholder="https://x.com/user/status/... 或 https://www.instagram.com/p/... 或 https://www.tiktok.com/@.../video/..." />
+      <button class="btn" id="btnToolSocialPaste" type="button">📋 粘贴</button>
+      <button class="btn" id="btnToolSocialParse" type="button">🔍 解析预览</button>
+      <button class="btn primary" id="btnToolSocialPush" type="button">🚀 一键推送至已选通道</button>
     </div>
-    
-    <div style="display:flex; gap:18px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+
+    <div class="admin-social-tool-options">
       <label class="switch"><input id="toolSocialTranslate" type="checkbox"/><span class="track"></span>AI 智能翻译</label>
       <label class="switch"><input id="toolSocialArchive" type="checkbox"/><span class="track"></span>同步保存到 SQLite 归档库</label>
-      <span id="toolSocialLoading" style="display:none; font-size:13px; color:var(--accent); font-weight:600;">⏳ 正在解析社媒内容，请稍候…</span>
+      <span class="admin-loading" id="toolSocialLoading">⏳ 正在解析社媒内容，请稍候…</span>
     </div>
 
     <!-- 推送通道勾选区 -->
-    <div style="margin-top:12px; padding:10px 14px; background:var(--card-soft); border-radius:8px; border:1px solid var(--border-soft);">
-      <div style="font-size:12px; color:var(--muted); font-weight:600; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+    <div class="admin-social-targets">
+      <div class="admin-social-targets-heading">
         <span>🎯 选择推送目标通道（按需勾选）：</span>
-        <button id="btnToolSocialToggleAllChannels" type="button" class="btn" style="padding:2px 8px; font-size:11px; height:auto;">反选 / 切换</button>
+        <button id="btnToolSocialToggleAllChannels" type="button" class="btn">反选 / 切换</button>
       </div>
-      <div id="toolSocialChannelList" style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
-        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text);">
+      <div class="admin-social-channel-list" id="toolSocialChannelList">
+        <label class="admin-social-channel-option">
           <input type="checkbox" name="toolSocialChannel" value="qq_official" checked /> 🤖 QQ 官方机器人
         </label>
-        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text);">
+        <label class="admin-social-channel-option">
           <input type="checkbox" name="toolSocialChannel" value="napcat" checked /> 🐾 NapCat QQ 群
         </label>
-        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text);">
+        <label class="admin-social-channel-option">
           <input type="checkbox" name="toolSocialChannel" value="tg" checked /> ✈️ Telegram
         </label>
       </div>
-      <div class="hint" style="margin-top:8px;">手动指定目标会直达所选通道，不读取该通道的订阅类型和白名单过滤规则。</div>
+      <div class="hint admin-social-targets-note">手动指定目标会直达所选通道，不读取该通道的订阅类型和白名单过滤规则。</div>
     </div>
 
     <!-- 解析结果展示区 -->
-    <div id="toolSocialResult" style="display:none; margin-top:16px; padding:16px; background:var(--card-soft); border:1px solid var(--border-soft); border-radius:12px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span id="tsResPlatform" style="padding:2px 8px; border-radius:6px; font-size:11.5px; font-weight:700; background:var(--accent-soft); color:var(--accent);">𝕏 Twitter</span>
-          <span id="tsResAuthor" style="font-size:14px; font-weight:700; color:var(--text-strong);"></span>
-          <span id="tsResTime" style="font-size:12px; color:var(--muted);"></span>
+    <div class="admin-social-result" id="toolSocialResult">
+      <div class="admin-social-result-heading">
+        <div class="admin-social-result-meta">
+          <span class="admin-social-platform" id="tsResPlatform">𝕏 Twitter</span>
+          <span class="admin-social-author" id="tsResAuthor"></span>
+          <span class="admin-social-time" id="tsResTime"></span>
         </div>
-        <a id="tsResLink" href="#" target="_blank" rel="noopener" style="font-size:12px; color:var(--accent); text-decoration:none;">查看原始链接 ↗</a>
+        <a class="admin-social-source-link" id="tsResLink" href="#" target="_blank" rel="noopener">查看原始链接 ↗</a>
       </div>
 
-      <div id="tsResText" style="font-size:13.5px; color:var(--text); line-height:1.6; white-space:pre-wrap; margin-bottom:8px;"></div>
-      <div id="tsResTransBox" style="display:none; background:rgba(40,205,65,0.08); border-left:3px solid var(--ok); border-radius:0 8px 8px 0; padding:8px 12px; margin-bottom:10px;">
-        <div style="font-size:11.5px; color:var(--ok); font-weight:650; margin-bottom:2px;">🤖 AI 译文</div>
-        <div id="tsResTranslation" style="font-size:13px; color:var(--ok); line-height:1.55; white-space:pre-wrap;"></div>
+      <div class="admin-social-result-text" id="tsResText"></div>
+      <div class="admin-social-translation" id="tsResTransBox">
+        <div class="admin-social-translation-title">🤖 AI 译文</div>
+        <div class="admin-social-translation-text" id="tsResTranslation"></div>
       </div>
 
-      <div id="tsResMedia" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;"></div>
+      <div class="admin-social-result-media" id="tsResMedia"></div>
     </div>
   </div>
 </section>
@@ -1179,11 +1276,11 @@
   <div class="card admin-module system-settings-card">
     <h2>🚦 发送与告警参数</h2>
     <div class="settings-scope-note">这些参数只影响告警通知、QQ/NapCat 发送节流和单路超时，不改变任何内容监控的抓取频率。监控时段与轮询间隔请在“动态监控”页面配置。</div>
-    <div class="settings-group channels" aria-labelledby="deliverySettingsTitle">
-      <div class="settings-group-title" id="deliverySettingsTitle">
+    <div class="admin-settings-group settings-group channels" aria-labelledby="deliverySettingsTitle">
+      <div class="admin-settings-title settings-group-title" id="deliverySettingsTitle">
         <span>告警与发送通道</span><span class="settings-group-badge">不控制抓取频率</span>
       </div>
-      <div class="settings-field-grid">
+      <div class="admin-field-grid settings-field-grid">
         <label class="field" title="相同告警的重复通知抑制时间，不影响任何轮询。">
           告警重复通知冷却（秒）
           <input id="alertCooldown" min="0" type="number"/>
@@ -1202,9 +1299,9 @@
 
   <div class="card admin-module">
     <h2>🌐 多引擎 AI 翻译设置（Gemini + 智谱 GLM-4 智能轮番调度）</h2>
-    <div class="settings-group">
-      <div class="settings-group-title"><span>翻译运行参数</span><span class="settings-group-badge">仅影响翻译请求</span></div>
-      <div class="settings-field-grid">
+    <div class="admin-settings-group settings-group">
+      <div class="admin-settings-title settings-group-title"><span>翻译运行参数</span><span class="settings-group-badge">仅影响翻译请求</span></div>
+      <div class="admin-field-grid settings-field-grid">
       <label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 AI 智能翻译</label>
       <label class="field">调用限速间隔（秒）
         <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
@@ -1214,8 +1311,8 @@
       </label>
       </div>
     </div>
-    <div class="settings-group">
-      <div class="settings-group-title"><span>服务凭证</span></div>
+    <div class="admin-settings-group settings-group">
+      <div class="admin-settings-title settings-group-title"><span>服务凭证</span></div>
       <div class="admin-credential-list">
       <div class="admin-credential-row">
         <span class="admin-credential-name">Google Gemini Key (.env)</span>
@@ -1248,17 +1345,17 @@
 
   <div class="card admin-module">
     <h2>💾 消息归档与每日摘要</h2>
-    <div class="settings-group">
-      <div class="settings-group-title"><span>归档内容</span></div>
-      <div class="settings-control-group">
+    <div class="admin-settings-group settings-group">
+      <div class="admin-settings-title settings-group-title"><span>归档内容</span></div>
+      <div class="admin-control-group settings-control-group">
         <label class="switch"><input id="archiveOn" type="checkbox"/><span class="track"></span>归档新消息（含媒体文件）</label>
         <label class="switch"><input id="archiveMedia" type="checkbox"/><span class="track"></span>下载媒体文件</label>
         <label class="switch"><input id="imageTaggingOn" type="checkbox"/><span class="track"></span>自动识别图片标签 (AI 打标)</label>
       </div>
     </div>
-    <div class="settings-group">
-      <div class="settings-group-title"><span>每日摘要</span></div>
-      <div class="settings-field-grid">
+    <div class="admin-settings-group settings-group">
+      <div class="admin-settings-title settings-group-title"><span>每日摘要</span></div>
+      <div class="admin-field-grid settings-field-grid">
         <label class="switch"><input id="summaryOn" type="checkbox"/><span class="track"></span>每日运行摘要</label>
         <label class="field">摘要时间（JST 整点）
           <input id="summaryHour" max="23" min="0" type="number"/>
@@ -1269,9 +1366,9 @@
 
   <div class="card admin-module">
     <h2>🖥️ 网页管理端服务配置</h2>
-    <div class="settings-group">
-      <div class="settings-group-title"><span>服务监听</span><span class="settings-group-badge">重启后生效</span></div>
-      <div class="settings-field-grid">
+    <div class="admin-settings-group settings-group">
+      <div class="admin-settings-title settings-group-title"><span>服务监听</span><span class="settings-group-badge">重启后生效</span></div>
+      <div class="admin-field-grid settings-field-grid">
         <label class="switch"><input id="webAdminOn" type="checkbox"/><span class="track"></span>启用 Web UI（下次重启生效）</label>
         <label class="field">监听地址<input id="webAdminHost" placeholder="127.0.0.1" type="text"/></label>
         <label class="field">端口<input id="webAdminPort" max="65535" min="1" type="number"/></label>
@@ -1285,18 +1382,16 @@
 
 <!-- ── 用户 ─────────────────────────────── -->
 <section class="tab" id="tab-users">
-  <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
-      <div style="flex:1; min-width:240px;">
-        <h2 style="margin:0; font-size:16px; display:flex; align-items:center; gap:8px;">
-          <span>🌐</span> 归档公开访问（游客免登录）
-        </h2>
-        <div class="hint" style="margin-top:6px; line-height:1.6;">
+  <div class="card admin-module">
+    <div class="admin-user-access">
+      <div class="admin-user-access-copy">
+        <h2 class="admin-user-access-title"><span>🌐</span><span>归档公开访问（游客免登录）</span></h2>
+        <p class="hint admin-user-access-note">
           仅归档页允许游客访问，管理后台仍需管理员登录。
-          <a href="/archive" target="_blank" style="color:var(--accent); font-weight:600;">打开归档 ↗</a>
-        </div>
+          <a class="admin-link" href="/archive" target="_blank" rel="noopener">打开归档 ↗</a>
+        </p>
       </div>
-      <label class="switch" style="font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:8px;">
+      <label class="switch admin-user-access-toggle">
         <input id="authArchivePublic" type="checkbox"/>
         <span class="track"></span>
         <span>游客免登录</span>
@@ -1304,18 +1399,23 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2>🔑 账号与权限管理</h2>
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>🔑 账号与权限管理</h2>
+      <div class="admin-actions">
+        <button class="btn" id="btnAddUser" type="button">＋ 添加用户</button>
+      </div>
+    </div>
+    <div class="admin-data-group">
     <div class="table-wrap">
-      <table>
+      <table class="admin-user-table">
         <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead>
         <tbody id="userRows"></tbody>
       </table>
     </div>
-    <div style="margin-top:12px">
-      <button class="btn" id="btnAddUser" type="button">＋ 添加用户</button>
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    <div class="empty admin-user-empty" hidden id="userEmpty">暂无用户数据</div>
+    <p class="hint admin-note">
       <code>admin</code> 可管理全部功能，<code>viewer</code> 仅可访问归档；系统会阻止删除或降级最后一个管理员。
     </p>
   </div>
@@ -1323,48 +1423,52 @@
 
 <!-- ── 高级 ─────────────────────────────── -->
 <section class="tab" id="tab-advanced">
-  <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-      <h2 style="margin:0;">📟 控制台实时运行日志</h2>
-      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+  <div class="card admin-module">
+    <div class="admin-module-heading">
+      <h2>📟 控制台实时运行日志</h2>
+      <div class="admin-actions">
         <button class="btn small" id="btnPauseLog" type="button" title="暂停/恢复日志轮询">⏸ 暂停刷新</button>
         <button class="btn small" id="btnCopyLog" type="button" title="复制选中的日志内容，若未选则复制当前全部显示日志">📋 复制日志</button>
         <button class="btn small" id="btnClearLog" type="button">🗑️ 清空显示</button>
       </div>
     </div>
-    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px">
+    <div class="admin-control-group admin-log-toolbar">
       <div class="chips" id="logSourceChips"></div>
       <label class="switch"><input id="logErrOnly" type="checkbox"/><span class="track"></span>仅错误</label>
-      <input id="logKeyword" placeholder="关键词过滤…" style="width:170px" type="text"/>
-      <span class="hint" id="logFilterInfo" style="margin:0"></span>
-      <label class="switch" style="margin-left:auto"><input checked="" id="logFollow" type="checkbox"/><span class="track"></span>自动滚动到底部</label>
+      <input class="admin-log-keyword" id="logKeyword" placeholder="关键词过滤…" type="text"/>
+      <span class="hint admin-log-filter-info" id="logFilterInfo"></span>
+      <label class="switch admin-log-follow"><input checked="" id="logFollow" type="checkbox"/><span class="track"></span>自动滚动到底部</label>
     </div>
     <div id="logView"></div>
-    <p class="hint" id="logHint" style="margin-top:6px; margin-bottom:0;"></p>
+    <p class="hint admin-hint-flush" id="logHint"></p>
   </div>
 
-  <div class="card">
-    <h2>📝 完整配置（JSON 在线编辑器）</h2>
-    <textarea id="rawJson" spellcheck="false"></textarea>
-    <div style="margin-top:10px; display:flex; gap:10px">
-      <button class="btn" id="btnApplyJson" type="button">应用到表单</button>
-      <button class="btn" id="btnResetJson" type="button">从表单刷新</button>
+  <div class="card admin-module">
+    <div class="admin-module-heading"><h2>📝 完整配置（JSON 在线编辑器）</h2></div>
+    <div class="admin-editor-group">
+      <textarea id="rawJson" spellcheck="false"></textarea>
+      <div class="admin-actions admin-editor-actions">
+        <button class="btn" id="btnApplyJson" type="button">应用到表单</button>
+        <button class="btn" id="btnResetJson" type="button">从表单刷新</button>
+      </div>
     </div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    <p class="hint admin-note">
       保存时服务端会按 Schema 校验，并按标准分区重写 <code>config.json</code>。
     </p>
   </div>
 
-  <div class="card">
-    <h2>📦 历史版本（配置自动快照）</h2>
-    <div class="table-wrap">
+  <div class="card admin-module">
+    <div class="admin-module-heading"><h2>📦 历史版本（配置自动快照）</h2></div>
+    <div class="admin-data-group">
+      <div class="table-wrap">
       <table>
         <thead><tr><th>快照时间</th><th>大小</th><th>操作</th></tr></thead>
         <tbody id="historyRows"></tbody>
       </table>
     </div>
-    <div class="empty" hidden="" id="historyEmpty">还没有历史快照（保存一次配置后出现）。</div>
-    <p class="hint" style="margin-top: 10px; margin-bottom: 0;">
+    </div>
+    <div class="empty admin-history-empty" hidden="" id="historyEmpty">还没有历史快照（保存一次配置后出现）。</div>
+    <p class="hint admin-note">
       回滚前会自动保存当前版本快照，恢复操作也可以再次撤销。
     </p>
   </div>
@@ -2254,7 +2358,8 @@ async function fetchStatus() {
       STARTING: "⏳ 启动中",
     };
     startupBox.textContent = stateLabels[state] || state;
-    startupBox.className = "admin-summary-value cred " + (state === "READY" ? "ok" : state === "DEGRADED" ? "miss" : "");
+    const tone = state === "READY" ? "ok" : state === "DEGRADED" ? "err" : "warn";
+    startupBox.className = "admin-summary-value admin-summary-state admin-status-badge " + tone;
     startupBox.title = (startup.reasons || []).join("；");
   }
   $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
@@ -2760,7 +2865,7 @@ function renderGeneral() {
     return null;
   }).filter((x) => x && x.openid);
   renderCmdOpenids();
-  const envBadge = (v) => v ? '<span class="cred ok">✓ 已配置</span>' : '<span class="cred miss">✗ 未配置</span>';
+  const envBadge = (v) => v ? '<span class="admin-status-badge ok">✓ 已配置</span>' : '<span class="admin-status-badge err">✗ 未配置</span>';
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
   if ($("btnClearGeminiKey")) $("btnClearGeminiKey").hidden = !envStatus.GEMINI_API_KEY;
@@ -2862,8 +2967,8 @@ function renderQqBots() {
       tdSecret.appendChild(secBtn);
 
       const tdState = document.createElement("td");
-      if (st && st.ok) tdState.innerHTML = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
-      else if (st) tdState.innerHTML = '<span class="cred miss">✗ 不完整</span>';
+      if (st && st.ok) tdState.innerHTML = enabled ? '<span class="admin-status-badge ok">✓ 可用</span>' : '<span class="admin-status-badge muted">通道未开</span>';
+      else if (st) tdState.innerHTML = '<span class="admin-status-badge err">✗ 不完整</span>';
       else tdState.innerHTML = '<span class="admin-status-badge muted">未保存</span>';
 
       const tdOps = document.createElement("td");
@@ -2917,10 +3022,10 @@ function renderQqBots() {
     for (const bot of qqBotStatus.filter((s) => !s.declared)) {
       const unused = !bot.app_id && !bot.client_secret && !bot.target_openid;
       const badge = (v) => unused ? '<span class="admin-status-badge muted">—</span>'
-        : (v ? '<span class="cred ok">✓</span>' : '<span class="cred miss">✗ 缺失</span>');
+        : (v ? '<span class="admin-status-badge ok">✓</span>' : '<span class="admin-status-badge err">✗ 缺失</span>');
       let state;
-      if (bot.ok) state = enabled ? '<span class="cred ok">✓ 可用</span>' : '<span class="cred miss">通道未开</span>';
-      else if (!unused) state = '<span class="cred miss">✗ 不完整</span>';
+      if (bot.ok) state = enabled ? '<span class="admin-status-badge ok">✓ 可用</span>' : '<span class="admin-status-badge muted">通道未开</span>';
+      else if (!unused) state = '<span class="admin-status-badge err">✗ 不完整</span>';
       else state = '<span class="admin-status-badge muted">未使用</span>';
       const tr = document.createElement("tr");
       tr.innerHTML = "<td><b>" + esc(bot.name) + "</b> <span class='admin-legacy-slot'>(.env 槽位)</span></td>" +
@@ -3551,14 +3656,14 @@ async function renderIgSessionUI() {
     const isGood = data.assessment && data.assessment.safe_enough;
     const levelStr = isGood ? "完整度: " + (data.assessment.level === "full" ? "满分完整" : "良好") : "仅基础会话";
     const userStr = data.user_id ? " (UID: " + data.user_id + ")" : "";
-    igStatusEl.innerHTML = '<span class="cred ok">✓ 凭证已就绪</span>';
+    igStatusEl.innerHTML = '<span class="admin-status-badge ok">✓ 凭证已就绪</span>';
     if (igDetailEl) {
       igDetailEl.textContent = `已载入 ${data.cookie_names.length} 项 Cookie (${levelStr})${userStr}，Story 与图集已就绪`;
     }
     if (btnClear) btnClear.style.display = "inline-block";
     if (btnCheck) btnCheck.style.display = "inline-block";
   } else {
-    igStatusEl.innerHTML = '<span class="cred miss">✗ 未配置</span>';
+    igStatusEl.innerHTML = '<span class="admin-status-badge err">✗ 未配置</span>';
     if (igDetailEl) {
       igDetailEl.textContent = "未配置 Cookies。当前为匿名模式，单帖链接可正常解析，但主页定时巡查易触发官方 429 限流。";
     }
@@ -5708,25 +5813,25 @@ let minPwLen = 8;
 async function refreshUsers() {
   const tbody = $("userRows");
   // 显示骨架屏 loading 状态
-  tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:14px 4px;text-align:center">⏳ 加载用户列表中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state">⏳ 加载用户列表中...</td></tr>';
   let data;
   try {
     data = await api("/api/users");
   } catch (e) {
     console.error("[refreshUsers] API 请求失败:", e);
-    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--err);padding:14px 4px">❌ 加载失败：' + esc(e.message) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state admin-table-state--error">❌ 加载失败：' + esc(e.message) + '</td></tr>';
     return;
   }
   if (!data.ok) {
     const errMsg = (data.errors || ["接口返回 ok=false"]).join("；");
     console.error("[refreshUsers] API 返回错误:", errMsg);
-    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--err);padding:14px 4px">❌ ' + esc(errMsg) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state admin-table-state--error">❌ ' + esc(errMsg) + '</td></tr>';
     return;
   }
   minPwLen = data.min_password_len || 8;
   tbody.innerHTML = "";
   if (!data.users || data.users.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:14px 4px">暂无用户数据</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state">暂无用户数据</td></tr>';
     return;
   }
   const adminCount = data.users.filter((u) => u.role === "admin").length;
@@ -5734,9 +5839,9 @@ async function refreshUsers() {
     const tr = document.createElement("tr");
     const when = u.created_at ? new Date(u.created_at * 1000).toLocaleString() : "—";
     tr.innerHTML = "<td><b>" + esc(u.username) + "</b>" +
-      (u.is_me ? ' <span class="cred ok">当前登录</span>' : "") + "</td>" +
-      "<td>" + (u.role === "admin" ? '<span class="cred ok">admin</span>'
-                                   : '<span class="cred" style="color:var(--muted)">viewer</span>') +
+      (u.is_me ? ' <span class="admin-status-badge ok admin-user-current">当前登录</span>' : "") + "</td>" +
+      "<td>" + (u.role === "admin" ? '<span class="admin-status-badge ok">admin</span>'
+                                   : '<span class="admin-status-badge muted">viewer</span>') +
       "</td><td>" + esc(when) + "</td>";
     const td = document.createElement("td");
     td.appendChild(mkBtn("改密码", () => openSecretDialog(
@@ -6223,7 +6328,7 @@ function renderSocialPushTargets() {
   }
 
   if (targets.length === 0) {
-    container.innerHTML = `<span style="font-size:12px; color:var(--muted);">⚠️ 当前未配置或未启用任何推送通道，可在下方通道设置中开启</span>`;
+    container.innerHTML = `<span class="admin-social-no-targets">⚠️ 当前未配置或未启用任何推送通道，可在下方通道设置中开启</span>`;
     return;
   }
 
@@ -6235,8 +6340,8 @@ function renderSocialPushTargets() {
 
   container.innerHTML = targets.map(t => {
     const isChecked = isFirstRender || previouslySelected.has(t.id);
-    return `
-      <label style="font-size:12.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; font-weight:550; color:var(--text); background:var(--card); padding:5px 10px; border-radius:6px; border:1px solid var(--border-soft);">
+      return `
+      <label class="admin-social-channel-option admin-social-channel-option--target">
         <input type="checkbox" name="toolSocialChannel" value="${t.id}" ${isChecked ? 'checked' : ''} />
         <span>${esc(t.name)}</span>
       </label>
@@ -6315,23 +6420,12 @@ function renderSocialToolResult(data) {
       if (m.type === "image") {
         const img = document.createElement("img");
         img.src = m.url;
-        img.style.width = "120px";
-        img.style.height = "120px";
-        img.style.objectFit = "cover";
-        img.style.borderRadius = "8px";
-        img.style.border = "1px solid var(--border-soft)";
+        img.className = "admin-social-result-image";
         mediaDiv.appendChild(img);
       } else if (m.type === "video") {
         const vTag = document.createElement("div");
-        vTag.style.display = "inline-flex";
-        vTag.style.alignItems = "center";
-        vTag.style.gap = "6px";
-        vTag.style.padding = "8px 12px";
-        vTag.style.borderRadius = "8px";
-        vTag.style.background = "rgba(0,0,0,0.5)";
-        vTag.style.color = "#fff";
-        vTag.style.fontSize = "12px";
-        vTag.innerHTML = '🎬 视频媒体 (' + (m.url ? '<a href="' + m.url + '" target="_blank" style="color:#fff;text-decoration:underline;">直链</a>' : '本地已下载') + ')';
+        vTag.className = "admin-social-video-link";
+        vTag.innerHTML = '🎬 视频媒体 (' + (m.url ? '<a href="' + m.url + '" target="_blank" rel="noopener">直链</a>' : '本地已下载') + ')';
         mediaDiv.appendChild(vTag);
       }
     });
