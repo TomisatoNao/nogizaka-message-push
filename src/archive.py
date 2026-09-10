@@ -580,7 +580,11 @@ def _sniff_content_type(path: Path, declared_type: str = "") -> str | None:
 def load_month(m_name: str, year: int, month: int) -> list[dict]:
     json_path = _member_root(m_name) / f"{year:04d}" / f"{month:02d}" / "messages.json"
     if not json_path.exists():
-        return []
+        fallback = _member_root(m_name) / f"{year:04d}" / str(month) / "messages.json"
+        if fallback.exists():
+            json_path = fallback
+        else:
+            return []
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)

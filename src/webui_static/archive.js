@@ -1895,11 +1895,23 @@ function customConfirm({ title = "确认操作", message = "确定继续吗？",
 
 function showToast(msg, type = "info") {
   let container = $("toastContainer");
-  if (!container) return;
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toastContainer";
+    container.className = "toast-container";
+    document.body.appendChild(container);
+  }
+  const normType = (type === "ok" || type === "success") ? "success" : (type === "error" ? "error" : "info");
+  let icon = normType === "success" ? "✅" : (normType === "error" ? "❌" : "");
+  if (!icon) {
+    const hasEmoji = /^\p{Emoji}/u.test(String(msg).trim());
+    if (!hasEmoji) {
+      icon = "ℹ️";
+    }
+  }
   const toast = document.createElement("div");
-  const icon = type === "success" ? "✅" : type === "error" ? "❌" : "ℹ️";
-  toast.className = `custom-toast ${type}`;
-  toast.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`;
+  toast.className = `custom-toast ${normType}`;
+  toast.innerHTML = (icon ? `<span>${icon}</span>` : '') + `<span>${esc(msg)}</span>`;
   container.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = "0";
@@ -2520,9 +2532,9 @@ function renderBubble(msg) {
       uploadBadgeHtml +
     '</div>' +
     '<div class="msg-meta-right">' +
-      favHtml +
       jumpHtml +
       copyHtml +
+      favHtml +
     '</div>' +
   '</div>';
 
@@ -2755,20 +2767,7 @@ function renderBubble(msg) {
   b.querySelectorAll("video, audio").forEach(observeArchiveMedia);
 }
 
-let toastTimer = null;
-function showToast(text) {
-  let el = $("toastMsg");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "toastMsg";
-    el.className = "toast-msg";
-    document.body.appendChild(el);
-  }
-  el.textContent = text;
-  el.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.classList.remove("show"); }, 2400);
-}
+// toast notifications unified in showToast(msg, type)
 
 
 // ── 灯箱 ─────────────────────────────────────────

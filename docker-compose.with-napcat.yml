@@ -23,15 +23,15 @@ services:
     container_name: napcat
     restart: unless-stopped
     environment:
-      - ACCOUNT=3376333268
+      - ACCOUNT=${NAPCAT_ACCOUNT:-}
       - HTTP_ENABLE=true
       - HTTP_PORT=36036
       - WEBUI_PORT=6099
-      - WEBUI_TOKEN=tomisatonao
+      - WEBUI_TOKEN=${NAPCAT_WEBUI_TOKEN:-change_me}
       - NAPCAT_UID=0
       - NAPCAT_GID=0
     ports:
-      - "6099:6099" # NapCat 网页扫码登录控制台 (http://NAS_IP:6099/webui?token=tomisatonao)
+      - "6099:6099" # NapCat 网页扫码登录控制台 (http://NAS_IP:6099/webui?token=${NAPCAT_WEBUI_TOKEN:-change_me})
       - "36036:36036" # OneBot 11 HTTP 接口（使用高端口避免占用宿主机 3000）
     volumes:
       - ./napcat/config:/app/napcat/config
