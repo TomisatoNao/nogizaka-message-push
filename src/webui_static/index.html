@@ -351,7 +351,11 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) select { color-scheme: dark; }
   }
-  input.invalid { border-color: var(--err); outline: 1px solid var(--err); }
+  input.invalid, select.invalid, textarea.invalid {
+    border-color: var(--err); outline: 1px solid color-mix(in srgb, var(--err) 72%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 14%, transparent), inset 0 1px 3px rgba(0,0,0,.02);
+  }
+  .admin-field-error { margin-top: 4px; color: var(--err); font-size: 11.5px; line-height: 1.45; }
   /* 紧凑字段组：输入框与分隔符是一个不可拆分的视觉单元。 */
   .pair { display: flex; gap: 8px; align-items: center; min-width: 0; flex-wrap: nowrap; }
   .pair input { width: 90px; }
@@ -2411,8 +2415,8 @@ $("confirmDialog").addEventListener("close", () => {
   _confirmResult = false;
   _settleConfirm(res);
 });
-function msg(text, cls) { 
-  const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || ""); 
+function msg(text, cls) {
+  const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || "");
   const bar = document.querySelector("footer.savebar");
   bar.classList.add("show");
   clearTimeout(window.saveMsgTimer);
@@ -2420,6 +2424,324 @@ function msg(text, cls) {
     window.saveMsgTimer = null;
     if (!dirty) bar.classList.remove("show");
   }, 4000);
+}
+
+// ── 管理端前端校验 ─────────────────────────────────
+// 浏览器原生 min/max 只负责提示，不能阻止脚本直接 PUT；这里统一做严格
+// 的数字、区间、URL 和账号列表校验，并把错误定位到具体控件。后端 Schema
+// 仍是最终防线，校验器不改变 config 的字段结构。
+const ADMIN_NUMBER_RULES = Object.freeze({
+  scheduleDayStart: { label: "日间开始", min: 0, max: 23, integer: true },
+  scheduleNightStart: { label: "深夜开始", min: 0, max: 23, integer: true },
+  sleepStart: { label: "休眠开始", min: 0, max: 23, integer: true },
+  sleepEnd: { label: "休眠结束", min: 0, max: 23, integer: true },
+  dayMin: { label: "Message 日间最小间隔", min: 1, integer: true },
+  dayMax: { label: "Message 日间最大间隔", min: 1, integer: true },
+  nightMin: { label: "Message 深夜最小间隔", min: 1, integer: true },
+  nightMax: { label: "Message 深夜最大间隔", min: 1, integer: true },
+  blogDayMin: { label: "博客日间最小间隔", min: 1, integer: true },
+  blogDayMax: { label: "博客日间最大间隔", min: 1, integer: true },
+  blogNightMin: { label: "博客深夜最小间隔", min: 1, integer: true },
+  blogNightMax: { label: "博客深夜最大间隔", min: 1, integer: true },
+  socialXInterval: { label: "X 日间间隔", min: 10, integer: true },
+  socialXNightInterval: { label: "X 深夜间隔", min: 10, integer: true },
+  socialIgInterval: { label: "Instagram 日间最小间隔", min: 60, integer: true },
+  socialIgIntervalMax: { label: "Instagram 日间最大间隔", min: 60, integer: true },
+  socialIgNightInterval: { label: "Instagram 深夜最小间隔", min: 60, integer: true },
+  socialIgNightIntervalMax: { label: "Instagram 深夜最大间隔", min: 60, integer: true },
+  socialTiktokInterval: { label: "TikTok 间隔", min: 30, integer: true },
+  socialLiveInterval: { label: "TikTok Live 探测间隔", min: 5, integer: true },
+  alertCooldown: { label: "告警重复通知冷却", min: 0, integer: true },
+  qqSendInterval: { label: "QQ / NapCat 发送节流间隔", min: 0, step: 0.1, integer: false },
+  napcatSendTimeout: { label: "NapCat 单路发送超时", min: 1, max: 300, integer: true },
+  geminiMinInterval: { label: "AI 调用限速间隔", min: 0, step: 0.5, integer: false },
+  translateTimeout: { label: "翻译单次超时", min: 1, integer: true },
+  summaryHour: { label: "每日摘要时间", min: 0, max: 23, integer: true },
+  webAdminPort: { label: "Web 管理端口", min: 1, max: 65535, integer: true },
+});
+
+const ADMIN_SOCIAL_ACCOUNT_RULES = Object.freeze({
+  socialXAccounts: { label: "X 账号", pattern: /^[A-Za-z0-9_]{1,15}$/, example: "字母、数字、下划线（最多 15 位）" },
+  socialIgAccounts: { label: "Instagram 账号", pattern: /^[A-Za-z0-9._]{1,30}$/, example: "字母、数字、点和下划线（最多 30 位）" },
+  socialTiktokAccounts: { label: "TikTok 账号", pattern: /^[A-Za-z0-9._]{1,50}$/, example: "字母、数字、点和下划线（最多 50 位）" },
+  socialLiveAccounts: { label: "TikTok Live 账号", pattern: /^[A-Za-z0-9._]{1,50}$/, example: "字母、数字、点和下划线（最多 50 位）" },
+});
+
+function clearAdminFieldValidation(element) {
+  if (!element) return;
+  element.classList.remove("invalid");
+  element.removeAttribute("aria-invalid");
+  const field = element.closest(".field, .secret-field, td") || element.parentElement;
+  if (!field) return;
+  const error = field.querySelector(".admin-field-error[data-admin-error]");
+  if (error) error.remove();
+}
+
+function clearAdminValidation() {
+  document.querySelectorAll(".admin-field-error[data-admin-error]").forEach((node) => node.remove());
+  document.querySelectorAll("input.invalid, select.invalid, textarea.invalid").forEach((element) => {
+    element.classList.remove("invalid");
+    element.removeAttribute("aria-invalid");
+  });
+}
+
+function markAdminFieldInvalid(element, message) {
+  if (!element) return;
+  element.classList.add("invalid");
+  element.setAttribute("aria-invalid", "true");
+  const field = element.closest(".field, .secret-field, td") || element.parentElement;
+  if (!field) return;
+  let error = field.querySelector(".admin-field-error[data-admin-error]");
+  if (!error) {
+    error = document.createElement("div");
+    error.className = "admin-field-error";
+    error.dataset.adminError = "true";
+    field.appendChild(error);
+  }
+  error.textContent = message;
+}
+
+function strictAdminNumber(raw, { min, max, step, integer = true } = {}) {
+  const text = String(raw ?? "").trim();
+  if (!text) return { value: null, error: "不能为空" };
+  // Number("12abc") 会返回 NaN，但 parseInt("12abc") 会误读成 12；
+  // 只接受普通十进制，避免保存时静默截断用户输入。
+  if (!/^[+-]?(?:\d+|\d*\.\d+)$/.test(text)) return { value: null, error: "必须是有效数字" };
+  const value = Number(text);
+  if (!Number.isFinite(value)) return { value: null, error: "必须是有效数字" };
+  if (integer && !Number.isInteger(value)) return { value: null, error: "必须为整数" };
+  if (min !== undefined && value < min) return { value: null, error: "不能小于 " + min };
+  if (max !== undefined && value > max) return { value: null, error: "不能大于 " + max };
+  if (step !== undefined) {
+    const base = min !== undefined ? min : 0;
+    const quotient = (value - base) / step;
+    if (Math.abs(quotient - Math.round(quotient)) > 1e-8) {
+      return { value: null, error: "必须按 " + step + " 的步长填写" };
+    }
+  }
+  return { value, error: "" };
+}
+
+function adminValidationError(errors, element, message) {
+  markAdminFieldInvalid(element, message);
+  errors.push(message);
+}
+
+function validateAdminNumberField(id, errors) {
+  const element = $(id);
+  if (!element) return null;
+  const rule = ADMIN_NUMBER_RULES[id] || {
+    label: id,
+    min: element.min === "" ? undefined : Number(element.min),
+    max: element.max === "" ? undefined : Number(element.max),
+    step: element.step && element.step !== "any" ? Number(element.step) : undefined,
+    integer: !element.step || element.step === "1",
+  };
+  const result = strictAdminNumber(element.value, rule);
+  if (result.error) adminValidationError(errors, element, rule.label + result.error);
+  return result.value;
+}
+
+function validateAdminRange(minId, maxId, label, errors) {
+  const min = validateAdminNumberField(minId, errors);
+  const max = validateAdminNumberField(maxId, errors);
+  if (min !== null && max !== null && min > max) {
+    const maxElement = $(maxId);
+    adminValidationError(errors, maxElement, label + "的最小值不能大于最大值");
+  }
+  return [min, max];
+}
+
+function validAdminUrl(raw, { protocols = ["http:", "https:"], allowRelative = false } = {}) {
+  const value = String(raw ?? "").trim();
+  if (!value) return true;
+  if (/\s/.test(value)) return false;
+  if (allowRelative && value.startsWith("/") && !value.startsWith("//")) return true;
+  try {
+    // API、代理和账号端点必须是绝对 URL；不使用 base URL，避免把
+    // "api.example" 或 "//host/path" 静默解析成当前站点的相对地址。
+    const parsed = new URL(value);
+    return protocols.includes(parsed.protocol) && !!parsed.hostname;
+  } catch (_) {
+    return false;
+  }
+}
+
+function validAdminHost(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value || value.length > 253 || /[\s/\\]/.test(value)) return false;
+  if (value === "localhost" || /^[0-9A-Fa-f:]+$/.test(value)) return true;
+  return /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/.test(value);
+}
+
+function validateAdminSocialUrl(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value) return "请输入 X / Instagram / TikTok / 抖音链接";
+  if (value.length > 4096) return "链接过长（最多 4096 个字符）";
+  if (/\s/.test(value)) return "链接不能包含空格";
+  let parsed;
+  try { parsed = new URL(value); } catch (_) { return "请输入完整的 http(s) 链接"; }
+  if (!["http:", "https:"].includes(parsed.protocol)) return "链接必须使用 http 或 https 协议";
+  if (parsed.username || parsed.password) return "链接不能包含账号或密码";
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  const path = parsed.pathname;
+  const supportedHosts = new Set([
+    "x.com", "twitter.com", "vxtwitter.com", "fixupx.com",
+    "instagram.com", "tiktok.com", "vm.tiktok.com", "vt.tiktok.com",
+    "douyin.com", "v.douyin.com",
+  ]);
+  if (!supportedHosts.has(host)) return "不支持的社媒链接域名";
+  // 服务端按平台域名接收并继续解析，前端只阻止无内容路径和未知域名，
+  // 这样也兼容 vxtwitter/fixupx、TikTok/Douyin 短链接等分享格式。
+  if (path && path !== "/") return "";
+  return "链接需要包含具体的动态或视频路径";
+}
+
+function validateAdminSocialAccounts(id, errors) {
+  const element = $(id);
+  const rule = ADMIN_SOCIAL_ACCOUNT_RULES[id];
+  if (!element || !rule) return;
+  const seen = new Set();
+  const values = String(element.value || "").split(/[\n,]+/).map((value) => value.trim().replace(/^@/, "")).filter(Boolean);
+  for (const value of values) {
+    if (!rule.pattern.test(value)) {
+      adminValidationError(errors, element, rule.label + "格式不正确（" + rule.example + "）");
+      break;
+    }
+    if (seen.has(value.toLowerCase())) {
+      adminValidationError(errors, element, rule.label + "不能重复填写：" + value);
+      break;
+    }
+    seen.add(value.toLowerCase());
+  }
+}
+
+function validateAdminConfig() {
+  clearAdminValidation();
+  const errors = [];
+
+  // 所有可见数字输入均走同一套严格规则；区间再做一次跨字段校验。
+  for (const id of Object.keys(ADMIN_NUMBER_RULES)) validateAdminNumberField(id, errors);
+  validateAdminRange("dayMin", "dayMax", "Message 日间巡查间隔", errors);
+  validateAdminRange("nightMin", "nightMax", "Message 深夜巡查间隔", errors);
+  validateAdminRange("blogDayMin", "blogDayMax", "博客日间巡查间隔", errors);
+  validateAdminRange("blogNightMin", "blogNightMax", "博客深夜巡查间隔", errors);
+  validateAdminRange("socialIgInterval", "socialIgIntervalMax", "Instagram 日间巡查间隔", errors);
+  validateAdminRange("socialIgNightInterval", "socialIgNightIntervalMax", "Instagram 深夜巡查间隔", errors);
+  for (const id of Object.keys(ADMIN_SOCIAL_ACCOUNT_RULES)) validateAdminSocialAccounts(id, errors);
+
+  const addTextError = (id, message) => adminValidationError(errors, $(id), message);
+  const napcatApi = $("napcatApi")?.value.trim() || "";
+  if (napcatApi && !validAdminUrl(napcatApi)) addTextError("napcatApi", "NapCat API 地址必须是有效的 http(s) 链接");
+  const mediaBase = $("napcatMediaBaseUrl")?.value.trim() || "";
+  if (mediaBase && !validAdminUrl(mediaBase, { allowRelative: true })) {
+    addTextError("napcatMediaBaseUrl", "媒体访问基地址必须是有效的 http(s) 链接或相对路径");
+  }
+  const proxy = $("sysProxy")?.value.trim() || "";
+  if (proxy && !validAdminUrl(proxy, { protocols: ["http:", "https:", "socks5:", "socks5h:"] })) {
+    addTextError("sysProxy", "代理地址必须是有效的 HTTP、HTTPS 或 SOCKS5 链接");
+  }
+  const host = $("webAdminHost")?.value.trim() || "";
+  if (!validAdminHost(host)) addTextError("webAdminHost", "监听地址只能填写有效的主机名、IP 或 localhost");
+
+  const accounts = config && config.accounts;
+  if (!accounts || typeof accounts !== "object" || Array.isArray(accounts)) {
+    errors.push("账号池必须是对象");
+  } else {
+    for (const [id, account] of Object.entries(accounts)) {
+      if (!/^[a-z0-9_]{1,64}$/.test(id)) errors.push("账号 ID「" + id + "」只能使用小写字母、数字和下划线（最多 64 位）");
+      if (!account || typeof account !== "object") { errors.push("账号「" + id + "」配置无效"); continue; }
+      if (!["nogizaka46", "hinatazaka46", "sakurazaka46", "yodel"].includes(account.group)) {
+        errors.push("账号「" + id + "」必须选择受支持的团体");
+      }
+      if (account.auth !== undefined && !["web", "mobile"].includes(account.auth)) {
+        errors.push("账号「" + id + "」登录方式无效");
+      }
+      if (account.api_base && !validAdminUrl(account.api_base, { protocols: ["http:", "https:"] })) {
+        errors.push("账号「" + id + "」的 API Base 不是有效 URL");
+      }
+      if (account.web_origin && !validAdminUrl(account.web_origin, { protocols: ["http:", "https:"] })) {
+        errors.push("账号「" + id + "」的 Web Origin 不是有效 URL");
+      }
+    }
+  }
+
+  if (!Array.isArray(config?.monitor)) errors.push("监控成员列表必须是数组");
+  const monitor = Array.isArray(config?.monitor) ? config.monitor : [];
+  const monitorSeen = new Set();
+  monitor.forEach((member, index) => {
+    const label = String(member?.name || "#" + (index + 1)).trim();
+    const id = String(member?.id ?? "").trim();
+    const account = String(member?.account ?? "").trim();
+    if (!id) errors.push("成员「" + label + "」缺少官方成员 ID，请从 Message 账号重新拉取");
+    if (!label || label.startsWith("#")) errors.push("第 " + (index + 1) + " 个成员缺少官方姓名");
+    if (!account || !accounts || !accounts[account]) errors.push("成员「" + label + "」绑定了未定义的账号");
+    const key = account + ":" + id;
+    if (id && monitorSeen.has(key)) errors.push("成员「" + label + "」与同账号下其他成员重复");
+    if (id) monitorSeen.add(key);
+  });
+
+  const qqBots = config?.qq_official_bots;
+  if (qqBots !== undefined && !Array.isArray(qqBots)) errors.push("QQ 官方 Bot 列表必须是数组");
+  const qqNames = new Set();
+  (Array.isArray(qqBots) ? qqBots : []).forEach((bot, index) => {
+    const row = document.querySelectorAll("#qqBotRows .admin-table-input--id")[index];
+    const name = String(bot?.name || "").trim();
+    if (!/^[a-z0-9_]{1,64}$/.test(name)) adminValidationError(errors, row, "QQ Bot 名称只能使用小写字母、数字和下划线（最多 64 位）");
+    if (name && qqNames.has(name)) adminValidationError(errors, row, "QQ Bot 名称不能重复：" + name);
+    if (name) qqNames.add(name);
+    if (bot?.app_id && !/^\d{1,20}$/.test(String(bot.app_id).trim())) {
+      const app = document.querySelectorAll("#qqBotRows .admin-table-input--app")[index];
+      adminValidationError(errors, app, "App ID 只能是 1–20 位数字");
+    }
+    for (const [key, label] of [["target_openid", "个人 OpenID"], ["group_openid", "群 OpenID"]]) {
+      const value = String(bot?.[key] || "").trim();
+      if (value && !/^[A-Za-z0-9_-]{4,256}$/.test(value)) {
+        const input = document.querySelectorAll("#qqBotRows .admin-table-input--" + (key === "target_openid" ? "openid" : "group-openid"))[index];
+        adminValidationError(errors, input, label + "只能包含字母、数字、下划线或连字符（4–256 位）");
+      }
+    }
+  });
+
+  const napcatRoutes = config?.napcat_routes;
+  if (napcatRoutes !== undefined && !Array.isArray(napcatRoutes)) errors.push("NapCat 路由列表必须是数组");
+  (Array.isArray(napcatRoutes) ? napcatRoutes : []).forEach((route, index) => {
+    const raw = String(route?.group_id ?? "").trim();
+    if (!/^\d+$/.test(raw) || Number(raw) <= 0) {
+      const input = document.querySelectorAll("#napcatRows .admin-table-input--napcat-id")[index];
+      adminValidationError(errors, input, "NapCat 群号必须是正整数");
+    }
+  });
+  const tgBots = config?.tg_bots;
+  if (tgBots !== undefined && !Array.isArray(tgBots)) errors.push("Telegram Bot 列表必须是数组");
+  (Array.isArray(tgBots) ? tgBots : []).forEach((bot, index) => {
+    const name = String(bot?.name || "").trim();
+    const nameInput = document.querySelectorAll("#tgBotRows .admin-table-input--tg-name")[index];
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)) adminValidationError(errors, nameInput, "Telegram Bot 名称只能使用字母、数字、点、下划线或连字符（最多 64 位）");
+    const chat = String(bot?.target_chat || "").trim();
+    if (chat && (/[\s]/.test(chat) || chat.length > 128)) {
+      const chatInput = document.querySelectorAll("#tgBotRows .admin-table-input--tg-chat")[index];
+      adminValidationError(errors, chatInput, "Target Chat ID 不能包含空格且最多 128 位");
+    }
+  });
+
+  const commandOpenids = window._cmdOpenids || [];
+  commandOpenids.forEach((item, index) => {
+    const value = String(item?.openid || "").trim();
+    if (!/^[A-Za-z0-9_-]{4,256}$/.test(value)) errors.push("第 " + (index + 1) + " 个指令授权 OpenID 格式无效");
+  });
+  return Array.from(new Set(errors));
+}
+
+function focusAdminValidationError() {
+  const element = document.querySelector("input.invalid, select.invalid, textarea.invalid");
+  if (!element) return;
+  const dialog = element.closest("dialog");
+  if (dialog && !dialog.open) {
+    try { dialog.showModal(); } catch (_) { /* 仅用于定位，失败时继续滚动 */ }
+  }
+  try { element.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { element.scrollIntoView(); }
+  setTimeout(() => element.focus(), 0);
 }
 
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
@@ -2539,49 +2861,13 @@ async function saveConfig() {
   collectGeneral();
   collectChannels();
   collectSocial();
-  
-  // 增加前端校验
-  const errors = [];
-  if (config.day_interval && config.day_interval[0] > config.day_interval[1]) {
-    errors.push("日间巡查间隔的最小值不能大于最大值");
-  }
-  if (config.night_interval && config.night_interval[0] > config.night_interval[1]) {
-    errors.push("夜间巡查间隔的最小值不能大于最大值");
-  }
-  if (config.blog_monitor && config.blog_monitor.day_interval && config.blog_monitor.day_interval[0] > config.blog_monitor.day_interval[1]) {
-    errors.push("博客日间巡查间隔的最小值不能大于最大值");
-  }
-  if (config.blog_monitor && config.blog_monitor.night_interval && config.blog_monitor.night_interval[0] > config.blog_monitor.night_interval[1]) {
-    errors.push("博客夜间巡查间隔的最小值不能大于最大值");
-  }
-  const schedule = config.monitor_schedule || {};
-  for (const [key, label] of [["day_start_hour", "日间开始"], ["night_start_hour", "深夜开始"]]) {
-    const hour = schedule[key];
-    if (typeof hour !== "number" || !Number.isInteger(hour) || hour < 0 || hour > 23) {
-      errors.push("全局监控" + label + "必须为 0 ~ 23 之间的整点数字");
-    }
-  }
-  if (!Array.isArray(schedule.sleep_hours) || schedule.sleep_hours.length !== 2 ||
-      schedule.sleep_hours.some((hour) => typeof hour !== "number" || !Number.isInteger(hour) || hour < 0 || hour > 23)) {
-    errors.push("全局休眠时段必须填写两个 0 ~ 23 之间的整点小时");
-  }
-  if (config.daily_summary && config.daily_summary.hour !== undefined && config.daily_summary.hour !== null) {
-    const h = config.daily_summary.hour;
-    if (typeof h !== "number" || isNaN(h) || h < 0 || h > 23) {
-      errors.push("每日摘要时间必须为 0 ~ 23 之间的整点数字");
-    }
-  }
-  if (config.web_admin && config.web_admin.port !== undefined && config.web_admin.port !== null) {
-    const p = config.web_admin.port;
-    if (typeof p !== "number" || isNaN(p) || p < 1 || p > 65535) {
-      errors.push("Web 管理端口必须在 1 ~ 65535 之间");
-    }
-  }
-  
+  const errors = validateAdminConfig();
   if (errors.length > 0) {
-    msg("保存失败，请检查配置：\n" + errors.join("\n"), "err");
+    msg("保存失败，请修正以下配置：\n" + errors.join("\n"), "err");
+    focusAdminValidationError();
     return;
   }
+  // 区间、调度时间和端口均已由 validateAdminConfig 统一处理。
 
   // 高级页有没点「应用到表单」的 JSON 修改时，保存会忽略它们——先确认
   if (document.getElementById("tab-advanced").classList.contains("active")) {
@@ -3218,8 +3504,8 @@ function updateScheduleState() {
   const state = $("scheduleState");
   if (!state) return;
   const value = (id, fallback) => {
-    const n = parseInt($(id)?.value, 10);
-    return Number.isFinite(n) ? Math.max(0, Math.min(23, n)) : fallback;
+    const result = strictAdminNumber($(id)?.value, { min: 0, max: 23, integer: true });
+    return result.value === null ? fallback : result.value;
   };
   const pad = (n, end = false) => (end && n === 0 ? "24:00" : String(n).padStart(2, "0") + ":00");
   const day = value("scheduleDayStart", 7);
@@ -3557,21 +3843,41 @@ $("qqBotSecretEye").addEventListener("click", () => {
 $("qqBotCancel").addEventListener("click", () => $("qqBotDialog").close());
 
 $("qqBotSave").addEventListener("click", async () => {
+  ["qqBotName", "qqBotRemark", "qqBotAppId", "qqBotSecret", "qqBotOpenid"].forEach((id) => clearAdminFieldValidation($(id)));
   const name = $("qqBotName").value.trim().toLowerCase();
   const remark = $("qqBotRemark").value.trim();
   const appId = $("qqBotAppId").value.trim();
   const secret = $("qqBotSecret").value.trim();
   const openid = $("qqBotOpenid").value.trim();
 
-  if (!/^[a-z0-9_]+$/.test(name)) { uiAlert("Bot 名称只能用小写字母、数字、下划线"); return; }
+  if (!/^[a-z0-9_]{1,64}$/.test(name)) {
+    markAdminFieldInvalid($("qqBotName"), "Bot 名称只能用小写字母、数字、下划线（最多 64 位）");
+    uiAlert("Bot 名称只能用小写字母、数字、下划线（最多 64 位）");
+    return;
+  }
   if ((config.qq_official_bots || []).some((b) => b.name === name)) { uiAlert("该名称已存在"); return; }
   if (/^qq_official_bot\d+$/.test(name)) {
     uiAlert("这个名称会与旧版 .env 编号槽位（QQ_OFFICIAL_BOT1_* 等）的变量名冲突，\n" +
             "删除时容易留下残余。请换一个，例如 official_bot1 或 main_bot。");
     return;
   }
-  if (!appId) { uiAlert("请填写 App ID"); return; }
-  if (!secret) { uiAlert("请填写 Client Secret"); return; }
+  if (!appId) { markAdminFieldInvalid($("qqBotAppId"), "请填写 App ID"); uiAlert("请填写 App ID"); return; }
+  if (!/^\d{1,20}$/.test(appId)) {
+    markAdminFieldInvalid($("qqBotAppId"), "App ID 只能是 1–20 位数字");
+    uiAlert("App ID 只能是 1–20 位数字");
+    return;
+  }
+  if (!secret) { markAdminFieldInvalid($("qqBotSecret"), "请填写 Client Secret"); uiAlert("请填写 Client Secret"); return; }
+  if (/[\r\n]/.test(secret) || secret.length > 16384) {
+    markAdminFieldInvalid($("qqBotSecret"), "Client Secret 不能换行且最多 16384 位");
+    uiAlert("Client Secret 不能换行且最多 16384 位");
+    return;
+  }
+  if (openid && !/^[A-Za-z0-9_-]{4,256}$/.test(openid)) {
+    markAdminFieldInvalid($("qqBotOpenid"), "OpenID 只能包含字母、数字、下划线或连字符（4–256 位）");
+    uiAlert("OpenID 格式不正确");
+    return;
+  }
 
   const btn = $("qqBotSave");
   btn.disabled = true; btn.textContent = "添加中…";
@@ -3610,7 +3916,10 @@ function parseNum(val, float = false) {
   if (val === undefined || val === null) return null;
   const s = String(val).trim();
   if (s === "") return null;
-  const n = float ? parseFloat(s) : parseInt(s, 10);
+  // 与保存前校验保持一致：拒绝 parseInt/parseFloat 的部分解析和整数截断。
+  if (!/^[+-]?(?:\d+|\d*\.\d+)$/.test(s)) return s;
+  const n = Number(s);
+  if (!float && !Number.isInteger(n)) return s;
   return Number.isFinite(n) ? n : s;
 }
 
@@ -3699,9 +4008,11 @@ function collectGeneral() {
 }
 
 document.addEventListener("input", (e) => {
+  clearAdminFieldValidation(e.target);
   if (e.target && e.target.closest && e.target.closest("main")) markDirty();
 });
 document.addEventListener("change", (e) => {
+  clearAdminFieldValidation(e.target);
   if (e.target && e.target.closest && e.target.closest("main")) markDirty();
 });
 
@@ -3713,6 +4024,12 @@ $("btnTestProxy")?.addEventListener("click", async () => {
   const proxy = $("sysProxy") ? $("sysProxy").value.trim() : "";
   const resBox = $("proxyTestResult");
   if (!resBox) return;
+  if (proxy && !validAdminUrl(proxy, { protocols: ["http:", "https:", "socks5:", "socks5h:"] })) {
+    markAdminFieldInvalid($("sysProxy"), "代理地址必须是有效的 HTTP、HTTPS 或 SOCKS5 链接");
+    msg("代理地址格式不正确，请先修正后再测试", "err");
+    $("sysProxy")?.focus();
+    return;
+  }
   resBox.innerHTML = '<div style="font-size:13px; color:var(--accent); padding:6px 0;">⏳ 正在探测各节点网络连通性与响应延迟…</div>';
   try {
     const res = await api("/api/system/proxy/test", {
@@ -3963,19 +4280,43 @@ $("secretCancel").addEventListener("click", () => $("secretDialog").close());
 $("secretSave").addEventListener("click", async () => {
   const values = {};
   let missing = null;
+  let invalid = null;
   for (const input of $("secretFields").querySelectorAll("input")) {
     const f = secretCtx.fields.find((x) => x.env === input.dataset.env);
     const v = input.value.trim();
+    clearAdminFieldValidation(input);
+    if (v && (/\r|\n/.test(v) || v.length > 16384) && !invalid) {
+      invalid = { input, message: "凭证不能包含换行且最多 16384 位" };
+    }
     if (v) values[input.dataset.env] = v;
     else if (f && f.required && !missing) missing = f.label;
   }
-  if (missing) { uiAlert("请填写：" + missing); return; }
+  if (invalid) {
+    markAdminFieldInvalid(invalid.input, invalid.message);
+    uiAlert(invalid.message);
+    return;
+  }
+  if (missing) {
+    const missingInput = Array.from($("secretFields").querySelectorAll("input")).find((input) => {
+      const f = secretCtx.fields.find((x) => x.env === input.dataset.env);
+      return f && f.required && !input.value.trim();
+    });
+    markAdminFieldInvalid(missingInput, "请填写：" + missing);
+    uiAlert("请填写：" + missing);
+    return;
+  }
   if (!Object.keys(values).length) { uiAlert("没有填写任何值"); return; }
 
   // 账号密码走用户管理接口（不写 .env）
   if (secretCtx.userAction) {
     const pw = values["__password__"] || "";
     if (pw.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
+    if (pw.length > 256 || /[\r\n]/.test(pw)) {
+      const pwInput = $("secretFields").querySelector('input[data-env="__password__"]');
+      markAdminFieldInvalid(pwInput, "密码不能换行且最多 256 位");
+      uiAlert("密码不能换行且最多 256 位");
+      return;
+    }
     const ok = await userAction({ ...secretCtx.userAction, password: pw });
     if (ok) $("secretDialog").close();
     return;
@@ -4301,20 +4642,24 @@ function renderSocial() {
 function collectSocial() {
   config.platforms = config.platforms || {};
   const parseAccs = (val) => Array.from(new Set(val.split(/[\n,]+/).map(s => s.trim().replace(/^@/, "")).filter(Boolean)));
+  const numeric = (id, fallback, float = false) => {
+    const parsed = parseNum($(id)?.value, float);
+    return typeof parsed === "number" ? parsed : fallback;
+  };
 
   config.platforms.x = {
     ...(config.platforms.x || {}),
     enabled: $("socialXOn").checked,
-    interval_seconds: parseInt($("socialXInterval").value, 10) || 60,
-    night_interval_seconds: parseInt($("socialXNightInterval").value, 10) || 300,
+    interval_seconds: numeric("socialXInterval", 60),
+    night_interval_seconds: numeric("socialXNightInterval", 300),
     accounts: parseAccs($("socialXAccounts").value),
     display_names: (config.platforms.x && config.platforms.x.display_names) || {}
   };
 
-  const igDayMin = parseInt($("socialIgInterval").value, 10) || 1800;
-  const igDayMax = parseInt($("socialIgIntervalMax").value, 10) || igDayMin;
-  const igNightMin = parseInt($("socialIgNightInterval").value, 10) || 5400;
-  const igNightMax = parseInt($("socialIgNightIntervalMax").value, 10) || igNightMin;
+  const igDayMin = numeric("socialIgInterval", 1800);
+  const igDayMax = numeric("socialIgIntervalMax", igDayMin);
+  const igNightMin = numeric("socialIgNightInterval", 5400);
+  const igNightMax = numeric("socialIgNightIntervalMax", igNightMin);
   config.platforms.instagram = {
     ...(config.platforms.instagram || {}),
     enabled: $("socialIgOn").checked,
@@ -4331,7 +4676,7 @@ function collectSocial() {
   config.platforms.tiktok = {
     ...(config.platforms.tiktok || {}),
     enabled: $("socialTiktokOn").checked,
-    interval_seconds: parseInt($("socialTiktokInterval").value, 10) || 120,
+    interval_seconds: numeric("socialTiktokInterval", 120),
     accounts: parseAccs($("socialTiktokAccounts").value),
     display_names: (config.platforms.tiktok && config.platforms.tiktok.display_names) || {}
   };
@@ -4339,7 +4684,7 @@ function collectSocial() {
   config.platforms.tiktok_live = {
     ...(config.platforms.tiktok_live || {}),
     enabled: $("socialLiveOn").checked,
-    interval_seconds: parseInt($("socialLiveInterval").value, 10) || 8,
+    interval_seconds: numeric("socialLiveInterval", 8),
     accounts: parseAccs($("socialLiveAccounts").value),
     display_names: (config.platforms.tiktok_live && config.platforms.tiktok_live.display_names) || {}
   };
@@ -4540,17 +4885,50 @@ function openAccountDialog(id) {
 $("btnAddAccount").addEventListener("click", () => openAccountDialog(null));
 $("accCancel").addEventListener("click", () => $("accountDialog").close());
 $("accSave").addEventListener("click", async () => {
+  ["accId", "accAppTag", "accApiBase", "accWebOrigin"].forEach((id) => clearAdminFieldValidation($(id)));
   const newId = $("accId").value.trim();
-  if (!/^[a-z0-9_]+$/.test(newId)) { uiAlert("账号 ID 只能用小写字母、数字、下划线"); return; }
+  if (!/^[a-z0-9_]{1,64}$/.test(newId)) {
+    markAdminFieldInvalid($("accId"), "账号 ID 只能用小写字母、数字、下划线（最多 64 位）");
+    uiAlert("账号 ID 只能用小写字母、数字、下划线（最多 64 位）");
+    return;
+  }
   if ((!editingAccountId || editingAccountId !== newId) && config.accounts && config.accounts[newId]) {
     uiAlert("账号 ID「" + newId + "」已存在，请换一个名称");
     return;
   }
-  const acc = { group: $("accGroupChips").dataset.value };
-  if ($("accAuthChips").dataset.value === "mobile") acc.auth = "mobile";
-  if ($("accAppTag").value.trim()) acc.app_tag = $("accAppTag").value.trim();
-  if ($("accApiBase").value.trim()) acc.api_base = $("accApiBase").value.trim();
-  if ($("accWebOrigin").value.trim()) acc.web_origin = $("accWebOrigin").value.trim();
+  const appTag = $("accAppTag").value.trim();
+  if (appTag.length > 64 || /[\r\n]/.test(appTag)) {
+    markAdminFieldInvalid($("accAppTag"), "App 标签最多 64 位且不能换行");
+    uiAlert("App 标签最多 64 位且不能换行");
+    return;
+  }
+  const apiBase = $("accApiBase").value.trim();
+  if (apiBase && !validAdminUrl(apiBase, { protocols: ["http:", "https:"] })) {
+    markAdminFieldInvalid($("accApiBase"), "API Base 必须是有效的 http(s) URL");
+    uiAlert("API Base 必须是有效的 http(s) URL");
+    return;
+  }
+  const webOrigin = $("accWebOrigin").value.trim();
+  if (webOrigin && !validAdminUrl(webOrigin, { protocols: ["http:", "https:"] })) {
+    markAdminFieldInvalid($("accWebOrigin"), "Web Origin 必须是有效的 http(s) URL");
+    uiAlert("Web Origin 必须是有效的 http(s) URL");
+    return;
+  }
+  const group = $("accGroupChips").dataset.value;
+  const auth = $("accAuthChips").dataset.value;
+  if (!["nogizaka46", "hinatazaka46", "sakurazaka46", "yodel"].includes(group)) {
+    uiAlert("请选择受支持的团体");
+    return;
+  }
+  if (!["web", "mobile"].includes(auth)) {
+    uiAlert("请选择有效的登录方式");
+    return;
+  }
+  const acc = { group: group };
+  if (auth === "mobile") acc.auth = "mobile";
+  if (appTag) acc.app_tag = appTag;
+  if (apiBase) acc.api_base = apiBase;
+  if (webOrigin) acc.web_origin = webOrigin;
   
   config.accounts = config.accounts || {};
 
@@ -4939,9 +5317,10 @@ function renderNapcat() {
     
     const tdId = document.createElement("td");
     tdId.appendChild(mkTableInput(r.group_id || "", (v) => {
-      const n = parseInt(v.trim(), 10);
-      if (Number.isFinite(n)) r.group_id = n;
-      else r.group_id = null;
+      const raw = v.trim();
+      const n = Number(raw);
+      // 保留非法原文，保存前校验才能阻止 12abc 被 parseInt 静默截成 12。
+      r.group_id = /^\d+$/.test(raw) && Number.isSafeInteger(n) && n > 0 ? n : (raw || null);
     }, "12345678", "admin-table-input--napcat-id"));
 
     const tdRemark = document.createElement("td");
@@ -5973,7 +6352,18 @@ function setOpenidStatus(html, color) {
 
 $("openidStart").addEventListener("click", async () => {
   const bot = openidCtx.bot;
-  if (!bot.app_id) { uiAlert("请先在表格里填写该 Bot 的 App ID"); return; }
+  clearAdminFieldValidation($("openidSecret"));
+  if (!/^\d{1,20}$/.test(String(bot.app_id || "").trim())) {
+    uiAlert("请先在表格里填写有效的 Bot App ID（1–20 位数字）");
+    return;
+  }
+  const secretValue = $("openidSecret").value.trim();
+  const secretRequired = !$("openidSecretField").hidden;
+  if (secretRequired && (!secretValue || /[\r\n]/.test(secretValue) || secretValue.length > 16384)) {
+    markAdminFieldInvalid($("openidSecret"), "Client Secret 必填，不能换行且最多 16384 位");
+    uiAlert("请填写有效的 Client Secret");
+    return;
+  }
   const btn = $("openidStart");
   btn.disabled = true; btn.textContent = "连接中…";
   try {
@@ -6015,6 +6405,10 @@ function startOpenidPolling() {
     if (!st.ok) return;
     if (st.state === "captured") {
       stopOpenidPolling();
+      if (!/^[A-Za-z0-9_-]{4,256}$/.test(String(st.openid || "").trim())) {
+        setOpenidStatus("❌ 服务端返回的 OpenID 格式异常，未写入表格。", "var(--err)");
+        return;
+      }
       const isGroup = (openidCtx.mode || "user") === "group";
       if (isGroup) {
         openidCtx.bot.group_openid = st.openid;
@@ -6181,11 +6575,19 @@ function initCmdOpenidEvents() {
 
   $("cmdOpenidSave")?.addEventListener("click", () => {
     const rawOpenid = ($("cmdOpenidInput").value || "").trim().toUpperCase();
-    if (!rawOpenid) {
-      uiAlert("请输入有效的 OpenID");
+    clearAdminFieldValidation($("cmdOpenidInput"));
+    clearAdminFieldValidation($("cmdOpenidName"));
+    if (!/^[A-Z0-9_-]{4,256}$/.test(rawOpenid)) {
+      markAdminFieldInvalid($("cmdOpenidInput"), "OpenID 只能包含字母、数字、下划线或连字符（4–256 位）");
+      uiAlert("请输入有效的 OpenID（4–256 位字母、数字或下划线）");
       return;
     }
     const name = ($("cmdOpenidName").value || "").trim();
+    if (name.length > 128 || /[\r\n]/.test(name)) {
+      markAdminFieldInvalid($("cmdOpenidName"), "备注最多 128 位且不能换行");
+      uiAlert("备注最多 128 位且不能换行");
+      return;
+    }
     let type = "group";
     const radios = document.getElementsByName("cmdOpenidType");
     for (const r of radios) {
@@ -6381,10 +6783,25 @@ $("btnCopyPw").addEventListener("click", async () => {
   }
 });
 $("userSave").addEventListener("click", async () => {
+  clearAdminFieldValidation($("newUserName"));
+  clearAdminFieldValidation($("newUserPw"));
   const username = $("newUserName").value.trim();
   const password = $("newUserPw").value;
-  if (!username) { uiAlert("请填写用户名"); return; }
-  if (password.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(username)) {
+    markAdminFieldInvalid($("newUserName"), "用户名只能使用字母、数字、下划线和连字符（最多 64 位）");
+    uiAlert("用户名只能使用字母、数字、下划线和连字符（最多 64 位）");
+    return;
+  }
+  if (password.length < minPwLen) {
+    markAdminFieldInvalid($("newUserPw"), "密码至少 " + minPwLen + " 位");
+    uiAlert("密码至少 " + minPwLen + " 位");
+    return;
+  }
+  if (password.length > 256 || /[\r\n]/.test(password)) {
+    markAdminFieldInvalid($("newUserPw"), "密码不能换行且最多 256 位");
+    uiAlert("密码不能换行且最多 256 位");
+    return;
+  }
   const btn = $("userSave");
   btn.disabled = true; btn.textContent = "创建中…";
   const ok = await userAction({
@@ -6619,12 +7036,14 @@ $("btnLogout").addEventListener("click", async () => {
     dlg.close();
   };
   $("cpSave").onclick = async () => {
+    [oldPw, newPw, confirmPw].forEach((input) => clearAdminFieldValidation(input));
     const o = oldPw.value.trim(), n = newPw.value.trim(), c = confirmPw.value.trim();
     err.style.display = "none";
-    if (!o) { err.textContent = "请输入当前原密码"; err.style.display = "block"; return; }
-    if (!n || n.length < 8) { err.textContent = "新密码至少需要 8 位"; err.style.display = "block"; return; }
-    if (n === o) { err.textContent = "新密码不能与当前原密码相同"; err.style.display = "block"; return; }
-    if (c && c !== n) { err.textContent = "两次输入的新密码不一致"; err.style.display = "block"; return; }
+    if (!o) { markAdminFieldInvalid(oldPw, "请输入当前原密码"); err.textContent = "请输入当前原密码"; err.style.display = "block"; return; }
+    if (!n || n.length < 8) { markAdminFieldInvalid(newPw, "新密码至少需要 8 位"); err.textContent = "新密码至少需要 8 位"; err.style.display = "block"; return; }
+    if (n.length > 256 || /[\r\n]/.test(n)) { markAdminFieldInvalid(newPw, "新密码不能换行且最多 256 位"); err.textContent = "新密码不能换行且最多 256 位"; err.style.display = "block"; return; }
+    if (n === o) { markAdminFieldInvalid(newPw, "新密码不能与当前原密码相同"); err.textContent = "新密码不能与当前原密码相同"; err.style.display = "block"; return; }
+    if (c && c !== n) { markAdminFieldInvalid(confirmPw, "两次输入的新密码不一致"); err.textContent = "两次输入的新密码不一致"; err.style.display = "block"; return; }
 
     $("cpSave").disabled = true;
     try {
@@ -6655,7 +7074,10 @@ $("btnLogout").addEventListener("click", async () => {
 $("btnToolSocialPaste").addEventListener("click", async () => {
   try {
     const text = await navigator.clipboard.readText();
-    if (text) $("toolSocialUrl").value = text.trim();
+    if (text) {
+      $("toolSocialUrl").value = text.trim();
+      clearAdminFieldValidation($("toolSocialUrl"));
+    }
   } catch (e) {
     uiAlert("无法读取剪贴板，请手动粘贴");
   }
@@ -6663,7 +7085,12 @@ $("btnToolSocialPaste").addEventListener("click", async () => {
 
 $("btnToolSocialParse").addEventListener("click", async () => {
   const url = $("toolSocialUrl").value.trim();
-  if (!url) { uiAlert("请先输入 X / Instagram / TikTok 链接"); return; }
+  const urlError = validateAdminSocialUrl(url);
+  if (urlError) {
+    markAdminFieldInvalid($("toolSocialUrl"), urlError);
+    uiAlert(urlError);
+    return;
+  }
   const btn = $("btnToolSocialParse");
   const loading = $("toolSocialLoading");
   const resultDiv = $("toolSocialResult");
@@ -6808,7 +7235,12 @@ $("btnToolSocialToggleAllChannels").addEventListener("click", () => {
 
 $("btnToolSocialPush").addEventListener("click", async () => {
   const url = $("toolSocialUrl").value.trim();
-  if (!url) { uiAlert("请先输入 X / Instagram / TikTok 链接"); return; }
+  const urlError = validateAdminSocialUrl(url);
+  if (urlError) {
+    markAdminFieldInvalid($("toolSocialUrl"), urlError);
+    uiAlert(urlError);
+    return;
+  }
   const selectedChannels = Array.from(document.querySelectorAll('input[name="toolSocialChannel"]:checked')).map(cb => cb.value);
   if (selectedChannels.length === 0) {
     uiAlert("请至少勾选一个推送目标通道！");

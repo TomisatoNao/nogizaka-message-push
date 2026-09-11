@@ -315,6 +315,29 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
     assert "NapCat 单路发送超时" in html
 
 
+def test_admin_frontend_validation_contract():
+    """管理页保存前应严格校验数字、区间、URL 和动态表格字段。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    assert "const ADMIN_NUMBER_RULES = Object.freeze({" in html
+    assert "function strictAdminNumber(" in html
+    assert "function validateAdminConfig()" in html
+    assert "function validateAdminSocialUrl(" in html
+    assert "function validateAdminSocialAccounts(" in html
+    assert "focusAdminValidationError();" in html
+    assert 'const errors = validateAdminConfig();' in html
+    assert "parseInt($(\"socialXInterval\").value" not in html
+    assert "parseInt($(\"socialIgInterval\").value" not in html
+    assert "保留非法原文，保存前校验才能阻止" in html
+    assert "input.invalid, select.invalid, textarea.invalid" in html
+    assert "const parsed = new URL(value);" in html
+    assert "代理地址必须是有效的 HTTP、HTTPS 或 SOCKS5 链接" in html
+    assert "API Base 必须是有效的 http(s) URL" in html
+    assert "QQ Bot 名称只能使用小写字母、数字和下划线" in html
+    assert "Telegram Bot 名称只能使用字母、数字、点、下划线或连字符" in html
+    assert "用户名只能使用字母、数字、下划线和连字符" in html
+
+
 def test_admin_modules_share_grouped_responsive_layout_contract():
     """状态、账号/成员和推送通道统一使用模块/控制/数据/操作层级。"""
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
@@ -845,10 +868,10 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260911_3" in html
-    assert "/static/archive.css?v=20260911_1" in html
-    assert "/static/archive.js?v=20260911_3" in perf
-    assert "/static/archive.css?v=20260911_1" in perf
+    assert "/static/archive.js?v=20260911_4" in html
+    assert "/static/archive.css?v=20260911_2" in html
+    assert "/static/archive.js?v=20260911_4" in perf
+    assert "/static/archive.css?v=20260911_2" in perf
 
 
 def test_archive_favorite_filter_has_single_entry_point():
@@ -901,6 +924,26 @@ def test_archive_group_blog_backfill_contract():
     assert 'JSON.stringify({ groups })' in script
     assert "function promptArchiveMemberUrl()" in script
     assert "翻译请在博客页面按篇触发" in html
+
+
+def test_archive_backfill_member_picker_and_blog_url_validation_contract():
+    """回填成员只能通过已加载成员复选框选择，博客 URL 在前端先校验。"""
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    styles = (_ROOT / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+
+    assert 'id="bmMemberOptions"' in html
+    assert 'id="bmMemberSelectAll"' in html
+    assert 'type="hidden" id="bmMemberInput"' in html
+    assert 'id="bmMemberOptions" class="bm-member-options"' in html
+    assert "function renderBackfillMemberOptions" in script
+    assert "function selectedBackfillMembers" in script
+    assert "selectedBackfillMembers().join(\", \")" in script
+    assert "function isValidArchiveMemberBlogUrl" in script
+    assert "inputType: \"url\"" in script
+    assert "请输入三坂官方成员博客列表页链接" in script
+    assert ".bm-member-options" in styles
+    assert ".bm-member-option" in styles
 
 
 def test_archive_message_month_footer_contract():

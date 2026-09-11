@@ -7,7 +7,7 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260906_1">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260911_1">
+<link rel="stylesheet" href="/static/archive.css?v=20260911_2">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -334,6 +334,7 @@
     <p class="cm-message" id="pmMessage">请在下方输入相关信息：</p>
     <div class="cm-input-wrapper">
       <input type="text" id="pmInput" class="cm-input" placeholder="" autocomplete="off" />
+      <div id="pmError" class="cm-input-error" role="alert" hidden></div>
       <label id="pmCheckLabel" class="cm-checkbox-group" style="display:none;">
         <input type="checkbox" id="pmCheckbox" />
         <span id="pmCheckText">开启 AI 翻译</span>
@@ -386,14 +387,20 @@
 
 <!-- Message Backfill Modal -->
 <div id="backfillMessageModal" class="custom-modal-backdrop" style="display:none;">
-  <div class="custom-modal-card" style="max-width: 440px; text-align: left;">
-    <div class="cm-icon" style="text-align: center;">💬</div>
-    <h3 class="cm-title" style="text-align: center;">回填成员历史消息</h3>
-    <p class="cm-message" style="text-align: center; margin-bottom: 16px;">补齐监控成员的历史消息及重试失败媒体</p>
+  <div class="custom-modal-card message-backfill-card">
+    <div class="cm-icon">💬</div>
+    <h3 class="cm-title">回填成员历史消息</h3>
+    <p class="cm-message">从已归档成员中选择目标；不选择则回填全部监控成员。</p>
 
-    <div class="cm-input-wrapper" style="margin: 0 0 16px 0;">
-      <label style="font-size: 12.5px; font-weight: 600; color: #a1a1a6; display: block; margin-bottom: 6px;">目标成员</label>
-      <input type="text" id="bmMemberInput" class="cm-input" placeholder="留空代表全部监控成员，或输入姓名（例：冨里 奈央）" autocomplete="off" />
+    <div class="cm-input-wrapper bm-member-picker">
+      <div class="bm-member-picker-head">
+        <span class="bm-member-picker-label">目标成员</span>
+        <button id="bmMemberSelectAll" class="bm-member-select-all" type="button">全选</button>
+      </div>
+      <div id="bmMemberOptions" class="bm-member-options" role="group" aria-label="选择消息回填成员"></div>
+      <div id="bmMemberSelectionSummary" class="bm-member-selection-summary">未选择：全部监控成员</div>
+      <!-- 保留隐藏字段，兼容现有 payload 读取与外部脚本。用户只能通过上方复选框选择。 -->
+      <input type="hidden" id="bmMemberInput" value="" />
     </div>
 
     <div style="margin-bottom: 16px;">
@@ -489,7 +496,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20260911_3"></script>
+<script src="/static/archive.js?v=20260911_4"></script>
 
 </body>
 </html>

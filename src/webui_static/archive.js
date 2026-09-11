@@ -4181,7 +4181,7 @@ window.addEventListener("hashchange", () => {
   handleRoute(false);
 });
 
-function customPrompt({ title = "请输入", message = "", placeholder = "", defaultValue = "", icon = "📥", confirmText = "提交", showCheckbox = false, checkText = "" } = {}) {
+function customPrompt({ title = "请输入", message = "", placeholder = "", defaultValue = "", icon = "📥", confirmText = "提交", showCheckbox = false, checkText = "", inputType = "text", validate = null } = {}) {
   return new Promise((resolve) => {
     const modal = $("customPromptModal");
     if (!modal) return resolve(null);
@@ -4190,10 +4190,17 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
     $("pmTitle").textContent = title;
     $("pmMessage").textContent = message;
     $("pmConfirm").textContent = confirmText;
-    
+
     const input = $("pmInput");
+    input.type = inputType;
     input.placeholder = placeholder;
     input.value = defaultValue;
+    input.removeAttribute("aria-invalid");
+    const errorEl = $("pmError");
+    if (errorEl) {
+      errorEl.hidden = true;
+      errorEl.textContent = "";
+    }
     
     const checkLabel = $("pmCheckLabel");
     const checkbox = $("pmCheckbox");
@@ -4208,8 +4215,25 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
     modal.style.display = "flex";
     setTimeout(() => { input.focus(); input.select(); }, 60);
 
+    const clearValidationError = () => {
+      input.removeAttribute("aria-invalid");
+      if (errorEl) {
+        errorEl.hidden = true;
+        errorEl.textContent = "";
+      }
+    };
     const onConfirm = () => {
       const val = input.value.trim();
+      const validationMessage = typeof validate === "function" ? validate(val) : "";
+      if (validationMessage) {
+        input.setAttribute("aria-invalid", "true");
+        if (errorEl) {
+          errorEl.hidden = false;
+          errorEl.textContent = validationMessage;
+        }
+        input.focus();
+        return;
+      }
       const checked = checkbox.checked;
       cleanup();
       resolve({ value: val, checked: checked });
@@ -4227,11 +4251,13 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
       $("pmConfirm").removeEventListener("click", onConfirm);
       $("pmCancel").removeEventListener("click", onCancel);
       input.removeEventListener("keydown", onKeydown);
+      input.removeEventListener("input", clearValidationError);
     };
 
     $("pmConfirm").addEventListener("click", onConfirm);
     $("pmCancel").addEventListener("click", onCancel);
     input.addEventListener("keydown", onKeydown);
+    input.addEventListener("input", clearValidationError);
   });
 }
 
@@ -4336,7 +4362,11 @@ async function promptArchiveMemberUrl() {
     icon: "📝",
     confirmText: "开始归档",
     showCheckbox: true,
-    checkText: "开启 Gemini AI 中日双语翻译（勾选将较慢）"
+    checkText: "开启 Gemini AI 中日双语翻译（勾选将较慢）",
+    inputType: "url",
+    validate: (value) => isValidArchiveMemberBlogUrl(value)
+      ? ""
+      : "请输入三坂官方成员博客列表页链接，并确认包含数字 ct 成员编号。"
   });
 
   if (!result || !result.value) return;
@@ -4361,6 +4391,108 @@ async function promptArchiveMember() {
   return promptArchiveMemberUrl();
 }
 
+const BACKFILL_GROUP_LABELS = {
+  nogizaka46: "乃木坂",
+  hinatazaka46: "日向坂",
+  sakurazaka46: "樱坂",
+  yodel: "yodel",
+};
+
+function backfillMemberOptions() {
+  return Array.from($('bmMemberOptions')?.querySelectorAll('input[type="checkbox"]') || []);
+}
+
+function selectedBackfillMembers() {
+  return backfillMemberOptions()
+    .filter((input) => input.checked)
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function syncBackfillMemberSelection() {
+  const options = backfillMemberOptions();
+  const selected = selectedBackfillMembers();
+  const hidden = $("bmMemberInput");
+  const summary = $("bmMemberSelectionSummary");
+  const toggle = $("bmMemberSelectAll");
+  if (hidden) hidden.value = selected.join(", ");
+  if (summary) {
+    summary.textContent = selected.length
+      ? `已选择 ${selected.length} 位成员`
+      : "未选择：全部监控成员";
+  }
+  if (toggle) {
+    toggle.disabled = options.length === 0;
+    toggle.textContent = options.length && selected.length === options.length ? "清空选择" : "全选";
+  }
+}
+
+function renderBackfillMemberOptions(selectedNames = []) {
+  const box = $("bmMemberOptions");
+  if (!box) return;
+  const available = (Array.isArray(members) ? members : []).filter((member) => member && member.name);
+  const selected = new Set(selectedNames);
+  box.innerHTML = "";
+  if (!available.length) {
+    box.innerHTML = '<div class="bm-member-empty">暂无可选的已归档成员；未选择时仍会回填全部监控成员。</div>';
+    syncBackfillMemberSelection();
+    return;
+  }
+  available.forEach((member) => {
+    const label = document.createElement("label");
+    label.className = "bm-member-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = member.name;
+    input.checked = selected.has(member.name);
+    input.setAttribute("aria-label", `选择 ${member.display || member.name}`);
+    const name = document.createElement("span");
+    name.className = "bm-member-option-name";
+    name.textContent = member.display || member.name;
+    const group = document.createElement("span");
+    group.className = "bm-member-option-group";
+    group.textContent = BACKFILL_GROUP_LABELS[member.group] || member.group || "成员";
+    label.append(input, name, group);
+    box.appendChild(label);
+  });
+  syncBackfillMemberSelection();
+}
+
+function backfillMemberSelectionForOpen() {
+  const current = curMember && curMember !== "__all__" && members.some((member) => member.name === curMember)
+    ? [curMember]
+    : [];
+  renderBackfillMemberOptions(current);
+}
+
+$("bmMemberOptions")?.addEventListener("change", syncBackfillMemberSelection);
+$("bmMemberSelectAll")?.addEventListener("click", () => {
+  const options = backfillMemberOptions();
+  const selectAll = selectedBackfillMembers().length !== options.length;
+  options.forEach((input) => { input.checked = selectAll; });
+  syncBackfillMemberSelection();
+});
+
+function isValidArchiveMemberBlogUrl(value) {
+  const rules = {
+    "nogizaka46.com": "/s/n46/diary/",
+    "sakurazaka46.com": "/s/s46/diary/",
+    "hinatazaka46.com": "/s/official/diary/",
+  };
+  try {
+    const url = new URL(String(value || "").trim());
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const pathPrefix = rules[host];
+    const port = url.port;
+    const ct = url.searchParams.get("ct") || "";
+    if (!pathPrefix || !["http:", "https:"].includes(url.protocol)) return false;
+    if (url.username || url.password || (port && port !== "80" && port !== "443")) return false;
+    return url.pathname.startsWith(pathPrefix) && /^\d+$/.test(ct);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function promptArchiveMessage() {
   const modal = $("backfillMessageModal");
   if (!modal) return;
@@ -4372,13 +4504,8 @@ async function promptArchiveMessage() {
   const cancelBtn = $("bmCancel");
   const confirmBtn = $("bmConfirm");
 
-  // 若当前正在查看某位成员，默认填入该成员显示名
-  if (curMember && curMember !== "__all__") {
-    const curObj = members.find(m => m.name === curMember);
-    memberInput.value = (curObj && curObj.display) || curMember;
-  } else {
-    memberInput.value = "";
-  }
+  // 若当前正在查看某位成员，默认勾选该成员；不勾选则保持“全部监控成员”的旧语义。
+  backfillMemberSelectionForOpen();
 
   // 默认断点续传模式
   for (const r of modeRadios) {
@@ -4417,7 +4544,8 @@ async function promptArchiveMessage() {
     };
 
     const onConfirm = async () => {
-      const memberVal = (memberInput.value || "").trim();
+      const memberVal = selectedBackfillMembers().join(", ");
+      if (memberInput) memberInput.value = memberVal;
       const selectedMode = (document.querySelector('input[name="bmMode"]:checked') || {}).value || "incremental";
 
       let payload = { member: memberVal, reset: false };
@@ -4461,7 +4589,10 @@ async function promptArchiveMessage() {
     document.addEventListener("keydown", onKeydown);
 
     modal.style.display = "flex";
-    setTimeout(() => { memberInput.focus(); }, 60);
+    setTimeout(() => {
+      const firstOption = backfillMemberOptions()[0];
+      (firstOption || $("bmMemberSelectAll") || confirmBtn).focus();
+    }, 60);
   });
 }
 // ── 粉丝信件 (Fan Letters) 交互逻辑 ───────────────────────
