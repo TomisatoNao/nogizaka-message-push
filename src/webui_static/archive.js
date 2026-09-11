@@ -1541,6 +1541,22 @@ function renderBlogMiniCard(post, container) {
 let currentBlogReaderPost = null;
 let blogReaderReturnHash = null;
 let currentTransMode = "ja-zh";
+let blogReaderSavedScroll = 0;
+
+function restoreWindowScroll(pos) {
+  if (typeof pos === "number" && pos > 0) {
+    window.scrollTo({ top: pos, behavior: "instant" });
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: pos, behavior: "instant" });
+      setTimeout(() => {
+        const cur = window.scrollY || document.documentElement.scrollTop || 0;
+        if (Math.abs(cur - pos) > 10) {
+          window.scrollTo({ top: pos, behavior: "instant" });
+        }
+      }, 50);
+    });
+  }
+}
 
 function getStructuredBlocks(post) {
   if (!post) return null;
@@ -1730,6 +1746,9 @@ function renderCurrentBlogContent() {
 
 function openBlogReader(post, bodyHtml, returnHash) {
   const readerWasHidden = $("blogReader").style.display === "none";
+  if (readerWasHidden && !blogReaderSavedScroll) {
+    blogReaderSavedScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  }
   if (returnHash !== undefined) {
     blogReaderReturnHash = returnHash || "";
   } else if (readerWasHidden) {
@@ -1838,6 +1857,7 @@ function openBlogReader(post, bodyHtml, returnHash) {
 }
 
 function closeBlogReader() {
+  const savedScroll = blogReaderSavedScroll;
   $("blogReader").style.display = "none";
   document.documentElement.classList.remove("modal-open");
   document.body.classList.remove("modal-open");
@@ -1846,6 +1866,8 @@ function closeBlogReader() {
   currentBlogReaderPost = null;
   if (typeof handleBackTopScroll === "function") handleBackTopScroll();
 
+  restoreWindowScroll(savedScroll);
+
   // 恢复打开前的路由：首页卡片关闭后必须回到首页，而不是博客列表。
   const returnHash = blogReaderReturnHash !== null
     ? blogReaderReturnHash
@@ -1853,7 +1875,7 @@ function closeBlogReader() {
   blogReaderReturnHash = null;
   writeArchiveHash(returnHash);
   // writeArchiveHash 会抑制同一轮 hashchange；主动分发一次，确保视觉状态与 URL 一致。
-  setTimeout(() => handleRoute(false), 0);
+  setTimeout(() => handleRoute(false, savedScroll), 0);
 }
 
 const brCloseBtn = $("brClose");
@@ -3406,6 +3428,9 @@ function fmtDateShort(utc) {
 }
 
 async function openBlogReaderById(blogId) {
+  if ($("blogReader") && $("blogReader").style.display === "none") {
+    blogReaderSavedScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  }
   try {
     const res = await api("/api/archive/blogs?id=" + encodeURIComponent(blogId));
     if (res.ok && res.post) {
@@ -3908,7 +3933,7 @@ function hideHome() {
 }
 
 // ── 路由与视图分发 ─────────────────────────────────────
-async function handleRoute(isInitial = false) {
+async function handleRoute(isInitial = false, restoreScrollPos = null) {
   const rawHash = (location.hash || "").replace(/^#/, "");
   const p = new URLSearchParams(rawHash);
 
@@ -3966,8 +3991,11 @@ async function handleRoute(isInitial = false) {
       return;
     }
 
+    const targetScroll = restoreScrollPos !== null ? restoreScrollPos : blogReaderSavedScroll;
+
     // 未指定博客 ID：若阅读器正开着，关闭它并回到列表
-    if ($("blogReader").style.display !== "none") {
+    const readerWasOpen = $("blogReader").style.display !== "none";
+    if (readerWasOpen) {
       $("blogReader").style.display = "none";
       document.documentElement.classList.remove("modal-open");
       document.body.classList.remove("modal-open");
@@ -3976,7 +4004,26 @@ async function handleRoute(isInitial = false) {
       currentBlogReaderPost = null;
       blogReaderReturnHash = null;
     }
+
+    const isAlreadyMatchingBlogList = (
+      curMode === "blog" &&
+      curBlogGroup === group &&
+      curBlogAuthor === author &&
+      curBlogDate === date &&
+      searchQuery === q &&
+      page === requestedPage &&
+      $("blogGrid") && $("blogGrid").style.display !== "none" &&
+      $("blogCards") && $("blogCards").children.length > 0
+    );
+
+    if (isAlreadyMatchingBlogList) {
+      restoreWindowScroll(targetScroll);
+      if (typeof handleBackTopScroll === "function") handleBackTopScroll();
+      return;
+    }
+
     await selectBlogGroup(group, author, false, { date, q, page: requestedPage });
+    restoreWindowScroll(targetScroll);
     return;
   }
 
@@ -4019,7 +4066,33 @@ async function handleRoute(isInitial = false) {
 
   // 3. 首页模式（默认无 hash 或 #home）
   if (!rawHash || rawHash === "home") {
-    showHome();
+    const readerWasOpen = $("blogReader").style.display !== "none";
+    if (readerWasOpen) {
+      $("blogReader").style.display = "none";
+      document.documentElement.classList.remove("modal-open");
+      document.body.classList.remove("modal-open");
+      document.body.style.overflow = "";
+      $("brContent").innerHTML = "";
+      currentBlogReaderPost = null;
+      blogReaderReturnHash = null;
+    }
+
+    const targetScroll = restoreScrollPos !== null ? restoreScrollPos : blogReaderSavedScroll;
+    const isAlreadyMatchingHome = (
+      curMode === "home" &&
+      $('archiveHome') && $('archiveHome').classList.contains('active') &&
+      $('portalContent') && $('portalContent').style.display !== 'none' &&
+      $('portalContent').children.length > 0
+    );
+
+    if (isAlreadyMatchingHome) {
+      restoreWindowScroll(targetScroll);
+      if (typeof handleBackTopScroll === "function") handleBackTopScroll();
+      return;
+    }
+
+    await showHome();
+    restoreWindowScroll(targetScroll);
     return;
   }
 

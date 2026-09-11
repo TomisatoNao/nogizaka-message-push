@@ -1531,11 +1531,10 @@ html.view-blog #blogGrid { display: block !important; }
   .bp-btn:hover { background: var(--bg-hover); border-color: var(--border-hover); transform: translateY(-1px); }
   .bp-btn:disabled { opacity: 0.5; pointer-events: none; cursor: not-allowed; }
   .bp-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 2px 8px var(--accent-ring); }
-  /* 模态/阅读器打开时彻底锁定背景 html 与 body，消除双重滑条 */
+  /* 模态/阅读器打开时锁定背景滚动，消除双重滑条 */
   html.modal-open,
   body.modal-open {
     overflow: hidden !important;
-    height: 100% !important;
   }
 
   /* Blog Reader Overlay */

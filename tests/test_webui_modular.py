@@ -1371,3 +1371,26 @@ def test_accounts_rename_route(monkeypatch):
     handler.do_POST()
     assert sent_resps[-1][0]["ok"] is True
     assert renamed == [("acc_old", "acc_new")]
+
+
+def test_blog_reader_scroll_preservation_contract():
+    """验证博客阅读器返回与滚动记忆契约，确保返回列表时不发生重绘或滚动归零。"""
+    css_path = _ROOT / "src" / "webui_static" / "archive.css"
+    js_path = _ROOT / "src" / "webui_static" / "archive.js"
+
+    css = css_path.read_text(encoding="utf-8")
+    js = js_path.read_text(encoding="utf-8")
+
+    # 1. CSS 契约：modal-open 不得强制限制 height: 100%，防止浏览器将 scrollTop 强制归零
+    assert "body.modal-open" in css
+    assert "overflow: hidden !important;" in css
+    # 确认在 modal-open 规则块中不存在 height: 100%
+    modal_rule = css.split("body.modal-open")[1].split("}")[0]
+    assert "height: 100%" not in modal_rule, "modal-open 不应设置 height: 100% 防止滚动位置重置"
+
+    # 2. JS 契约：滚动位置记录、多级恢复与避免重复全量拉取
+    assert "let blogReaderSavedScroll = 0;" in js
+    assert "function restoreWindowScroll(pos)" in js
+    assert "restoreWindowScroll(savedScroll);" in js
+    assert "isAlreadyMatchingBlogList" in js
+    assert "isAlreadyMatchingHome" in js
