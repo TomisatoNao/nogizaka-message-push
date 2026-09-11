@@ -49,8 +49,8 @@ def _set_state(
     _set_blog_translation_state(db, blog_id, status=status, error=error, request_id=request_id)
 
 
-def _cal_days(db: sqlite3.Connection, group: str, author: str = "") -> dict[str, int]:
-    return _blog_calendar_days(db, group, author)
+def _cal_days(db: sqlite3.Connection, group: str, author: str = "", query: str = "") -> dict[str, int]:
+    return _blog_calendar_days(db, group, author, query)
 
 
 def _get_blog_translation_lock(blog_id: int) -> threading.Lock:
@@ -100,8 +100,8 @@ def _set_blog_translation_state(
         return
 
 
-def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "") -> dict[str, int]:
-    """按博客分组/作者统计有效日期的文章数。"""
+def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "", query: str = "") -> dict[str, int]:
+    """按博客分组/作者/搜索词统计有效日期的文章数。"""
     where = [
         "group_key = ?",
         "date IS NOT NULL",
@@ -114,6 +114,18 @@ def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "") ->
         normalized_author = author.replace(" ", "").replace("　", "").replace("_", "")
         where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
         params.append(normalized_author)
+
+    if query:
+        terms = [t.lower() for t in query.split() if t.strip()]
+        for t in terms:
+            escaped_t = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pat = f"%{escaped_t}%"
+            where.append(
+                "(lower(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR "
+                "lower(COALESCE(body_text, '')) LIKE ? ESCAPE '\\' OR "
+                "lower(COALESCE(translation, '')) LIKE ? ESCAPE '\\')"
+            )
+            params.extend([pat, pat, pat])
 
     rows = db.execute(
         "SELECT substr(date, 1, 10) AS day, COUNT(*) AS count "
@@ -140,10 +152,15 @@ def _blog_list_excerpt(body_text: str, translation: str, query: str, limit: int 
     if not text:
         return ""
     if query:
+        terms = [t.lower() for t in str(query).split() if t.strip()]
         lower_text = text.lower()
-        idx = lower_text.find(str(query).lower())
-        if idx >= 0:
-            start = max(0, idx - limit // 3)
+        earliest_idx = -1
+        for t in terms:
+            idx = lower_text.find(t)
+            if idx >= 0 and (earliest_idx == -1 or idx < earliest_idx):
+                earliest_idx = idx
+        if earliest_idx >= 0:
+            start = max(0, earliest_idx - limit // 3)
             end = min(len(text), start + limit)
             prefix = "…" if start else ""
             suffix = "…" if end < len(text) else ""
@@ -189,8 +206,12 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     if sub == "blog_calendar":
         group = qp("group", "hinatazaka")
         author = qp("author", "").strip()
+        query = qp("q", "").strip()
+        if len(query) > 100:
+            _send_json_resp(handler, {"ok": False, "errors": ["搜索关键词不能超过 100 个字符"]}, 400)
+            return True
         try:
-            days = _cal_days(_get_db(), group, author)
+            days = _cal_days(_get_db(), group, author, query)
         except (sqlite3.Error, OSError):
             _send_json_resp(handler, {"ok": False, "errors": ["博客日历暂时不可用"]}, 500)
             return True
@@ -199,6 +220,7 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             "ok": True,
             "group": group,
             "author": author,
+            "query": query,
             "days": days,
             "total": sum(days.values()),
             "first_date": date_keys[0] if date_keys else "",
@@ -262,7 +284,10 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         month = int(qp("month", "0") or "0")
         page = max(1, int(qp("page", "1") or "1"))
         per_page = min(100, max(1, int(qp("per_page", "30") or "30")))
-        q = qp("q", "")
+        q = qp("q", "").strip()
+        if len(q) > 100:
+            _send_json_resp(handler, {"ok": False, "errors": ["搜索关键词不能超过 100 个字符"]}, 400)
+            return True
         posts = []
         total = 0
         try:
@@ -280,9 +305,16 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 where += " AND substr(date,1,7)=?"
                 params.append(f"{year:04d}-{month:02d}")
             if q:
-                where += " AND (title LIKE ? OR body_text LIKE ? OR translation LIKE ?)"
-                q_like = f"%{q}%"
-                params.extend([q_like, q_like, q_like])
+                terms = [t.lower() for t in q.split() if t.strip()]
+                for t in terms:
+                    escaped_t = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    pat = f"%{escaped_t}%"
+                    where += (
+                        " AND (lower(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR "
+                        "lower(COALESCE(body_text, '')) LIKE ? ESCAPE '\\' OR "
+                        "lower(COALESCE(translation, '')) LIKE ? ESCAPE '\\')"
+                    )
+                    params.extend([pat, pat, pat])
             total = db.execute(f"SELECT COUNT(*) FROM blog_posts {where}", params).fetchone()[0]
 
             has_hero_mode = (not q and not date_filter and not (year and month))

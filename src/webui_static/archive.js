@@ -539,7 +539,7 @@ function hasCalendarMatchesInMonth(year, month) {
 }
 
 function syncSearchCalendarMonth() {
-  if (curMode !== "msg" || !searchQuery || !dayCounts || !Object.keys(dayCounts).length) return;
+  if ((curMode !== "msg" && curMode !== "blog") || !searchQuery || !dayCounts || !Object.keys(dayCounts).length) return;
   ensureCalendarMonth();
   if (hasCalendarMatchesInMonth(calYM.year, calYM.month)) return;
   const latest = Object.keys(dayCounts)
@@ -557,8 +557,10 @@ async function loadBlogCalendar() {
   if (calendarAbort) calendarAbort.abort();
   calendarAbort = new AbortController();
   try {
-    const data = await api("/api/archive/blog_calendar?group=" + encodeURIComponent(curBlogGroup) +
-                           "&author=" + encodeURIComponent(curBlogAuthor || ""), { signal: calendarAbort.signal });
+    let url = "/api/archive/blog_calendar?group=" + encodeURIComponent(curBlogGroup) +
+              "&author=" + encodeURIComponent(curBlogAuthor || "");
+    if (searchQuery) url += "&q=" + encodeURIComponent(searchQuery);
+    const data = await api(url, { signal: calendarAbort.signal });
     if (version !== calendarVersion) return;
     if (!data.ok || typeof data.days !== "object") throw new Error("博客日历接口返回无效数据");
     blogCalendarError = "";
@@ -570,7 +572,9 @@ async function loadBlogCalendar() {
   }
   if (version !== calendarVersion) return;
   
-  if (!curBlogDate && (!calYM || Object.keys(dayCounts).length > 0)) {
+  if (searchQuery) {
+    syncSearchCalendarMonth();
+  } else if (!curBlogDate && (!calYM || Object.keys(dayCounts).length > 0)) {
     const keys = Object.keys(dayCounts).sort();
     if (keys.length > 0) {
       const latest = keys[keys.length - 1];
@@ -629,7 +633,7 @@ function renderCalendar() {
     ? blogCalendarError
     : (monthTotal > 0
       ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
-      : (curMode === "blog" ? "本月无博客" : (searchQuery ? "本月无匹配消息" : "本月无消息")));
+      : (curMode === "blog" ? (searchQuery ? "本月无匹配博客" : "本月无博客") : (searchQuery ? "本月无匹配消息" : "本月无消息")));
 }
 
 $("calPrev").addEventListener("click", () => {
@@ -648,11 +652,12 @@ $("calNext").addEventListener("click", () => {
 async function jumpToDay(dateKey) {
   const [y, m] = dateKey.split("-").map(Number);
   const keepMessageSearch = curMode === "msg" && Boolean(searchQuery);
-  if (!keepMessageSearch) searchQuery = "";
+  const keepBlogSearch = curMode === "blog" && Boolean(searchQuery);
+  if (!keepMessageSearch && !keepBlogSearch) searchQuery = "";
   syncSearchInput();
 
   if (curMode === "blog") {
-    // 博客模式下的日期跳转：重置页码为 1，清空关键词，切换/锁定指定日期
+    // 博客模式下的日期跳转：重置页码为 1，切换/锁定指定日期（搜索模式下保留关键词）
     page = 1;
     curBlogDate = (curBlogDate === dateKey) ? "" : dateKey;
     renderCalendar();
@@ -1488,23 +1493,10 @@ function renderBlogMiniCard(post, container) {
   if (searchQuery) {
     const fullText = post.excerpt || "";
     const lowerText = fullText.toLowerCase();
-    const lowerQuery = searchQuery.toLowerCase();
-    let idx = lowerText.indexOf(lowerQuery);
-    if (idx !== -1) {
-      let snippets = [];
-      let lastEnd = 0;
-      while (idx !== -1 && snippets.length < 3) {
-        let start = Math.max(lastEnd, idx - 25);
-        let end = Math.min(fullText.length, idx + lowerQuery.length + 35);
-        let snippet = fullText.substring(start, end);
-        if (start > lastEnd) snippet = "..." + snippet;
-        snippets.push(snippet);
-        lastEnd = end;
-        idx = lowerText.indexOf(lowerQuery, lastEnd);
-      }
-      let finalSnippet = snippets.join("");
-      if (lastEnd < fullText.length) finalSnippet += "...";
-      excerpt = '<div class="bc-excerpt">' + highlightQuery(finalSnippet, searchQuery) + '</div>';
+    const terms = searchQuery.split(/\s+/).filter(Boolean);
+    const hasMatch = terms.some(t => lowerText.includes(t.toLowerCase()));
+    if (hasMatch) {
+      excerpt = '<div class="bc-excerpt">' + highlightQuery(fullText, searchQuery) + '</div>';
     } else {
       excerpt = '<div class="bc-excerpt"><span style="color:var(--muted)">原文/译文包含关键词</span></div>';
     }
@@ -1746,7 +1738,136 @@ function renderCurrentBlogContent() {
   });
 
   updateModeSelectorUI();
+  if (searchQuery && $("blogReader") && $("blogReader").style.display !== "none") {
+    highlightBlogReaderSearch(false);
+  }
 }
+
+function highlightBlogReaderSearch(scrollIntoView = true) {
+
+  if (!searchQuery) return;
+
+  const contentDiv = $("brContent");
+
+  if (!contentDiv) return;
+
+  const terms = searchQuery.split(/\s+/).map(t => t.trim()).filter(Boolean);
+
+  if (!terms.length) return;
+
+  const re = new RegExp("(" + terms.map(escRegex).join("|") + ")", "gi");
+
+  const walker = document.createTreeWalker(contentDiv, NodeFilter.SHOW_TEXT, {
+
+    acceptNode: (n) => {
+
+      if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+
+      const parent = n.parentNode;
+
+      if (parent && (parent.nodeName === "SCRIPT" || parent.nodeName === "STYLE" || parent.classList?.contains("br-search-target"))) {
+
+        return NodeFilter.FILTER_REJECT;
+
+      }
+
+      return NodeFilter.FILTER_ACCEPT;
+
+    }
+
+  }, false);
+
+
+
+  const textNodes = [];
+
+  let curr;
+
+  while ((curr = walker.nextNode())) {
+
+    re.lastIndex = 0;
+
+    if (re.test(curr.nodeValue)) {
+
+      textNodes.push(curr);
+
+    }
+
+  }
+
+
+
+  let firstMark = null;
+
+  textNodes.forEach(node => {
+
+    const parent = node.parentNode;
+
+    if (!parent) return;
+
+    const parts = node.nodeValue.split(re);
+
+    if (parts.length <= 1) return;
+
+    const frag = document.createDocumentFragment();
+
+    parts.forEach(part => {
+
+      if (!part) return;
+
+      re.lastIndex = 0;
+
+      if (re.test(part)) {
+
+        const mark = document.createElement("mark");
+
+        mark.className = "br-search-target";
+
+        mark.style.background = "var(--accent-soft)";
+
+        mark.style.color = "var(--accent)";
+
+        mark.textContent = part;
+
+        frag.appendChild(mark);
+
+        if (!firstMark) firstMark = mark;
+
+      } else {
+
+        frag.appendChild(document.createTextNode(part));
+
+      }
+
+    });
+
+    parent.replaceChild(frag, node);
+
+  });
+
+
+
+  if (scrollIntoView && firstMark) {
+
+    setTimeout(() => {
+
+      const reader = $("blogReader");
+
+      if (reader && firstMark) {
+
+        const topPos = firstMark.getBoundingClientRect().top + reader.scrollTop - (window.innerHeight / 2);
+
+        reader.scrollTo({ top: Math.max(0, topPos), behavior: "smooth" });
+
+      }
+
+    }, 100);
+
+  }
+
+}
+
+
 
 function openBlogReader(post, bodyHtml, returnHash) {
   const readerWasHidden = $("blogReader").style.display === "none";
@@ -1815,47 +1936,7 @@ function openBlogReader(post, bodyHtml, returnHash) {
 
   if (searchQuery) {
     setTimeout(() => {
-      const contentDiv = $("brContent");
-      if (!contentDiv) return;
-      const walker = document.createTreeWalker(contentDiv, NodeFilter.SHOW_TEXT, null, false);
-      let node;
-      let found = false;
-      const lowerQuery = searchQuery.toLowerCase();
-      while ((node = walker.nextNode())) {
-        if (node.nodeValue.toLowerCase().includes(lowerQuery)) {
-          const span = document.createElement("mark");
-          span.className = "br-search-target";
-          span.style.background = "var(--accent-soft)";
-          span.style.color = "var(--accent)";
-          
-          const idx = node.nodeValue.toLowerCase().indexOf(lowerQuery);
-          const before = node.nodeValue.substring(0, idx);
-          const match = node.nodeValue.substring(idx, idx + searchQuery.length);
-          const after = node.nodeValue.substring(idx + searchQuery.length);
-          
-          span.textContent = match;
-          const parent = node.parentNode;
-          
-          const beforeNode = document.createTextNode(before);
-          const afterNode = document.createTextNode(after);
-          
-          parent.insertBefore(beforeNode, node);
-          parent.insertBefore(span, node);
-          parent.insertBefore(afterNode, node);
-          parent.removeChild(node);
-          
-          if (!found) {
-            setTimeout(() => {
-              const reader = $("blogReader");
-              const topPos = span.getBoundingClientRect().top + reader.scrollTop - (window.innerHeight / 2);
-              reader.scrollTo({ top: Math.max(0, topPos), behavior: "smooth" });
-            }, 100);
-            found = true;
-          }
-          
-          walker.currentNode = afterNode;
-        }
-      }
+      highlightBlogReaderSearch(true);
     }, 100);
   }
 }
@@ -2367,6 +2448,7 @@ function startSearch(q, updateHash = true) {
   syncMessageMonthFooter();
   resetContent();
   if (curMode === "blog") {
+    loadBlogCalendar();
     loadBlogPage(1, updateHash);
     return;
   }
@@ -2413,7 +2495,15 @@ function clearSearch() {
   searchQuery = "";
   syncSearchInput();
   syncMessageMonthFooter();
-  if (curMode === "blog") { loadBlogPage(1, true); return; }
+  if (curMode === "blog") {
+
+    loadBlogCalendar();
+
+    loadBlogPage(1, true);
+
+    return;
+
+  }
   loadCalendar();
   if (curYM) selectMonth(curYM.year, curYM.month);
 }

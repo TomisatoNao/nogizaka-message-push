@@ -642,6 +642,148 @@ def test_blog_list_endpoint_returns_summary_dto_without_full_body(monkeypatch):
     assert detail.payload["post"]["body_html"] == "<p>正文</p>"
 
 
+def test_blog_search_multi_term_and_escaping_and_case_insensitive(monkeypatch):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute(
+        """CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY, group_key TEXT, author TEXT, title TEXT, url TEXT,
+            date TEXT, body_html TEXT, body_text TEXT, translation TEXT,
+            content_json TEXT, translation_model TEXT, images_json TEXT,
+            image_paths_json TEXT, raw_json TEXT
+        )"""
+    )
+    db.executemany(
+        """INSERT INTO blog_posts
+           (id, group_key, author, title, url, date, body_html, body_text,
+            translation, content_json, translation_model, images_json, image_paths_json, raw_json)
+           VALUES (?, 'nogizaka', '冨里 奈央', ?, 'https://example.test',
+                   ?, '<p>body</p>', ?, ?, '[]', '', '[]', '[]', '{}')""",
+        [
+            (1, "アンダーライブ リハーサル", "2026-08-01 10:00", "今日はUNDER LIVEの通しリハーサルでした！楽しかった！", "今天是Live总彩排！"),
+            (2, "日常の100%満足な日", "2026-08-02 10:00", "100%の力を出し切ったよ_特別な一日", "发挥了100%的实力_特别的一天"),
+            (3, "普通のタイトル", "2026-08-03 10:00", "何気ない日常の文章です。", "平淡日常"),
+        ],
+    )
+    db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
+    monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
+
+    class Handler(_ResponseHandler):
+        def __init__(self, path):
+            super().__init__()
+            self.path = path
+            self.command = "GET"
+            self.payload = None
+            self.code = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+            self.code = code
+
+    # 1. 多词分词 AND 语义匹配（不同语序，同时命中标题与正文）
+    multi_term = Handler("/api/archive/blogs?group=nogizaka&q=" + quote("リハーサル アンダー"))
+    archive_handlers.handle_archive(multi_term, "blogs", lambda **_: True, lambda: None)
+    assert multi_term.code == 200
+    assert multi_term.payload["total"] == 1
+    assert multi_term.payload["posts"][0]["id"] == 1
+
+    # 2. 大小写不敏感测试
+    case_insensitive = Handler("/api/archive/blogs?group=nogizaka&q=live")
+    archive_handlers.handle_archive(case_insensitive, "blogs", lambda **_: True, lambda: None)
+    assert case_insensitive.code == 200
+    assert case_insensitive.payload["total"] == 1
+    assert case_insensitive.payload["posts"][0]["id"] == 1
+
+    # 3. SQL 通配符安全转义（搜索 % 不穿透匹配全量，搜索 _ 不匹配单字符）
+    percent_search = Handler("/api/archive/blogs?group=nogizaka&q=" + quote("100%"))
+    archive_handlers.handle_archive(percent_search, "blogs", lambda **_: True, lambda: None)
+    assert percent_search.code == 200
+    assert percent_search.payload["total"] == 1
+    assert percent_search.payload["posts"][0]["id"] == 2
+
+    underscore_search = Handler("/api/archive/blogs?group=nogizaka&q=" + quote("切ったよ_特別"))
+    archive_handlers.handle_archive(underscore_search, "blogs", lambda **_: True, lambda: None)
+    assert underscore_search.code == 200
+    assert underscore_search.payload["total"] == 1
+    assert underscore_search.payload["posts"][0]["id"] == 2
+
+    # 搜索单个下划线只匹配包含字面值下划线的文章，不应匹配所有文章
+    single_underscore = Handler("/api/archive/blogs?group=nogizaka&q=_")
+    archive_handlers.handle_archive(single_underscore, "blogs", lambda **_: True, lambda: None)
+    assert single_underscore.code == 200
+    assert single_underscore.payload["total"] == 1
+    assert single_underscore.payload["posts"][0]["id"] == 2
+
+    # 4. 超长关键词校验（> 100 字符直接返回 400）
+    too_long = Handler("/api/archive/blogs?group=nogizaka&q=" + quote("a" * 101))
+    archive_handlers.handle_archive(too_long, "blogs", lambda **_: True, lambda: None)
+    assert too_long.code == 400
+    assert "超过 100 个字符" in too_long.payload["errors"][0]
+
+
+def test_blog_calendar_search_query_filter(monkeypatch):
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute(
+        """CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY, group_key TEXT, author TEXT, title TEXT,
+            date TEXT, body_text TEXT, translation TEXT
+        )"""
+    )
+    db.executemany(
+        """INSERT INTO blog_posts (id, group_key, author, title, date, body_text, translation)
+           VALUES (?, 'nogizaka', '冨里 奈央', ?, ?, ?, ?)""",
+        [
+            (1, "アンダーライブ", "2026-08-01 10:00", "リハーサル開始", "开始彩排"),
+            (2, "アンダーライブ", "2026-08-01 14:00", "本番初日", "初日演出"),
+            (3, "普通の日常", "2026-08-02 10:00", "美味しいケーキ", "美味蛋糕"),
+        ],
+    )
+    db.commit()
+    monkeypatch.setattr(archive_common, "get_blog_db", lambda: db)
+    monkeypatch.setattr(archive_handlers, "get_blog_db", lambda: db)
+
+    class Handler(_ResponseHandler):
+        def __init__(self, path):
+            super().__init__()
+            self.path = path
+            self.command = "GET"
+            self.payload = None
+            self.code = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+            self.code = code
+
+    # 不带 q 时：统计全量有效天数
+    cal_all = Handler("/api/archive/blog_calendar?group=nogizaka")
+    archive_handlers.handle_archive(cal_all, "blog_calendar", lambda **_: True, lambda: None)
+    assert cal_all.code == 200
+    assert cal_all.payload["days"] == {"2026-08-01": 2, "2026-08-02": 1}
+    assert cal_all.payload["total"] == 3
+
+    # 带 q 时：仅统计命中关键词的文章与日期
+    cal_query = Handler("/api/archive/blog_calendar?group=nogizaka&q=" + quote("アンダー ライブ"))
+    archive_handlers.handle_archive(cal_query, "blog_calendar", lambda **_: True, lambda: None)
+    assert cal_query.code == 200
+    assert cal_query.payload["days"] == {"2026-08-01": 2}
+    assert cal_query.payload["total"] == 2
+    assert cal_query.payload["first_date"] == "2026-08-01"
+    assert cal_query.payload["last_date"] == "2026-08-01"
+    assert cal_query.payload["query"] == "アンダー ライブ"
+
+    # 超长关键词 400 校验
+    cal_too_long = Handler("/api/archive/blog_calendar?group=nogizaka&q=" + quote("x" * 105))
+    archive_handlers.handle_archive(cal_too_long, "blog_calendar", lambda **_: True, lambda: None)
+    assert cal_too_long.code == 400
+    assert "超过 100 个字符" in cal_too_long.payload["errors"][0]
+
+
 def test_blog_delete_translation_endpoint_clears_translation(monkeypatch):
     import sqlite3
 
