@@ -62,11 +62,16 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     if sub == "members":
         members = []
         monitor_map = {}
-        for idx, m in enumerate(getattr(cfg, "MONITOR_LIST", [])):
-            norm = m.get("m_name", "").replace(" ", "").replace("　", "").replace("_", "")
+        for m in getattr(cfg, "MONITOR_LIST", []) or []:
+            if not isinstance(m, dict):
+                continue
+            display = str(m.get("m_name") or m.get("name") or "").strip()
+            norm = display.replace(" ", "").replace("　", "").replace("_", "")
+            if not norm:
+                continue
             monitor_map[norm] = {
-                "display": m.get("m_name", ""),
-                "group": m.get("group_type", ""),
+                "display": display,
+                "group": str(m.get("group_type") or "").strip(),
             }
 
         from src import avatar_manager
@@ -93,7 +98,45 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             })
 
         members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
-        _send_json_resp(handler, {"ok": True, "members": members})
+
+        # 归档浏览器需要保留数据库里的全量历史成员，但回填工具只能针对
+        # 当前 config.MONITOR_LIST 中的成员。两者故意分成两个字段，避免
+        # 前端再次把历史归档成员误当成当前监控目标。
+        archived_by_norm = {
+            str(item.get("name") or "").replace(" ", "").replace("　", "").replace("_", ""): item
+            for item in members
+            if item.get("name")
+        }
+        monitor_members = []
+        monitor_seen = set()
+        for raw in getattr(cfg, "MONITOR_LIST", []) or []:
+            if not isinstance(raw, dict):
+                continue
+            display = str(raw.get("m_name") or raw.get("name") or "").strip()
+            norm = display.replace(" ", "").replace("　", "").replace("_", "")
+            if not norm or norm in monitor_seen:
+                continue
+            monitor_seen.add(norm)
+            archived = archived_by_norm.get(norm) or {}
+            group = str(raw.get("group_type") or archived.get("group") or "").strip()
+            monitor_members.append({
+                # 使用 config 中的成员名作为回填参数；backfill_archive.py
+                # 会按 m_name / m_id 在 MONITOR_LIST 中解析，不依赖归档目录名。
+                "name": display,
+                "display": display,
+                "group": group,
+                "avatar": archived.get("avatar") or avatar_map.get(f"{group}:{norm}") or avatar_map.get(norm) or "",
+                "months": int(archived.get("months", 0) or 0),
+                "total": int(archived.get("total", 0) or 0),
+                "letters_total": int(archived.get("letters_total", 0) or 0),
+            })
+        monitor_members.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
+
+        _send_json_resp(handler, {
+            "ok": True,
+            "members": members,
+            "monitor_members": monitor_members,
+        })
         return True
 
     # 3. 月份列表

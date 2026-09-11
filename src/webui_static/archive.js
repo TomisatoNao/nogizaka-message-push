@@ -6,7 +6,8 @@ try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
 const BLOG_GROUP_KEYS = ["nogizaka", "sakurazaka", "hinatazaka"];
 
-let members = [];        // [{name, display, total, letters_total, months}]
+let members = [];        // 归档浏览列表：包含所有已有历史数据的成员
+let monitorMembers = []; // 回填目标列表：仅来自当前 config.MONITOR_LIST
 let blogGroups = [];     // [{key, total, first_date, last_date}]
 let curMember = "";
 let curBlogGroup = "";   // 非空 = 博客模式
@@ -793,6 +794,9 @@ async function loadMembers(skipSelect = false) {
   const data = await api("/api/archive/members");
   if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
   members = data.members;
+  monitorMembers = Array.isArray(data.monitor_members)
+    ? data.monitor_members.filter((member) => member && member.name)
+    : [];
   if (!members.length) {
     showEmpty("还没有任何归档。确认 config.json 的 archive.enabled 已开启，" +
               "新消息会自动归档；历史消息用 python tools/backfill_archive.py 回填。");
@@ -4430,11 +4434,11 @@ function syncBackfillMemberSelection() {
 function renderBackfillMemberOptions(selectedNames = []) {
   const box = $("bmMemberOptions");
   if (!box) return;
-  const available = (Array.isArray(members) ? members : []).filter((member) => member && member.name);
+  const available = (Array.isArray(monitorMembers) ? monitorMembers : []).filter((member) => member && member.name);
   const selected = new Set(selectedNames);
   box.innerHTML = "";
   if (!available.length) {
-    box.innerHTML = '<div class="bm-member-empty">暂无可选的已归档成员；未选择时仍会回填全部监控成员。</div>';
+    box.innerHTML = '<div class="bm-member-empty">暂无当前监控成员；请先在管理端配置 Message 监控成员。</div>';
     syncBackfillMemberSelection();
     return;
   }
@@ -4459,9 +4463,11 @@ function renderBackfillMemberOptions(selectedNames = []) {
 }
 
 function backfillMemberSelectionForOpen() {
-  const current = curMember && curMember !== "__all__" && members.some((member) => member.name === curMember)
-    ? [curMember]
-    : [];
+  const normalize = (value) => String(value || "").replace(/[ _　]/g, "");
+  const currentMember = curMember && curMember !== "__all__"
+    ? monitorMembers.find((member) => normalize(member.name) === normalize(curMember))
+    : null;
+  const current = currentMember ? [currentMember.name] : [];
   renderBackfillMemberOptions(current);
 }
 

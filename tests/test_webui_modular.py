@@ -868,9 +868,9 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260911_4" in html
+    assert "/static/archive.js?v=20260911_5" in html
     assert "/static/archive.css?v=20260911_2" in html
-    assert "/static/archive.js?v=20260911_4" in perf
+    assert "/static/archive.js?v=20260911_5" in perf
     assert "/static/archive.css?v=20260911_2" in perf
 
 
@@ -944,6 +944,46 @@ def test_archive_backfill_member_picker_and_blog_url_validation_contract():
     assert "请输入三坂官方成员博客列表页链接" in script
     assert ".bm-member-options" in styles
     assert ".bm-member-option" in styles
+
+
+def test_archive_backfill_picker_uses_current_monitor_members_only():
+    """回填选择器必须消费监控成员字段，不能复用归档历史全量列表。"""
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    backend = (_ROOT / "src" / "webui_modules" / "archive" / "messages.py").read_text(encoding="utf-8")
+
+    assert "从当前监控成员中选择目标" in html
+    assert "let monitorMembers = []" in script
+    assert "monitorMembers = Array.isArray(data.monitor_members)" in script
+    assert "const available = (Array.isArray(monitorMembers) ? monitorMembers : [])" in script
+    assert '"monitor_members": monitor_members' in backend
+    assert "config.MONITOR_LIST" in backend
+    assert "已归档成员" not in script[script.index("function renderBackfillMemberOptions"):script.index("function backfillMemberSelectionForOpen")]
+
+
+def test_archive_members_payload_separates_monitor_list(monkeypatch):
+    """归档 API 保留历史浏览列表，同时单独返回当前监控成员。"""
+    from src.webui_modules.archive import messages
+
+    monkeypatch.setattr(messages.cfg, "MONITOR_LIST", [
+        {"m_name": "监控成员", "group_type": "nogizaka46"},
+        {"m_name": "无归档成员", "group_type": "yodel"},
+    ])
+    monkeypatch.setattr(messages._archive, "list_members", lambda: ["监控成员", "历史成员"])
+    monkeypatch.setattr(messages._archive, "get_letters_counts", lambda _names: {})
+    monkeypatch.setattr(messages._archive, "list_months", lambda _name: [{"count": 2}])
+    monkeypatch.setattr(messages._archive, "infer_member_group", lambda _name: "")
+
+    import src.avatar_manager as avatar_manager
+    monkeypatch.setattr(avatar_manager, "get_member_avatar_map", lambda: {})
+
+    handler = _ResponseHandler()
+    handler.path = "/api/archive/members"
+    assert messages.handle_messages(handler, "members", lambda **_: True, lambda: {})
+    payload = json.loads(handler.wfile.getvalue())
+
+    assert {item["name"] for item in payload["members"]} == {"监控成员", "历史成员"}
+    assert [item["name"] for item in payload["monitor_members"]] == ["监控成员", "无归档成员"]
 
 
 def test_archive_message_month_footer_contract():
