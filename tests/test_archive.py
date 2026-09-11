@@ -89,6 +89,18 @@ def main() -> None:
         assert "103" in fail_ids, f"无本地文件的媒体消息应进重试集合: {fail_ids}"
         data = [m for m in data if m.get("id") != 103]   # 还原，避免影响后续用例
         month_json.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+        # 兼容单数字月份目录 fallback
+        single_digit_dir = tmpdir / "测试_成员" / "2026" / "3"
+        single_digit_dir.mkdir(parents=True, exist_ok=True)
+        (single_digit_dir / "messages.json").write_text(
+            json.dumps([{"id": 201, "type": "text", "text": "三月测试"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        loaded_single = archive.load_month(mdir, 2026, 3)
+        assert len(loaded_single) == 1 and loaded_single[0]["id"] == 201, f"单数字月份目录应能正常加载: {loaded_single}"
+        (single_digit_dir / "messages.json").unlink()
+        single_digit_dir.rmdir()
         print("✅ Test 2 通过\n")
 
         # ── Test 3: 查看器 API ───────────────────────────

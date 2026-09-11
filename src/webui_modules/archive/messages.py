@@ -393,10 +393,28 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             else:
                 fav_ids = set()
 
+        # 搜索模式下日历只统计跨月搜索命中的日期；不带 q 时沿用缓存的全量统计。
+        query = qp("q").strip()
+        if len(query) > 100:
+            _send_json_resp(handler, {"ok": False, "errors": ["搜索关键词不能超过 100 个字符"]}, 400)
+            return True
+        if query:
+            hits = _archive.search(member, query, type_filter=wanted, order="desc")
+            if fav_ids is not None:
+                hits = [m for m in hits if str(m.get("id")) in fav_ids]
+            days = {}
+            for message in hits:
+                stamp = message.get("published_at") or message.get("updated_at", "")
+                day = _archive._jst_date(stamp)
+                if day:
+                    days[day] = days.get(day, 0) + 1
+        else:
+            days = _archive.day_counts(member, type_filter=wanted, id_filter=fav_ids)
+
         _send_json_resp(handler, {
             "ok": True,
             "member": member,
-            "days": _archive.day_counts(member, type_filter=wanted, id_filter=fav_ids),
+            "days": days,
         })
         return True
 

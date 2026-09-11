@@ -845,10 +845,45 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260911_1" in html
+    assert "/static/archive.js?v=20260911_3" in html
     assert "/static/archive.css?v=20260911_1" in html
-    assert "/static/archive.js?v=20260911_1" in perf
+    assert "/static/archive.js?v=20260911_3" in perf
     assert "/static/archive.css?v=20260911_1" in perf
+
+
+def test_archive_favorite_filter_has_single_entry_point():
+    """收藏筛选只保留消息工具栏入口，单条消息收藏按钮仍可用。"""
+    html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    assert html.count('id="chipFav"') == 1
+    assert 'id="menuMyFavorites"' not in html
+    assert "menuMyFavorites" not in script
+    assert '.fav-btn' in script
+    assert "let isFavFilter = false" in script
+    assert 'p.set("fav", "1")' in script
+    assert 'if (isFavFilter) calUrl += "&favorite=1"' in script
+    assert 'const favParam = isFavFilter ? "&favorite=1" : ""' in script
+    assert "refreshFilteredView();" in script
+
+
+def test_archive_search_calendar_uses_matching_days_and_locks_message_months():
+    """搜索跨月显示，月份时间线锁定，日历仍可定位命中日期。"""
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    assert 'if (searchQuery) calUrl += "&q=" + encodeURIComponent(searchQuery);' in script
+    assert "function syncMessageMonthNavigation()" in script
+    assert "const locked = curMode === \"msg\" && Boolean(searchQuery);" in script
+    assert "monthNav.hidden = false;" in script
+    assert "if (select) select.disabled = locked;" in script
+    assert "if (prev) prev.disabled = true;" in script
+    assert "function syncSearchCalendarMonth()" in script
+    assert 'const entryNoun = curMode === "blog" ? "篇博客" : (searchQuery ? "条匹配消息" : "条消息");' in script
+    assert '"本月无匹配消息"' in script
+    assert 'const keepMessageSearch = curMode === "msg" && Boolean(searchQuery);' in script
+    assert "&& !keepMessageSearch" in script
+    assert "if (curMode === \"msg\" && searchQuery) return;" in script
+    assert script.count("loadCalendar();") >= 4
 
 
 def test_archive_group_blog_backfill_contract():

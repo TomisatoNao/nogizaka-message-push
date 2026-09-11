@@ -391,6 +391,31 @@ def test_api_composite_months_and_calendar_filtering(monkeypatch, tmp_path):
     assert "2026-08-15" in cal_days_fav_pic
     assert "2026-09-10" not in cal_days_fav_pic  # 9-10 是文字消息，被过滤
 
+    # 2.3 搜索日历只点亮跨月搜索命中的日期，并继续支持收藏复合筛选
+    search_hits = [
+        {**msg1, "_year": 2026, "_month": 9},
+        {**msg2, "_year": 2026, "_month": 9},
+        {**msg3, "_year": 2026, "_month": 8},
+    ]
+    monkeypatch.setattr(
+        _archive,
+        "search",
+        lambda _member, _query, type_filter=None, order="desc": [
+            m for m in search_hits if type_filter is None or m["type"] in type_filter
+        ],
+    )
+    h_cal_query = _MockHandler(f"/api/archive/calendar?member={member_dir}&q=命中", headers=cookie_alice)
+    assert handle_messages(h_cal_query, "calendar", lambda **_: True, lambda: {}) is True
+    cal_days_query = h_cal_query.get_json_response()["days"]
+    assert cal_days_query == {"2026-09-10": 1, "2026-09-11": 1, "2026-08-15": 1}
+
+    h_cal_query_fav = _MockHandler(
+        f"/api/archive/calendar?member={member_dir}&q=命中&favorite=1", headers=cookie_alice
+    )
+    assert handle_messages(h_cal_query_fav, "calendar", lambda **_: True, lambda: {}) is True
+    cal_days_query_fav = h_cal_query_fav.get_json_response()["days"]
+    assert cal_days_query_fav == {"2026-09-10": 1, "2026-08-15": 1}
+
     # 3. 验证消息列表复合筛选 (messages)
     # 3.1 9月收藏列表
     h_msg_fav = _MockHandler(f"/api/archive/messages?member={member_dir}&year=2026&month=9&favorite=1", headers=cookie_alice)
@@ -419,4 +444,23 @@ def test_api_composite_months_and_calendar_filtering(monkeypatch, tmp_path):
     h_bob_cal = _MockHandler(f"/api/archive/calendar?member={member_dir}&favorite=1", headers=cookie_bob)
     handle_messages(h_bob_cal, "calendar", lambda **_: True, lambda: {})
     assert h_bob_cal.get_json_response()["days"] == {}
+
+def test_fts5_zero_match_does_not_scan_disk(monkeypatch):
+    """FTS5 匹配 0 条时直接返回空列表，绝不降级穿透去全量扫描磁盘 JSON。"""
+    from src import archive, archive_query
+
+    member_dir = "测试_FTS0"
+
+    # 如果发生磁盘扫描，load_month 会被调用；我们通过 mock 验证 load_month 绝不被调用
+    disk_scanned = False
+
+    def fake_load_month(*args, **kwargs):
+        nonlocal disk_scanned
+        disk_scanned = True
+        return []
+
+    monkeypatch.setattr(archive, "load_month", fake_load_month)
+    results = archive_query.search(member_dir, "nonexistent_query_term_xyz")
+    assert results == []
+    assert not disk_scanned, "FTS5 0 匹配时不应触发磁盘回退扫描！"
 

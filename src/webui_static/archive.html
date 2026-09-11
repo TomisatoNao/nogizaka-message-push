@@ -73,10 +73,6 @@
           <div class="user-info-role" id="userMenuRole"></div>
         </div>
         <div class="dropdown-divider"></div>
-        <button class="dropdown-item" id="menuMyFavorites" type="button">
-          <span class="icon">⭐</span> 我的收藏消息
-        </button>
-        <div class="dropdown-divider"></div>
         <button class="dropdown-item" id="changePwBtn" type="button">
           <span class="icon">🔑</span> 修改登录密码
         </button>
@@ -492,7 +488,8 @@
 </dialog>
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
-<script src="/static/archive.js?v=20260911_1"></script>
+<div id="toastContainer" class="toast-container"></div>
+<script src="/static/archive.js?v=20260911_3"></script>
 
 </body>
 </html>

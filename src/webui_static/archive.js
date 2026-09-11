@@ -276,7 +276,33 @@ async function api(path, options = {}) {
 }
 
 function normalizedQuery(value) { return String(value || "").trim().slice(0, 100); }
-function syncSearchInput() { $("searchBox").value = searchQuery; $("searchClear").hidden = !searchQuery; }
+function syncMessageMonthNavigation() {
+  const monthNav = $("monthNavGroup");
+  if (!monthNav) return;
+  const locked = curMode === "msg" && Boolean(searchQuery);
+  // 保持顶部月份控件占位，搜索态只禁用交互，避免页面跳动。
+  monthNav.hidden = false;
+  monthNav.setAttribute("aria-disabled", String(locked));
+  const prev = $("prevMonth");
+  const next = $("nextMonth");
+  const select = $("monthSelect");
+  if (select) select.disabled = locked;
+  if (locked) {
+    if (prev) prev.disabled = true;
+    if (next) next.disabled = true;
+    return;
+  }
+  const monthIndex = currentMessageMonthIndex();
+  if (prev) prev.disabled = monthIndex < 0 || monthIndex >= months.length - 1;
+  if (next) next.disabled = monthIndex < 0 || monthIndex <= 0;
+}
+function syncSearchInput() {
+  $("searchBox").value = searchQuery;
+  $("searchClear").hidden = !searchQuery;
+  // 搜索结果跨越全部月份，时间线月份控件保留布局但不允许切换。
+  // 日历仍然独立显示搜索命中的日期，并允许用户跨月浏览。
+  syncMessageMonthNavigation();
+}
 function messageOrderLabel() {
   return messageOrder === "asc" ? "从早到晚" : "最新优先";
 }
@@ -493,6 +519,7 @@ async function loadCalendar() {
   try {
     let calUrl = "/api/archive/calendar?member=" + encodeURIComponent(curMember) + "&type=" + curType;
     if (isFavFilter) calUrl += "&favorite=1";
+    if (searchQuery) calUrl += "&q=" + encodeURIComponent(searchQuery);
     const data = await api(calUrl, { signal: calendarAbort.signal });
     if (version !== calendarVersion) return;
     dayCounts = data.ok ? data.days : {};
@@ -501,7 +528,26 @@ async function loadCalendar() {
     dayCounts = {};
   }
   if (version !== calendarVersion) return;
+  if (searchQuery) syncSearchCalendarMonth();
   renderCalendar();
+}
+
+function hasCalendarMatchesInMonth(year, month) {
+  const prefix = year + "-" + String(month).padStart(2, "0") + "-";
+  return Object.keys(dayCounts).some((key) => key.startsWith(prefix) && Number(dayCounts[key]) > 0);
+}
+
+function syncSearchCalendarMonth() {
+  if (curMode !== "msg" || !searchQuery || !dayCounts || !Object.keys(dayCounts).length) return;
+  ensureCalendarMonth();
+  if (hasCalendarMatchesInMonth(calYM.year, calYM.month)) return;
+  const latest = Object.keys(dayCounts)
+    .filter((key) => Number(dayCounts[key]) > 0)
+    .sort()
+    .pop();
+  if (!latest) return;
+  const [year, month] = latest.split("-").map(Number);
+  calYM = { year, month };
 }
 
 async function loadBlogCalendar() {
@@ -541,7 +587,7 @@ function renderCalendar() {
   $("calTitle").textContent = year + " 年 " + month + " 月";
   const grid = $("calGrid");
   grid.innerHTML = "";
-  const entryNoun = curMode === "blog" ? "篇博客" : "条消息";
+  const entryNoun = curMode === "blog" ? "篇博客" : (searchQuery ? "条匹配消息" : "条消息");
   for (const w of ["日", "一", "二", "三", "四", "五", "六"]) {
     const h = document.createElement("div");
     h.className = "cal-dow";
@@ -582,7 +628,7 @@ function renderCalendar() {
     ? blogCalendarError
     : (monthTotal > 0
       ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
-      : (curMode === "blog" ? "本月无博客" : "本月无消息"));
+      : (curMode === "blog" ? "本月无博客" : (searchQuery ? "本月无匹配消息" : "本月无消息")));
 }
 
 $("calPrev").addEventListener("click", () => {
@@ -600,7 +646,8 @@ $("calNext").addEventListener("click", () => {
 
 async function jumpToDay(dateKey) {
   const [y, m] = dateKey.split("-").map(Number);
-  searchQuery = "";
+  const keepMessageSearch = curMode === "msg" && Boolean(searchQuery);
+  if (!keepMessageSearch) searchQuery = "";
   syncSearchInput();
 
   if (curMode === "blog") {
@@ -623,7 +670,7 @@ async function jumpToDay(dateKey) {
   if (jumpVersion !== contentVersion) return;
   $("loadMore").hidden = true;
   // 兜底：当前类型筛选下该日期没有消息 → 自动切回「全部」重载
-  if (!document.querySelector('.day-sep[data-date="' + dateKey + '"]') && curType) {
+  if (!document.querySelector('.day-sep[data-date="' + dateKey + '"]') && curType && !keepMessageSearch) {
     curType = "";
     $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
       c.classList.toggle("active", TYPES[i][0] === ""));
@@ -2172,6 +2219,7 @@ function syncMessageMonthFooter() {
 }
 
 function navigateAdjacentMonth(offset, { scrollToTop = false } = {}) {
+  if (curMode === "msg" && searchQuery) return;
   const monthIndex = currentMessageMonthIndex();
   const target = monthIndex >= 0 ? months[monthIndex + offset] : null;
   if (!target) return;
@@ -2196,6 +2244,7 @@ async function selectMonth(year, month) {
   const idx = currentMessageMonthIndex();
   $("prevMonth").disabled = idx >= months.length - 1;
   $("nextMonth").disabled = idx <= 0;
+  syncMessageMonthNavigation();
   resetContent();
   if (!curBlogGroup) syncHash();
   await loadPage();
@@ -2297,9 +2346,11 @@ function startSearch(q, updateHash = true) {
   }
   if (updateHash) syncHash();
   if (!searchQuery) {
+    loadCalendar();
     if (curYM) { selectMonth(curYM.year, curYM.month); return; }
     return;
   }
+  loadCalendar();
   loadPage();
 }
 let searchDebounceTimer = null;
@@ -2337,6 +2388,7 @@ function clearSearch() {
   syncSearchInput();
   syncMessageMonthFooter();
   if (curMode === "blog") { loadBlogPage(1, true); return; }
+  loadCalendar();
   if (curYM) selectMonth(curYM.year, curYM.month);
 }
 $("searchClear").addEventListener("click", clearSearch);
@@ -2849,6 +2901,7 @@ document.addEventListener("keydown", (e) => {
   }
 
   // 3. 全局键盘热键
+  if (curMode === "msg" && searchQuery && (e.key === "[" || e.key === "]")) return;
   if (e.key === "[") {
     e.preventDefault();
     $("prevMonth").click();
@@ -2940,24 +2993,6 @@ function initInteractionChips() {
       refreshFilteredView();
     });
   }
-  const menuFav = $("menuMyFavorites");
-  if (menuFav) {
-    menuFav.addEventListener("click", async () => {
-      if ($("userDropdown")) $("userDropdown").classList.remove("open");
-      if (curMode !== "msg") switchMainTab("msg");
-      isFavFilter = true;
-      if (chipFav) chipFav.classList.toggle("active", true);
-      await refreshFilteredView();
-      // 如果当前选中的月份没有收藏（count === 0），自动跳转到最近一个有收藏的月份
-      const currentOpt = months.find(m => curYM && m.year === curYM.year && m.month === curYM.month);
-      if (!currentOpt || currentOpt.count === 0) {
-        const firstWithFav = months.find(m => m.count > 0);
-        if (firstWithFav) {
-          await selectMonth(firstWithFav.year, firstWithFav.month);
-        }
-      }
-    });
-  }
 }
 
 function initTypeChips() {
@@ -2983,6 +3018,7 @@ function initMessageOrder() {
 }
 
 $("monthSelect").addEventListener("change", () => {
+  if (curMode === "msg" && searchQuery) return;
   const [y, m] = $("monthSelect").value.split("-").map(Number);
   selectMonth(y, m);
 });
