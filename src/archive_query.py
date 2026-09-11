@@ -361,7 +361,7 @@ def day_counts(
 
 def search(member_dir: str, query: str, type_filter: set[str] | None = None,
            limit: int = 500, order: str = "desc") -> list[dict]:
-    """跨月搜索：优先使用 SQLite FTS5 全文索引，无 DB 或被 mock 时降级为 JSON 遍历。
+    """跨月搜索：优先使用 SQLite 原生 SQL 子串匹配，无 DB 或被 mock 时降级为 JSON 遍历。
     原文与译文都参与匹配，空格分词取 AND 语义。
     返回附加 _year/_month 字段的消息列表，最多 limit 条。
 
@@ -378,34 +378,73 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
     is_mocked = getattr(archive, "list_months", None) is not getattr(archive, "_ORIGINAL_LIST_MONTHS", None)
     if not is_mocked:
         conn = _get_init_db()
-        if conn and _get_has_fts5():
+        if conn:
             try:
-                match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
-                sql = """
-                    SELECT m.raw_json, m.year, m.month
-                    FROM messages_fts f
-                    JOIN messages m ON f.id = m.id
-                    WHERE f.member_dir = ? AND messages_fts MATCH ?
-                """
-                params: list[str | int] = [member_dir, match_expr]
-                if type_filter:
-                    placeholders = ",".join("?" * len(type_filter))
-                    sql += f" AND m.type IN ({placeholders})"
-                    params.extend(list(type_filter))
-                direction = "ASC" if order == "asc" else "DESC"
-                sql += f" ORDER BY m.updated_at {direction}, m.id {direction} LIMIT ?"
-                params.append(limit)
+                possible_dirs = {
+                    member_dir,
+                    member_dir.replace("_", ""),
+                    member_dir.replace(" ", ""),
+                    member_dir.replace("　", ""),
+                    member_dir.replace("_", " "),
+                    member_dir.replace(" ", "_"),
+                }
+                try:
+                    from src.archive import member_dir_name
+                    possible_dirs.add(member_dir_name(member_dir))
+                except Exception:
+                    pass
+                dir_list = [d for d in possible_dirs if d]
 
-                cursor = conn.cursor()
-                cursor.execute(sql, params)
-                results = []
-                for raw, yr, mo in cursor.fetchall():
-                    msg = json.loads(raw)
-                    results.append({**msg, "_year": yr, "_month": mo})
-                if results:
+                placeholders_dirs = ",".join("?" * len(dir_list))
+                where_member = f"(member_dir IN ({placeholders_dirs}) OR member_name IN ({placeholders_dirs}))"
+                member_params: list[str | int] = list(dir_list) + list(dir_list)
+
+                has_member = conn.execute(
+                    f"SELECT 1 FROM messages WHERE {where_member} LIMIT 1;",
+                    member_params
+                ).fetchone()
+
+                if has_member:
+                    where_clauses = [where_member]
+                    params: list[str | int] = list(member_params)
+
+                    if type_filter:
+                        placeholders_types = ",".join("?" * len(type_filter))
+                        where_clauses.append(f"type IN ({placeholders_types})")
+                        params.extend(list(type_filter))
+
+                    for t in terms:
+                        escaped_t = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                        pat = f"%{escaped_t}%"
+                        where_clauses.append(
+                            "(lower(COALESCE(text, '')) LIKE ? ESCAPE '\\' OR "
+                            "lower(COALESCE(translation, '')) LIKE ? ESCAPE '\\' OR "
+                            "lower(COALESCE(tags, '')) LIKE ? ESCAPE '\\')"
+                        )
+                        params.extend([pat, pat, pat])
+
+                    direction = "ASC" if order == "asc" else "DESC"
+                    sql = f"""
+                        SELECT raw_json, year, month
+                        FROM messages
+                        WHERE {' AND '.join(where_clauses)}
+                        ORDER BY updated_at {direction}, id {direction}
+                        LIMIT ?
+                    """
+                    params.append(limit)
+
+                    cursor = conn.cursor()
+                    cursor.execute(sql, params)
+                    results = []
+                    for raw, yr, mo in cursor.fetchall():
+                        try:
+                            msg = json.loads(raw)
+                            results.append({**msg, "_year": yr, "_month": mo})
+                        except (ValueError, TypeError):
+                            continue
                     return results
             except Exception as e:
-                log_all(f"⚠️ SQLite FTS5 搜索异常，降级回 JSON 文件匹配: {e}", is_debug=True)
+                log_all(f"⚠️ SQLite 搜索异常，降级回 JSON 文件匹配: {e}", is_debug=True)
 
     list_months_fn = getattr(archive, "list_months", list_months)
     load_month_fn = getattr(archive, "load_month", None)

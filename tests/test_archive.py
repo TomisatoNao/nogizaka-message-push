@@ -350,6 +350,7 @@ def main() -> None:
             (3, "今日はライブでした", ""),
             (4, "ライブ楽しかった！", "演唱会真开心！"),
             (5, "おやすみなさい", "晚安"),
+            (6, "アンダーライブのリハーサルで詰め詰めで送れてなかった ごめんね", "Underlive排练很紧凑没能发消息 对不起"),
         ]):
             asyncio.run(archive.archive_message(
                 s_member,
@@ -359,15 +360,20 @@ def main() -> None:
                 translated=trans))
         sdir = archive.member_dir_name("搜索 用例")
         hits = archive.search(sdir, "ライブ")
-        assert len(hits) == 2 and hits[0]["_month"] == 4 and hits[1]["_month"] == 3, \
+        # ライブ 应命中 603(mo 6), 601(mo 4), 600(mo 3)
+        assert len(hits) == 3 and [h["_month"] for h in hits] == [6, 4, 3], \
             f"跨月命中且新的在前: {[(h['id'], h['_month']) for h in hits]}"
         asc_hits = archive.search(sdir, "ライブ", order="asc")
-        assert len(asc_hits) == 2 and asc_hits[0]["_month"] == 3 and asc_hits[1]["_month"] == 4, \
+        assert len(asc_hits) == 3 and [h["_month"] for h in asc_hits] == [3, 4, 6], \
             f"升序搜索应从旧到新: {[(h['id'], h['_month']) for h in asc_hits]}"
         assert len(archive.search(sdir, "演唱会")) == 1, "译文应参与匹配"
         assert len(archive.search(sdir, "ライブ 楽しかった")) == 1, "空格分词应为 AND 语义"
+        assert len(archive.search(sdir, "アンダーライブ")) == 1, "长连续日语中段词应100%命中"
+        assert len(archive.search(sdir, "リハーサル")) == 1, "长连续日语词中段子串应100%命中"
+        assert len(archive.search(sdir, "アンダーライブ リハーサル")) == 1, "多关键词长日语子串应100%命中"
         assert archive.search(sdir, "LIVE不存在的词") == []
         assert archive.search(sdir, "   ") == [], "空关键词返回空"
+        assert archive.search(sdir, "%") == [], "特殊通配符 % 应被转义不匹配无关内容"
         assert len(archive.search(sdir, "ライブ", type_filter={"video"})) == 0, "类型过滤应生效"
         print("✅ Test 7.5 通过\n")
 
@@ -455,7 +461,7 @@ def main() -> None:
             s_enc = "%E6%90%9C%E7%B4%A2_%E7%94%A8%E4%BE%8B"
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96")
             j = json.loads(body)
-            assert code == 200 and j["total"] == 2 and j["messages"][0]["year"] == 2026, f"搜索: {j}"
+            assert code == 200 and j["total"] == 3 and j["messages"][0]["year"] == 2026, f"搜索: {j}"
             code, body, _ = _http("GET", base + f"/api/archive/search?member={s_enc}&q=%E3%83%A9%E3%82%A4%E3%83%96&order=asc")
             j = json.loads(body)
             assert code == 200 and j["order"] == "asc" and j["messages"][0]["month"] == 3, \

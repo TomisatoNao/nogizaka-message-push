@@ -167,6 +167,7 @@ def init_db() -> sqlite3.Connection | None:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_type_pub ON messages(type, published_at DESC);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_pub ON messages(member_dir, type, published_at DESC);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_ym ON messages(member_dir, type, year, month);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_updated ON messages(member_dir, updated_at DESC);")
 
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS sent_ids (
