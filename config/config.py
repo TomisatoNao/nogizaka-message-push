@@ -146,13 +146,36 @@ _DEFAULTS: dict = {
     "qq_commands_enabled":      False,
     "qq_commands_mode":         "configured",
     "qq_commands_allow":        [],
-    # 通道（默认值，config.json 的 channels / napcat_api 可覆盖）
-    "qq_bot_api":               "http://127.0.0.1:3000/send_group_msg",
+    # 通道（默认值，config.json 的 channels / NapCat 地址字段可覆盖）
+    # QQ_BOT_API 保留为运行时兼容别名；新配置使用 napcat_api_base +
+    # napcat_api_token，由发送侧按 action 自动拼接请求地址。
+    "qq_bot_api":               "http://127.0.0.1:3000",
+    "napcat_api_base":          "http://127.0.0.1:3000",
+    "napcat_api_token":         "",
+    "napcat_forward_user_id":   "",
+    "napcat_forward_nickname":  "坂道监控",
     "enable_napcat_qq":         False,
     "enable_qq_official_bot":   False,
     "enable_tg_bot":            False,
     "tg_bots":                  [],
     "napcat_routes":            [],
+    # NapCat/OneBot 入站群消息解析（默认关闭；鉴权 Token 只从 .env 读取）
+    "napcat_inbound":           {
+        "enabled": False,
+        "transport": "http_post",
+        "listen_host": "0.0.0.0",
+        "listen_port": 46047,
+        "event_path": "/api/napcat/events",
+        "translate": False,
+        "archive": False,
+        "max_links_per_message": 1,
+        "queue_size": 32,
+        "workers": 2,
+        "cooldown_seconds": 10,
+        "dedupe_ttl_seconds": 900,
+        "request_timeout_seconds": 180,
+        "max_message_bytes": 65536,
+    },
     "napcat_media_base_url":    "",
     "napcat_media_signing_secret": "",
     "proxy":                    "",
@@ -635,6 +658,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "media":                        "MEDIA",
     "social":                       "SOCIAL",
     "napcat_routes":                "NAPCAT_ROUTES",
+    "napcat_inbound":               "NAPCAT_INBOUND",
     "napcat_media_base_url":         "NAPCAT_MEDIA_BASE_URL",
     "napcat_media_signing_secret":   "NAPCAT_MEDIA_SIGNING_SECRET",
     "tg_bots":                      "TG_BOTS",
@@ -648,7 +672,7 @@ _CONTAINER_KEYS = frozenset({
     "gemini_models", "gemini_tag_models",
     "skip_publish_types", "media_type_map",
     "platforms", "blog_monitor", "blog_records",
-    "media", "social", "napcat_routes", "tg_bots",
+    "media", "social", "napcat_routes", "napcat_inbound", "tg_bots",
     "monitor_schedule",
 })
 

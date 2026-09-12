@@ -9,21 +9,20 @@ and gives both actions the same validation/error contract.
 from __future__ import annotations
 
 import os
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from src.logger import log_all
+from src.social.url_utils import (
+    SOCIAL_HOSTS,
+    SocialUrlValidationError,
+    validate_social_url,
+)
 from src.webui_modules.static_handler import send_json
 
 _MAX_URL_LENGTH = 4096
 _MAX_CHANNELS = 64
-_SOCIAL_HOSTS = frozenset({
-    "instagram.com", "www.instagram.com",
-    "x.com", "www.x.com", "twitter.com", "www.twitter.com",
-    "vxtwitter.com", "www.vxtwitter.com", "fixupx.com", "www.fixupx.com",
-    "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "vt.tiktok.com",
-    "douyin.com", "www.douyin.com", "v.douyin.com",
-})
+# 兼容旧版插件/单测读取的内部常量；实际校验统一由 url_utils 执行。
+_SOCIAL_HOSTS = SOCIAL_HOSTS
 
 
 class SocialToolRequestError(ValueError):
@@ -49,20 +48,12 @@ def _error(handler, request_id: str, message: str, *, code: int, error_code: str
 
 
 def _validate_url(value) -> str:
-    url = str(value or "").strip()
-    if not url:
-        raise SocialToolRequestError("请先输入社媒链接")
+    try:
+        url = validate_social_url(value)
+    except SocialUrlValidationError as exc:
+        raise SocialToolRequestError(str(exc)) from exc
     if len(url) > _MAX_URL_LENGTH:
         raise SocialToolRequestError("社媒链接过长")
-    try:
-        parsed = urlsplit(url)
-        hostname = (parsed.hostname or "").lower().rstrip(".")
-    except ValueError as exc:
-        raise SocialToolRequestError("社媒链接格式无效") from exc
-    if parsed.scheme.lower() not in {"http", "https"} or not hostname:
-        raise SocialToolRequestError("社媒链接必须使用 http 或 https")
-    if parsed.username or parsed.password or hostname not in _SOCIAL_HOSTS:
-        raise SocialToolRequestError("不支持的社媒链接域名")
     return url
 
 

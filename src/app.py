@@ -66,8 +66,13 @@ from src.platforms.napcat_session import (
     classify_status_response,
     resolve_status_endpoint,
 )
+from src.platforms.napcat_listener import NapCatInboundListener
 from src.platforms.qq_official import health_check as qq_official_health_check
-from src.social.manager import start_social_service, stop_social_service
+from src.social.manager import (
+    get_social_service,
+    start_social_service,
+    stop_social_service,
+)
 from src.webui import start_webui
 
 # ---- 博客状态 ----
@@ -78,6 +83,7 @@ _blog_client: httpx.AsyncClient | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _command_listeners: dict[str, tuple[str, asyncio.Task]] = {}
 _last_command_status: str = ""
+_napcat_inbound_listener: NapCatInboundListener | None = None
 
 
 # ──────────────────────────────────────────────
@@ -507,6 +513,39 @@ def _sync_command_listeners() -> None:
     _last_command_status = status
 
 
+async def _sync_napcat_inbound_listener() -> bool:
+    """按当前配置启停 NapCat 入站社媒链接监听。"""
+
+    global _napcat_inbound_listener
+    if _napcat_inbound_listener is None:
+        _napcat_inbound_listener = NapCatInboundListener(
+            config_provider=lambda: getattr(cfg, "_config", {}),
+            service_provider=get_social_service,
+            logger=log_all,
+        )
+    try:
+        return await _napcat_inbound_listener.reconcile()
+    except Exception as exc:
+        log_all(
+            f"⚠️ NapCat 入站监听同步失败: {type(exc).__name__}",
+            is_error=True,
+        )
+        return False
+
+
+def _schedule_napcat_inbound_listener() -> None:
+    """在主事件循环线程中异步执行入站监听热重载。"""
+
+    try:
+        asyncio.create_task(
+            _sync_napcat_inbound_listener(),
+            name="napcat-inbound-reconcile",
+        )
+    except RuntimeError:
+        # 事件循环正在退出时，配置 watchdog 的最后一次回调可以安全忽略。
+        pass
+
+
 def _on_config_reload(success: bool = True) -> None:
     """config.json 热重载后的补偿动作（由 watchdog 线程调用）。"""
     if not success:
@@ -537,6 +576,7 @@ def _on_config_reload(success: bool = True) -> None:
     # 指令监听要跟着新配置走，否则在管理端新加的 Bot 得等到下次重启才会上线
     if _main_loop is not None and not _main_loop.is_closed():
         _main_loop.call_soon_threadsafe(_sync_command_listeners)
+        _main_loop.call_soon_threadsafe(_schedule_napcat_inbound_listener)
 
 
 # ──────────────────────────────────────────────
@@ -647,6 +687,7 @@ def handle_openid_action(action: str, app_id: str, secret: str, mode: str = "use
 # 主生命周期入口
 # ──────────────────────────────────────────────
 async def main() -> None:
+    global _main_loop, _napcat_inbound_listener
     http_client: httpx.AsyncClient | None = None
     auth_http_client: httpx.AsyncClient | None = None
     qq_client: httpx.AsyncClient | None = None
@@ -843,6 +884,10 @@ async def main() -> None:
         except Exception as e:
             log_all(f"⚠️ 启动社交媒体监控失败: {e}", is_error=True)
 
+        # NapCat 入站监听使用独立端口，仅在显式开启、NapCat 通道开启且
+        # NAPCAT_EVENT_TOKEN 已配置时启动；事件接收本身只做校验和排队。
+        await _sync_napcat_inbound_listener()
+
         stop_event = asyncio.Event()
         _install_stop_handlers(stop_event)
 
@@ -911,7 +956,6 @@ async def main() -> None:
         asyncio.create_task(_bg_avatar_warmup())
 
         # 官方 Bot 指令监听（私聊 Bot 查状态 / 归档）
-        global _main_loop
         _main_loop = loop
         _sync_command_listeners()
 
@@ -965,6 +1009,12 @@ async def main() -> None:
                 observer.join(timeout=2.0)
             except Exception:
                 pass
+        if _napcat_inbound_listener is not None:
+            try:
+                await _napcat_inbound_listener.stop()
+            except Exception:  # nosec B110
+                pass
+            _napcat_inbound_listener = None
         try:
             stop_social_service()
         except Exception:
@@ -1023,9 +1073,12 @@ __all__ = [
     "_install_stop_handlers",
     "_init_accounts",
     "_sync_command_listeners",
+    "_sync_napcat_inbound_listener",
+    "_schedule_napcat_inbound_listener",
     "_on_config_reload",
     "_command_listeners",
     "_last_command_status",
+    "_napcat_inbound_listener",
     "set_main_loop",
     "get_main_loop",
     "get_command_listeners",

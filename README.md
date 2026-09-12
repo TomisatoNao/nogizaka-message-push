@@ -194,6 +194,72 @@ curl -fsS http://127.0.0.1:46046/api/health/status
 
 预期日志包含 `NapCat QQ 连通正常` 和 `启动状态：READY`。
 
+#### NapCat 群消息中的社媒链接自动解析（可选）
+
+如果希望群友在指定 QQ 群直接发送 X / Instagram / TikTok / 抖音链接，主程序可以
+通过独立的 OneBot 入站端口解析并回帖。该功能默认关闭，且默认不翻译、不归档，避免
+增加处理时间。只会处理 `napcat_routes` 中已经配置的群号；其它群即使能访问端口也会
+被丢弃。
+
+1. 在 `.env` 设置一个仅用于事件上报的高强度随机值：
+
+   ```bash
+   NAPCAT_EVENT_TOKEN=<与 NapCat 事件上报配置相同的随机 Token>
+   ```
+
+2. 在 `config/config.json` 开启并按需调整队列：
+
+   ```json
+   "napcat_inbound": {
+     "enabled": true,
+     "transport": "http_post",
+     "listen_host": "0.0.0.0",
+     "listen_port": 46047,
+     "event_path": "/api/napcat/events",
+     "translate": false,
+     "archive": false,
+     "queue_size": 32,
+     "workers": 2,
+     "cooldown_seconds": 10
+   }
+   ```
+
+   同时保持 `channels.napcat`（或环境变量 `ENABLE_NAPCAT_QQ`）为 `true`，否则主程序会
+   主动不绑定入站端口。
+
+3. 在 NapCat 的 OneBot 11 HTTP 事件上报中填写：
+
+   - 同一 Compose：`http://sakamichi-push:46047/api/napcat/events`
+   - Windows NapCat：`http://<NAS局域网IP>:46047/api/napcat/events`
+   - 请求头使用 `Authorization: Bearer <NAPCAT_EVENT_TOKEN>`（也兼容
+     `X-OneBot-Token`）。
+
+   同一 Compose 的 `46047` 只走 Docker 内网即可；Compose 默认只把宿主机绑定到
+   `127.0.0.1`。Windows NapCat 跨主机时，在 `.env` 将 `NAPCAT_EVENT_BIND` 改为 NAS
+   局域网 IP 后重建容器，再按局域网/ VPN 防火墙规则放行。不要把该端口直接暴露到公网。Token 缺失、错误或群号不在白名单时，主程序
+   不会执行任何解析或发送。接收端只做鉴权、大小检查、链接提取和有界排队，解析/下载/回帖
+   在后台工作线程执行，不会阻塞主轮询。
+
+   如果更希望由 Windows NapCat 主动保持连接，也可以把 `transport` 改为
+   `reverse_ws`，然后在 NapCat「网络配置 → WebSocket 客户端」中填写：
+
+   - 同一 Compose：`ws://sakamichi-push:46047/api/napcat/events`
+   - Windows NapCat：`ws://<NAS局域网IP>:46047/api/napcat/events`
+
+   WebSocket 客户端的 Token 仍填写同一个 `NAPCAT_EVENT_TOKEN`，消息格式选择
+   `array`，建议关闭「上报自身消息」并保留自动重连。HTTP 客户端和 WebSocket
+   客户端二选一，避免同一条群消息重复上报；当前主程序实现的是反向 WS（NapCat
+   作为客户端），不是让主程序主动连接 NapCat WebSocket 服务端。
+
+   本地首次接入前可运行无副作用自检（不会启动主程序、不会读取社媒凭证，也不会向 QQ 群发消息）：
+
+   ```bash
+   python tools/test_napcat_local.py
+   ```
+
+   自检默认使用 `127.0.0.1:46047`、路由群号 `707891867` 和 `.env` 中的
+   `NAPCAT_EVENT_TOKEN`；需要更换测试群号时使用 `--group-id <群号>`。
+
 ---
 
 ### 方式 B：原生 Python 环境运行
@@ -562,6 +628,7 @@ ZHIPU_API_KEY=df488cc9...              # 智谱开放平台 API Key
 TG_BOT1_TOKEN=123456:ABC...            # config.json 中 tg_bot1 的专属 Token
 # TG_BOT2_TOKEN=123456:XYZ...           # config.json 中 tg_bot2 的专属 Token
 WEB_ADMIN_TOKEN=your_token             # Web 管理端外部 API 调用 Token (可选)
+NAPCAT_EVENT_TOKEN=change_me           # NapCat 入站事件 Token（可选功能，建议随机长值）
 NAPCAT_MEDIA_SIGNING_SECRET=change_me  # 远程媒体签名密钥（建议使用 32 字节以上随机值）
 INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 ```

@@ -162,6 +162,13 @@ def reload_social_service(config: dict | None = None) -> None:
             log_all("⚙️ 社交媒体监控配置已热重载（X / Instagram / TikTok 账号列表即时生效）", is_debug=True)
 
 
+def get_social_service() -> SocialService | None:
+    """返回当前统一社媒服务实例，供轻量入站适配器复用。"""
+
+    with _lock:
+        return _service
+
+
 def stop_social_service():
     """优雅停止社媒监控服务。"""
     global _scheduler, _shared_config, _service

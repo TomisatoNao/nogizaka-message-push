@@ -17,6 +17,25 @@
   // ── NapCat (OneBot 11) 路由配置 ──
   "napcat_routes": [],
 
+  // ── NapCat 入站群消息解析（默认关闭；Token 放在 .env）──
+  // 只有 napcat_routes 中列出的群号会触发解析和回帖。
+  "napcat_inbound": {
+    "enabled": false,
+    "transport": "http_post",
+    "listen_host": "0.0.0.0",
+    "listen_port": 46047,
+    "event_path": "/api/napcat/events",
+    "translate": false,
+    "archive": false,
+    "max_links_per_message": 1,
+    "queue_size": 32,
+    "workers": 2,
+    "cooldown_seconds": 10,
+    "dedupe_ttl_seconds": 900,
+    "request_timeout_seconds": 180,
+    "max_message_bytes": 65536
+  },
+
   // ── Telegram Bot 路由配置 ──
   // 每个 Bot 的凭证放在 .env：名称 tg_bot1 对应 TG_BOT1_TOKEN
   "tg_bots": [],

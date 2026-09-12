@@ -6,6 +6,12 @@ services:
     ports:
       # 管理端对外端口（局域网/公网）
       - "46046:46046"
+      # NapCat 入站事件端口；默认只绑定 NAS 本机。Windows NapCat 跨主机
+      # 上报时将 NAPCAT_EVENT_BIND 改为 NAS 局域网 IP（不要直接暴露公网）。
+      - "${NAPCAT_EVENT_BIND:-127.0.0.1}:46047:46047"
+    expose:
+      # 同一 Compose 的 NapCat 可直接访问 sakamichi-push:46047，无需走宿主机端口。
+      - "46047"
     environment:
       - TZ=Asia/Tokyo
       # 启用 NapCat OneBot11 推送通道

@@ -8,6 +8,9 @@ services:
     ports:
       # 管理端默认仅暴露给宿主机；要公网访问请经 HTTPS 反向代理转发。
       - "127.0.0.1:46046:46046"
+      # NapCat 入站事件端口默认仅绑定宿主机；跨主机 NapCat 时设置
+      # NAPCAT_EVENT_BIND 为 NAS 局域网 IP，并由防火墙限制来源。
+      - "${NAPCAT_EVENT_BIND:-127.0.0.1}:46047:46047"
     environment:
       - TZ=Asia/Tokyo
       # 可直接在此处注入密钥（或写入挂载的 .env 文件）：

@@ -41,8 +41,8 @@ COPY config/config.example.json ./config.example.json.default
 RUN chmod +x entrypoint.sh && \
     mkdir -p data logs
 
-# 暴露 WebUI 端口
-EXPOSE 46046
+# 暴露 WebUI 与可选 NapCat 入站事件端口
+EXPOSE 46046 46047
 
 # 声明持久化目录
 VOLUME ["/app/config", "/app/data", "/app/logs"]

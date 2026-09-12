@@ -25,7 +25,106 @@
       }
     },
     "napcat_api": {
-      "type": "string"
+      "type": "string",
+      "description": "旧版兼容字段；新配置请使用 napcat_api_base 与 napcat_api_token。"
+    },
+    "napcat_api_base": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "NapCat/OneBot 服务基地址，不含动作路径、查询参数或 access_token。"
+    },
+    "napcat_api_token": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "NapCat/OneBot access_token；与基地址分开保存。"
+    },
+    "napcat_forward_user_id": {
+      "type": ["string", "integer"],
+      "description": "合并转发自定义节点使用的 NapCat 登录 QQ 号；入站事件可自动提供。"
+    },
+    "napcat_forward_nickname": {
+      "type": "string",
+      "default": "坂道监控"
+    },
+    "napcat_inbound": {
+      "type": "object",
+      "description": "NapCat/OneBot 11 入站群消息解析监听。必须同时配置 NAPCAT_EVENT_TOKEN。",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["http_post", "reverse_ws"],
+          "default": "http_post"
+        },
+        "listen_host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "listen_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 46047
+        },
+        "event_path": {
+          "type": "string",
+          "pattern": "^/[^\\s]{0,127}$",
+          "default": "/api/napcat/events"
+        },
+        "translate": {
+          "type": "boolean",
+          "default": false
+        },
+        "archive": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_links_per_message": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "default": 1
+        },
+        "queue_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 32
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2
+        },
+        "cooldown_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 10
+        },
+        "dedupe_ttl_seconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 86400,
+          "default": 900
+        },
+        "request_timeout_seconds": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 900,
+          "default": 180
+        },
+        "max_message_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "default": 65536
+        }
+      }
     },
     "napcat_media_base_url": {
       "type": "string",
