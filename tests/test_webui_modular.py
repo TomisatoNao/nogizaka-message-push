@@ -397,6 +397,8 @@ def test_napcat_endpoint_fields_share_aligned_responsive_group():
     assert ".napcat-endpoint-grid { display: grid; grid-template-columns: repeat(3" in html
     assert ".napcat-endpoint-grid { grid-template-columns: repeat(2" in html
     assert ".napcat-endpoint-grid { grid-template-columns: 1fr; gap: 10px; }" in html
+    assert "input[type=text], input[type=url], input[type=password]" in html
+    assert "box-sizing: border-box;" in html
 
 
 def test_table_action_cells_keep_table_column_alignment():

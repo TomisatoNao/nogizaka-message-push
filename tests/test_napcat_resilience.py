@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
 import pytest
 
 import config.config as cfg
@@ -41,6 +42,15 @@ class _FakeClient:
             return self.responses[0]
         finally:
             self.active -= 1
+
+
+class _TemporaryClient(_FakeClient):
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.closed = False
+
+    async def aclose(self):
+        self.closed = True
 
 
 def test_napcat_error_excerpt_redacts_tokens_and_local_paths():
@@ -102,6 +112,67 @@ def test_structured_napcat_base_appends_action_and_uses_separate_token(monkeypat
     assert url == "http://napcat.example:36036/send_group_forward_msg"
     assert "access_token" not in url
     assert headers["Authorization"] == "Bearer separate-token"
+
+
+@pytest.mark.asyncio
+async def test_forward_read_timeout_is_not_retried_or_reported_failed(monkeypatch):
+    """NapCat 已收到请求后的回包超时不能重试，否则会发出重复卡片。"""
+
+    class _ReadTimeoutClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def post(self, *_args, **_kwargs):
+            self.calls += 1
+            raise httpx.ReadTimeout(
+                "slow forward response",
+                request=httpx.Request("POST", "http://napcat/send_group_forward_msg"),
+            )
+
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036", raising=False)
+    client = _ReadTimeoutClient()
+    napcat.initialize(client)
+
+    result = await napcat.send_group_forward_message(
+        100,
+        [{"type": "node", "data": {"content": []}}],
+        max_retries=3,
+    )
+
+    assert result is True
+    assert client.calls == 1
+    assert napcat.get_send_gate_snapshot()["failure_streak"] == 0
+
+
+def test_cross_loop_send_uses_temporary_client(monkeypatch):
+    """工作线程的新事件循环不能复用主循环创建的 httpx transport。"""
+
+    owner_client = _FakeClient([_Response(body={"status": "ok", "retcode": 0})])
+
+    async def _bind_owner():
+        napcat.initialize(owner_client)
+
+    asyncio.run(_bind_owner())
+    temporary = _TemporaryClient([
+        _Response(body={"status": "ok", "retcode": 0})
+    ])
+    monkeypatch.setattr(napcat.httpx, "AsyncClient", lambda **_kwargs: temporary)
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036", raising=False)
+
+    result = asyncio.run(
+        napcat.send_qq_message(
+            100,
+            [{"type": "text", "data": {"text": "cross-loop"}}],
+            max_retries=1,
+        )
+    )
+
+    assert result is True
+    assert owner_client.calls == 0
+    assert temporary.calls == 1
+    assert temporary.closed is True
 
 
 @pytest.mark.asyncio

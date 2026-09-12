@@ -89,17 +89,28 @@ async def test_napcat_multi_media_uses_group_forward_endpoint(tmp_path, monkeypa
     ]
 
     assert await NapCatAdapter().send_post(target, "caption", media) is True
-    assert len(client.calls) == 1
-    url, kwargs = client.calls[0]
+    assert len(client.calls) == 2
+
+    text_url, text_kwargs = client.calls[0]
+    assert text_url.endswith("/send_group_msg")
+    text_payload = json.loads(text_kwargs["content"])
+    assert text_payload["message"] == [
+        {"type": "text", "data": {"text": "caption"}}
+    ]
+
+    url, kwargs = client.calls[1]
     assert url.endswith("/send_group_forward_msg")
     payload = json.loads(kwargs["content"])
     assert payload["group_id"] == 123456
     assert len(payload["messages"]) == 2
     assert all(node["type"] == "node" for node in payload["messages"])
     assert payload["messages"][0]["data"]["user_id"] == 2272248496
-    assert payload["messages"][0]["data"]["content"][0]["type"] == "text"
-    assert payload["messages"][0]["data"]["content"][1]["type"] == "image"
+    assert payload["messages"][0]["data"]["content"][0]["type"] == "image"
     assert payload["messages"][1]["data"]["content"][0]["type"] == "image"
+    assert all(
+        len(node["data"]["content"]) == 1
+        for node in payload["messages"]
+    )
 
 
 @pytest.mark.asyncio

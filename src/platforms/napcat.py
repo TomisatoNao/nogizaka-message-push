@@ -4,6 +4,7 @@
 import asyncio
 import json
 import re
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from src.logger import format_httpx_error, log_all
 
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
 _client: httpx.AsyncClient = None   # type: ignore
+_client_loop: asyncio.AbstractEventLoop | None = None
 
 
 @dataclass(frozen=True)
@@ -71,7 +73,10 @@ class NapCatSendGate:
         failure_threshold: int = 3,
         logger=None,
     ) -> None:
-        self._lock = asyncio.Lock()
+        # NapCat 投递既可能来自主 asyncio loop，也可能来自社媒工作线程中
+        # 的短生命周期 loop。asyncio.Lock 不能跨 loop 共享，因此这里用
+        # 非阻塞轮询的线程锁串行化请求，取消任务时也不会遗留后台抢锁线程。
+        self._lock = threading.Lock()
         self._last_request_at: float | None = None
         self._blocked_until: float | None = None
         self._blocked_reason: str = ""
@@ -88,7 +93,8 @@ class NapCatSendGate:
         self._log = logger or (lambda *_args, **_kwargs: None)
 
     async def __aenter__(self):
-        await self._lock.acquire()
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(0.02)
         return self
 
     async def __aexit__(self, _exc_type, _exc, _tb):
@@ -320,8 +326,12 @@ def _classify_error(status_code: int, body: object = None, text: str = "") -> st
 
 def initialize(client: httpx.AsyncClient) -> None:
     """注入共享的 AsyncClient 实例。"""
-    global _client, _send_gate
+    global _client, _client_loop, _send_gate
     _client = client
+    try:
+        _client_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _client_loop = None
     # initialize() 在主事件循环内调用；重建 HTTP 客户端时同步清理旧的
     # 熔断/锁状态，避免已关闭的事件循环或上一轮故障污染新实例。
     _send_gate = NapCatSendGate(logger=log_all)
@@ -587,84 +597,132 @@ async def _post_payload_detailed(
     api_url, req_headers = _resolve_api_action_url(cfg.QQ_BOT_API, action)
     retries = max(1, int(max_retries))
     last_error = "delivery_failed"
-    for attempt in range(retries):
-        # 限速作用于每次真实 HTTP 请求，包括重试；调用方已经持有账号级锁。
-        await _send_gate.wait_turn()
-        try:
-            resp = await _client.post(
-                api_url,
-                content=payload_str,
-                headers=req_headers,
-            )
-            if resp.status_code == 200:
-                try:
-                    response_body = resp.json()
-                except Exception:
+    current_loop = asyncio.get_running_loop()
+    request_client = _client
+    temporary_client: httpx.AsyncClient | None = None
+    if _client_loop is not current_loop:
+        # 入站链接解析会在线程内创建独立事件循环，不能复用主循环拥有的
+        # httpx 连接池。为该次投递创建直连客户端，结束后立即关闭。
+        temporary_client = httpx.AsyncClient(
+            timeout=35.0,
+            transport=httpx.AsyncHTTPTransport(
+                retries=0,
+                http2=False,
+                trust_env=False,
+            ),
+            limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
+        )
+        request_client = temporary_client
+
+    try:
+        for attempt in range(retries):
+            # 限速作用于每次真实 HTTP 请求，包括重试；调用方已经持有账号级锁。
+            await _send_gate.wait_turn()
+            try:
+                request_kwargs: dict[str, object] = {
+                    "content": payload_str,
+                    "headers": req_headers,
+                }
+                if action == "send_group_forward_msg":
+                    # NapCat 构造合并转发通常明显慢于普通消息；单独放宽读取
+                    # 时间，但仍低于 DeliveryService 默认 45 秒总预算。
+                    request_kwargs["timeout"] = httpx.Timeout(
+                        connect=10.0,
+                        read=35.0,
+                        write=35.0,
+                        pool=10.0,
+                    )
+                resp = await request_client.post(api_url, **request_kwargs)
+                if resp.status_code == 200:
+                    try:
+                        response_body = resp.json()
+                    except Exception:
+                        log_all(
+                            f"⚠️ Bot 返回非 JSON 响应（HTTP 200，按成功处理）: "
+                            f"{_safe_excerpt(getattr(resp, 'text', ''))}",
+                            is_error=True,
+                        )
+                        return NapCatSendOutcome(True)
+                    if isinstance(response_body, dict) and (
+                        response_body.get("status") == "ok"
+                        or response_body.get("retcode") == 0
+                    ):
+                        return NapCatSendOutcome(True)
+                    last_error = _classify_error(
+                        resp.status_code,
+                        response_body,
+                        getattr(resp, "text", ""),
+                    )
                     log_all(
-                        f"⚠️ Bot 返回非 JSON 响应（HTTP 200，按成功处理）: "
-                        f"{_safe_excerpt(getattr(resp, 'text', ''))}",
+                        f"⚠️ Bot 返回业务失败 | 方式={action_label} | "
+                        f"error_code={last_error} | "
+                        f"{_body_excerpt(response_body, getattr(resp, 'text', ''))}",
                         is_error=True,
                     )
-                    return NapCatSendOutcome(True)
-                if isinstance(response_body, dict) and (
-                    response_body.get("status") == "ok"
-                    or response_body.get("retcode") == 0
-                ):
-                    return NapCatSendOutcome(True)
+                    return NapCatSendOutcome(False, last_error)
+
                 last_error = _classify_error(
                     resp.status_code,
-                    response_body,
+                    None,
                     getattr(resp, "text", ""),
                 )
                 log_all(
-                    f"⚠️ Bot 返回业务失败 | 方式={action_label} | "
+                    f"📡 异常响应 ({attempt + 1}/{retries}): "
+                    f"HTTP {resp.status_code} | 方式={action_label} | "
                     f"error_code={last_error} | "
-                    f"{_body_excerpt(response_body, getattr(resp, 'text', ''))}",
+                    f"{_safe_excerpt(getattr(resp, 'text', ''))}",
                     is_error=True,
                 )
-                return NapCatSendOutcome(False, last_error)
+                if resp.status_code == 502:
+                    log_all("🔥 502，代理/协议问题", is_error=True)
+                # 4xx（除 429）不可重试，直接放弃
+                if resp.status_code < 500 and resp.status_code != 429:
+                    return NapCatSendOutcome(False, last_error)
 
-            last_error = _classify_error(
-                resp.status_code,
-                None,
-                getattr(resp, "text", ""),
-            )
-            log_all(
-                f"📡 异常响应 ({attempt + 1}/{retries}): HTTP {resp.status_code} | "
-                f"方式={action_label} | error_code={last_error} | "
-                f"{_safe_excerpt(getattr(resp, 'text', ''))}",
-                is_error=True,
-            )
-            if resp.status_code == 502:
-                log_all("🔥 502，代理/协议问题", is_error=True)
-            # 4xx（除 429）不可重试，直接放弃
-            if resp.status_code < 500 and resp.status_code != 429:
-                return NapCatSendOutcome(False, last_error)
+            except httpx.ReadTimeout as e:
+                if action == "send_group_forward_msg":
+                    # 读取超时时请求体已经交给 NapCat，实际群消息很可能已
+                    # 发出。合并转发没有幂等键，重试只会产生重复卡片。
+                    log_all(
+                        "⚠️ NapCat 合并转发回包超时；请求已提交，不再重试，"
+                        "按已接收处理以避免重复消息 | "
+                        f"{_safe_excerpt(format_httpx_error(e))}",
+                        is_warning=True,
+                    )
+                    return NapCatSendOutcome(True, "delivery_unconfirmed")
+                last_error = "timeout"
+                log_all(
+                    f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                    f"error_code=timeout | {_safe_excerpt(format_httpx_error(e))}",
+                    is_error=True,
+                )
+            except httpx.TimeoutException as e:
+                last_error = "timeout"
+                log_all(
+                    f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                    f"error_code=timeout | {_safe_excerpt(format_httpx_error(e))}",
+                    is_error=True,
+                )
+            except (httpx.RequestError, OSError) as e:
+                last_error = "network_error"
+                log_all(
+                    f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                    f"error_code=network_error | {_safe_excerpt(format_httpx_error(e))}",
+                    is_error=True,
+                )
+            except Exception as e:
+                last_error = "unexpected_error"
+                log_all(
+                    f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                    f"error_code=unexpected_error | {_safe_excerpt(format_httpx_error(e))}",
+                    is_error=True,
+                )
 
-        except httpx.TimeoutException as e:
-            last_error = "timeout"
-            log_all(
-                f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
-                f"error_code=timeout | {_safe_excerpt(format_httpx_error(e))}",
-                is_error=True,
-            )
-        except (httpx.RequestError, OSError) as e:
-            last_error = "network_error"
-            log_all(
-                f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
-                f"error_code=network_error | {_safe_excerpt(format_httpx_error(e))}",
-                is_error=True,
-            )
-        except Exception as e:
-            last_error = "unexpected_error"
-            log_all(
-                f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
-                f"error_code=unexpected_error | {_safe_excerpt(format_httpx_error(e))}",
-                is_error=True,
-            )
-
-        if attempt < retries - 1:
-            await asyncio.sleep(2 ** attempt)
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+    finally:
+        if temporary_client is not None:
+            await temporary_client.aclose()
 
     return NapCatSendOutcome(False, last_error)
 
@@ -802,13 +860,15 @@ async def send_qq_message(
 async def send_group_forward_message(
     group_id: int,
     messages: list[dict],
-    max_retries: int = 3,
+    max_retries: int = 1,
 ) -> bool:
     """以 OneBot 合并转发卡片发送多个消息节点。
 
     ``send_group_forward_msg`` 会把多个节点折叠成一条群消息，适合
     Instagram/TikTok 轮播等多媒体动态，避免普通消息链被 QQ 的每分钟
-    消息条数限制拆成多条。节点内容由 ``NapCatAdapter`` 负责构造。
+    消息条数限制拆成多条。该接口没有幂等键，默认只提交一次；读取回包
+    超时时按“已提交但未确认”处理，避免 NapCat 已发送后产生重复卡片。
+    节点内容由 ``NapCatAdapter`` 负责构造。
     """
 
     if not isinstance(messages, list) or not messages:

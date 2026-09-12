@@ -310,9 +310,10 @@
   /* 允许网格子项在窄屏收缩；内部紧凑组自行管理其最小宽度。 */
   .grid > * { min-width: 0; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
-  input[type=text], input[type=number], input[type=search], select, textarea {
+  input[type=text], input[type=url], input[type=password], input[type=number], input[type=search], select, textarea {
     padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
     background-color: var(--field); color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
+    box-sizing: border-box;
     transition: border-color var(--tr), box-shadow var(--tr), background-color var(--tr);
     box-shadow: inset 0 1px 3px rgba(0,0,0,.02); }
   select {

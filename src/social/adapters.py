@@ -189,31 +189,16 @@ class NapCatAdapter:
     def _forward_nodes(
         cls,
         target: DeliveryTarget,
-        text: str,
         media_items: list[dict],
     ) -> list[dict] | None:
-        """把正文和媒体包装为 OneBot 自定义转发节点。"""
+        """把媒体包装为 OneBot 自定义转发节点。"""
 
         identity = cls._forward_identity(target)
         if identity is None or not media_items:
             return None
         user_id, nickname = identity
         nodes: list[dict] = []
-        first_content: list[dict] = []
-        if text:
-            first_content.append({"type": "text", "data": {"text": text}})
-        first_content.append(media_items[0])
-        nodes.append(
-            {
-                "type": "node",
-                "data": {
-                    "user_id": user_id,
-                    "nickname": nickname,
-                    "content": first_content,
-                },
-            }
-        )
-        for item in media_items[1:]:
+        for item in media_items:
             nodes.append(
                 {
                     "type": "node",
@@ -293,15 +278,21 @@ class NapCatAdapter:
                 media_items.append(chain_item)
         try:
             # 多张图片/媒体使用合并转发，只占用 QQ 群的一条消息配额；
-            # 单张媒体继续走原有消息链，保持兼容和最快响应。
+            # 正文先作为独立普通消息发送，折叠卡片内只展示媒体，避免
+            # 第一张图片与正文混在一个转发节点中。单张媒体继续走原有
+            # 消息链，保持兼容和最快响应。
             if len(media_items) > 1:
-                nodes = self._forward_nodes(target, text, media_items)
+                nodes = self._forward_nodes(target, media_items)
                 if nodes is not None:
+                    group_id = self._group_id(target)
+                    text_sent = await napcat.send_qq_message(
+                        group_id,
+                        [{"type": "text", "data": {"text": text}}],
+                    )
+                    if not text_sent:
+                        return False
                     return bool(
-                        await napcat.send_group_forward_message(
-                            self._group_id(target),
-                            nodes,
-                        )
+                        await napcat.send_group_forward_message(group_id, nodes)
                     )
                 self._log(
                     "ℹ️ NapCat 多媒体缺少有效转发身份，回退普通消息链",
