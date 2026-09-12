@@ -1,4 +1,5 @@
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -7,7 +8,8 @@ import config.config as cfg
 from src.platforms import napcat
 from src.social.adapters import NapCatAdapter
 from src.social.contracts import DeliveryTarget
-from src.social.models import MediaItem
+from src.social.formatter import build_post_message
+from src.social.models import MediaItem, Post
 from src.webui_modules import social_media_service as media_service
 
 
@@ -88,29 +90,87 @@ async def test_napcat_multi_media_uses_group_forward_endpoint(tmp_path, monkeypa
         MediaItem(type="image", url="https://example/two.jpg", local_path=str(paths[1])),
     ]
 
-    assert await NapCatAdapter().send_post(target, "caption", media) is True
-    assert len(client.calls) == 2
+    post = Post(
+        platform="instagram",
+        post_id="demo",
+        author="@demo_account",
+        text="caption",
+        media=media,
+        timestamp="2026-09-12 23:54:43 JST",
+        extra={"url": "https://www.instagram.com/p/demo/"},
+    )
+    full_text = build_post_message(post)
 
-    text_url, text_kwargs = client.calls[0]
-    assert text_url.endswith("/send_group_msg")
-    text_payload = json.loads(text_kwargs["content"])
-    assert text_payload["message"] == [
-        {"type": "text", "data": {"text": "caption"}}
-    ]
+    assert await NapCatAdapter().send_post(target, full_text, media) is True
+    assert len(client.calls) == 1
 
-    url, kwargs = client.calls[1]
+    url, kwargs = client.calls[0]
     assert url.endswith("/send_group_forward_msg")
     payload = json.loads(kwargs["content"])
     assert payload["group_id"] == 123456
-    assert len(payload["messages"]) == 2
+    assert len(payload["messages"]) == 3
     assert all(node["type"] == "node" for node in payload["messages"])
     assert payload["messages"][0]["data"]["user_id"] == 2272248496
-    assert payload["messages"][0]["data"]["content"][0]["type"] == "image"
+    first_content = payload["messages"][0]["data"]["content"]
+    assert first_content == [{"type": "text", "data": {"text": full_text}}]
+    assert "2026-09-12 23:54:43 JST" in first_content[0]["data"]["text"]
+    assert not {"image", "video", "record"} & {
+        item["type"] for item in first_content
+    }
     assert payload["messages"][1]["data"]["content"][0]["type"] == "image"
+    assert payload["messages"][2]["data"]["content"][0]["type"] == "image"
     assert all(
         len(node["data"]["content"]) == 1
         for node in payload["messages"]
     )
+    assert all(
+        node["data"]["user_id"] == 2272248496
+        for node in payload["messages"]
+    )
+    assert all(
+        int(node["data"].get("time", 0)) > 0
+        for node in payload["messages"]
+    )
+    assert not any(call_url.endswith("/send_group_msg") for call_url, _ in client.calls)
+
+
+def test_napcat_seven_media_builds_body_plus_seven_media_nodes():
+    target = DeliveryTarget("napcat", "123456", "groups").bind_runtime(
+        {"group_id": 123456, "self_id": "2272248496"}
+    )
+    media_items = [
+        {"type": "image", "data": {"file": f"https://example/{index}.jpg"}}
+        for index in range(7)
+    ]
+
+    nodes = NapCatAdapter._forward_nodes(target, "正文", media_items)
+
+    assert nodes is not None
+    assert len(nodes) == 8
+    assert nodes[0]["data"]["content"] == [
+        {"type": "text", "data": {"text": "正文"}}
+    ]
+    assert all(int(node["data"].get("time", 0)) > 0 for node in nodes)
+    assert all(
+        len(node["data"]["content"]) == 1
+        and node["data"]["content"][0]["type"] == "image"
+        for node in nodes[1:]
+    )
+
+
+def test_build_post_message_fallback_timestamp_when_empty():
+    post = Post(
+        platform="instagram",
+        post_id="demo_no_time",
+        author="@demo_account",
+        text="caption without time",
+        media=[],
+        timestamp="",
+        extra={"url": "https://www.instagram.com/p/demo_no_time/"},
+    )
+    msg = build_post_message(post)
+    assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} JST", msg)
+    assert "📷 Instagram · @demo_account · " in msg
 
 
 @pytest.mark.asyncio

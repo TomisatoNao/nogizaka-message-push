@@ -18,6 +18,7 @@ social/formatter.py — 社交平台 QQ 推送格式化
 """
 
 from datetime import datetime, timezone, timedelta
+import time
 
 from src.social.models import Post
 
@@ -180,9 +181,14 @@ def build_post_message(post: Post, translated: str | None = None,
     header_parts = [plat_str]
     if display_author:
         header_parts.append(display_author)
+    ts_str = (post.timestamp or "").strip()
+    if not ts_str:
+        ts_str = fmt_ts(time.time())
+    elif not (ts_str.endswith("JST") or ts_str.endswith("CST") or ts_str.endswith("UTC")):
+        ts_str = f"{ts_str} JST"
+
+    header_parts.append(ts_str)
     header = " · ".join(header_parts)
-    if post.timestamp:
-        header += f" {post.timestamp}"
 
     sections = [header]
 

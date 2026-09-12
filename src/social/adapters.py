@@ -9,6 +9,7 @@ NapCat 消息链的一次性发送语义。
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -167,6 +168,10 @@ class NapCatAdapter:
             user_id = os.getenv("NAPCAT_FORWARD_USER_ID", "")
         if not user_id:
             user_id = getattr(napcat.cfg, "NAPCAT_FORWARD_USER_ID", "")
+        if not user_id:
+            runtime = getattr(target, "runtime", None)
+            if isinstance(runtime, Mapping):
+                user_id = runtime.get("self_id") or runtime.get("forward_user_id")
         if not nickname:
             nickname = (
                 os.getenv("NAPCAT_FORWARD_NICKNAME", "")
@@ -189,15 +194,29 @@ class NapCatAdapter:
     def _forward_nodes(
         cls,
         target: DeliveryTarget,
+        text: str,
         media_items: list[dict],
+        *,
+        post_time: int | None = None,
     ) -> list[dict] | None:
-        """把媒体包装为 OneBot 自定义转发节点。"""
+        """把正文与媒体包装为彼此独立的 OneBot 自定义转发节点。"""
 
         identity = cls._forward_identity(target)
         if identity is None or not media_items:
             return None
         user_id, nickname = identity
-        nodes: list[dict] = []
+        node_time = int(post_time or time.time())
+        nodes: list[dict] = [
+            {
+                "type": "node",
+                "data": {
+                    "user_id": user_id,
+                    "nickname": nickname,
+                    "time": node_time,
+                    "content": [{"type": "text", "data": {"text": text}}],
+                },
+            }
+        ]
         for item in media_items:
             nodes.append(
                 {
@@ -205,6 +224,7 @@ class NapCatAdapter:
                     "data": {
                         "user_id": user_id,
                         "nickname": nickname,
+                        "time": node_time,
                         "content": [item],
                     },
                 }
@@ -277,20 +297,13 @@ class NapCatAdapter:
                 chain.append(chain_item)
                 media_items.append(chain_item)
         try:
-            # 多张图片/媒体使用合并转发，只占用 QQ 群的一条消息配额；
-            # 正文先作为独立普通消息发送，折叠卡片内只展示媒体，避免
-            # 第一张图片与正文混在一个转发节点中。单张媒体继续走原有
-            # 消息链，保持兼容和最快响应。
+            # 多张图片/媒体使用一次合并转发，只占用 QQ 群的一条消息配额；
+            # 首节点仅放正文，其余节点各放一项媒体，避免正文与图片内联。
+            # 单张媒体继续走原有消息链，保持兼容和最快响应。
             if len(media_items) > 1:
-                nodes = self._forward_nodes(target, media_items)
+                nodes = self._forward_nodes(target, text, media_items)
                 if nodes is not None:
                     group_id = self._group_id(target)
-                    text_sent = await napcat.send_qq_message(
-                        group_id,
-                        [{"type": "text", "data": {"text": text}}],
-                    )
-                    if not text_sent:
-                        return False
                     return bool(
                         await napcat.send_group_forward_message(group_id, nodes)
                     )

@@ -19,10 +19,12 @@ import json
 import logging
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
 from src.social.models import MediaItem, Post
+
+_JST = timezone(timedelta(hours=9))
 
 log = logging.getLogger("collink")
 
@@ -124,13 +126,18 @@ def _author_from_links(links: list[dict]) -> tuple[str, str]:
     return "Instagram 用户", ""
 
 
-def _timestamp_from_value(value: str) -> str:
+def _timestamp_from_value(value: str | int | float) -> str:
     if not value:
         return ""
+    val_str = str(value).strip()
+    if val_str.isdigit():
+        try:
+            dt = datetime.fromtimestamp(float(val_str), tz=timezone.utc)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError, OSError):
+            return ""
     try:
-        # Keep the project's human-readable timestamp convention while
-        # accepting the ISO-8601 value used by article:published_time.
-        text = value.replace("Z", "+00:00")
+        text = val_str.replace("Z", "+00:00")
         dt = datetime.fromisoformat(text)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     except (TypeError, ValueError):
@@ -416,13 +423,46 @@ def _extract_page_data(
             break
 
     published = ""
-    try:
-        locator = page.locator('meta[property="article:published_time"]')
-        published = (
-            locator.first.get_attribute("content") if locator.count() else ""
-        ) or ""
-    except Exception:  # pragma: no cover - browser-specific DOM race
-        pass
+    for selector in (
+        "time[datetime]",
+        'meta[property="article:published_time"]',
+        'meta[itemprop="datePublished"]',
+        'meta[property="og:updated_time"]',
+        'meta[name="twitter:timestamp"]',
+    ):
+        try:
+            locator = page.locator(selector)
+            if locator.count():
+                attr = "datetime" if selector.startswith("time") else "content"
+                published = locator.first.get_attribute(attr) or ""
+                if published:
+                    break
+        except Exception:  # pragma: no cover - browser-specific DOM race
+            pass
+
+    if not published:
+        try:
+            scripts = page.locator("script").evaluate_all(
+                """els => els.map(el => el.textContent || el.innerText || '')"""
+            )
+            if isinstance(scripts, list):
+                for s in scripts:
+                    if not isinstance(s, str) or not s:
+                        continue
+                    m_ts = re.search(r'["\']taken_at(?:_timestamp)?["\']\s*:\s*(\d{9,11})', s)
+                    if m_ts:
+                        published = m_ts.group(1)
+                        break
+                    m_d = re.search(
+                        r'["\'](?:uploadDate|dateCreated|datePublished)["\']\s*:\s*["\']([^"\'\\]+)',
+                        s,
+                    )
+                    if m_d:
+                        published = m_d.group(1)
+                        break
+        except Exception:  # pragma: no cover - browser-specific DOM race
+            pass
+
     log.debug(
         "[single_fetcher] Instagram Embed 媒体候选 | structured=%d | dom=%d | unique=%d",
         len(structured_media),
@@ -504,7 +544,7 @@ def _fetch_public_post_sync(url: str, *, proxy: str, timeout: float, max_media: 
         author=author,
         text=caption,
         media=media,
-        timestamp=timestamp,
+        timestamp=timestamp or datetime.now(_JST).strftime("%Y-%m-%d %H:%M:%S JST"),
         extra={
             "url": url,
             "username": username,

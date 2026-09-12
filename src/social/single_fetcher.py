@@ -466,7 +466,7 @@ class SocialUrlParser:
         timestamp = ""
         if taken_at:
             dt = datetime.fromtimestamp(taken_at, tz=timezone.utc).astimezone(_JST)
-            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S JST")
 
         count_desc = f" (共 {len(media_items)} 条)" if len(media_items) > 1 else ""
         text = f"Instagram Story by @{username or author}{count_desc}"
@@ -533,7 +533,7 @@ class SocialUrlParser:
         timestamp = ""
         if taken_at:
             dt = datetime.fromtimestamp(taken_at, tz=timezone.utc).astimezone(_JST)
-            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S JST")
 
         media_items = []
         carousel = item.get("carousel_media") or []
@@ -627,7 +627,7 @@ class SocialUrlParser:
                     if create_time:
                         try:
                             dt = datetime.fromtimestamp(int(create_time), tz=timezone.utc).astimezone(_JST)
-                            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+                            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S JST")
                         except Exception:  # nosec B110
                             pass
 
@@ -762,7 +762,7 @@ class SocialUrlParser:
         timestamp = ""
         if info.get("timestamp"):
             dt = datetime.fromtimestamp(info["timestamp"], tz=timezone.utc).astimezone(_JST)
-            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S JST")
 
         media_items = []
         entries = info.get("entries")
