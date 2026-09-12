@@ -37,10 +37,12 @@
   .admin-control-group,
   .admin-data-group,
   .admin-account-group { min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
-  /* NapCat 的两个地址属于同一组端点配置：标签短而稳定，输入框保持同一基线。 */
-  .napcat-endpoint-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; align-items: start; min-width: 0; }
+  /* NapCat 端点采用“基地址 + 独立 Token + 媒体地址”三列结构，
+     发送动作由业务层按需拼接，避免把接口路径和密钥重复写进 URL。 */
+  .napcat-endpoint-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; align-items: start; min-width: 0; }
   .napcat-endpoint-grid > .field,
   .napcat-endpoint-grid > .field > input { min-width: 0; }
+  .napcat-endpoint-grid input[type=password] { font-family: var(--mono); letter-spacing: .03em; }
   .napcat-endpoint-note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; }
   .admin-control-group { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
   .admin-control-group .switch { flex: 0 0 auto; width: auto; white-space: normal; line-height: 1.4; }
@@ -1133,8 +1135,11 @@
     </div>
     <div class="admin-account-group napcat-endpoint-group">
       <div class="napcat-endpoint-grid">
-        <label class="field">NapCat API 地址
-          <input id="napcatApi" placeholder="例如: http://127.0.0.1:3000/send_group_msg" type="text"/>
+        <label class="field">NapCat API 地址（基地址）
+          <input id="napcatApi" autocomplete="url" placeholder="例如: http://127.0.0.1:3000" type="url"/>
+        </label>
+        <label class="field">NapCat 访问密钥（可选）
+          <input id="napcatApiToken" autocomplete="new-password" placeholder="填写 OneBot access_token" type="password"/>
         </label>
         <label class="field">媒体访问基地址（可选）
           <input id="napcatMediaBaseUrl" placeholder="例如: http://192.168.22.13:46046" type="text"/>
@@ -1157,8 +1162,8 @@
         </table>
       </div>
     </div>
-    <p class="hint admin-note">
-      API 地址可填写基础地址或完整的 <code>/send_group_msg</code> 接口；不同群组可通过各自的订阅规则分别接收消息。新建路由默认不订阅任何内容，请按需增量勾选。
+      <p class="hint admin-note">
+      发送接口由系统按动作自动拼接；不同群组可通过各自的订阅规则分别接收消息。新建路由默认不订阅任何内容，请按需增量勾选。
     </p>
   </div>
 
@@ -2567,6 +2572,45 @@ function validAdminUrl(raw, { protocols = ["http:", "https:"], allowRelative = f
   }
 }
 
+// NapCat 旧版配置曾把动作路径和 access_token 一起写进一个 URL。管理端
+// 读取时做一次无损拆分，保存时只写入基地址与独立 Token。
+function splitNapcatApiValue(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value) return { base: "", token: "" };
+  try {
+    const parsed = new URL(value);
+    const segments = parsed.pathname.replace(/\/+$/, "").split("/");
+    const endpoint = segments[segments.length - 1] || "";
+    if (["send_group_msg", "send_group_forward_msg", "get_status"].includes(endpoint)) segments.pop();
+    parsed.pathname = segments.join("/") || "/";
+    const token = parsed.searchParams.get("access_token") || parsed.searchParams.get("token") || "";
+    parsed.search = "";
+    parsed.hash = "";
+    return { base: parsed.toString().replace(/\/$/, ""), token };
+  } catch (_) {
+    return { base: value, token: "" };
+  }
+}
+
+function validNapcatBaseUrl(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value) return true;
+  if (!validAdminUrl(value, { protocols: ["http:", "https:"] })) return false;
+  try {
+    const parsed = new URL(value);
+    if (parsed.search || parsed.hash || parsed.username || parsed.password) return false;
+    const endpoint = parsed.pathname.replace(/\/+$/, "").split("/").pop() || "";
+    return !["send_group_msg", "send_group_forward_msg", "get_status"].includes(endpoint);
+  } catch (_) {
+    return false;
+  }
+}
+
+function validNapcatToken(raw) {
+  const value = String(raw ?? "");
+  return value.length <= 512 && !/[\r\n\x00]/.test(value) && !/\s/.test(value);
+}
+
 function validAdminHost(raw) {
   const value = String(raw ?? "").trim();
   if (!value || value.length > 253 || /[\s/\\]/.test(value)) return false;
@@ -2632,7 +2676,13 @@ function validateAdminConfig() {
 
   const addTextError = (id, message) => adminValidationError(errors, $(id), message);
   const napcatApi = $("napcatApi")?.value.trim() || "";
-  if (napcatApi && !validAdminUrl(napcatApi)) addTextError("napcatApi", "NapCat API 地址必须是有效的 http(s) 链接");
+  if (napcatApi && !validNapcatBaseUrl(napcatApi)) {
+    addTextError("napcatApi", "NapCat API 基地址必须是有效的 http(s) 链接，且不能包含接口路径、查询参数或密钥");
+  }
+  const napcatToken = $("napcatApiToken")?.value || "";
+  if (napcatToken && !validNapcatToken(napcatToken)) {
+    addTextError("napcatApiToken", "NapCat 访问密钥不能包含空格/换行，且最多 512 个字符");
+  }
   const mediaBase = $("napcatMediaBaseUrl")?.value.trim() || "";
   if (mediaBase && !validAdminUrl(mediaBase, { allowRelative: true })) {
     addTextError("napcatMediaBaseUrl", "媒体访问基地址必须是有效的 http(s) 链接或相对路径");
@@ -2845,6 +2895,9 @@ async function loadConfig() {
     collectGeneral();
     collectChannels();
     collectSocial();
+    // 旧版 napcat_api 会在 collectGeneral() 中完成结构化迁移，
+    // 高级页的只读 JSON 预览也应立即显示新字段，而不是继续展示完整 URL。
+    refreshRawJson();
     baseline = JSON.stringify(config);
     setDirty(false);
     loadPushTargets();
@@ -3540,7 +3593,13 @@ function renderGeneral() {
     lab.append(input, track, document.createTextNode(label));
     box.appendChild(lab);
   }
-  $("napcatApi").value = config.napcat_api || "";
+  const legacyNapcat = splitNapcatApiValue(config.napcat_api || "");
+  const napcatBase = String(config.napcat_api_base ?? legacyNapcat.base ?? "").trim();
+  const napcatToken = Object.prototype.hasOwnProperty.call(config, "napcat_api_token")
+    ? String(config.napcat_api_token ?? "")
+    : legacyNapcat.token;
+  $("napcatApi").value = napcatBase;
+  $("napcatApiToken").value = napcatToken;
   $("napcatMediaBaseUrl").value = config.napcat_media_base_url || "";
   const di = config.day_interval || [120, 180], ni = config.night_interval || [1500, 1800];
   const schedule = config.monitor_schedule || {};
@@ -3931,8 +3990,15 @@ function collectGeneral() {
     if (!el) return null;
     return parseNum(el.value, float);
   };
-  config.napcat_api = $("napcatApi").value.trim() || undefined;
-  if (config.napcat_api === undefined) delete config.napcat_api;
+  const napcatBase = $("napcatApi")?.value.trim() || "";
+  const napcatToken = $("napcatApiToken")?.value || "";
+  config.napcat_api_base = napcatBase || undefined;
+  if (config.napcat_api_base === undefined) delete config.napcat_api_base;
+  config.napcat_api_token = napcatToken || undefined;
+  if (config.napcat_api_token === undefined) delete config.napcat_api_token;
+  // 不再把动作路径或密钥写回旧版单字段；后端仍兼容读取旧配置，用户
+  // 下一次保存时会自然完成结构化迁移。
+  delete config.napcat_api;
   config.napcat_media_base_url = $("napcatMediaBaseUrl").value.trim() || undefined;
   if (config.napcat_media_base_url === undefined) delete config.napcat_media_base_url;
   config.day_interval = [num("dayMin") ?? 120, num("dayMax") ?? 180];

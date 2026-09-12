@@ -71,6 +71,39 @@ def test_nested_qqnt_error_text_is_included_in_stable_classification():
     assert napcat._classify_error(200, body) == "qq_send_network_error"
 
 
+def test_qq_group_message_quota_error_is_classified_as_rate_limited():
+    body = {
+        "status": "failed",
+        "retcode": 200,
+        "message": "本群每分钟只能发10条消息",
+    }
+    assert napcat._classify_error(200, body) == "rate_limited"
+
+
+def test_forward_endpoint_reuses_configured_path_and_auth_query():
+    url, headers = napcat._resolve_api_action_url(
+        "http://napcat.example/api/send_group_msg?access_token=secret",
+        "send_group_forward_msg",
+    )
+    assert url == "http://napcat.example/api/send_group_forward_msg?access_token=secret"
+    assert headers["Authorization"] == "Bearer secret"
+
+
+def test_structured_napcat_base_appends_action_and_uses_separate_token(monkeypatch):
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat.example:36036", raising=False)
+    monkeypatch.setattr(cfg, "NAPCAT_API_BASE", "http://napcat.example:36036", raising=False)
+    monkeypatch.setattr(cfg, "NAPCAT_API_TOKEN", "separate-token", raising=False)
+
+    url, headers = napcat._resolve_api_action_url(
+        cfg.QQ_BOT_API,
+        "send_group_forward_msg",
+    )
+
+    assert url == "http://napcat.example:36036/send_group_forward_msg"
+    assert "access_token" not in url
+    assert headers["Authorization"] == "Bearer separate-token"
+
+
 @pytest.mark.asyncio
 async def test_online_probe_does_not_hide_failed_send(monkeypatch):
     monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)

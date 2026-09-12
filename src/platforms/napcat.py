@@ -5,6 +5,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from src.utils import utc_to_jst
 
@@ -273,6 +274,20 @@ def _classify_error(status_code: int, body: object = None, text: str = "") -> st
         return "auth_failed"
     if status_code == 429:
         return "rate_limited"
+    # QQ 群通常会把“每分钟只能发 N 条消息”作为 HTTP 200 的业务错误
+    # 返回，而不是使用标准 HTTP 429。把这类文本归到限流分类，避免
+    # 合并转发失败时被误记成普通 http_error，也让发送门闩进入短冷却。
+    if any(
+        marker in excerpt
+        for marker in (
+            "本群每分钟只能发",
+            "每分钟只能发",
+            "每分钟最多发送",
+            "rate limit",
+            "too many messages",
+        )
+    ):
+        return "rate_limited"
     if any(
         marker in excerpt
         for marker in (
@@ -465,7 +480,10 @@ def _split_video_record_chain(message_chain: list[dict]) -> list[list[dict]]:
 # 发送
 # ──────────────────────────────────────────────
 def _resolve_api_url_and_headers(raw_url: str) -> tuple[str, dict[str, str]]:
-    url = (raw_url or getattr(cfg, "QQ_BOT_API", "") or "").strip()
+    raw_value = str(raw_url or "").strip()
+    configured_url = str(getattr(cfg, "QQ_BOT_API", "") or "").strip()
+    url = (raw_value or configured_url or str(getattr(cfg, "NAPCAT_API_BASE", "") or "")).strip()
+    use_config_token = not raw_value or raw_value == configured_url
     if not url:
         url = "http://127.0.0.1:3000/send_group_msg"
 
@@ -480,6 +498,11 @@ def _resolve_api_url_and_headers(raw_url: str) -> tuple[str, dict[str, str]]:
         # 若 URL 中携带 access_token 或 token，自动增加 Authorization Bearer 头增强兼容
         qs = parse_qs(parsed.query)
         token = qs.get("access_token", [None])[0] or qs.get("token", [None])[0]
+        # 新版配置不再把密钥拼进 URL。仅当调用方使用当前配置的地址
+        # （或未显式传入地址）时才读取独立 Token，避免测试/调用方传入
+        # 一个临时地址却意外套用另一台 NapCat 的密钥。
+        if not token and use_config_token:
+            token = str(getattr(cfg, "NAPCAT_API_TOKEN", "") or "").strip() or None
         if token:
             headers["Authorization"] = f"Bearer {token}"
     except Exception:
@@ -487,32 +510,81 @@ def _resolve_api_url_and_headers(raw_url: str) -> tuple[str, dict[str, str]]:
     return url, headers
 
 
-async def _post_message_detailed(
+def _resolve_api_action_url(raw_url: str, action: str) -> tuple[str, dict[str, str]]:
+    """将已配置的 OneBot endpoint 切换到指定 action。
+
+    新版管理端保存的是不含动作路径的服务基地址，发送侧按 action 自动
+    追加 ``/send_group_msg`` 或 ``/send_group_forward_msg``；旧版完整地址
+    也会复用同一主机、查询参数和鉴权头。对自定义前缀保留兼容：未知路径
+    会在末尾追加 action。
+    """
+
+    url, headers = _resolve_api_url_and_headers(raw_url)
+    action = str(action or "send_group_msg").strip().lstrip("/")
+    if not action:
+        action = "send_group_msg"
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        path = parsed.path or "/"
+        normalized = path.rstrip("/")
+        endpoint = normalized.rsplit("/", 1)[-1] if normalized else ""
+        if endpoint in {"send_group_msg", "send_group_forward_msg"}:
+            prefix = normalized.rsplit("/", 1)[0]
+            path = f"{prefix}/{action}" if prefix else f"/{action}"
+        elif not normalized:
+            path = f"/{action}"
+        else:
+            path = f"{normalized}/{action}"
+        return urlunparse(parsed._replace(path=path)), headers
+    except Exception:
+        # 保留原有 endpoint 的容错行为；仅在 URL 可解析时切换 action。
+        return url, headers
+
+
+def _strip_payload_internal(value: object) -> object:
+    """递归移除 OneBot payload 中的内部字段。
+
+    合并转发节点会嵌套消息链，不能只清理最外层，否则内部的 ``_role``
+    等准备阶段字段可能被 NapCat 当成协议字段处理。
+    """
+
+    if isinstance(value, Mapping):
+        return {
+            key: _strip_payload_internal(candidate)
+            for key, candidate in value.items()
+            if not str(key).startswith("_")
+        }
+    if isinstance(value, (list, tuple)):
+        return [_strip_payload_internal(item) for item in value]
+    return value
+
+
+async def _post_payload_detailed(
     group_id: int,
-    message_chain: list[dict],
+    payload: Mapping[str, object],
+    action: str,
     max_retries: int,
 ) -> NapCatSendOutcome:
-    """发送一批消息并返回稳定的内部结果。
-
-    调用方负责持有 ``_send_gate``；这样同一账号的文本、图片、视频批次会
-    保持顺序，且监控/手动推送不会并发打到同一个 OneBot 端点。
-    """
+    """向 OneBot action 发送一个 JSON payload 并返回稳定结果。"""
 
     if _client is None:
         log_all("⚠️ NapCat 客户端尚未初始化", is_error=True)
         return NapCatSendOutcome(False, "not_initialized")
 
-    payload_str = json.dumps(
-        {"group_id": group_id, "message": strip_internal_keys(message_chain)},
-        ensure_ascii=False,
-    )
+    body: dict[str, object] = {"group_id": group_id}
+    body.update(_strip_payload_internal(payload))  # type: ignore[arg-type]
+    payload_str = json.dumps(body, ensure_ascii=False)
+    action_label = "合并转发" if action == "send_group_forward_msg" else "普通消息"
     if cfg.DEBUG_LOG_QQ_PAYLOAD:
         log_all(
-            f"📤 发送体: {len(payload_str)} 字节 | 预览: {payload_str[:200]}",
+            f"📤 发送体: {len(payload_str)} 字节 | 方式={action_label} | "
+            f"预览: {payload_str[:200]}",
             is_debug=True,
         )
 
-    api_url, req_headers = _resolve_api_url_and_headers(cfg.QQ_BOT_API)
+    api_url, req_headers = _resolve_api_action_url(cfg.QQ_BOT_API, action)
     retries = max(1, int(max_retries))
     last_error = "delivery_failed"
     for attempt in range(retries):
@@ -526,7 +598,7 @@ async def _post_message_detailed(
             )
             if resp.status_code == 200:
                 try:
-                    body = resp.json()
+                    response_body = resp.json()
                 except Exception:
                     log_all(
                         f"⚠️ Bot 返回非 JSON 响应（HTTP 200，按成功处理）: "
@@ -534,58 +606,60 @@ async def _post_message_detailed(
                         is_error=True,
                     )
                     return NapCatSendOutcome(True)
-                if isinstance(body, dict) and (
-                    body.get("status") == "ok" or body.get("retcode") == 0
+                if isinstance(response_body, dict) and (
+                    response_body.get("status") == "ok"
+                    or response_body.get("retcode") == 0
                 ):
                     return NapCatSendOutcome(True)
                 last_error = _classify_error(
                     resp.status_code,
-                    body,
+                    response_body,
                     getattr(resp, "text", ""),
                 )
                 log_all(
-                    f"⚠️ Bot 返回业务失败 | error_code={last_error} | "
-                    f"{_body_excerpt(body, getattr(resp, 'text', ''))}",
+                    f"⚠️ Bot 返回业务失败 | 方式={action_label} | "
+                    f"error_code={last_error} | "
+                    f"{_body_excerpt(response_body, getattr(resp, 'text', ''))}",
                     is_error=True,
                 )
                 return NapCatSendOutcome(False, last_error)
-            else:
-                last_error = _classify_error(
-                    resp.status_code,
-                    None,
-                    getattr(resp, "text", ""),
-                )
-                log_all(
-                    f"📡 异常响应 ({attempt + 1}/{retries}): "
-                    f"HTTP {resp.status_code} | error_code={last_error} | "
-                    f"{_safe_excerpt(getattr(resp, 'text', ''))}",
-                    is_error=True,
-                )
-                if resp.status_code == 502:
-                    log_all("🔥 502，代理/协议问题", is_error=True)
-                # 4xx（除 429）不可重试，直接放弃
-                if resp.status_code < 500 and resp.status_code != 429:
-                    return NapCatSendOutcome(False, last_error)
+
+            last_error = _classify_error(
+                resp.status_code,
+                None,
+                getattr(resp, "text", ""),
+            )
+            log_all(
+                f"📡 异常响应 ({attempt + 1}/{retries}): HTTP {resp.status_code} | "
+                f"方式={action_label} | error_code={last_error} | "
+                f"{_safe_excerpt(getattr(resp, 'text', ''))}",
+                is_error=True,
+            )
+            if resp.status_code == 502:
+                log_all("🔥 502，代理/协议问题", is_error=True)
+            # 4xx（除 429）不可重试，直接放弃
+            if resp.status_code < 500 and resp.status_code != 429:
+                return NapCatSendOutcome(False, last_error)
 
         except httpx.TimeoutException as e:
             last_error = "timeout"
             log_all(
-                f"🔥 发送异常 ({attempt + 1}/{retries}) | error_code=timeout | "
-                f"{_safe_excerpt(format_httpx_error(e))}",
+                f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                f"error_code=timeout | {_safe_excerpt(format_httpx_error(e))}",
                 is_error=True,
             )
         except (httpx.RequestError, OSError) as e:
             last_error = "network_error"
             log_all(
-                f"🔥 发送异常 ({attempt + 1}/{retries}) | error_code=network_error | "
-                f"{_safe_excerpt(format_httpx_error(e))}",
+                f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                f"error_code=network_error | {_safe_excerpt(format_httpx_error(e))}",
                 is_error=True,
             )
         except Exception as e:
             last_error = "unexpected_error"
             log_all(
-                f"🔥 发送异常 ({attempt + 1}/{retries}) | error_code=unexpected_error | "
-                f"{_safe_excerpt(format_httpx_error(e))}",
+                f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
+                f"error_code=unexpected_error | {_safe_excerpt(format_httpx_error(e))}",
                 is_error=True,
             )
 
@@ -595,8 +669,32 @@ async def _post_message_detailed(
     return NapCatSendOutcome(False, last_error)
 
 
-async def _post_message(group_id: int, message_chain: list[dict], max_retries: int) -> bool:
-    """兼容旧调用方的布尔发送接口。"""
+async def _post_message_detailed(
+    group_id: int,
+    message_chain: list[dict],
+    max_retries: int,
+) -> NapCatSendOutcome:
+    """发送一批消息并返回稳定的内部结果。
+
+    调用方负责持有 ``_send_gate``；这样同一账号的文本、图片、视频批次会
+    保持顺序，且监控/手动推送不会并发打到同一个 OneBot 端点。
+    """
+
+    return await _post_payload_detailed(
+        group_id,
+        {"message": strip_internal_keys(message_chain)},
+        "send_group_msg",
+        max_retries,
+    )
+
+
+async def _send_payload(
+    group_id: int,
+    payload: Mapping[str, object],
+    action: str,
+    max_retries: int = 3,
+) -> bool:
+    """在账号级发送门闩内执行任意 OneBot action。"""
 
     started = time.monotonic()
     async with _send_gate:
@@ -623,16 +721,33 @@ async def _post_message(group_id: int, message_chain: list[dict], max_retries: i
                 attempted=False,
             )
             return False
-        outcome = await _post_message_detailed(group_id, message_chain, max_retries)
+        outcome = await _post_payload_detailed(
+            group_id,
+            payload,
+            action,
+            max_retries,
+        )
         elapsed_ms = (time.monotonic() - started) * 1000
         _send_gate.record(outcome, target=group_id, elapsed_ms=elapsed_ms)
         _record_send_health(outcome, group_id, elapsed_ms)
         if not outcome.ok:
             log_all(
-                f"❌ QQ 消息发送彻底失败 | error_code={outcome.error_code}",
+                f"❌ QQ {('合并转发' if action == 'send_group_forward_msg' else '消息')}"
+                f"发送彻底失败 | error_code={outcome.error_code}",
                 is_error=True,
             )
         return outcome.ok
+
+
+async def _post_message(group_id: int, message_chain: list[dict], max_retries: int) -> bool:
+    """兼容旧调用方的布尔发送接口。"""
+
+    return await _send_payload(
+        group_id,
+        {"message": strip_internal_keys(message_chain)},
+        "send_group_msg",
+        max_retries,
+    )
 
 
 async def send_qq_message(
@@ -682,3 +797,44 @@ async def send_qq_message(
     elapsed_ms = (time.monotonic() - started) * 1000
     _record_send_health(NapCatSendOutcome(True), group_id, elapsed_ms)
     return True
+
+
+async def send_group_forward_message(
+    group_id: int,
+    messages: list[dict],
+    max_retries: int = 3,
+) -> bool:
+    """以 OneBot 合并转发卡片发送多个消息节点。
+
+    ``send_group_forward_msg`` 会把多个节点折叠成一条群消息，适合
+    Instagram/TikTok 轮播等多媒体动态，避免普通消息链被 QQ 的每分钟
+    消息条数限制拆成多条。节点内容由 ``NapCatAdapter`` 负责构造。
+    """
+
+    if not isinstance(messages, list) or not messages:
+        return False
+    log_all(
+        f"📦 NapCat 合并转发 | 群{group_id} | 节点{len(messages)} | "
+        "按 1 条群消息投递",
+        is_debug=True,
+    )
+    return await _send_payload(
+        group_id,
+        {"messages": messages},
+        "send_group_forward_msg",
+        max_retries,
+    )
+
+
+__all__ = [
+    "NapCatSendGate",
+    "NapCatSendOutcome",
+    "build_message_chain",
+    "get_send_gate_snapshot",
+    "initialize",
+    "record_send_timeout",
+    "send_group_forward_message",
+    "send_qq_message",
+    "set_session_state",
+    "strip_internal_keys",
+]

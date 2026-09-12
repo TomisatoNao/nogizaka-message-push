@@ -51,6 +51,17 @@ def test_resolve_status_endpoint_preserves_token_and_path(monkeypatch):
     assert headers["User-Agent"] == "test-agent"
 
 
+def test_resolve_status_endpoint_uses_structured_base_and_token(monkeypatch):
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036", raising=False)
+    monkeypatch.setattr(cfg, "NAPCAT_API_BASE", "http://napcat:36036", raising=False)
+    monkeypatch.setattr(cfg, "NAPCAT_API_TOKEN", "separate-token", raising=False)
+
+    endpoint, headers = resolve_status_endpoint(cfg.QQ_BOT_API)
+
+    assert endpoint == "http://napcat:36036/get_status"
+    assert headers["Authorization"] == "Bearer separate-token"
+
+
 def test_status_classifier_handles_business_auth_failure_on_http_200():
     state, online, reason = classify_status_response(
         200,

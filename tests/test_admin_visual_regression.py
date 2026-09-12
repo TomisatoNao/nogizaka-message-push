@@ -80,7 +80,8 @@ def _fixture_config() -> dict:
                 "push_message": True,
             },
         ],
-        "napcat_api": "http://napcat:3000/send_group_msg",
+        "napcat_api_base": "http://napcat:3000",
+        "napcat_api_token": "fixture-token",
         "napcat_media_base_url": "http://sakamichi-push:46046",
         "napcat_routes": [
             {"group_id": 12345678, "remark": "示例群", "push_message": True},
@@ -224,7 +225,11 @@ def _assert_screenshot(actual, expected, *, max_ratio: float = 0.005) -> None:
     bbox = diff.getbbox()
     if bbox is None:
         return
-    changed = sum(1 for pixel in diff.getdata() if pixel != (0, 0, 0))
+    # Pillow 12 已将 ``Image.getdata`` 标记为弃用；优先使用新的扁平化
+    # 像素接口，同时保留对 Pillow 10/11 的兼容回退。
+    flattened = getattr(diff, "get_flattened_data", None)
+    pixels = flattened() if callable(flattened) else diff.getdata()
+    changed = sum(1 for pixel in pixels if pixel != (0, 0, 0))
     ratio = changed / (actual_image.width * actual_image.height)
     if ratio > effective_max_ratio:
         actual_path = Path(actual)
@@ -526,15 +531,21 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                             };
                         }"""
                     )
-                    assert len(napcat["rects"]) == 2
+                    assert len(napcat["rects"]) == 3
                     assert napcat["noteText"] == "NapCat 不在本机时填写媒体地址；共享文件系统可留空。"
                     assert napcat["gridRight"] <= metrics["viewportWidth"] + 1
                     if viewport_name == "mobile":
                         assert len(napcat["columns"].split()) == 1
                         assert napcat["rects"][1]["top"] > napcat["rects"][0]["top"]
-                    else:
+                        assert napcat["rects"][2]["top"] > napcat["rects"][1]["top"]
+                    elif viewport_name == "tablet":
                         assert len(napcat["columns"].split()) == 2
                         assert abs(napcat["rects"][1]["top"] - napcat["rects"][0]["top"]) <= 2
+                        assert napcat["rects"][2]["top"] > napcat["rects"][1]["top"]
+                    else:
+                        assert len(napcat["columns"].split()) == 3
+                        assert abs(napcat["rects"][1]["top"] - napcat["rects"][0]["top"]) <= 2
+                        assert abs(napcat["rects"][2]["top"] - napcat["rects"][0]["top"]) <= 2
                 elif tab == "social":
                     schedule = page.evaluate(
                         """() => {

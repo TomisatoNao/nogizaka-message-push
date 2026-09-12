@@ -57,6 +57,22 @@ def test_serialize_config():
     assert reparsed == SAMPLE_CONFIG
 
 
+def test_structured_napcat_fields_validate_and_serialize():
+    structured = json.loads(json.dumps(SAMPLE_CONFIG))
+    structured.pop("napcat_api", None)
+    structured["napcat_api_base"] = "http://napcat.example:36036"
+    structured["napcat_api_token"] = "separate-token"
+
+    assert config_service.validate_config(structured) == []
+    reparsed = json5.loads(config_service.serialize_config(structured))
+    assert reparsed["napcat_api_base"] == "http://napcat.example:36036"
+    assert reparsed["napcat_api_token"] == "separate-token"
+
+    invalid = json.loads(json.dumps(structured))
+    invalid["napcat_api_base"] = "http://napcat.example:36036/send_group_msg?access_token=leaked"
+    assert any("基地址无效" in error for error in config_service.validate_config(invalid))
+
+
 def test_config_history_and_save(tmp_path: Path):
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps(SAMPLE_CONFIG), encoding="utf-8")

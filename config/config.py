@@ -206,6 +206,35 @@ def _deep_merge(base: dict, override: dict) -> None:
             base[key] = val
 
 
+def _split_napcat_api(raw_url: object) -> tuple[str, str]:
+    """拆分旧版 NapCat 完整接口地址，返回 ``(基地址, access_token)``。
+
+    旧版管理端把 ``/send_group_msg?access_token=...`` 一并保存到
+    ``napcat_api``。新配置只保存服务基地址和独立 Token；这里集中处理
+    迁移，运行时仍接受旧格式，避免升级后必须手工改配置。
+    """
+
+    raw = str(raw_url or "").strip()
+    if not raw:
+        return "", ""
+    try:
+        from urllib.parse import parse_qs, urlsplit, urlunsplit
+
+        parsed = urlsplit(raw)
+        query = parse_qs(parsed.query)
+        token = (query.get("access_token") or [""])[0] or (query.get("token") or [""])[0]
+        path = (parsed.path or "").rstrip("/")
+        endpoint = path.rsplit("/", 1)[-1] if path else ""
+        if endpoint in {"send_group_msg", "send_group_forward_msg", "get_status"}:
+            path = path.rsplit("/", 1)[0] if "/" in path else ""
+        base = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+        return (base or raw), str(token or "")
+    except Exception:
+        # 保留旧版容错：异常字符串继续交给发送侧校验/报错，不在迁移阶段
+        # 擅自丢失用户原始配置。
+        return raw, ""
+
+
 def _normalize_config(raw: dict) -> dict:
     """检测旧格式 config.json，转换为新格式内部表示。"""
     is_old = "enable_napcat_qq" in raw or "monitor_list" in raw
@@ -222,8 +251,29 @@ def _normalize_config(raw: dict) -> dict:
         cfg["enable_napcat_qq"]       = channels.get("napcat", False)
         cfg["enable_qq_official_bot"] = channels.get("qq_official", False)
         cfg["enable_tg_bot"]          = channels.get("tg", False)
-        if "napcat_api" in cfg:
-            cfg["qq_bot_api"] = cfg.pop("napcat_api")
+        # NapCat 地址结构化迁移：新格式只保留基地址与独立 Token；旧版
+        # ``napcat_api`` 完整 URL 仍可读取，并在这里拆分成新字段。
+        legacy_napcat_api = cfg.pop("napcat_api", None)
+        napcat_base = str(cfg.get("napcat_api_base") or "").strip()
+        napcat_token = str(cfg.get("napcat_api_token") or "").strip()
+        if legacy_napcat_api and not napcat_base:
+            napcat_base, legacy_token = _split_napcat_api(legacy_napcat_api)
+            cfg["napcat_api_base"] = napcat_base
+            if not napcat_token and legacy_token:
+                cfg["napcat_api_token"] = legacy_token
+                napcat_token = legacy_token
+        elif napcat_base:
+            # 即使用户误把旧完整地址填进了新字段，也自动归一化，避免
+            # 最终出现 ``.../send_group_msg/send_group_msg``。
+            normalized_base, embedded_token = _split_napcat_api(napcat_base)
+            cfg["napcat_api_base"] = normalized_base
+            if not napcat_token and embedded_token:
+                cfg["napcat_api_token"] = embedded_token
+        if cfg.get("napcat_api_base"):
+            cfg["qq_bot_api"] = cfg["napcat_api_base"]
+        elif legacy_napcat_api:
+            # 非 URL 的旧值留给发送侧报告原始错误，兼容旧配置行为。
+            cfg["qq_bot_api"] = legacy_napcat_api
 
         if "sleep_hours" in cfg:
             sh = cfg.pop("sleep_hours")
@@ -386,13 +436,24 @@ def _normalize_config(raw: dict) -> dict:
 
         return cfg
 
-    # 旧格式：打印迁移提示，原样返回
+    # 旧格式：打印迁移提示，同时尽量补齐 NapCat 结构化字段。旧版配置
+    # 有时只写 ``napcat_api``，如果原样返回会被新 facade 忽略该键。
+    legacy_cfg = dict(raw)
+    legacy_endpoint = legacy_cfg.get("napcat_api") or legacy_cfg.get("qq_bot_api")
+    if legacy_endpoint:
+        base, token = _split_napcat_api(legacy_endpoint)
+        legacy_cfg.setdefault("napcat_api_base", base)
+        if token:
+            legacy_cfg.setdefault("napcat_api_token", token)
+        legacy_cfg.setdefault("qq_bot_api", base or legacy_endpoint)
+
+    # 旧格式：打印迁移提示，返回兼容后的内部表示。
     print(
         "⚠️  检测到旧格式 config.json。\n"
         "   系统将以兼容模式运行，建议迁移到新格式。\n"
         "   新格式示例见: docs/superpowers/specs/2026-07-25-config-simplification-design.md"
     )
-    return dict(raw)
+    return legacy_cfg
 
 
 def _match_account_credentials(cfg: dict) -> dict:
@@ -577,6 +638,10 @@ _KEY_TO_VAR: dict[str, str] = {
     "enable_qq_official_bot":       "ENABLE_QQ_OFFICIAL_BOT",
     "enable_tg_bot":               "ENABLE_TG_BOT",
     "qq_bot_api":                   "QQ_BOT_API",
+    "napcat_api_base":              "NAPCAT_API_BASE",
+    "napcat_api_token":             "NAPCAT_API_TOKEN",
+    "napcat_forward_user_id":       "NAPCAT_FORWARD_USER_ID",
+    "napcat_forward_nickname":      "NAPCAT_FORWARD_NICKNAME",
     "qq_user_agent":                "QQ_USER_AGENT",
     "qq_official_token_url":        "QQ_OFFICIAL_TOKEN_URL",
     "qq_official_api_base":         "QQ_OFFICIAL_API_BASE",
@@ -833,9 +898,23 @@ def _load_config() -> dict:
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
     cfg["zhipu_api_key"]  = _env("ZHIPU_API_KEY", "")
     cfg["proxy"]          = (cfg.get("proxy") or "").strip() or _env("HTTP_PROXY") or _env("HTTPS_PROXY") or _env("ALL_PROXY") or _env("PROXY", "")
-    napcat_env_api        = _env("QQ_BOT_API") or _env("NAPCAT_API_URL")
-    if napcat_env_api:
+    # 新版 NapCat 配置把服务基地址与访问密钥分开；旧版完整
+    # ``QQ_BOT_API`` / ``NAPCAT_API_URL`` 仍可直接使用，且优先级低于新版
+    # 两个变量。运行时 ``qq_bot_api`` 作为兼容别名只保存基地址。
+    napcat_env_base = _env("NAPCAT_API_BASE").strip()
+    napcat_env_token = _env("NAPCAT_API_TOKEN")
+    napcat_env_api = _env("QQ_BOT_API") or _env("NAPCAT_API_URL")
+    if napcat_env_base:
+        cfg["napcat_api_base"] = napcat_env_base
+        cfg["qq_bot_api"] = napcat_env_base
+    elif napcat_env_api:
+        legacy_base, legacy_token = _split_napcat_api(napcat_env_api)
+        cfg["napcat_api_base"] = legacy_base
         cfg["qq_bot_api"] = napcat_env_api
+        if legacy_token and not napcat_env_token:
+            cfg["napcat_api_token"] = legacy_token
+    if napcat_env_token:
+        cfg["napcat_api_token"] = napcat_env_token
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
     cfg = _match_account_credentials(cfg)
@@ -924,7 +1003,17 @@ ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)  
 ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT) # type: ignore[has-type]
 ENABLE_TG_BOT          = _env_bool("ENABLE_TG_BOT",          ENABLE_TG_BOT)          # type: ignore[has-type]
 DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)   # type: ignore[has-type]
-QQ_BOT_API             = _env("QQ_BOT_API",                  _env("NAPCAT_API_URL", QQ_BOT_API)) # type: ignore[has-type]
+NAPCAT_API_BASE        = _env("NAPCAT_API_BASE",             str(getattr(_sys.modules[__name__], "NAPCAT_API_BASE", "") or ""))
+NAPCAT_API_TOKEN       = _env("NAPCAT_API_TOKEN",            str(getattr(_sys.modules[__name__], "NAPCAT_API_TOKEN", "") or ""))
+_legacy_napcat_env     = _env("QQ_BOT_API") or _env("NAPCAT_API_URL")
+if _legacy_napcat_env and not _env("NAPCAT_API_BASE"):
+    _legacy_base, _legacy_token = _split_napcat_api(_legacy_napcat_env)
+    NAPCAT_API_BASE = _legacy_base
+    if not _env("NAPCAT_API_TOKEN") and _legacy_token:
+        NAPCAT_API_TOKEN = _legacy_token
+QQ_BOT_API             = NAPCAT_API_BASE or _env("QQ_BOT_API", _env("NAPCAT_API_URL", QQ_BOT_API)) # type: ignore[has-type]
+NAPCAT_FORWARD_USER_ID = _env("NAPCAT_FORWARD_USER_ID",      str(getattr(_sys.modules[__name__], "NAPCAT_FORWARD_USER_ID", "") or ""))
+NAPCAT_FORWARD_NICKNAME = _env("NAPCAT_FORWARD_NICKNAME",    str(getattr(_sys.modules[__name__], "NAPCAT_FORWARD_NICKNAME", "") or ""))
 
 
 # ================================================================
@@ -1003,11 +1092,22 @@ def reload() -> bool:
 
             # 重新应用环境变量覆盖
             global ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, DEBUG_LOG_QQ_PAYLOAD, \
-                   ENABLE_TG_BOT, QQ_BOT_API
+                   ENABLE_TG_BOT, QQ_BOT_API, NAPCAT_API_BASE, NAPCAT_API_TOKEN, \
+                   NAPCAT_FORWARD_USER_ID, NAPCAT_FORWARD_NICKNAME
             ENABLE_NAPCAT_QQ       = _env_bool("ENABLE_NAPCAT_QQ",       ENABLE_NAPCAT_QQ)
             ENABLE_QQ_OFFICIAL_BOT = _env_bool("ENABLE_QQ_OFFICIAL_BOT", ENABLE_QQ_OFFICIAL_BOT)
             DEBUG_LOG_QQ_PAYLOAD   = _env_bool("DEBUG_LOG_QQ_PAYLOAD",   DEBUG_LOG_QQ_PAYLOAD)
-            QQ_BOT_API             = _env("QQ_BOT_API",                  _env("NAPCAT_API_URL", QQ_BOT_API))
+            NAPCAT_API_BASE        = _env("NAPCAT_API_BASE",             str(getattr(_sys.modules[__name__], "NAPCAT_API_BASE", "") or ""))
+            NAPCAT_API_TOKEN       = _env("NAPCAT_API_TOKEN",            str(getattr(_sys.modules[__name__], "NAPCAT_API_TOKEN", "") or ""))
+            _legacy_napcat_env     = _env("QQ_BOT_API") or _env("NAPCAT_API_URL")
+            if _legacy_napcat_env and not _env("NAPCAT_API_BASE"):
+                _legacy_base, _legacy_token = _split_napcat_api(_legacy_napcat_env)
+                NAPCAT_API_BASE = _legacy_base
+                if not _env("NAPCAT_API_TOKEN") and _legacy_token:
+                    NAPCAT_API_TOKEN = _legacy_token
+            QQ_BOT_API             = NAPCAT_API_BASE or _env("QQ_BOT_API", _env("NAPCAT_API_URL", QQ_BOT_API))
+            NAPCAT_FORWARD_USER_ID = _env("NAPCAT_FORWARD_USER_ID",      str(getattr(_sys.modules[__name__], "NAPCAT_FORWARD_USER_ID", "") or ""))
+            NAPCAT_FORWARD_NICKNAME = _env("NAPCAT_FORWARD_NICKNAME",    str(getattr(_sys.modules[__name__], "NAPCAT_FORWARD_NICKNAME", "") or ""))
 
             # TG Bot 的专属 Token 会在 _load_config → _build_tg_bots 中重新读取。
             ENABLE_TG_BOT  = _env_bool("ENABLE_TG_BOT", ENABLE_TG_BOT)

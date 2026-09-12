@@ -222,10 +222,10 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
 
     # ── 检查 NapCat 连通性 ────────────────────────────────
     if napcat_enabled:
-        bot_api = getattr(cfg, "QQ_BOT_API", "http://127.0.0.1:3000/send_group_msg")
+        bot_api = getattr(cfg, "QQ_BOT_API", "http://127.0.0.1:3000")
         try:
-            # 与实际发送请求保持同一套 URL/token 解析规则；状态接口必须带上
-            # QQ_BOT_API 中配置的 access_token，否则 NapCat 会返回 403。
+            # 与实际发送请求保持同一套基地址/Token 解析规则；新版 Token
+            # 独立配置，旧版完整 URL 仍由探针兼容解析。
             status_url, napcat_headers = resolve_status_endpoint(bot_api)
             resp = await qq_client.get(status_url, headers=napcat_headers)
             body = None

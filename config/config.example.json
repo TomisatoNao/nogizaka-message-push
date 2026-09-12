@@ -5,7 +5,14 @@
     "tg": false,
     "qq_official": false
   },
-  "napcat_api": "http://127.0.0.1:3000/send_group_msg",
+  // NapCat 只填写服务基地址；发送动作（/send_group_msg、
+  // /send_group_forward_msg、/get_status）由程序自动拼接。
+  "napcat_api_base": "http://127.0.0.1:3000",
+  "napcat_api_token": "",
+  // 合并转发节点身份（可选）。入站反向 WebSocket 会自动使用事件里的 self_id；
+  // 定时任务若也要将多媒体折叠发送，可填写 NapCat 登录 QQ 号和显示昵称。
+  "napcat_forward_user_id": "",
+  "napcat_forward_nickname": "坂道监控",
   // NapCat 位于其他主机时填写群晖可被其访问的地址；留空表示同机 file:// 模式
   "napcat_media_base_url": "",
   // 可选：固定媒体签名密钥；留空时使用 WEB_ADMIN_TOKEN 或进程随机密钥

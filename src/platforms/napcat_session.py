@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import inspect
+import re
 import time
 from typing import Callable
 from urllib.parse import parse_qs, urlparse, urlunparse
@@ -68,20 +69,29 @@ class NapCatSessionAlertTracker:
 
 def _safe_reason(value: object, limit: int = 160) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    # httpx 的异常有时会把请求 URL 放进消息；状态探针使用的 URL 可能
+    # 携带 access_token，诊断信息必须可读但不能把鉴权凭证写入日志。
+    text = re.sub(
+        r"(?i)(access[_-]?token|authorization|token)\s*=\s*([^&\s]+)",
+        r"\1=<redacted>",
+        text,
+    )
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
 def resolve_status_endpoint(raw_url: str) -> tuple[str, dict[str, str]]:
     """将发送端点转换为 ``get_status``，并提取 URL 中的访问令牌。
 
-    NapCat 管理端通常要求在 ``QQ_BOT_API`` 中填写
-    ``.../send_group_msg?access_token=...``；状态探针必须沿用同一个令牌，
-    否则会把正常服务误报为 HTTP 403。
+    新版管理端分别读取 ``NAPCAT_API_BASE`` 与 ``NAPCAT_API_TOKEN``；旧版
+    ``QQ_BOT_API`` 中的 ``.../send_group_msg?access_token=...`` 也继续兼容。
+    状态探针必须沿用同一个令牌，否则会把正常服务误报为 HTTP 403。
     """
 
-    raw = (raw_url or getattr(cfg, "QQ_BOT_API", "") or "").strip()
+    raw_value = str(raw_url or "").strip()
+    configured_url = str(getattr(cfg, "QQ_BOT_API", "") or "").strip()
+    raw = (raw_value or configured_url or str(getattr(cfg, "NAPCAT_API_BASE", "") or "")).strip()
     if not raw:
-        raw = "http://127.0.0.1:3000/send_group_msg"
+        raw = "http://127.0.0.1:3000"
 
     headers = {
         "Content-Type": "application/json",
@@ -97,13 +107,17 @@ def resolve_status_endpoint(raw_url: str) -> tuple[str, dict[str, str]]:
         elif not path:
             status_path = "/get_status"
         else:
-            status_path = path.rsplit("/", 1)[0] + "/get_status"
+            # 新版填写的是 NapCat 服务基地址（例如 /api），因此状态
+            # 接口应追加到基地址，而不是误退回到上一级路径。
+            status_path = path + "/get_status"
         if not status_path.startswith("/"):
             status_path = "/" + status_path
         parsed = parsed._replace(path=status_path)
         endpoint = urlunparse(parsed)
         query = parse_qs(parsed.query)
         token = (query.get("access_token") or [""])[0] or (query.get("token") or [""])[0]
+        if not token and (not raw_value or raw == configured_url):
+            token = str(getattr(cfg, "NAPCAT_API_TOKEN", "") or "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return endpoint, headers
@@ -212,7 +226,9 @@ class NapCatSessionMonitor:
             api_reachable = False
             self._consecutive_failures += 1
         except Exception as exc:
-            state, online, reason = "unknown", None, type(exc).__name__
+            detail = _safe_reason(exc)
+            reason = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+            state, online = "unknown", None
             api_reachable = None
             self._consecutive_failures = 0
             self._emit_log(

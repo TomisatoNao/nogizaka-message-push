@@ -154,12 +154,12 @@ NapCat 有两种常见部署方式，请按实际网络拓扑选择：
 使用仓库自带的 `docker-compose.with-napcat.yml`。该文件中的 NapCat OneBot HTTP 端口为 `36036`（`3000` 是其他部署的常见端口），两个容器会加入同一个 Docker 网络，主程序通过服务名访问 NapCat：
 
 ```yaml
-QQ_BOT_API=http://napcat:36036/send_group_msg?access_token=<OneBot_HTTP_Token>
-NAPCAT_API_URL=http://napcat:36036/send_group_msg?access_token=<OneBot_HTTP_Token>
+NAPCAT_API_BASE=http://napcat:36036
+NAPCAT_API_TOKEN=<OneBot_HTTP_Token>
 NAPCAT_MEDIA_BASE_URL=http://sakamichi-push:46046
 ```
 
-其中 `<OneBot_HTTP_Token>` 是 NapCat OneBot HTTP 服务的 Token，**不是** NapCat WebUI 登录 Token。若 NapCat 未启用 HTTP Token，则删除 `?access_token=...`。媒体基地址必须是 NapCat 容器能够访问的地址；同一 Compose 网络优先使用 `http://sakamichi-push:46046`。
+其中 `<OneBot_HTTP_Token>` 是 NapCat OneBot HTTP 服务的 Token，**不是** NapCat WebUI 登录 Token；若 NapCat 未启用 HTTP Token，则将 `NAPCAT_API_TOKEN` 留空。媒体基地址必须是 NapCat 容器能够访问的地址；同一 Compose 网络优先使用 `http://sakamichi-push:46046`。
 
 从仓库目录启动同机部署：
 
@@ -174,15 +174,27 @@ NapCat 网页控制台默认在 `http://<群晖IP>:6099/`，OneBot HTTP 接口�
 
 **方式 2：NapCat 在另一台电脑或另一套容器**
 
-将 API 地址改为 NapCat 所在主机的局域网地址，例如：
+将 NapCat 基地址和 Token 分开配置，例如：
 
 ```text
-http://192.168.1.20:3000/send_group_msg?access_token=<OneBot_HTTP_Token>
+NAPCAT_API_BASE=http://192.168.1.20:3000
+NAPCAT_API_TOKEN=<OneBot_HTTP_Token>
 ```
 
 同时将 `NAPCAT_MEDIA_BASE_URL` 设置为主程序对 NapCat 可访问的 HTTP 地址，例如 `http://192.168.1.10:46046`。不要填写主程序容器内部的 `/app/data/...` 路径；远程 NapCat 无法读取该路径，会出现 `ENOENT`。
 
-> **配置优先级**：Compose 环境变量 / `.env` 会覆盖 `config/config.json`。如果已经在 Web 管理端填写 API 地址，请不要在 Compose 中保留旧的 `QQ_BOT_API` 或 `NAPCAT_API_URL`，否则页面修改不会生效。
+远程 NapCat 还必须能访问这个媒体地址的 `/api/social/media/...` 路径；因此主程序的
+`web_admin.host` 不能只绑定 `127.0.0.1`。原生部署请绑定主程序所在局域网地址，Docker
+部署请在容器内监听 `0.0.0.0`，再用端口映射和防火墙限制 NapCat 主机来源。管理端已启用账号
+鉴权时，签名媒体 URL 不依赖浏览器 Cookie，但仍不要把 46046 直接暴露到公网。
+
+> **配置优先级**：Compose 环境变量 / `.env` 会覆盖 `config/config.json`。新版优先使用 `NAPCAT_API_BASE` 与 `NAPCAT_API_TOKEN`；旧的 `QQ_BOT_API` / `NAPCAT_API_URL` 完整 URL 仍兼容，但不建议继续使用。
+
+多媒体动态（例如 Instagram 轮播）会优先调用 OneBot 的
+`send_group_forward_msg`，折叠为一条群消息，以减少群消息条数消耗。反向 WebSocket
+入站会自动把 NapCat 事件中的 `self_id` 用作转发节点身份；定时监控没有事件上下文时，
+可在 `.env` 设置 `NAPCAT_FORWARD_USER_ID`（NapCat 登录 QQ 号）和可选的
+`NAPCAT_FORWARD_NICKNAME`。未配置身份时会安全回退到原有普通消息链。
 
 部署或修改后执行：
 
@@ -575,7 +587,8 @@ Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env
 ```jsonc
 {
   "channels": { "napcat": true, "tg": false, "qq_official": false },
-  "napcat_api": "http://127.0.0.1:3000/send_group_msg",
+  "napcat_api_base": "http://127.0.0.1:3000",
+  "napcat_api_token": "",
   "napcat_routes": [
     {
       "group_id": 533072575,
@@ -708,7 +721,7 @@ Docker 部署请先执行 `docker compose pull && docker compose up -d`，再请
 curl -i -H "Authorization: Bearer <OneBot_HTTP_Token>" http://<NapCat主机>:<OneBot_HTTP_Port>/get_status
 ```
 
-同一 Compose 部署的 `<OneBot_HTTP_Port>` 是 `36036`；其他部署按 NapCat 实际端口填写。若返回 `token verify failed!`，说明 Token 错误；若返回 HTTP 200，再检查 Compose 中的 `QQ_BOT_API` 是否覆盖了 Web 管理端保存的配置。启动检查和实际推送使用同一地址及鉴权信息。
+同一 Compose 部署的 `<OneBot_HTTP_Port>` 是 `36036`；其他部署按 NapCat 实际端口填写。若返回 `token verify failed!`，说明 Token 错误；若返回 HTTP 200，再检查 `NAPCAT_API_BASE` / `NAPCAT_API_TOKEN` 是否被 Compose 环境变量覆盖。启动检查和实际推送使用同一地址及鉴权信息。
 </details>
 
 <details>

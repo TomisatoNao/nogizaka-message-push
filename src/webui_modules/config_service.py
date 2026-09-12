@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+from urllib.parse import urlsplit
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
@@ -68,6 +69,28 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
             errors.append(f"读取 Schema 失败: {e}")
         return errors
 
+    # NapCat 的新结构将服务基地址与 Token 分开。Schema 负责类型，
+    # 这里补充跨字段无法表达的 URL/密钥约束；旧版 napcat_api 完整地址
+    # 仍保留兼容，不强制用户在升级时手工迁移。
+    napcat_base = str(raw.get("napcat_api_base") or "").strip()
+    if napcat_base:
+        try:
+            if any(ch.isspace() for ch in napcat_base):
+                raise ValueError("不能包含空白字符")
+            parsed = urlsplit(napcat_base)
+            endpoint = (parsed.path or "").rstrip("/").rsplit("/", 1)[-1]
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("必须是有效的 http(s) URL")
+            if parsed.query or parsed.fragment or parsed.username or parsed.password:
+                raise ValueError("基地址不能包含查询参数、片段或账号密码")
+            if endpoint in {"send_group_msg", "send_group_forward_msg", "get_status"}:
+                raise ValueError("基地址不能包含 OneBot 动作路径")
+        except ValueError as exc:
+            errors.append(f"NapCat API 基地址无效: {exc}")
+    napcat_token = str(raw.get("napcat_api_token") or "")
+    if len(napcat_token) > 512 or any(ch.isspace() for ch in napcat_token) or "\x00" in napcat_token:
+        errors.append("NapCat 访问密钥不能包含空白字符，且最多 512 个字符")
+
     accounts = raw.get("accounts", {})
     seen: set[tuple[str, str]] = set()
     for i, m in enumerate(raw.get("monitor", [])):
@@ -122,7 +145,7 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
 # ================================================================
 
 _SECTIONS: list[tuple[str, list[str]]] = [
-    ("── 推送通道 ──",  ["channels", "napcat_api", "napcat_routes", "tg_bots", "qq_official_bots"]),
+    ("── 推送通道 ──",  ["channels", "napcat_api_base", "napcat_api_token", "napcat_api", "napcat_routes", "napcat_inbound", "tg_bots", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 消息归档 ──",  ["archive"]),
     ("── 每日摘要 ──",  ["daily_summary"]),
@@ -150,7 +173,7 @@ def _render_value(key: str, val) -> str:
             and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands", "monitor_schedule") \
+    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands", "monitor_schedule", "napcat_inbound") \
             and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"

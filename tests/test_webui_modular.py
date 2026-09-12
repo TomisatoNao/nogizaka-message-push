@@ -361,7 +361,7 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
         "btnPickMember", "btnSyncSubs", "pickGroupChips", "pickAccountChips", "channelSwitches", "qqBotRows",
         "btnAddQqBot", "qqBotHint", "cmdOn", "cmdOptionsBlock", "cmdMode", "cmdWhitelistWrap",
         "cmdWhitelistCountBadge", "btnSyncBotOpenids", "btnAddCmdOpenid", "cmdModeHintBanner",
-        "cmdOpenidList", "napcatApi", "napcatMediaBaseUrl", "napcatRows", "btnAddNapcat",
+        "cmdOpenidList", "napcatApi", "napcatApiToken", "napcatMediaBaseUrl", "napcatRows", "btnAddNapcat",
         "tgTokenMigrationNotice", "tgBotRows", "btnAddTGBot",
     ):
         assert html.count(f'id="{element_id}"') == 1
@@ -384,16 +384,18 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
 
 
 def test_napcat_endpoint_fields_share_aligned_responsive_group():
-    """NapCat 地址字段使用紧凑的双列端点组，窄屏再单列。"""
+    """NapCat 基地址、Token 和媒体地址使用紧凑的响应式端点组。"""
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
 
     assert 'class="napcat-endpoint-grid"' in html
     assert "napcat-endpoint-note" in html
     assert 'class="field">NapCat API 地址' in html
+    assert 'id="napcatApiToken"' in html
     assert 'class="field">媒体访问基地址（可选）' in html
     assert "NapCat 不在本机时填写媒体地址；共享文件系统可留空。" in html
     assert "跨容器或跨主机时必须填写 NapCat 可访问的媒体地址" not in html
-    assert ".napcat-endpoint-grid { display: grid; grid-template-columns: repeat(2" in html
+    assert ".napcat-endpoint-grid { display: grid; grid-template-columns: repeat(3" in html
+    assert ".napcat-endpoint-grid { grid-template-columns: repeat(2" in html
     assert ".napcat-endpoint-grid { grid-template-columns: 1fr; gap: 10px; }" in html
 
 
