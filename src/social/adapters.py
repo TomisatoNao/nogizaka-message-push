@@ -127,6 +127,106 @@ class NapCatAdapter:
         return route.get("group_id") if isinstance(route, Mapping) else route
 
     @staticmethod
+    def _forward_identity(target: DeliveryTarget) -> tuple[int, str] | None:
+        """读取合并转发节点所需的机器人身份。
+
+        反向 WebSocket 入站路由会把 NapCat 事件中的 ``self_id`` 绑定到
+        ``DeliveryTarget.runtime``，因此这条链路无需额外配置。定时路由
+        没有事件上下文时可在路由中设置 ``forward_user_id``，或使用
+        ``NAPCAT_FORWARD_USER_ID`` 环境变量；缺少有效 QQ 号就回退普通
+        消息链，避免向 NapCat 发送一个会被拒绝的伪节点。
+        """
+
+        route = _target_value(target)
+        user_id: object = ""
+        nickname: object = ""
+        if isinstance(route, Mapping):
+            user_id = (
+                route.get("forward_user_id")
+                or route.get("self_id")
+                or route.get("bot_id")
+            )
+            nickname = (
+                route.get("forward_nickname")
+                or route.get("self_nickname")
+                or route.get("nickname")
+            )
+        else:
+            user_id = (
+                getattr(route, "forward_user_id", None)
+                or getattr(route, "self_id", None)
+                or getattr(route, "bot_id", None)
+            )
+            nickname = (
+                getattr(route, "forward_nickname", None)
+                or getattr(route, "self_nickname", None)
+                or getattr(route, "nickname", None)
+            )
+
+        if not user_id:
+            user_id = os.getenv("NAPCAT_FORWARD_USER_ID", "")
+        if not user_id:
+            user_id = getattr(napcat.cfg, "NAPCAT_FORWARD_USER_ID", "")
+        if not nickname:
+            nickname = (
+                os.getenv("NAPCAT_FORWARD_NICKNAME", "")
+                or getattr(napcat.cfg, "NAPCAT_FORWARD_NICKNAME", "")
+            )
+
+        if isinstance(user_id, bool):
+            return None
+        normalized_id = str(user_id or "").strip()
+        if (
+            not normalized_id.isdigit()
+            or int(normalized_id) <= 0
+            or len(normalized_id) > 20
+        ):
+            return None
+        normalized_name = str(nickname or "坂道监控").strip()[:64] or "坂道监控"
+        return int(normalized_id), normalized_name
+
+    @classmethod
+    def _forward_nodes(
+        cls,
+        target: DeliveryTarget,
+        text: str,
+        media_items: list[dict],
+    ) -> list[dict] | None:
+        """把正文和媒体包装为 OneBot 自定义转发节点。"""
+
+        identity = cls._forward_identity(target)
+        if identity is None or not media_items:
+            return None
+        user_id, nickname = identity
+        nodes: list[dict] = []
+        first_content: list[dict] = []
+        if text:
+            first_content.append({"type": "text", "data": {"text": text}})
+        first_content.append(media_items[0])
+        nodes.append(
+            {
+                "type": "node",
+                "data": {
+                    "user_id": user_id,
+                    "nickname": nickname,
+                    "content": first_content,
+                },
+            }
+        )
+        for item in media_items[1:]:
+            nodes.append(
+                {
+                    "type": "node",
+                    "data": {
+                        "user_id": user_id,
+                        "nickname": nickname,
+                        "content": [item],
+                    },
+                }
+            )
+        return nodes
+
+    @staticmethod
     def _chain_item(media: MediaItem) -> dict | None:
         path = media.local_path
         if not path or not os.path.exists(path):
@@ -185,11 +285,28 @@ class NapCatAdapter:
         media: list[MediaItem],
     ) -> bool:
         chain = [{"type": "text", "data": {"text": text}}]
+        media_items: list[dict] = []
         for item in media:
             chain_item = self._chain_item(item)
             if chain_item:
                 chain.append(chain_item)
+                media_items.append(chain_item)
         try:
+            # 多张图片/媒体使用合并转发，只占用 QQ 群的一条消息配额；
+            # 单张媒体继续走原有消息链，保持兼容和最快响应。
+            if len(media_items) > 1:
+                nodes = self._forward_nodes(target, text, media_items)
+                if nodes is not None:
+                    return bool(
+                        await napcat.send_group_forward_message(
+                            self._group_id(target),
+                            nodes,
+                        )
+                    )
+                self._log(
+                    "ℹ️ NapCat 多媒体缺少有效转发身份，回退普通消息链",
+                    is_debug=True,
+                )
             return bool(await napcat.send_qq_message(self._group_id(target), chain))
         except (OSError, ValueError) as exc:
             self._log(

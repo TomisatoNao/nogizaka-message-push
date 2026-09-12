@@ -232,6 +232,14 @@
           "remark": {
             "type": "string"
           },
+          "forward_user_id": {
+            "type": ["string", "integer"],
+            "description": "该路由合并转发节点使用的 NapCat 登录 QQ 号（可选）。"
+          },
+          "forward_nickname": {
+            "type": "string",
+            "description": "该路由合并转发节点显示昵称（可选）。"
+          },
           "push_message": {
             "type": "boolean",
             "default": true
