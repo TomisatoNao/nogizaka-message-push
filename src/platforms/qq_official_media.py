@@ -44,6 +44,14 @@ _AUDIO_EXTENSIONS = frozenset({
 })
 _QQ_VOICE_EXTENSION = ".amr"  # QQ 客户端语音文件扩展名，内容为 SILK 编码
 
+# 分片链路不可用时才会进入压缩兜底。多个官方 Bot 可能同时发送同一张
+# 博客卡片，缓存压缩结果可以避免每个 Bot 重复跑一次 PIL/ffmpeg；限制总
+# 容量，避免媒体推送高峰长期占住进程内存。
+_COMPRESS_CACHE: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
+_COMPRESS_CACHE_BYTES = 0
+_COMPRESS_CACHE_LIMIT = 64 * 1024 * 1024
+_COMPRESS_CACHE_LOCK = threading.RLock()
+
 
 @dataclass(frozen=True)
 class MediaPayload:
@@ -252,6 +260,14 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
     """如果视频体积超过腾讯开放平台直传限制(8MB)，自动通过 ffmpeg 动态计算码率快速压制。"""
     if not content or len(content) <= max_bytes:
         return content
+
+    cache_key = ("video", hashlib.sha256(content).hexdigest(), int(max_bytes))
+    with _COMPRESS_CACHE_LOCK:
+        cached = _COMPRESS_CACHE.get(cache_key)
+        if cached is not None:
+            _COMPRESS_CACHE.move_to_end(cache_key)
+            return cached
+
     ffmpeg = shutil.which("ffmpeg") or ""
     if not ffmpeg:
         return content
@@ -292,6 +308,7 @@ def _compress_video_if_needed(content: bytes, max_bytes: int = int(7.8 * 1024 * 
                 compressed = out_f.read()
             if len(compressed) < len(content):
                 log_all(f"🎬 视频体积较大 ({len(content)/1024/1024:.1f}MB)，已自动压制至 {len(compressed)/1024/1024:.1f}MB 以适配 QQ 上传限制", is_debug=True)
+                _cache_compressed_media(cache_key, compressed)
                 return compressed
     except Exception as ex:
         log_all(f"⚠️ 视频自动压制异常: {ex}", is_debug=True)
@@ -309,6 +326,14 @@ def _compress_image_if_needed(content: bytes, max_bytes: int = int(2.8 * 1024 * 
     """如果图片体积超过腾讯开放平台直传限制(~3MB)，通过 PIL 动态无损/高保真压缩。"""
     if not content or len(content) <= max_bytes:
         return content
+
+    cache_key = ("image", hashlib.sha256(content).hexdigest(), int(max_bytes))
+    with _COMPRESS_CACHE_LOCK:
+        cached = _COMPRESS_CACHE.get(cache_key)
+        if cached is not None:
+            _COMPRESS_CACHE.move_to_end(cache_key)
+            return cached
+
     try:
         import io
         from PIL import Image
@@ -320,6 +345,7 @@ def _compress_image_if_needed(content: bytes, max_bytes: int = int(2.8 * 1024 * 
             img_rgb.save(buf, format="JPEG", quality=quality, optimize=True, progressive=True)
             res = buf.getvalue()
             if len(res) <= max_bytes:
+                _cache_compressed_media(cache_key, res)
                 return res
         
         w, h = img.size
@@ -332,13 +358,31 @@ def _compress_image_if_needed(content: bytes, max_bytes: int = int(2.8 * 1024 * 
             resized.save(buf, format="JPEG", quality=75, optimize=True)
             res = buf.getvalue()
             if len(res) <= max_bytes:
+                _cache_compressed_media(cache_key, res)
                 return res
             scale -= 0.15
 
+        _cache_compressed_media(cache_key, res)
         return res
     except Exception as e:
         log_all(f"⚠️ 图片自动高保真压缩异常: {e}", is_debug=True)
         return content
+
+
+def _cache_compressed_media(key: tuple[str, str, int], content: bytes) -> None:
+    """写入有界的压缩结果缓存。"""
+    global _COMPRESS_CACHE_BYTES
+    if not content or len(content) > _COMPRESS_CACHE_LIMIT:
+        return
+    with _COMPRESS_CACHE_LOCK:
+        previous = _COMPRESS_CACHE.pop(key, None)
+        if previous is not None:
+            _COMPRESS_CACHE_BYTES -= len(previous)
+        _COMPRESS_CACHE[key] = content
+        _COMPRESS_CACHE_BYTES += len(content)
+        while _COMPRESS_CACHE and _COMPRESS_CACHE_BYTES > _COMPRESS_CACHE_LIMIT:
+            _, removed = _COMPRESS_CACHE.popitem(last=False)
+            _COMPRESS_CACHE_BYTES -= len(removed)
 
 
 _client: httpx.AsyncClient | None = None

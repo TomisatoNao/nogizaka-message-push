@@ -118,9 +118,13 @@ class QQOfficialBot(QQOfficialClient):
                     content = raw_payload[1]
                     filename = raw_payload[2] if len(raw_payload) > 2 else ""
                     mime_type = raw_payload[3] if len(raw_payload) > 3 else ""
+                    source_url = ""
                 if isinstance(raw_payload, MediaPayload):
                     mime_type = raw_payload.mime_type
-                if content is None:
+                    source_url = raw_payload.source_url
+                # 下载器可能只拿到可由 QQ 服务端访问的公开 URL；这种情况
+                # 不应因为本地下载失败而提前丢弃，上传层会走 URL 直取。
+                if content is None and not source_url:
                     ok = False
                     continue
                 file_info = await self._upload_media(
@@ -130,6 +134,7 @@ class QQOfficialBot(QQOfficialClient):
                     target_openid=target_openid,
                     filename=str(filename or ""),
                     mime_type=str(mime_type or ""),
+                    source_url=str(source_url or ""),
                 )
                 if not file_info or not await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid):
                     ok = False
@@ -172,7 +177,7 @@ class QQOfficialBot(QQOfficialClient):
     _send_group_text = send_group_text
 
     async def send_media_file(self, scope: str, target_openid: str, media_type: str, content: bytes,
-                              filename: str = "", mime_type: str = "") -> bool:
+                              filename: str = "", mime_type: str = "", source_url: str = "") -> bool:
         """向指定用户/群聊发送单个图片、视频或音频媒体。scope: 'users' | 'groups'。"""
         if not content or not target_openid:
             return False
@@ -186,10 +191,36 @@ class QQOfficialBot(QQOfficialClient):
                 target_openid=target_openid,
                 filename=filename,
                 mime_type=mime_type,
+                source_url=source_url,
             )
             if not file_info:
                 return False
             return await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid)
+
+    async def send_media_url(self, scope: str, target_openid: str, media_type: str,
+                             source_url: str, filename: str = "", mime_type: str = "") -> tuple[bool, bool]:
+        """优先用远程 URL 发送媒体，并返回 ``(sent, safe_to_fallback)``。
+
+        QQ 服务端明确拒绝 URL 时可以安全改用本地字节；超时或发送回包
+        不确定时禁止调用方再提交一份，避免群里出现重复媒体。
+        """
+        if not source_url or not target_openid:
+            return False, True
+        async with self._send_limiter:
+            if not await self.ensure_access_token():
+                return False, False
+            file_info, safe_to_fallback = await self._upload_media_via_url(
+                media_type,
+                source_url,
+                scope=scope,
+                target_openid=target_openid,
+                filename=filename,
+                mime_type=mime_type,
+            )
+            if not file_info:
+                return False, safe_to_fallback
+            sent = await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid)
+            return sent, False
 
     async def send_translation_qq(self, scope: str, target_openid: str, pairs: list[tuple[str, str]]) -> bool:
         """发送 QQ 中日对照正文（日文斜体*，中文常规体，双语对之间零宽空格行，切分<=1800字符）。"""

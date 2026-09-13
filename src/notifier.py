@@ -3,6 +3,7 @@
 # ============================================================
 import asyncio
 from dataclasses import dataclass
+import inspect
 from typing import Awaitable, Callable
 
 import httpx
@@ -557,6 +558,24 @@ async def send_blog_post(post: dict) -> bool:
         local_paths = post.get("image_paths") or []
         for idx, img_url in enumerate(media_urls):
             try:
+                # 公开 CDN 图片优先让 QQ 服务端按 URL 拉取，避免每个官方
+                # Bot 都重复下载/编码同一份原图；只有明确拒绝时才回退本地字节。
+                send_url = getattr(bot, "send_media_url", None)
+                if callable(send_url):
+                    url_result = send_url(
+                        scope,
+                        target,
+                        "image",
+                        img_url,
+                    )
+                    if inspect.isawaitable(url_result):
+                        sent_by_url, safe_to_fallback = await url_result
+                        if sent_by_url:
+                            await asyncio.sleep(0.4)
+                            continue
+                        if not safe_to_fallback:
+                            return False
+
                 img_bytes = None
                 if idx < len(local_paths) and local_paths[idx]:
                     lp = local_paths[idx]
@@ -579,7 +598,12 @@ async def send_blog_post(post: dict) -> bool:
                         if r.status_code == 200:
                             img_bytes = r.content
 
-                if not img_bytes or not await bot.send_media_file(scope, target, "image", img_bytes):
+                if not img_bytes or not await bot.send_media_file(
+                    scope,
+                    target,
+                    "image",
+                    img_bytes,
+                ):
                     return False
             except (OSError, httpx.HTTPError, ValueError) as ex:
                 log_all(f"⚠️ 官方 Bot [{bot.name}] 博客图片推送失败: {type(ex).__name__}", is_debug=True)

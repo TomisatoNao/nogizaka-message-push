@@ -216,8 +216,8 @@ async def test_upload_media_fallback_to_file_when_silk_unavailable(monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_upload_media_compresses_large_images_and_videos(monkeypatch: pytest.MonkeyPatch) -> None:
-    """验证超限图片与视频在直传前自动触发保真压缩。"""
+async def test_upload_media_prefers_chunked_and_compresses_only_once_on_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """大媒体先走分片；只有分片失败时才执行一次压缩兜底。"""
     client = qq_official_client.QQOfficialClient("app_1", "secret_1", "test_bot")
     monkeypatch.setattr(client, "ensure_access_token", AsyncMock(return_value=True))
 
@@ -242,18 +242,170 @@ async def test_upload_media_compresses_large_images_and_videos(monkeypatch: pyte
 
     monkeypatch.setattr(client, "_post_json", fake_post)
 
-    # 1. 3MB 图片直传限制
+    # 1. 3.5MB 图片直接使用官方分片，保持原图，不触发压缩或 Base64 直传。
+    monkeypatch.setattr(client, "_upload_media_chunked", AsyncMock(return_value="CHUNKED_IMG"))
     big_img = b"x" * int(3.5 * 1024 * 1024)
     res_img = await client._upload_media("image", big_img, filename="pic.png")
-    assert res_img == "COMPRESSED_OK"
-    assert image_compressed is True
+    assert res_img == "CHUNKED_IMG"
+    assert image_compressed is False
 
-    # 2. 模拟分片上传失败降级压制直传
+    # 2. 分片失败时仅执行一次视频压缩兜底，再做一次小体积直传。
     monkeypatch.setattr(client, "_upload_media_chunked", AsyncMock(return_value=None))
     big_vid = b"y" * int(8.5 * 1024 * 1024)
     res_vid = await client._upload_media("video", big_vid, filename="video.mp4")
     assert res_vid == "COMPRESSED_OK"
     assert video_compressed is True
+
+
+@pytest.mark.asyncio
+async def test_upload_media_uses_server_side_url_without_file_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """有公开媒体地址时由 QQ 服务端取文件，避免本地重复下载与压缩。"""
+    client = qq_official_client.QQOfficialClient("app_1", "secret_1", "test_bot", "group-1")
+    monkeypatch.setattr(client, "ensure_access_token", AsyncMock(return_value=True))
+    posted: list[tuple[str, dict, dict]] = []
+
+    async def fake_post(url: str, payload: dict, **kwargs):
+        posted.append((url, payload, kwargs))
+        return SimpleNamespace(status_code=200, json=lambda: {"file_info": "URL_FILE_INFO"})
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+    monkeypatch.setattr(client, "_upload_media_chunked", AsyncMock(side_effect=AssertionError("不应进入分片")))
+
+    result = await client._upload_media(
+        "image",
+        b"local-fallback",
+        scope="groups",
+        target_openid="group-1",
+        filename="photo.jpg",
+        source_url="https://cdn.example/photo.jpg?token=abc",
+    )
+
+    assert result == "URL_FILE_INFO"
+    assert len(posted) == 1
+    assert posted[0][1]["url"] == "https://cdn.example/photo.jpg?token=abc"
+    assert "file_data" not in posted[0][1]
+    assert posted[0][1]["srv_send_msg"] is False
+    assert posted[0][2]["max_retries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_url_upload_without_file_info_is_not_replayed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2xx 无 file_info 属于未知结果，不能再提交本地副本。"""
+    client = qq_official_client.QQOfficialClient("app_1", "secret_1", "test_bot", "group-1")
+    monkeypatch.setattr(client, "ensure_access_token", AsyncMock(return_value=True))
+
+    async def fake_post(*_args, **_kwargs):
+        return SimpleNamespace(status_code=200, json=lambda: {})
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+
+    file_info, safe_to_fallback = await client._upload_media_via_url(
+        "image",
+        "https://cdn.example/photo.jpg",
+        scope="groups",
+        target_openid="group-1",
+        filename="photo.jpg",
+    )
+
+    assert file_info is None
+    assert safe_to_fallback is False
+
+
+@pytest.mark.asyncio
+async def test_non_idempotent_media_requests_are_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """媒体直传与最终发消息超时后只尝试一次，避免日志失败造成重复消息。"""
+    client = qq_official_client.QQOfficialClient("app_1", "secret_1", "test_bot", "group-1")
+    monkeypatch.setattr(client, "ensure_access_token", AsyncMock(return_value=True))
+    calls: list[tuple[str, int]] = []
+
+    async def fake_post(url: str, payload: dict, max_retries: int = 3, **kwargs):
+        calls.append((url, max_retries))
+        return SimpleNamespace(status_code=200, json=lambda: {"file_info": "FI"})
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+    assert await client._upload_media("image", b"small-image", filename="photo.jpg") == "FI"
+    assert await client._send_uploaded_media("FI", scope="groups", target_openid="group-1") is True
+    assert [attempts for _url, attempts in calls] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_shared_client_timeout_is_not_replayed_by_fresh_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """共享连接超时不能隐式切换 client 再发一遍相同的非幂等请求。"""
+    client = qq_official_client.QQOfficialClient("app_1", "secret_1", "test_bot")
+
+    class _SharedClient:
+        is_closed = False
+        calls = 0
+
+        async def post(self, *_args, **_kwargs):
+            self.calls += 1
+            raise httpx.ReadTimeout("simulated timeout")
+
+    shared = _SharedClient()
+    monkeypatch.setattr(
+        qq_official_client.httpx,
+        "AsyncClient",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("超时后不应创建第二个 client")),
+    )
+    client.initialize(shared)  # type: ignore[arg-type]
+
+    with pytest.raises(httpx.ReadTimeout):
+        await client._safe_post("https://api.example/files", {})
+    assert shared.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_uses_one_part_finish_and_complete_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证官方分片链路的字段、顺序和 file_uuid 兼容解析。"""
+    client = qq_official_client.QQOfficialClient("app_1", "secret_1", "test_bot", "group-1")
+    monkeypatch.setattr(client, "ensure_access_token", AsyncMock(return_value=True))
+    api_calls: list[tuple[str, dict, int]] = []
+
+    async def fake_post(url: str, payload: dict, max_retries: int = 3, **kwargs):
+        api_calls.append((url, payload.copy(), max_retries))
+        if url.endswith("/upload_prepare"):
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {
+                    "upload_id": "upload-1",
+                    "block_size": 4,
+                    "parts": [
+                        {"index": 2, "presigned_url": "https://cos/2", "block_size": 4},
+                        {"index": 1, "presigned_url": "https://cos/1", "block_size": 4},
+                    ],
+                },
+            )
+        if url.endswith("/upload_part_finish"):
+            return SimpleNamespace(status_code=204, json=lambda: {})
+        return SimpleNamespace(status_code=200, json=lambda: {"file_uuid": "uuid-1"})
+
+    class _FakeUploadClient:
+        def __init__(self, **kwargs):
+            self.puts: list[tuple[str, bytes, dict]] = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def put(self, url: str, *, content: bytes, headers: dict):
+            self.puts.append((url, content, headers))
+            return SimpleNamespace(status_code=200)
+
+    fake_upload_client = _FakeUploadClient()
+    monkeypatch.setattr(qq_official_client.httpx, "AsyncClient", lambda **_kwargs: fake_upload_client)
+    monkeypatch.setattr(client, "_post_json", fake_post)
+
+    result = await client._upload_media_chunked("image", b"abcdefgh", scope="groups", target_openid="group-1", filename="x.jpg")
+
+    assert result == "uuid-1"
+    assert [(url, content) for url, content, _headers in fake_upload_client.puts] == [
+        ("https://cos/1", b"abcd"),
+        ("https://cos/2", b"efgh"),
+    ]
+    assert [call[2] for call in api_calls] == [1, 2, 2, 2]
+    assert api_calls[-1][1] == {"upload_id": "upload-1"}
 
 
 def test_credentials_initialize_tolerance():

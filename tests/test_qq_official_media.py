@@ -189,6 +189,38 @@ async def test_send_chain_passes_media_metadata_to_upload(monkeypatch: pytest.Mo
     assert uploaded[0]["mime_type"] == "audio/mp4"
 
 
+@pytest.mark.asyncio
+async def test_send_chain_allows_url_only_media_when_local_download_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本地媒体下载失败时仍可直接让 QQ 服务端按公开 URL 取文件。"""
+    bot = qq_official.QQOfficialBot("test", "app", "secret", "user")
+    monkeypatch.setattr(bot, "ensure_access_token", _async_true)
+    uploaded: list[dict] = []
+
+    async def fake_upload(media_type: str, content: bytes | None, **kwargs):
+        uploaded.append({"media_type": media_type, "content": content, **kwargs})
+        return "FI_URL_ONLY"
+
+    monkeypatch.setattr(bot, "_upload_media", fake_upload)
+    async def fake_send(*_args, **_kwargs) -> bool:
+        return True
+
+    monkeypatch.setattr(bot, "_send_uploaded_media", fake_send)
+    ok = await bot.send_message_chain(
+        {"m_name": "测试"},
+        [{"type": "image", "data": {"file": "https://cdn.example/photo.jpg"}}],
+        [qq_official.MediaPayload("image", None, "photo.jpg", "image/jpeg", "https://cdn.example/photo.jpg")],
+    )
+
+    assert ok is True
+    assert uploaded[0]["media_type"] == "image"
+    assert uploaded[0]["content"] is None
+    assert uploaded[0]["scope"] == "users"
+    assert uploaded[0]["target_openid"] == "user"
+    assert uploaded[0]["filename"] == "photo.jpg"
+    assert uploaded[0]["mime_type"] == "image/jpeg"
+    assert uploaded[0]["source_url"] == "https://cdn.example/photo.jpg"
+
+
 def test_archive_ftyp_sniff_respects_voice_declaration(tmp_path: Path) -> None:
     path = tmp_path / "voice.bin"
     path.write_bytes(b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00")
