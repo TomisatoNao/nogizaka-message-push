@@ -16,6 +16,7 @@ import config.config as cfg
 from config.credentials import (
     ACCOUNT_CREDS,
     clear_loop_state as clear_credentials_loop_state,
+    get_token_health,
     get_token_remaining_seconds,
     initialize as init_credentials,
     load_all_accounts,
@@ -375,9 +376,16 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
             elif not missing:
                 log_all(f"🟢 监控账号凭证完整（{len(needed)} 个账号）")
                 for acc_id in sorted(needed):
-                    remaining = get_token_remaining_seconds(acc_id)
-                    if remaining is not None:
-                        health.get_tracker().record_token(acc_id, max(0, remaining))
+                    token_health = get_token_health(acc_id)
+                    # 访问 Token 过期但尚未进入本轮巡查时，只表示等待自动
+                    # 续期；不要在健康追踪器中制造“Token 刷新失败”的持久错误。
+                    if (
+                        token_health.get("remaining") is not None
+                        and token_health.get("status") not in {"pending_renewal", "incomplete", "unknown"}
+                    ):
+                        health.get_tracker().record_token(
+                            acc_id, token_health["remaining"]
+                        )
     else:
         log_all("ℹ️ Message 监控尚未启用，跳过账号握手、成员目标和凭证检查")
         if not _has_configured_workload():

@@ -994,6 +994,50 @@ def get_token_remaining_seconds(account_id: str) -> float | None:
     return exp - datetime.now(timezone.utc).timestamp()
 
 
+def get_token_health(account_id: str, warn_seconds: int | float | None = None) -> dict:
+    """返回 Token 的可读健康状态，并区分过期与凭证确认失效。
+
+    访问 Token 过期只表示需要执行一次 refresh；在下一轮巡查尚未触发，或
+    refresh 尚未返回结果时，不能据此断言 Cookie/refresh_token 已失效。只有
+    续期接口明确返回认证拒绝（``credential_invalid``）才进入 ``invalid``。
+    ``remaining`` 保持原有秒数语义，状态页等调用方可据此显示倒计时。
+    """
+    remaining = get_token_remaining_seconds(account_id)
+    refresh_state = get_refresh_state(account_id)
+    refresh_kind = str(refresh_state.get("kind") or "available")
+
+    if refresh_kind == "credential_invalid":
+        status = "invalid"
+    elif refresh_kind == "transient_network":
+        status = "renewal_retry"
+    elif refresh_kind in {"response_invalid", "persistence_failure"}:
+        status = "renewal_error"
+    elif remaining is None:
+        status = "unknown"
+    elif remaining <= 0:
+        # Token 已过期，但凭证结构完整且尚未被续期接口拒绝：等待下一轮
+        # 巡查自动续期，不把“尚未检查”误报为“凭证失效”。
+        valid, _reason = validate_account_cred(account_id)
+        status = "pending_renewal" if valid else "incomplete"
+    else:
+        try:
+            threshold = max(0.0, float(
+                warn_seconds if warn_seconds is not None
+                else getattr(cfg, "HEALTH_TOKEN_WARN_SECONDS", 600)
+            ))
+        except (TypeError, ValueError):
+            threshold = 600.0
+        status = "expiring" if remaining < threshold else "normal"
+
+    return {
+        "remaining": None if remaining is None else max(0.0, float(remaining)),
+        # ``healthy`` 仍表示当前访问 Token 是否可直接使用；调用方应优先
+        # 读取 status，pending_renewal 并不等同于已确认的凭证失效。
+        "healthy": None if remaining is None else remaining > 0,
+        "status": status,
+    }
+
+
 async def proactive_refresh_if_expiring(account_id: str, target_group: int,
                                        account_cfg: dict | None = None) -> bool:
     """

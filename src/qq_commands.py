@@ -79,7 +79,7 @@ def _cmd_ping(_args: str) -> str:
 
 
 def _cmd_status(_args: str) -> str:
-    from config.credentials import get_token_remaining_seconds
+    from config.credentials import get_token_health
     from src import health
 
     snap = health.get_tracker().snapshot()
@@ -95,11 +95,19 @@ def _cmd_status(_args: str) -> str:
 
     tokens = []
     for acc_id in cfg.ACCOUNTS:
-        remaining = get_token_remaining_seconds(acc_id)
-        if remaining is None:
+        token = get_token_health(acc_id)
+        status = token.get("status")
+        remaining = token.get("remaining")
+        if status == "invalid":
+            tokens.append(f"• {acc_id}: 凭证已确认失效🔴")
+        elif status == "incomplete":
+            tokens.append(f"• {acc_id}: 凭证未完整⚠️")
+        elif status == "pending_renewal":
+            tokens.append(f"• {acc_id}: 待下一轮巡查续期⏳")
+        elif status in {"renewal_retry", "renewal_error"}:
+            tokens.append(f"• {acc_id}: 续期等待处理⚠️")
+        elif remaining is None:
             tokens.append(f"• {acc_id}: 未知")
-        elif remaining <= 0:
-            tokens.append(f"• {acc_id}: 已失效🔴")
         else:
             tokens.append(f"• {acc_id}: {_fmt_duration(remaining)}")
     if tokens:

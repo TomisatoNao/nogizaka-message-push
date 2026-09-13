@@ -3078,13 +3078,23 @@ async function fetchStatus() {
     if (!names.length) tokens.innerHTML = '<tr><td colspan="3" class="empty">（无数据）</td></tr>';
     for (const acc of names) {
       const t = data.tokens[acc];
+      const status = String(t.status || "");
       let badge;
-      if (!t.healthy || t.remaining <= 0) badge = '<span class="admin-status-badge err">🔴 失效（需重新填凭证）</span>';
+      if (status === "invalid") badge = '<span class="admin-status-badge err">🔴 凭证失效（需重新填写）</span>';
+      else if (status === "incomplete") badge = '<span class="admin-status-badge err">⚠️ 凭证未完整（需补充）</span>';
+      else if (status === "pending_renewal") badge = '<span class="admin-status-badge warn">⏳ 待巡查自动续期</span>';
+      else if (status === "renewal_retry") badge = '<span class="admin-status-badge warn">🔁 续期等待重试</span>';
+      else if (status === "renewal_error") badge = '<span class="admin-status-badge warn">⚠️ 续期待处理</span>';
+      else if (status === "unknown") badge = '<span class="admin-status-badge muted">— 待检测</span>';
+      else if (!status && (!t.healthy || t.remaining <= 0)) badge = '<span class="admin-status-badge err">🔴 失效（需重新填凭证）</span>';
       else if (t.remaining < (data.token_warn_seconds || 600))
         badge = '<span class="admin-status-badge warn">🔄 即将自动续期</span>';
       else badge = '<span class="admin-status-badge ok">✓ 正常</span>';
+      const remainingText = t.remaining == null ? "—" :
+        status === "pending_renewal" ? "待巡查" :
+        (t.remaining > 0 ? fmtDur(t.remaining) : "0s");
       tokens.innerHTML += "<tr><td><b>" + esc(acc) + "</b></td><td>" +
-        (t.remaining > 0 ? fmtDur(t.remaining) : "0s") + "</td><td>" + badge + "</td></tr>";
+        remainingText + "</td><td>" + badge + "</td></tr>";
     }
   }
 

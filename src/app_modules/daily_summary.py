@@ -68,7 +68,7 @@ def _storage_line() -> str:
 
 def _build_daily_summary() -> str:
     """生成全量每日运行摘要（整合 Message、三团博客、社交媒体、通道健康与存储监控）。"""
-    from config.credentials import get_token_remaining_seconds
+    from config.credentials import get_token_health
 
     app_mod = sys.modules.get("src.app")
     storage_line_fn = getattr(app_mod, "_storage_line", _storage_line) if app_mod else _storage_line
@@ -240,11 +240,19 @@ def _build_daily_summary() -> str:
 
     token_parts = []
     for acc_id in cfg.ACCOUNTS:
-        remaining = get_token_remaining_seconds(acc_id)
-        if remaining is None:
+        token = get_token_health(acc_id)
+        status = token.get("status")
+        remaining = token.get("remaining")
+        if status == "invalid":
+            token_parts.append(f"{acc_id} 凭证已确认失效🔴")
+        elif status == "incomplete":
+            token_parts.append(f"{acc_id} 凭证未完整⚠️")
+        elif status == "pending_renewal":
+            token_parts.append(f"{acc_id} 待下一轮巡查续期⏳")
+        elif status in {"renewal_retry", "renewal_error"}:
+            token_parts.append(f"{acc_id} 续期等待处理⚠️")
+        elif remaining is None:
             token_parts.append(f"{acc_id} 未知")
-        elif remaining <= 0:
-            token_parts.append(f"{acc_id} 失效🔴")
         else:
             token_parts.append(f"{acc_id} 正常")
     if token_parts:

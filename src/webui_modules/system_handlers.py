@@ -109,9 +109,11 @@ def handle_status(handler, on_poll_cb=None) -> None:
         import config.config as cfg
         live = {}
         for acc_id in cfg.ACCOUNTS:
-            remaining = creds_mod.get_token_remaining_seconds(acc_id)
-            if remaining is not None:
-                live[acc_id] = {"remaining": max(0.0, remaining), "healthy": remaining > 0}
+            token = creds_mod.get_token_health(acc_id)
+            # 保持旧版“无法解析过期时间时不造倒计时”的行为，同时让明确
+            # 的凭证错误/续期等待状态可见。
+            if token.get("remaining") is not None or token.get("status") != "unknown":
+                live[acc_id] = token
         if live:
             snap["tokens"] = live
     except Exception:
