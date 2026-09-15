@@ -417,6 +417,15 @@ def test_napcat_advanced_entry_and_dialog_layout_are_single_and_compact():
     assert "配置入站监听与 AI 群聊；修改后由底部保存栏统一保存。" in html
 
 
+def test_secret_dialog_only_shows_smart_parse_for_account_credentials():
+    """CPA/NapCat 独立密钥弹窗不得混入账号 signin/Cookie 教程。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    assert "const showSmartParse = Boolean((opts || {}).showSmartParse);" in html
+    assert '$("secretSmartBox").hidden = !showSmartParse;' in html
+    assert "fields, accId, { showSmartParse: true });" in html
+
+
 def test_table_action_cells_keep_table_column_alignment():
     """表格操作单元格不能继承对话框 .actions 的 flex 布局。"""
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")

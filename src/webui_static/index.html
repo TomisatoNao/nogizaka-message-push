@@ -4621,6 +4621,7 @@ $("btnTestProxy")?.addEventListener("click", async () => {
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
 function openSecretDialog(title, hint, fields, account, opts) {
+  const showSmartParse = Boolean((opts || {}).showSmartParse);
   secretCtx = { fields, account, userAction: (opts || {}).userAction || null,
                 onDone: (opts || {}).onDone || null };
   $("secretDialogTitle").textContent = title;
@@ -4628,7 +4629,12 @@ function openSecretDialog(title, hint, fields, account, opts) {
   $("secretDialogHint").hidden = !hint;
   if ($("secretSmartInput")) $("secretSmartInput").value = "";
   if ($("secretSmartFeedback")) $("secretSmartFeedback").textContent = "";
-  if ($("secretSmartBox")) $("secretSmartBox").open = false;
+  if ($("secretSmartBox")) {
+    $("secretSmartBox").open = false;
+    // 仅账号 Token/Cookie 支持 signin cURL 智能解析；CPA、NapCat
+    // 事件 Token 等独立密钥不应出现无关的 DevTools/Cookie 教程。
+    $("secretSmartBox").hidden = !showSmartParse;
+  }
   const box = $("secretFields");
   box.innerHTML = "";
   for (const f of fields) {
@@ -4938,7 +4944,7 @@ function openAccountCredDialog(accId) {
          help: "优先使用 signin 登录响应下发的 Set-Cookie；如手动填写，请从 Application → Cookies 复制 session。不要用 profile / timeline 代替完整登录凭证。" }];
   openSecretDialog("填写账号凭证：" + accId,
     "💡 <b>首次登录免等 1 小时自动握手</b>：请使用初次登录流程中的 <code>signin</code> 请求提取 Token 与登录响应的 Set-Cookie（或手动从 Application → Cookies 复制 session）；不要使用 profile / timeline 代替。系统保存后会<b>立刻调用 update_token 完成握手</b>，但凭据失效时仍需重新配置。",
-    fields, accId);
+    fields, accId, { showSmartParse: true });
 }
 
 async function clearEnvSecret(envKey, name) {
