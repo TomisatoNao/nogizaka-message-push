@@ -145,7 +145,7 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
 # ================================================================
 
 _SECTIONS: list[tuple[str, list[str]]] = [
-    ("── 推送通道 ──",  ["channels", "napcat_api_base", "napcat_api_token", "napcat_api", "napcat_routes", "napcat_inbound", "tg_bots", "qq_official_bots"]),
+    ("── 推送通道 ──",  ["channels", "napcat_api_base", "napcat_api_token", "napcat_api", "napcat_forward_user_id", "napcat_forward_nickname", "napcat_media_base_url", "napcat_media_signing_secret", "napcat_routes", "napcat_inbound", "napcat_ai_chat", "tg_bots", "qq_official_bots"]),
     ("── 网页管理 ──",  ["web_admin"]),
     ("── 消息归档 ──",  ["archive"]),
     ("── 每日摘要 ──",  ["daily_summary"]),
@@ -173,7 +173,7 @@ def _render_value(key: str, val) -> str:
             and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
-    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands", "monitor_schedule", "napcat_inbound") \
+    if key in ("channels", "web_admin", "archive", "daily_summary", "auth", "qq_commands", "monitor_schedule", "napcat_inbound", "napcat_ai_chat") \
             and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
@@ -312,7 +312,8 @@ def _trigger_reload() -> bool:
 
 _SECRET_KEY_RE = re.compile(
     r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID|SESSIONID|USER_ID)"
-    r"|GEMINI_API_KEY|ZHIPU_API_KEY|INSTAGRAM_SESSIONID|INSTAGRAM_DS_USER_ID|X_AUTH_TOKEN|TIKTOK_SESSIONID)$"
+    r"|GEMINI_API_KEY|ZHIPU_API_KEY|INSTAGRAM_SESSIONID|INSTAGRAM_DS_USER_ID|X_AUTH_TOKEN|TIKTOK_SESSIONID"
+    r"|CPA_API_KEY|NAPCAT_EVENT_TOKEN)$"
 )
 # 管理端令牌不能从网页写入；旧版全局 TG Token 也只保留迁移检测，
 # 防止新配置继续产生“默认 Bot”语义。

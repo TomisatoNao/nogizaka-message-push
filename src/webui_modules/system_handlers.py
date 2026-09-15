@@ -58,6 +58,8 @@ def env_status(raw_config: dict | None = None) -> dict:
         "INSTAGRAM_SESSIONID": bool(os.getenv("INSTAGRAM_SESSIONID")),
         "X_AUTH_TOKEN": bool(os.getenv("X_AUTH_TOKEN")),
         "TIKTOK_SESSIONID": bool(os.getenv("TIKTOK_SESSIONID")),
+        "CPA_API_KEY": bool(os.getenv("CPA_API_KEY")),
+        "NAPCAT_EVENT_TOKEN": bool(os.getenv("NAPCAT_EVENT_TOKEN")),
     }
 
     # 延迟导入，避免 WebUI 模块导入阶段改变配置加载顺序。

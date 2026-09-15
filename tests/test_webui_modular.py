@@ -401,6 +401,22 @@ def test_napcat_endpoint_fields_share_aligned_responsive_group():
     assert "box-sizing: border-box;" in html
 
 
+def test_napcat_advanced_entry_and_dialog_layout_are_single_and_compact():
+    """高级入口只保留一个，弹窗采用固定头尾与紧凑响应式表单布局。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    assert html.count('id="btnNapcatAdvanced"') == 1
+    assert "btnNapcatAdvancedQuick" not in html
+    assert html.count('id="napcatAdvancedDialog"') == 1
+    assert 'class="napcat-advanced-dialog"' in html
+    assert ".napcat-advanced-dialog { display: flex; flex-direction: column;" in html
+    assert ".napcat-dialog-scroll { flex: 1 1 auto; min-height: 0;" in html
+    assert ".napcat-inbound-grid," in html and ".ai-chat-grid" in html
+    assert ".ai-chat-group-item" in html and "labelText.textContent" in html
+    assert 'target.closest("main, #napcatAdvancedDialog")' in html
+    assert "配置入站监听与 AI 群聊；修改后由底部保存栏统一保存。" in html
+
+
 def test_table_action_cells_keep_table_column_alignment():
     """表格操作单元格不能继承对话框 .actions 的 flex 布局。"""
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
@@ -1623,3 +1639,61 @@ def test_blog_reader_scroll_preservation_contract():
     assert "restoreWindowScroll(savedScroll);" in js
     assert "isAlreadyMatchingBlogList" in js
     assert "isAlreadyMatchingHome" in js
+
+
+def test_napcat_ai_and_inbound_webui_contract():
+    """验证 NapCat 入站群消息解析、AI 拟人群聊与卡片定制在 WebUI 静态契约中的完整性。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    # 1. 关键 UI DOM 元素唯一性
+    for element_id in (
+        "napcatForwardNickname",
+        "napcatForwardUserId",
+        "inboundOn",
+        "inboundTransport",
+        "inboundHost",
+        "inboundPort",
+        "inboundEventPath",
+        "napcatEventTokenStatus",
+        "btnFillNapcatEventToken",
+        "btnClearNapcatEventToken",
+        "inboundTranslate",
+        "inboundArchive",
+        "inboundMaxLinks",
+        "inboundWorkers",
+        "inboundCooldown",
+        "aiChatOn",
+        "aiChatBaseUrl",
+        "aiChatModel",
+        "aiChatEndpoint",
+        "cpaApiKeyStatus",
+        "btnFillCpaKey",
+        "btnClearCpaKey",
+        "aiChatRequireAt",
+        "aiChatKeywords",
+        "aiChatAllowedGroupsWrap",
+        "aiChatCooldownUser",
+        "aiChatCooldownGroup",
+        "aiChatMaxTurns",
+        "aiChatContextTtl",
+        "aiChatMaxQueryLength",
+        "aiChatWorkers",
+        "btnResetAiPrompt",
+        "aiChatSystemPrompt",
+        "subNapcatForwardWrap",
+        "subForwardNickname",
+        "subForwardUserId",
+    ):
+        assert html.count(f'id="{element_id}"') == 1, f"Missing or duplicate element id: {element_id}"
+
+    # 2. tab-channels 严格遵循无 inline style 规范
+    start = html.index('id="tab-channels"')
+    end = html.index("</section>", start)
+    section = html[start:end]
+    assert "style=" not in section
+
+    # 3. 包含冨里奈央专属预设 Prompt 与重置逻辑
+    assert "DEFAULT_TOMISATO_NAO_PROMPT" in html
+    assert "冨里奈央" in html
+    assert "btnResetAiPrompt" in html
+    assert "renderAiChatAllowedGroups" in html

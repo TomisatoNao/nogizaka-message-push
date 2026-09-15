@@ -176,6 +176,24 @@ _DEFAULTS: dict = {
         "request_timeout_seconds": 180,
         "max_message_bytes": 65536,
     },
+    # NapCat/OneBot AI 拟人群聊（模拟乃木坂46 冨里奈央）
+    "napcat_ai_chat":           {
+        "enabled": False,
+        "cpa_base_url": "",
+        "cpa_api_key": "",
+        "cpa_model": "gpt-5.6-luna",
+        "cpa_endpoint": "/v1/chat/completions",
+        "allowed_groups": [],
+        "require_at": True,
+        "trigger_keywords": ["奈央", "奈央酱", "なおなお"],
+        "cooldown_user_seconds": 5.0,
+        "cooldown_group_seconds": 3.0,
+        "max_context_turns": 6,
+        "context_ttl_seconds": 600.0,
+        "max_query_length": 500,
+        "workers": 2,
+        "system_prompt": "",
+    },
     "napcat_media_base_url":    "",
     "napcat_media_signing_secret": "",
     "proxy":                    "",
@@ -724,6 +742,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "social":                       "SOCIAL",
     "napcat_routes":                "NAPCAT_ROUTES",
     "napcat_inbound":               "NAPCAT_INBOUND",
+    "napcat_ai_chat":               "NAPCAT_AI_CHAT",
     "napcat_media_base_url":         "NAPCAT_MEDIA_BASE_URL",
     "napcat_media_signing_secret":   "NAPCAT_MEDIA_SIGNING_SECRET",
     "tg_bots":                      "TG_BOTS",
@@ -915,6 +934,23 @@ def _load_config() -> dict:
             cfg["napcat_api_token"] = legacy_token
     if napcat_env_token:
         cfg["napcat_api_token"] = napcat_env_token
+
+    # 7.1 NapCat AI 拟人群聊环境变量覆盖
+    if "napcat_ai_chat" in cfg and isinstance(cfg["napcat_ai_chat"], dict):
+        chat_dict = cfg["napcat_ai_chat"]
+        if _env("ENABLE_NAPCAT_AI_CHAT"):
+            chat_dict["enabled"] = _env_bool("ENABLE_NAPCAT_AI_CHAT")
+        if _env("CPA_BASE_URL"):
+            chat_dict["cpa_base_url"] = _env("CPA_BASE_URL")
+        if _env("CPA_API_KEY"):
+            chat_dict["cpa_api_key"] = _env("CPA_API_KEY")
+        if _env("CPA_MODEL"):
+            chat_dict["cpa_model"] = _env("CPA_MODEL")
+        if _env("CPA_ENDPOINT"):
+            chat_dict["cpa_endpoint"] = _env("CPA_ENDPOINT")
+        if _env("CPA_ALLOWED_GROUPS"):
+            raw_groups = _env("CPA_ALLOWED_GROUPS").replace("，", ",").split(",")
+            chat_dict["allowed_groups"] = [g.strip() for g in raw_groups if g.strip()]
 
     # 8. 账号凭证自动匹配（按命名约定从 .env 读取）
     cfg = _match_account_credentials(cfg)

@@ -138,3 +138,85 @@ def test_cred_and_bot_status():
     assert len(bot_status) == 1
     assert bot_status[0]["name"] == "bot_alpha"
     assert bot_status[0]["declared"] is True
+
+def test_napcat_ai_and_inbound_config_and_secrets(tmp_path: Path):
+    """测试 NapCat 入站、AI 拟人配置的分区序列化与密钥管理。"""
+    cfg = json.loads(json.dumps(SAMPLE_CONFIG))
+    cfg["napcat_forward_nickname"] = "坂道动态速递"
+    cfg["napcat_forward_user_id"] = 10001
+    cfg["napcat_routes"] = [
+        {"group_id": 12345, "remark": "主群", "forward_nickname": "奈央酱", "forward_user_id": 10002}
+    ]
+    cfg["napcat_inbound"] = {
+        "enabled": True,
+        "transport": "http_post",
+        "listen_host": "0.0.0.0",
+        "listen_port": 46047,
+        "event_path": "/api/napcat/events",
+        "translate": True,
+        "archive": False,
+        "max_links_per_message": 2,
+        "workers": 2,
+        "cooldown_seconds": 10,
+    }
+    cfg["napcat_ai_chat"] = {
+        "enabled": True,
+        "cpa_base_url": "http://192.168.22.13:8000",
+        "cpa_model": "gpt-5.6-luna",
+        "cpa_endpoint": "/v1/chat/completions",
+        "require_at": True,
+        "trigger_keywords": ["奈央", "なおなお"],
+        "allowed_groups": ["12345"],
+        "cooldown_user_seconds": 5.0,
+        "cooldown_group_seconds": 3.0,
+        "max_context_turns": 6,
+        "context_ttl_seconds": 600,
+        "max_query_length": 500,
+        "workers": 2,
+        "system_prompt": "你现在扮演冨里奈央。",
+    }
+
+    # 1. 验证无语法/格式报错
+    errors = config_service.validate_config(cfg)
+    assert errors == []
+
+    # 2. 验证序列化包含专属字段且无损反序列化
+    serialized = config_service.serialize_config(cfg)
+    assert "// ── 推送通道 ──" in serialized
+    assert '"napcat_inbound":' in serialized
+    assert '"napcat_ai_chat":' in serialized
+    assert '"napcat_forward_nickname": "坂道动态速递"' in serialized
+    reparsed = json5.loads(serialized)
+    assert reparsed["napcat_forward_nickname"] == "坂道动态速递"
+    assert reparsed["napcat_forward_user_id"] == 10001
+    assert reparsed["napcat_inbound"]["listen_port"] == 46047
+    assert reparsed["napcat_ai_chat"]["cpa_model"] == "gpt-5.6-luna"
+    assert reparsed["napcat_routes"][0]["forward_nickname"] == "奈央酱"
+
+    # 3. 验证 CPA_API_KEY 与 NAPCAT_EVENT_TOKEN 属于白名单秘密
+    secret_errs = config_service.validate_secret_values({
+        "CPA_API_KEY": "sk-test-cpa-key-123456",
+        "NAPCAT_EVENT_TOKEN": "my-secret-event-token",
+    })
+    assert secret_errs == []
+
+    # 4. 验证写入 .env 与移除
+    env_file = tmp_path / ".env"
+    env_file.write_text("CPA_API_KEY='old_key'\n", encoding="utf-8")
+    config_service.update_env_file(
+        values={"CPA_API_KEY": "new_cpa_key", "NAPCAT_EVENT_TOKEN": "token_abc"},
+        path=env_file,
+    )
+    content_env = env_file.read_text(encoding="utf-8")
+    assert "CPA_API_KEY='new_cpa_key'" in content_env
+    assert "NAPCAT_EVENT_TOKEN='token_abc'" in content_env
+
+    # 移除
+    config_service.update_env_file(
+        values={},
+        path=env_file,
+        remove=["CPA_API_KEY", "NAPCAT_EVENT_TOKEN"],
+    )
+    content_removed = env_file.read_text(encoding="utf-8")
+    assert "CPA_API_KEY" not in content_removed
+    assert "NAPCAT_EVENT_TOKEN" not in content_removed

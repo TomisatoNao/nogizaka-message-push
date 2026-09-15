@@ -246,6 +246,12 @@ class NapCatInboundListener:
         )
         self._event_token_from_env = event_token is None
         self._queue: queue.Queue[NapCatInboundJob | None] = queue.Queue(maxsize=32)
+        from src.platforms.napcat_chat import NapCatChatService
+
+        self._chat_service = NapCatChatService(
+            config_provider=self._config_provider,
+            logger=self._log,
+        )
         self._workers: list[asyncio.Task] = []
         self._stop_event: asyncio.Event | None = None
         self._server: _InboundHTTPServer | None = None
@@ -287,6 +293,10 @@ class NapCatInboundListener:
     @property
     def settings(self) -> dict[str, object]:
         return dict(self._settings_snapshot)
+
+    @property
+    def chat_service(self):
+        return self._chat_service
 
     def _emit(self, message: str, **kwargs) -> None:
         try:
@@ -530,27 +540,41 @@ class NapCatInboundListener:
             return "self_message"
 
         settings = self._settings_snapshot
-        max_links = int(settings.get("max_links_per_message", 1))
-        text = event_message_text(event.get("message"), event.get("raw_message"))
-        urls = extract_social_urls(text, max_urls=max_links)
-        if not urls:
-            self._mark("ignored")
-            return "no_social_url"
-
         try:
             message_id = str(event.get("message_id") or "").strip()
         except Exception:
             message_id = ""
         now = time.monotonic()
         dedupe_ttl = float(settings.get("dedupe_ttl_seconds", 900.0))
-        cooldown = float(settings.get("cooldown_seconds", 10.0))
         event_key = self._event_key(event, message_id)
+
         with self._state_lock:
             self._prune_state(now, dedupe_ttl)
             if event_key in self._seen and now - self._seen[event_key] <= dedupe_ttl:
                 self._mark("duplicate")
                 return "duplicate"
             self._seen[event_key] = now
+
+        max_links = int(settings.get("max_links_per_message", 1))
+        text = event_message_text(event.get("message"), event.get("raw_message"))
+        urls = extract_social_urls(text, max_urls=max_links)
+        if not urls:
+            if self._chat_service and self._chat_service.is_enabled():
+                chat_queued, chat_status = self._chat_service.try_accept_event(event, source=source)
+                if chat_queued:
+                    self._mark("queued")
+                    return "chat_queued"
+                if chat_status in {"rate_limited", "self_message", "group_not_allowed", "duplicate"}:
+                    self._mark("ignored")
+                    return chat_status
+                if chat_status == "queue_full":
+                    self._mark("queue_full")
+                    return chat_status
+            self._mark("ignored")
+            return "no_social_url"
+
+        cooldown = float(settings.get("cooldown_seconds", 10.0))
+        with self._state_lock:
             group_last = self._last_group_at.get(group_id, 0.0)
             sender_key = (group_id, user_id)
             sender_last = self._last_sender_at.get(sender_key, 0.0)
@@ -726,7 +750,7 @@ class NapCatInboundListener:
             {
                 "status": "ok",
                 "retcode": 0,
-                "accepted": result == "queued",
+                "accepted": result in {"queued", "chat_queued"},
             },
         )
 
@@ -857,6 +881,8 @@ class NapCatInboundListener:
             raise
 
         transport = str(self._settings_snapshot.get("transport") or "http_post")
+        if self._chat_service and self._chat_service.is_enabled():
+            await self._chat_service.start()
         self._emit(
             f"🔐 NapCat 入站监听已启动 | transport={transport} | "
             f"listen={self._settings_snapshot.get('listen_host')}:{self._settings_snapshot.get('listen_port')} | "
@@ -895,6 +921,8 @@ class NapCatInboundListener:
         self._workers.clear()
         self._stop_event = None
         self._loop = None
+        if self._chat_service:
+            await self._chat_service.stop()
 
     async def reconcile(self) -> bool:
         """配置热重载后启停监听器；已运行时只刷新运行时安全参数。"""
@@ -930,6 +958,16 @@ class NapCatInboundListener:
         if token_changed or transport_changed or endpoint_changed or worker_config_changed:
             await self.stop()
             return await self.start()
+
+        # 热重载同步 AI 拟人对话模块生命周期
+        if self._chat_service:
+            if self._chat_service.is_enabled():
+                if not self._chat_service.running:
+                    await self._chat_service.start()
+            else:
+                if self._chat_service.running:
+                    await self._chat_service.stop()
+
         return True
 
 

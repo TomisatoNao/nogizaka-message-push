@@ -126,6 +126,85 @@
         }
       }
     },
+    "napcat_ai_chat": {
+      "type": "object",
+      "description": "NapCat/OneBot 11 AI 拟人群聊配置（基于 CPA/Codex Luna 模拟冨里奈央）。",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "cpa_base_url": {
+          "type": "string",
+          "default": ""
+        },
+        "cpa_api_key": {
+          "type": "string",
+          "default": ""
+        },
+        "cpa_model": {
+          "type": "string",
+          "default": "gpt-5.6-luna"
+        },
+        "cpa_endpoint": {
+          "type": "string",
+          "default": "/v1/chat/completions"
+        },
+        "allowed_groups": {
+          "type": "array",
+          "items": { "type": ["string", "integer"] },
+          "default": []
+        },
+        "require_at": {
+          "type": "boolean",
+          "default": true
+        },
+        "trigger_keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["奈央", "奈央酱", "なおなお"]
+        },
+        "cooldown_user_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 5
+        },
+        "cooldown_group_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 3
+        },
+        "max_context_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 6
+        },
+        "context_ttl_seconds": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 86400,
+          "default": 600
+        },
+        "max_query_length": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 2000,
+          "default": 500
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "default": 2
+        },
+        "system_prompt": {
+          "type": "string"
+        }
+      }
+    },
     "napcat_media_base_url": {
       "type": "string",
       "format": "uri-reference"

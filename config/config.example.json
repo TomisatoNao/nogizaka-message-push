@@ -43,6 +43,24 @@
     "max_message_bytes": 65536
   },
 
+  // ── NapCat AI 拟人群聊（模拟乃木坂46 冨里奈央，基于 CPA 反代 Codex Luna）──
+  "napcat_ai_chat": {
+    "enabled": false,
+    "cpa_base_url": "http://127.0.0.1:8317",
+    "cpa_api_key": "",
+    "cpa_model": "gpt-5.6-luna",
+    "cpa_endpoint": "/v1/chat/completions",
+    "allowed_groups": [],
+    "require_at": true,
+    "trigger_keywords": ["奈央", "奈央酱", "なおなお"],
+    "cooldown_user_seconds": 5,
+    "cooldown_group_seconds": 3,
+    "max_context_turns": 6,
+    "context_ttl_seconds": 600,
+    "max_query_length": 500,
+    "workers": 2
+  },
+
   // ── Telegram Bot 路由配置 ──
   // 每个 Bot 的凭证放在 .env：名称 tg_bot1 对应 TG_BOT1_TOKEN
   "tg_bots": [],
@@ -70,7 +88,7 @@
     "hour": 23
   },
 
-  // ── 官方 Bot 指令（/status, /search 等）──
+  // ── 官方 Bot 指令（/status 等）──
   "qq_commands": {
     "enabled": false,
     "allow_openids": []
