@@ -116,6 +116,9 @@ _sqlite_conn: sqlite3.Connection | None = None
 _schema_initialized: bool = False
 _schema_lock = threading.Lock()
 _has_fts5: bool = False
+# 归档 JSON 中的自定义标签由管理端直接编辑。索引版本用于在升级后只做一次
+# 全量重建，补齐旧版本已经保存到 JSON、但尚未写入 SQLite/FTS 的标签。
+_MESSAGE_INDEX_VERSION = 2
 
 
 def get_db_path() -> Path:
@@ -168,6 +171,12 @@ def init_db() -> sqlite3.Connection | None:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_pub ON messages(member_dir, type, published_at DESC);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_type_ym ON messages(member_dir, type, year, month);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_updated ON messages(member_dir, updated_at DESC);")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS archive_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    );
+                """)
 
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS sent_ids (
@@ -377,9 +386,17 @@ def sync_all_to_sqlite(force: bool = False) -> int:
 
     if not force:
         try:
-            cur = conn.execute("SELECT COUNT(*) FROM messages;")
-            row = cur.fetchone()
-            if row and row[0] > 0:
+            row = conn.execute("SELECT COUNT(*) FROM messages;").fetchone()
+            version_row = conn.execute(
+                "SELECT value FROM archive_meta WHERE key = ?;",
+                ("messages_index_version",),
+            ).fetchone()
+            if (
+                row
+                and row[0] > 0
+                and version_row
+                and str(version_row[0]) == str(_MESSAGE_INDEX_VERSION)
+            ):
                 log_all(f"💾 SQLite 归档已就绪（共 {row[0]} 条记录）", is_debug=True)
                 return row[0]
         except Exception:  # nosec B110
@@ -426,9 +443,9 @@ def sync_all_to_sqlite(force: bool = False) -> int:
                 except Exception as e:
                     log_all(f"⚠️ 无法同步归档 {json_path}: {e}", is_error=True)
 
-    if all_rows:
-        try:
-            with conn:
+    try:
+        with conn:
+            if all_rows:
                 conn.executemany("""
                     INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, updated_at, text, translation, tags, local_file, raw_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -445,8 +462,14 @@ def sync_all_to_sqlite(force: bool = False) -> int:
                         INSERT INTO messages_fts (id, member_dir, member_name, text, translation, tags)
                         VALUES (?, ?, ?, ?, ?, ?);
                     """, fts_rows)
-        except Exception as e:
-            log_all(f"⚠️ SQLite 批量全量保存失败: {e}", is_error=True)
+            # 只有整批同步事务成功后才写入版本标记；异常时下次启动仍会重建。
+            conn.execute(
+                "INSERT INTO archive_meta(key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                ("messages_index_version", str(_MESSAGE_INDEX_VERSION)),
+            )
+    except Exception as e:
+        log_all(f"⚠️ SQLite 批量全量保存失败: {e}", is_error=True)
 
     log_all(f"💾 SQLite 归档全量同步完成，共计同步 {len(all_rows)} 条记录")
     return len(all_rows)

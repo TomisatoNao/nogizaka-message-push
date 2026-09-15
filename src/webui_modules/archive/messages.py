@@ -583,13 +583,13 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             return True
         with _archive_write_lock:
             msgs = _archive.load_month(member, year, month)
-            found = False
+            target_msg = None
             for m in msgs:
                 if str(m.get("id", "")) == msg_id:
                     m["_custom_tags"] = tags
-                    found = True
+                    target_msg = m
                     break
-            if not found:
+            if target_msg is None:
                 _send_json_resp(handler, {"ok": False, "errors": [f"消息 {msg_id} 不存在"]}, 404)
                 return True
             json_path = (_archive.archive_root() / member / f"{year:04d}" / f"{month:02d}" / "messages.json")
@@ -600,6 +600,11 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(msgs, f, ensure_ascii=False, indent=2)
             os.replace(tmp, json_path)
+            # 标签编辑先落盘，再同步受 SQLite 驱动的搜索索引；放在同一把
+            # 写锁内，避免并发编辑时后写入的 JSON 被旧索引覆盖。
+            # 用请求中的成员显示名写入 member_name，同时由归档层继续解析安全的
+            # 目录名；这样带空格/下划线的旧成员不会因编辑标签被改名。
+            _archive._save_msgs_to_sqlite(raw_m or member, year, month, [target_msg])
         try:
             user = current_user(handler) or {}
             source_ip = get_client_ip(handler)
