@@ -267,7 +267,7 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                                 if url_m:
                                     content = url_m.group(0)
                             else:
-                                cmd_m = re.search(r"(?:^|\s+)(/[a-zA-Z0-9_-]+|(?:菜单|帮助|状态|成员|最新|统计|搜索|ping|测试)(?:\s.*|$))", content)
+                                cmd_m = re.search(r"(?:^|\s+)(/[a-zA-Z0-9_-]+|(?:菜单|帮助|状态|成员|ping|测试)(?:\s.*|$))", content)
                                 if cmd_m:
                                     content = cmd_m.group(1).strip()
                                 elif content.startswith("@"):

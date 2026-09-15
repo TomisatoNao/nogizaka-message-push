@@ -4,7 +4,6 @@
 """
 import asyncio
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -77,18 +76,13 @@ async def _check_listener_sync(cfg) -> None:
 
 def main() -> None:
     import config.config as cfg
-    from src import archive, qq_commands
+    from src import qq_commands
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="qqcmd_test_"))
     saved = {
-        "archive_dir": cfg.ARCHIVE_DIR, "archive_enabled": cfg.ARCHIVE_ENABLED,
-        "archive_media": cfg.ARCHIVE_MEDIA, "bots": list(cfg.QQ_OFFICIAL_BOTS),
+        "bots": list(cfg.QQ_OFFICIAL_BOTS),
         "monitor": list(cfg.MONITOR_LIST), "allow": list(getattr(cfg, "QQ_COMMANDS_ALLOW", [])),
         "mode": getattr(cfg, "QQ_COMMANDS_MODE", "configured"),
     }
-    cfg.ARCHIVE_DIR = str(tmpdir)
-    cfg.ARCHIVE_ENABLED = True
-    cfg.ARCHIVE_MEDIA = False
     cfg.QQ_OFFICIAL_BOTS.clear()
     cfg.QQ_OFFICIAL_BOTS.append({"name": "b1", "app_id": "1", "client_secret": "s",
                                  "target_openid": ME})
@@ -123,8 +117,11 @@ def main() -> None:
         # ── Test 2: 指令分发 ────────────────────────────
         print("=== Test 2: 指令分发 ===")
         help_text = qq_commands.handle("/help", ME)
-        for name in ("status", "members", "latest", "search", "stats"):
+        for name in ("ping", "status", "members"):
             assert f"/{name}" in help_text, f"帮助应含 /{name}"
+        for removed in ("latest", "search", "stats"):
+            assert f"/{removed}" not in help_text, f"帮助不应再含 /{removed}"
+            assert "未知指令" in qq_commands.handle(f"/{removed}", ME)
         assert "未知指令" in qq_commands.handle("/nonexistent", ME)
         assert qq_commands.handle("/HELP", ME) is not None, "指令名应大小写不敏感"
 
@@ -134,58 +131,31 @@ def main() -> None:
         assert "轮" in status and "运行" in status
         print("✅ Test 2 通过\n")
 
-        # ── Test 3: 归档类指令 ──────────────────────────
-        print("=== Test 3: 归档查询 ===")
-        member = {"m_name": "测试 成员"}
-        for i, (text, trans) in enumerate([
-            ("ライブ楽しかった", "LIVE 很开心"),
-            ("おはよう", "早上好"),
-            ("ありがとう", "谢谢"),
-        ]):
-            utc = f"2026-07-0{i + 1}T10:00:00Z"
-            asyncio.run(archive.archive_message(
-                member, {"id": 900 + i, "type": "text", "text": text,
-                         "published_at": utc, "updated_at": utc}, translated=trans))
-
-        latest = qq_commands.handle("/latest", ME)
-        assert "谢谢" in latest or "ありがとう" in latest, f"应含最新一条: {latest}"
-        assert qq_commands.handle("/latest 测试成员 2", ME).count("[") >= 2, "应支持指定条数"
-        assert "没找到该成员" in qq_commands.handle("/latest 不存在的人", ME)
-
-        found = qq_commands.handle("/search LIVE", ME)
-        assert "命中 1 条" in found, f"译文应可搜: {found}"
-        assert "没有命中" in qq_commands.handle("/search 绝对不存在的词", ME)
-        assert "用法" in qq_commands.handle("/search", ME), "缺参数应给用法提示"
-
-        stats = qq_commands.handle("/stats", ME)
-        assert "3 条" in stats, f"统计应正确: {stats}"
-        print("✅ Test 3 通过\n")
-
-        # ── Test 4: 输出长度与异常隔离 ───────────────────
-        print("=== Test 4: 边界 ===")
-        for cmd in ("/help", "/status", "/members", "/latest", "/stats", "/search a"):
+        # ── Test 3: 输出长度与异常隔离 ───────────────────
+        print("=== Test 3: 边界 ===")
+        for cmd in ("/help", "/status", "/members"):
             reply = qq_commands.handle(cmd, ME)
             assert reply and len(reply) <= qq_commands.MAX_REPLY_CHARS, \
                 f"{cmd} 回复超长: {len(reply or '')}"
 
         # 指令内部抛异常时应回报错误而不是崩掉监听循环
-        orig = qq_commands._COMMANDS["stats"]
-        qq_commands._COMMANDS["stats"] = lambda _a: (_ for _ in ()).throw(RuntimeError("boom"))
+        orig = qq_commands._COMMANDS["status"]
+        qq_commands._COMMANDS["status"] = lambda _a: (_ for _ in ()).throw(RuntimeError("boom"))
         try:
-            assert "出错" in qq_commands.handle("/stats", ME)
+            assert "出错" in qq_commands.handle("/status", ME)
         finally:
-            qq_commands._COMMANDS["stats"] = orig
-        print("✅ Test 4 通过\n")
+            qq_commands._COMMANDS["status"] = orig
+        print("✅ Test 3 通过\n")
 
-        # ── Test 5: 热重载增删监听 ───────────────────────
+        # ── Test 4: 热重载增删监听 ───────────────────────
         # 曾经的 bug：监听只在进程启动时挂载，管理端热重载加的 Bot 要等重启才上线，
         # 表现为 QQ 那边一直回"机器人灵魂不在线"
-        print("=== Test 5: 热重载同步监听 ===")
+        print("=== Test 4: 热重载同步监听 ===")
         asyncio.run(_check_listener_sync(cfg))
-        print("✅ Test 5 通过\n")
+        print("✅ Test 4 通过\n")
 
-        # ── Test 6: 社交媒体链接识别 ─────────────────────
-        print("=== Test 6: 社交媒体链接识别 ===")
+        # ── Test 5: 社交媒体链接识别 ─────────────────────
+        print("=== Test 5: 社交媒体链接识别 ===")
         cfg.QQ_OFFICIAL_BOTS.clear()
         cfg.QQ_OFFICIAL_BOTS.append({"app_id": "A1", "target_openid": ME})
         cfg.QQ_COMMANDS_ALLOW = [ME]
@@ -201,12 +171,9 @@ def main() -> None:
             assert res_tt and "社媒链接" in res_tt, f"应识别 TikTok 短链接: {res_tt}"
         finally:
             qq_commands._trigger_social_reply_task = orig_trigger
-        print("✅ Test 6 通过\n")
+        print("✅ Test 5 通过\n")
 
     finally:
-        cfg.ARCHIVE_DIR = saved["archive_dir"]
-        cfg.ARCHIVE_ENABLED = saved["archive_enabled"]
-        cfg.ARCHIVE_MEDIA = saved["archive_media"]
         cfg.QQ_OFFICIAL_BOTS.clear()
         cfg.QQ_OFFICIAL_BOTS.extend(saved["bots"])
         cfg.MONITOR_LIST.clear()

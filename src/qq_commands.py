@@ -13,7 +13,6 @@ import config.config as cfg
 
 JST = timezone(timedelta(hours=9))
 MAX_REPLY_CHARS = 1400       # 官方 Bot 单条消息上限保守值
-MAX_LIST_ITEMS = 5          # 列表类回复最多列几项
 
 _SOCIAL_URL_RE = re.compile(
     r"https?://(?:[a-zA-Z0-9_-]+\.)*(?:twitter\.com|x\.com|instagram\.com|tiktok\.com|douyin\.com)/[^\s]+"
@@ -29,22 +28,6 @@ def _fmt_duration(seconds: float) -> str:
     if seconds >= 60:
         return f"{seconds // 60}分{seconds % 60}秒"
     return f"{seconds}秒"
-
-
-def _jst_str(utc_str: str) -> str:
-    try:
-        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        return dt.astimezone(JST).strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return utc_str[:16]
-
-
-def _clean_body(text: str, limit: int = 100) -> str:
-    if not text:
-        return ""
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    cleaned = " ".join(lines)
-    return cleaned if len(cleaned) <= limit else cleaned[:limit] + "…"
 
 
 def _clip(text: str, limit: int) -> str:
@@ -63,13 +46,9 @@ def _cmd_help(_args: str) -> str:
         "• /status — 查看程序运行状态、Token寿命与轮询周期\n"
         "• /members — 查看当前各平台已订阅监控的偶像名单\n"
         "• /ping — 快速测试机器人连接状态与网络延迟\n\n"
-        "【🔍 消息与归档】\n"
-        "• /latest [成员名] [条数] — 获取指定成员最新动态（如 /latest 冨里奈央 3）\n"
-        "• /search <关键词> — 全文检索中日文归档（如 /search 富士急）\n"
-        "• /stats — 查看归档统计概况与今日更新量\n\n"
         "【🌐 社媒自动解析与 AI 双语翻译】\n"
         "• 直接发送 X(Twitter) / Instagram / TikTok 动态链接，Bot 将自动提取高清原图/视频并附带 AI 双语翻译回复！\n\n"
-        "💡 提示：支持中英文指令别名（如「状态」「最新」「搜索」），群聊中请 @机器人 使用。"
+        "💡 提示：支持中英文指令别名（如「状态」「成员」），群聊中请 @机器人 使用。"
     )
 
 
@@ -149,104 +128,6 @@ def _cmd_members(_args: str) -> str:
     return "\n".join(lines)
 
 
-def _resolve_member(name_hint: str) -> str | None:
-    """把用户输入的成员名映射到归档目录名；未指定时取第一个监控成员。"""
-    from src import archive
-
-    dirs = archive.list_members()
-    if not dirs:
-        return None
-    if not name_hint:
-        if cfg.MONITOR_LIST:
-            want = archive.member_dir_name(cfg.MONITOR_LIST[0]["m_name"])
-            if want in dirs:
-                return want
-        return dirs[0]
-    hint = name_hint.replace(" ", "").lower()
-    for d in dirs:
-        if hint in d.replace("_", "").lower():
-            return d
-    return None
-
-
-def _cmd_latest(args: str) -> str:
-    from src import archive
-
-    parts = args.split()
-    count = 3
-    if parts and parts[-1].isdigit():
-        count = max(1, min(int(parts[-1]), MAX_LIST_ITEMS))
-        parts = parts[:-1]
-    name_hint = " ".join(parts)
-    member = _resolve_member(name_hint)
-    if not member:
-        return f"❓ 没找到该成员「{name_hint}」的归档。\n💡 发送 /members 可查看当前已监控成员名单。"
-
-    months = archive.list_months(member)
-    if not months:
-        return f"💬 【{member.replace('_', ' ')}】暂无历史归档记录。"
-
-    msgs: list[dict] = []
-    for m in months:
-        msgs = archive.load_month(member, m["year"], m["month"]) + msgs
-        if len(msgs) >= count:
-            break
-    picked = sorted(msgs, key=lambda x: x.get("updated_at", ""))[-count:]
-    if not picked:
-        return f"💬 【{member.replace('_', ' ')}】暂无历史归档记录。"
-
-    lines = [f"💬 【{member.replace('_', ' ')}】最新 {len(picked)} 条动态：\n"]
-    for i, msg in enumerate(reversed(picked), 1):
-        time_str = _jst_str(msg.get("published_at") or msg.get("updated_at", ""))
-        kind = {"picture": "🖼 [图片]", "image": "🖼 [图片]", "video": "🎬 [视频]", "voice": "🎤 [语音]"}.get(msg.get("type"), "💬 [消息]")
-        body = _clean_body(msg.get("_translation") or msg.get("text") or "", 90) or "（多媒体附件）"
-        lines.append(f"{i}. 📅 {time_str} {kind}\n   {body}\n")
-    return "\n".join(lines).strip()
-
-
-def _cmd_search(args: str) -> str:
-    from src import archive
-
-    query = args.strip()
-    if not query:
-        return "🔍 用法：/search <关键词>（例如：/search 富士急，中日文均可检索）"
-    member = _resolve_member("")
-    if not member:
-        return "🔍 数据库中暂无归档内容。"
-
-    hits = archive.search(member, query)
-    if not hits:
-        return f"🔍 关键词「{query}」没有命中相关内容。"
-    lines = [f"🔍 检索关键词「{query}」· 命中 {len(hits)} 条（展示最新 {min(len(hits), MAX_LIST_ITEMS)} 条）：\n"]
-    for i, msg in enumerate(hits[:MAX_LIST_ITEMS], 1):
-        time_str = _jst_str(msg.get("published_at") or msg.get("updated_at", ""))
-        kind = {"picture": "🖼", "image": "🖼", "video": "🎬", "voice": "🎤"}.get(msg.get("type"), "💬")
-        body = _clean_body(msg.get("_translation") or msg.get("text") or "", 90) or "（多媒体附件）"
-        lines.append(f"{i}. 📅 {time_str} {kind}\n   {body}\n")
-    return "\n".join(lines).strip()
-
-
-def _cmd_stats(_args: str) -> str:
-    from src import archive
-
-    members = archive.list_members()
-    if not members:
-        return "📚 数据库中暂无归档数据。"
-    today = datetime.now(JST).strftime("%Y-%m-%d")
-    lines = ["📚 系统归档统计概览\n"]
-    total_all = 0
-    for name in members[:MAX_LIST_ITEMS]:
-        months = archive.list_months(name)
-        total = sum(m["count"] for m in months)
-        total_all += total
-        today_n = archive.day_counts(name).get(today, 0)
-        lines.append(f"• {name.replace('_', ' ')}: 共 {total} 条 / {len(months)} 个月" + (f" (今日 +{today_n})" if today_n else ""))
-    if len(members) > MAX_LIST_ITEMS:
-        lines.append(f"（另有 {len(members) - MAX_LIST_ITEMS} 位成员未列出）")
-    lines.append(f"\n📈 全局累计已归档: {total_all} 条记录")
-    return "\n".join(lines).strip()
-
-
 _COMMANDS = {
     "help":     _cmd_help,
     "帮助":     _cmd_help,
@@ -257,14 +138,6 @@ _COMMANDS = {
     "members":  _cmd_members,
     "成员":     _cmd_members,
     "监控":     _cmd_members,
-    "latest":   _cmd_latest,
-    "最新":     _cmd_latest,
-    "最新消息": _cmd_latest,
-    "search":   _cmd_search,
-    "搜索":     _cmd_search,
-    "查询":     _cmd_search,
-    "stats":    _cmd_stats,
-    "统计":     _cmd_stats,
     "ping":     _cmd_ping,
     "测试":     _cmd_ping,
 }
