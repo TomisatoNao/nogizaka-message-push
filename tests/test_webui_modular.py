@@ -353,6 +353,12 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
         # 目标管理页的静态结构不再用 style= 负责布局，避免和动态监控的组件规则分叉。
         assert "style=" not in section
 
+    channels_start = html.index('id="tab-channels"')
+    channels_end = html.index("</section>", channels_start)
+    channels = html[channels_start:channels_end]
+    assert "发送接口由系统按动作自动拼接" not in channels
+    assert "每个 Bot 使用独立的" not in channels
+
     for element_id in (
         "stStartup", "stCycle", "stNext", "pollFeedback", "stTokens", "stChannels",
         "stNapcatHealth", "stDeliveryBacklog", "btnCopyDeliveryDiag", "stDiskTotal",
