@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY main.py .
 COPY entrypoint.sh .
 COPY config/ ./config/
+COPY config/ ./config.default/
 COPY src/ ./src/
 COPY tools/ ./tools/
 COPY config/config.example.json ./config.example.json.default

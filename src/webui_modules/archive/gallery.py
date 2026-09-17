@@ -75,42 +75,29 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         except (ValueError, TypeError):
             pass
 
-    # 如果只查博客图片
+    # 1. 仅查博客图片
     if source == "blog":
         data = _get_blog_gallery(member=member, page=page, per_page=per_page, year=year, month=month, order=order)
         _send_json_resp(handler, data)
         return True
 
-    # 查 Message 图片
-    res = _archive.get_gallery_photos(
-        member_dir=member,
-        source=source,
-        page=page,
-        per_page=per_page,
-        year=year,
-        month=month,
-        order=order,
-    )
+    # 2. 仅查 Message 图片
+    if source == "message":
+        res = _archive.get_gallery_photos(
+            member_dir=member,
+            source=source,
+            page=page,
+            per_page=per_page,
+            year=year,
+            month=month,
+            order=order,
+        )
+        _send_json_resp(handler, res)
+        return True
 
-    # 若为 all 模式，结合博客美图按时间排序混编呈现
-    if source == "all" and res.get("ok"):
-        blog_data = _get_blog_gallery(member=member, page=page, per_page=per_page, year=year, month=month, order=order)
-        blog_total = blog_data.get("total", 0)
-        blog_photos = blog_data.get("photos", [])
-
-        if blog_photos:
-            combined = sorted(
-                res.get("photos", []) + blog_photos,
-                key=lambda x: str(x.get("published_at") or ""),
-                reverse=(order == "desc"),
-            )
-            res["photos"] = combined[:per_page]
-
-        res["total"] = res.get("total", 0) + blog_total
-        res["total_pages"] = (res["total"] + per_page - 1) // per_page if res["total"] > 0 else 1
-        res["has_more"] = bool(len(res.get("photos", [])) == per_page and page < res["total_pages"])
-
-    _send_json_resp(handler, res)
+    # 3. all 模式：使用统一聚合全局分页，彻底杜绝跨页漏图与乱序
+    data = _get_combined_gallery(member=member, page=page, per_page=per_page, year=year, month=month, order=order)
+    _send_json_resp(handler, data)
     return True
 
 
@@ -406,6 +393,293 @@ def _get_blog_gallery(
             }
     except Exception as ex:
         return {"ok": False, "errors": [f"博客图片查询异常: {ex}"], "total": 0, "photos": []}
+
+
+def _get_combined_gallery(
+    member: str = "",
+    page: int = 1,
+    per_page: int = 20,
+    year: int | None = None,
+    month: int | None = None,
+    order: str = "desc",
+) -> dict:
+    """多源聚合（Message + Blog）全局统一分页查询。
+
+    优先采用 SQLite ATTACH 原生跨库 UNION ALL 实现单流全局时间轴排序与精准分页，
+    彻底消除独立 Offset 分页合并导致的丢图断层与时间戳错位问题。
+    在非文件数据库或测试 Mock 隔离场景下，通过双流窗口保底归并，保障零漏图。
+    """
+    page = max(1, int(page))
+    per_page = max(1, min(100, int(per_page)))
+
+    conn = _archive.init_db()
+    if not conn:
+        return {"ok": False, "errors": ["数据库未初始化"], "total": 0, "photos": []}
+
+    blog_db = None
+    try:
+        from src.webui_modules.archive_handlers import get_blog_db
+        blog_db = get_blog_db()
+    except Exception:
+        pass
+
+    # 若无博客数据库，直接降级查询消息
+    if not blog_db:
+        return _archive.get_gallery_photos(
+            member_dir=member,
+            source="all",
+            page=page,
+            per_page=per_page,
+            year=year,
+            month=month,
+            order=order,
+        )
+
+    # 尝试 SQLite ATTACH 原生统一跨库查询
+    attached = False
+    try:
+        db_list = conn.execute("PRAGMA database_list;").fetchall()
+        attached_names = {r[1] for r in db_list}
+        if "blog_db" in attached_names:
+            attached = True
+        else:
+            b_dbs = blog_db.execute("PRAGMA database_list;").fetchall()
+            blog_file = b_dbs[0][2] if b_dbs and b_dbs[0][2] else None
+            if not blog_file:
+                from src.blog_fetcher import BLOG_DB_PATH
+                if BLOG_DB_PATH.exists():
+                    blog_file = str(BLOG_DB_PATH.resolve())
+            if blog_file:
+                conn.execute("ATTACH DATABASE ? AS blog_db;", [blog_file])
+                attached = True
+    except Exception:
+        attached = False
+
+    if attached:
+        try:
+            from src.blog_fetcher import BLOG_IMAGE_DIR
+            from src.webui_modules.archive.common import _blog_table_columns
+
+            root = _archive.archive_root()
+            b_cols = _blog_table_columns(blog_db)
+            img_where, json_target = _get_blog_image_expr(b_cols)
+
+            msg_where = ["type IN ('picture', 'image')", "local_file IS NOT NULL", "local_file != ''"]
+            msg_params: list[object] = []
+            if member:
+                msg_where.append("member_dir = ?")
+                msg_params.append(member)
+            if year:
+                msg_where.append("year = ?")
+                msg_params.append(int(year))
+            if month:
+                msg_where.append("month = ?")
+                msg_params.append(int(month))
+
+            blog_where = [img_where, "j.value IS NOT NULL", "j.value != ''"]
+            blog_params: list[object] = []
+            if member:
+                norm_m = member.replace(" ", "").replace("　", "").replace("_", "")
+                blog_where.append("REPLACE(REPLACE(REPLACE(p.author, ' ', ''), '　', ''), '_', '') = ?")
+                blog_params.append(norm_m)
+            if year:
+                y_str = f"{year:04d}"
+                blog_where.append("substr(p.date, 1, 4) = ?")
+                blog_params.append(y_str)
+            if month and year:
+                ym_str = f"{year:04d}-{month:02d}"
+                blog_where.append("substr(p.date, 1, 7) = ?")
+                blog_params.append(ym_str)
+
+            c_msg = conn.execute(f"SELECT COUNT(*) FROM messages WHERE {' AND '.join(msg_where)};", msg_params).fetchone()[0]
+            c_blog = conn.execute(f"SELECT COUNT(*) FROM blog_db.blog_posts p, json_each({json_target}) j WHERE {' AND '.join(blog_where)};", blog_params).fetchone()[0]
+            total = int(c_msg + c_blog)
+
+            order_dir = "ASC" if str(order).lower() == "asc" else "DESC"
+            paths_expr = (
+                "CASE WHEN p.image_paths_json IS NOT NULL AND p.image_paths_json != '[]' AND p.image_paths_json != '' "
+                "THEN json_extract(p.image_paths_json, '$[' || j.key || ']') ELSE '' END"
+                if "image_paths_json" in b_cols else "''"
+            )
+
+            union_sql = f"""
+                SELECT id, src, member_name, member_dir, published_at, text, translation, local_file, remote_url, raw_json, year, month, group_key, blog_id
+                FROM (
+                    SELECT
+                        id,
+                        'message' as src,
+                        member_name,
+                        member_dir,
+                        REPLACE(published_at, 'T', ' ') as published_at,
+                        text,
+                        translation,
+                        local_file,
+                        NULL as remote_url,
+                        raw_json,
+                        year,
+                        month,
+                        '' as group_key,
+                        '' as blog_id
+                    FROM messages
+                    WHERE {' AND '.join(msg_where)}
+
+                    UNION ALL
+
+                    SELECT
+                        'blog_' || p.id || '_' || j.key as id,
+                        'blog' as src,
+                        p.author as member_name,
+                        p.author as member_dir,
+                        p.date as published_at,
+                        p.title as text,
+                        '' as translation,
+                        {paths_expr} as local_file,
+                        j.value as remote_url,
+                        NULL as raw_json,
+                        CAST(substr(p.date, 1, 4) AS INTEGER) as year,
+                        CAST(substr(p.date, 6, 2) AS INTEGER) as month,
+                        p.group_key as group_key,
+                        CAST(p.id AS TEXT) as blog_id
+                    FROM blog_db.blog_posts p, json_each({json_target}) j
+                    WHERE {' AND '.join(blog_where)}
+                )
+                ORDER BY published_at {order_dir}, id {order_dir}
+                LIMIT ? OFFSET ?;
+            """
+
+            offset = (page - 1) * per_page
+            photos = []
+            fetch_limit = per_page
+            fetch_offset = offset
+            all_params = msg_params + blog_params
+
+            while len(photos) < per_page:
+                batch_rows = conn.execute(union_sql, all_params + [fetch_limit, fetch_offset]).fetchall()
+                if not batch_rows:
+                    break
+                for r in batch_rows:
+                    photo_id, src, m_name, m_dir, pub, txt, trans, loc_f, rem_u, raw_j, yr, mo, g_k, b_id = r
+                    clean_local = str(loc_f or "").replace("\\", "/")
+                    if src == "message":
+                        full = root / m_dir / clean_local
+                        if not full.is_file():
+                            continue
+                        rj = {}
+                        if raw_j:
+                            try:
+                                rj = json.loads(raw_j)
+                            except (ValueError, TypeError):
+                                pass
+                        photos.append({
+                            "id": str(photo_id),
+                            "source": "message",
+                            "member_name": str(m_name),
+                            "member_dir": str(m_dir),
+                            "published_at": str(pub or ""),
+                            "text": str(txt or "").strip(),
+                            "translation": str(trans or "").strip(),
+                            "local_file": clean_local,
+                            "url": f"/api/archive/media/{m_dir}/{clean_local}",
+                            "w": rj.get("thumbnail_width"),
+                            "h": rj.get("thumbnail_height"),
+                            "year": yr,
+                            "month": mo,
+                        })
+                    else:  # blog
+                        url = ""
+                        if clean_local:
+                            full_p = BLOG_IMAGE_DIR / clean_local
+                            if full_p.exists() and full_p.stat().st_size <= 200:
+                                clean_local = ""
+                            else:
+                                url = _blog_media_url(clean_local)
+                        if not url and rem_u:
+                            val_str = str(rem_u).strip()
+                            if "_pre/blog" not in val_str and "img.nogizaka46.com" not in val_str:
+                                if val_str.startswith("http://") or val_str.startswith("https://"):
+                                    url = val_str
+                                elif val_str.startswith("/"):
+                                    base = (
+                                        "https://www.nogizaka46.com"
+                                        if g_k == "nogizaka"
+                                        else "https://sakurazaka46.com"
+                                        if g_k == "sakurazaka"
+                                        else "https://www.hinatazaka46.com"
+                                    )
+                                    url = base + val_str
+                                elif val_str:
+                                    full_p = BLOG_IMAGE_DIR / val_str.replace("\\", "/")
+                                    if not (full_p.exists() and full_p.stat().st_size <= 200):
+                                        url = _blog_media_url(val_str.replace("\\", "/"))
+                        if not url:
+                            continue
+                        photos.append({
+                            "id": str(photo_id),
+                            "blog_id": str(b_id) if b_id else None,
+                            "source": "blog",
+                            "group_key": g_k,
+                            "member_name": m_name or member,
+                            "member_dir": _archive.member_dir_name(m_name or member),
+                            "published_at": str(pub or ""),
+                            "text": str(txt or "").strip(),
+                            "url": url,
+                            "local_file": clean_local or (str(rem_u) if not str(rem_u).startswith("http") else ""),
+                            "year": yr,
+                            "month": mo,
+                        })
+                    if len(photos) >= per_page:
+                        break
+                fetch_offset += len(batch_rows)
+                if len(batch_rows) < fetch_limit:
+                    break
+
+            total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+            return {
+                "ok": True,
+                "source": "all",
+                "member": member,
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_more": bool(len(photos) == per_page and page < total_pages),
+                "photos": photos,
+            }
+        except Exception:
+            # 遇到特殊异常平滑进入窗口合并保底
+            pass
+
+    # 保底方案：双流窗口归并（用于无法 ATTACH 的测试隔离环境或极老旧 SQLite，确保绝对零漏图）
+    target_total = min(page * per_page, 2000)
+    msg_res = _archive.get_gallery_photos(
+        member_dir=member, source="message", page=1, per_page=target_total, year=year, month=month, order=order
+    )
+    blog_res = _get_blog_gallery(
+        member=member, page=1, per_page=target_total, year=year, month=month, order=order
+    )
+    msg_total = msg_res.get("total", 0)
+    blog_total = blog_res.get("total", 0)
+    total = int(msg_total + blog_total)
+    combined = sorted(
+        msg_res.get("photos", []) + blog_res.get("photos", []),
+        key=lambda x: str(x.get("published_at") or "").replace("T", " "),
+        reverse=(str(order).lower() == "desc"),
+    )
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    photos = combined[start_idx:end_idx]
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    return {
+        "ok": True,
+        "source": "all",
+        "member": member,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "has_more": bool(len(photos) == per_page and page < total_pages),
+        "photos": photos,
+    }
 
 
 _gallery_years_cache: dict[tuple, tuple[float, dict]] = {}

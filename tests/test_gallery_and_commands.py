@@ -1271,6 +1271,147 @@ def test_global_avatar_webp_thumbnail_pipeline(tmp_path, monkeypatch):
     assert len(raw_bytes) == avatar_file.stat().st_size
 
 
+def test_gallery_combined_pagination_no_photo_loss(temp_archive_env, tmp_path, monkeypatch):
+    """验证相册 all 模式全局分页：时间戳交错的消息与博客图片无缝合并，绝对不漏图、不重图。"""
+    from types import SimpleNamespace
+    from src.webui_modules.archive.gallery import handle_gallery
+
+    archive_dir = _archive.archive_root()
+    db_conn = _archive.init_db()
+
+    # 1. 准备 Message 图片数据：3 张，时间分别为 2024-09-20, 2024-09-18, 2024-09-16
+    m_dir = archive_dir / "冨里奈央" / "2024" / "09" / "picture"
+    m_dir.mkdir(parents=True, exist_ok=True)
+    for i, day in enumerate([20, 18, 16], start=1):
+        pic = m_dir / f"msg_pic_{i}.jpg"
+        pic.write_bytes(b"dummy_msg_jpg")
+        db_conn.execute(f"""
+            INSERT OR REPLACE INTO messages (id, member_name, member_dir, year, month, type, published_at, text, local_file, raw_json)
+            VALUES ('msg_{i}', '冨里奈央', '冨里奈央', 2024, 9, 'picture', '2024-09-{day:02d}T12:00:00Z', '消息{i}', '2024/09/picture/msg_pic_{i}.jpg', '{{}}');
+        """)
+    db_conn.commit()
+
+    # 2. 准备 Blog 图片数据：3 篇，时间分别为 2024-09-19, 2024-09-17, 2024-09-15
+    from src.blog_fetcher import BLOG_IMAGE_DIR
+    blog_db_path = tmp_path / "blogs.db"
+    blog_conn = sqlite3.connect(str(blog_db_path))
+    blog_conn.execute("""
+        CREATE TABLE IF NOT EXISTS blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            url TEXT,
+            date TEXT,
+            body_text TEXT,
+            images_json TEXT,
+            image_paths_json TEXT
+        );
+    """)
+
+    for i, day in enumerate([19, 17, 15], start=1):
+        rel_path = f"nogizaka/冨里奈央/blog_{i}.jpg"
+        full_blog_img = BLOG_IMAGE_DIR / rel_path
+        full_blog_img.parent.mkdir(parents=True, exist_ok=True)
+        full_blog_img.write_bytes(b"x" * 500)  # > 200 bytes
+        blog_conn.execute("""
+            INSERT INTO blog_posts (id, group_key, author, title, url, date, images_json, image_paths_json)
+            VALUES (?, 'nogizaka', '冨里奈央', ?, 'https://example.com', ?, ?, ?);
+        """, (i, f"博客{i}", f"2024-09-{day:02d} 12:00", json.dumps([f"https://cdn.example.com/b{i}.jpg"]), json.dumps([rel_path])))
+    blog_conn.commit()
+
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: blog_conn)
+    monkeypatch.setattr("src.webui_modules.archive.common.get_blog_db", lambda: blog_conn)
+
+    # 3. 按每页 2 张（per_page=2）连续翻阅 4 页
+    all_returned_ids = []
+    has_mores = []
+
+    for p in range(1, 5):
+        resp_data = {}
+        h = SimpleNamespace(
+            path=f"/api/archive/gallery?member=冨里奈央&source=all&page={p}&per_page=2",
+            headers={},
+            send_response=lambda code: resp_data.update({"code": code}),
+            send_header=lambda k, v: None,
+            end_headers=lambda: None,
+        )
+        h.wfile = SimpleNamespace(write=lambda b: resp_data.update({"body": json.loads(b.decode("utf-8"))}))
+
+        handled = handle_gallery(h, "gallery", lambda **_: True, None)
+        assert handled is True
+        assert resp_data["code"] == 200
+        body = resp_data["body"]
+        assert body["ok"] is True
+        photos = body["photos"]
+        all_returned_ids.extend([item["id"] for item in photos])
+        has_mores.append(body["has_more"])
+
+    # 验证 6 张图片按时间倒序完整呈现，无一遗漏
+    expected_order = [
+        "msg_1",        # 2024-09-20
+        "blog_1_0",     # 2024-09-19
+        "msg_2",        # 2024-09-18
+        "blog_2_0",     # 2024-09-17
+        "msg_3",        # 2024-09-16
+        "blog_3_0",     # 2024-09-15
+    ]
+    assert all_returned_ids == expected_order
+    # 验证 has_more 状态机契约：前两页为 True，最后一批次与空页为 False
+    assert has_mores == [True, True, False, False]
+
+
+def test_message_thumbnail_cache_privacy_contract(temp_archive_env, monkeypatch):
+    """验证私密消息缩略图缓存头安全对齐：私密模式下必须为 private，杜绝公开缓存泄露。"""
+    from types import SimpleNamespace
+    import config.config as cfg
+    from src.webui_modules.archive.messages import handle_messages
+
+    from PIL import Image
+
+    archive_dir = _archive.archive_root()
+    m_dir = archive_dir / "冨里奈央" / "2024" / "09" / "picture"
+    m_dir.mkdir(parents=True, exist_ok=True)
+    pic = m_dir / "secret_pic.jpg"
+    im = Image.new("RGB", (100, 100), color=(120, 120, 120))
+    im.save(pic, format="JPEG")
+
+    # 1. 私密模式（默认，AUTH_ARCHIVE_PUBLIC = False）
+    monkeypatch.setattr(cfg, "AUTH_ARCHIVE_PUBLIC", False)
+    headers_private = {}
+    h_priv = SimpleNamespace(
+        path="/api/archive/media/冨里奈央/2024/09/picture/secret_pic.jpg?thumb=1",
+        headers={},
+        send_response=lambda code: headers_private.update({"status": code}),
+        send_header=lambda k, v: headers_private.update({k: v}),
+        end_headers=lambda: None,
+        wfile=SimpleNamespace(write=lambda b: None),
+    )
+    handled = handle_messages(h_priv, "media/冨里奈央/2024/09/picture/secret_pic.jpg", lambda **_: True, None)
+    assert handled is True
+    assert headers_private.get("status") == 200
+    cc_private = headers_private.get("Cache-Control", "").lower()
+    assert "private" in cc_private
+    assert "public" not in cc_private
+
+    # 2. 公开模式（用户显式开启 AUTH_ARCHIVE_PUBLIC = True）
+    monkeypatch.setattr(cfg, "AUTH_ARCHIVE_PUBLIC", True)
+    headers_public = {}
+    h_pub = SimpleNamespace(
+        path="/api/archive/media/冨里奈央/2024/09/picture/secret_pic.jpg?thumb=1",
+        headers={},
+        send_response=lambda code: headers_public.update({"status": code}),
+        send_header=lambda k, v: headers_public.update({k: v}),
+        end_headers=lambda: None,
+        wfile=SimpleNamespace(write=lambda b: None),
+    )
+    handled_pub = handle_messages(h_pub, "media/冨里奈央/2024/09/picture/secret_pic.jpg", lambda **_: True, None)
+    assert handled_pub is True
+    assert headers_public.get("status") == 200
+    cc_public = headers_public.get("Cache-Control", "").lower()
+    assert "public" in cc_public
+
+
 
 
 
