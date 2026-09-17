@@ -738,8 +738,8 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         if BLOG_IMAGE_DIR.resolve() not in full.parents and full != BLOG_IMAGE_DIR.resolve():
             _send_json_resp(handler, {"ok": False, "errors": ["非法路径"]}, 403)
             return True
-        if not full.is_file():
-            _send_json_resp(handler, {"ok": False, "errors": ["媒体不存在"]}, 404)
+        if not full.is_file() or full.stat().st_size <= 200:
+            _send_json_resp(handler, {"ok": False, "errors": ["媒体不存在或已损坏"]}, 404)
             return True
         serve_file_range(handler, full)
         return True

@@ -577,7 +577,7 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
                         continue
                     clean_p = str(p).replace("\\", "/")
                     full_p = BLOG_IMAGE_DIR / Path(clean_p)
-                    if full_p.is_file():
+                    if full_p.is_file() and full_p.stat().st_size > 200:
                         return {
                             "id": f"blog_{br[0]}",
                             "member_name": str(br[2]),
@@ -606,7 +606,12 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
                 for rr in r_rows:
                     imgs = json.loads(rr[5]) if rr[5] else []
                     for img_url in imgs:
-                        if img_url and (str(img_url).startswith("http://") or str(img_url).startswith("https://")):
+                        if (
+                            img_url
+                            and (str(img_url).startswith("http://") or str(img_url).startswith("https://"))
+                            and "_pre/blog" not in str(img_url)
+                            and "img.nogizaka46.com" not in str(img_url)
+                        ):
                             return {
                                 "id": f"blog_remote_{rr[0]}",
                                 "member_name": str(rr[2]),

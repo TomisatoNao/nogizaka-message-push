@@ -625,4 +625,159 @@ def test_gallery_year_chips_and_sort_btn_contract():
     assert 'btnGallerySortOrder' in js
 
 
+def test_heal_corrupt_blog_images(tmp_path, monkeypatch):
+    """验证 heal_corrupt_blog_images 能够自动清理磁盘损坏文件并修复 SQLite 元数据。"""
+    from src.blog_fetcher import heal_corrupt_blog_images
+    import src.blog_fetcher as bf
+
+    img_dir = tmp_path / "blog_images"
+    img_dir.mkdir(parents=True)
+    monkeypatch.setattr(bf, "BLOG_IMAGE_DIR", img_dir)
+
+    # 1. 创建 0 字节文件、404 HTML 伪图片、有效图片
+    sub_dir = img_dir / "nogizaka" / "staff" / "post_1"
+    sub_dir.mkdir(parents=True)
+    zero_file = sub_dir / "zero.jpg"
+    zero_file.write_bytes(b"")
+    html_file = sub_dir / "404.jpg"
+    html_file.write_bytes(b"<!DOCTYPE html><html><head><title>404 Not Found</title></head></html>")
+    valid_file = sub_dir / "valid.jpg"
+    valid_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 300)
+
+    # 2. 构建 SQLite 数据库
+    db_path = tmp_path / "blogs.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            images_json TEXT,
+            image_paths_json TEXT
+        );
+    """)
+    rel_zero = str(zero_file.relative_to(img_dir)).replace("\\", "/")
+    rel_html = str(html_file.relative_to(img_dir)).replace("\\", "/")
+    rel_valid = str(valid_file.relative_to(img_dir)).replace("\\", "/")
+
+    # post 1: 包含早期官方已失效的死链
+    conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, images_json, image_paths_json)
+        VALUES (1, 'nogizaka', 'staff', '早期博客', '2012-02-15 10:00',
+                '["http://www.nogizaka46.com/_pre/blog/dead1.jpg", "https://valid.cdn/ok.jpg"]',
+                ?);
+    """, (json.dumps([rel_zero, rel_valid]),))
+
+    # post 2: 仅包含已删除或 404 文件
+    conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, images_json, image_paths_json)
+        VALUES (2, 'nogizaka', 'staff', '全部损坏', '2012-02-16 10:00',
+                '["http://img.nogizaka46.com/blog/dead2.jpg"]',
+                ?);
+    """, (json.dumps([rel_html]),))
+    conn.commit()
+
+    stats = heal_corrupt_blog_images(conn)
+
+    assert stats["deleted_files"] == 2
+    assert stats["healed_posts"] == 2
+    assert not zero_file.exists()
+    assert not html_file.exists()
+    assert valid_file.exists()
+
+    # 验证 post 1 元数据已自愈
+    row1 = conn.execute("SELECT images_json, image_paths_json FROM blog_posts WHERE id = 1").fetchone()
+    imgs1 = json.loads(row1[0])
+    paths1 = json.loads(row1[1])
+    assert imgs1 == ["https://valid.cdn/ok.jpg"]
+    assert paths1 == [rel_valid]
+
+    # 验证 post 2 死链与损坏路径已被清空
+    row2 = conn.execute("SELECT images_json, image_paths_json FROM blog_posts WHERE id = 2").fetchone()
+    imgs2 = json.loads(row2[0])
+    paths2 = json.loads(row2[1])
+    assert imgs2 == []
+    assert paths2 == []
+
+    conn.close()
+
+
+def test_get_blog_gallery_hole_filling_and_corrupt_filtering(tmp_path, monkeypatch):
+    """验证 _get_blog_gallery 在遇到损坏图片或死链时，通过空洞补齐拉取有效图片填满一页。"""
+    from src.webui_modules.archive.gallery import _get_blog_gallery
+    import src.blog_fetcher as bf
+
+    img_dir = tmp_path / "blog_images"
+    img_dir.mkdir(parents=True)
+    monkeypatch.setattr(bf, "BLOG_IMAGE_DIR", img_dir)
+
+    # 创建一个小于等于 200 字节的损坏文件与一个正常大小文件
+    corrupt_file = img_dir / "corrupt.jpg"
+    corrupt_file.write_bytes(b"corrupt")
+    valid_file = img_dir / "valid.jpg"
+    valid_file.write_bytes(b"\xff\xd8\xff" + b"X" * 400)
+
+    db_path = tmp_path / "blogs.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            images_json TEXT,
+            image_paths_json TEXT
+        );
+    """)
+    # 记录 1: 本地文件损坏 (<= 200B)
+    conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json)
+        VALUES (1, 'nogizaka', '成员A', '损坏', '2012-01-01 10:00', '["corrupt.jpg"]');
+    """)
+    # 记录 2: 远端 404 死链 (_pre/blog)
+    conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, images_json)
+        VALUES (2, 'nogizaka', '成员A', '死链', '2012-01-02 10:00', '["http://www.nogizaka46.com/_pre/blog/a.jpg"]');
+    """)
+    # 记录 3: 有效图片
+    conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json)
+        VALUES (3, 'nogizaka', '成员A', '有效', '2012-01-03 10:00', '["valid.jpg"]');
+    """)
+    conn.commit()
+
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: conn)
+
+    # 请求 per_page=1，最早优先。前 2 条损坏/死链应被跳过，空洞补齐直接命中第 3 条有效记录
+    data = _get_blog_gallery(page=1, per_page=1, order="asc")
+    assert data["ok"] is True
+    assert len(data["photos"]) == 1
+    assert data["photos"][0]["blog_id"] == "3"
+    assert data["photos"][0]["text"] == "有效"
+
+    conn.close()
+
+
+def test_gallery_card_error_handling_contract():
+    """验证前端渲染相册卡片绝不强制隐藏卡片，而是优雅展示占位图标。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+
+    # 1. 严禁使用 this.parentElement.style.display='none' 隐藏整个卡片
+    assert "onerror=\"this.parentElement.style.display='none';\"" not in js[js.find("renderGalleryCards"):]
+
+    # 2. 必须包含 img-broken 与 is-broken 状态标记
+    assert r"this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');" in js
+
+    # 3. CSS 中定义了 is-broken 的回退占位
+    assert ".gallery-card.is-broken" in css
+    assert ".gallery-card img.img-broken" in css
+
+
+
 

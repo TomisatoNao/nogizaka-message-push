@@ -3093,6 +3093,25 @@ html.view-gallery #galleryGrid { display: block !important; }
   opacity: 1;
 }
 
+.gallery-card.is-broken {
+  background: var(--bg-card, #23232a);
+}
+
+.gallery-card.is-broken::before {
+  content: '🖼️';
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 32px;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.gallery-card img.img-broken {
+  opacity: 0.2;
+}
+
 .gallery-card:hover img {
   transform: scale(1.05);
 }

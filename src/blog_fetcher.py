@@ -58,22 +58,34 @@ async def _download_images(http_client: httpx.AsyncClient, image_urls: list[str]
                 ext = "jpg"
             fname = f"{i+1:02d}.{ext}"
             fpath = dest_dir / fname
-            if fpath.exists() and fpath.stat().st_size > 0:
+            if fpath.exists() and fpath.stat().st_size > 200:
                 return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
             try:
                 r = await http_client.get(url, timeout=20)
                 r.raise_for_status()
-                fpath.write_bytes(r.content)
+                body = r.content
+                if len(body) <= 200:
+                    if fpath.exists():
+                        fpath.unlink(missing_ok=True)
+                    return (i, "")
+                head = body[:50].lower()
+                if b"<!doctype" in head or b"<html" in head:
+                    if fpath.exists():
+                        fpath.unlink(missing_ok=True)
+                    return (i, "")
+                fpath.write_bytes(body)
                 return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
             except Exception:
-                if fpath.exists() and fpath.stat().st_size > 0:
+                if fpath.exists() and fpath.stat().st_size > 200:
                     return (i, str(fpath.relative_to(BLOG_IMAGE_DIR)))
+                if fpath.exists():
+                    fpath.unlink(missing_ok=True)
                 return (i, "")
 
     tasks = [_fetch_one(i, url) for i, url in enumerate(image_urls)]
     results = await gather_cancel_safe(tasks, cleanup_timeout=5.0)
     results.sort(key=lambda x: x[0])
-    return [path for _, path in results]
+    return [path for _, path in results if path]
 
 # ── 博客任务表 ──
 # (显示名, fetch_posts, fetch_images, record_key, need_detail)
@@ -86,12 +98,150 @@ TASKS = [
 JST = timezone(timedelta(hours=9))
 BLOG_DB_PATH = Path("data/archive/blogs.db")
 _in_flight_blogs: set[str] = set()
+_blog_images_healed: bool = False
 
-# ── SQLite ──
+
+def heal_corrupt_blog_images(db: sqlite3.Connection | None = None) -> dict[str, int]:
+    """自愈检测与修复历史损坏的博客图片与失效元数据（强向下兼容与自动静默自愈）。
+
+    1. 扫描磁盘：清理 0 字节文件与 HTTP 404 HTML 伪图片，并清理空文件夹。
+    2. 扫描数据库：修复包含已失效 URL 或损坏本地路径的 blog_posts 记录。
+    """
+    stats = {"deleted_files": 0, "healed_posts": 0}
+    corrupt_rel_paths: set[str] = set()
+
+    # 1. 扫描磁盘上的损坏文件
+    if BLOG_IMAGE_DIR.exists():
+        try:
+            for p in BLOG_IMAGE_DIR.rglob("*"):
+                if not p.is_file():
+                    continue
+                try:
+                    sz = p.stat().st_size
+                    is_corrupt = False
+                    if sz <= 200:
+                        is_corrupt = True
+                    elif sz <= 4096:
+                        with open(p, "rb") as f:
+                            head = f.read(50).lower()
+                        if b"<!doctype" in head or b"<html" in head:
+                            is_corrupt = True
+
+                    if is_corrupt:
+                        rel = str(p.relative_to(BLOG_IMAGE_DIR)).replace("\\", "/")
+                        corrupt_rel_paths.add(rel)
+                        p.unlink(missing_ok=True)
+                        stats["deleted_files"] += 1
+                except Exception:
+                    pass
+
+            for d in sorted(BLOG_IMAGE_DIR.rglob("*"), key=lambda x: len(str(x)), reverse=True):
+                if d.is_dir() and not any(d.iterdir()):
+                    try:
+                        d.rmdir()
+                    except Exception:
+                        pass
+        except Exception as e:
+            log_all(f"⚠️ 扫描博客图片磁盘文件异常: {e}", is_debug=True)
+
+    # 2. 扫描与修正 SQLite 博客数据库
+    conn = db or init_blog_db()
+    try:
+        cur = conn.execute("""
+            SELECT id, images_json, image_paths_json
+            FROM blog_posts
+            WHERE images_json LIKE '%_pre/blog%' OR images_json LIKE '%img.nogizaka46.com%';
+        """)
+        dead_rows = cur.fetchall()
+
+        corrupt_rows = []
+        if corrupt_rel_paths:
+            cur_paths = conn.execute("""
+                SELECT id, images_json, image_paths_json
+                FROM blog_posts
+                WHERE image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != '';
+            """)
+            for cr in cur_paths.fetchall():
+                if any(cp in (cr[2] or "") for cp in corrupt_rel_paths):
+                    corrupt_rows.append(cr)
+
+        seen_ids = set()
+        target_rows = []
+        for r in list(dead_rows) + corrupt_rows:
+            if r[0] not in seen_ids:
+                seen_ids.add(r[0])
+                target_rows.append(r)
+
+        updates = []
+        for r in target_rows:
+            post_id = r[0]
+            raw_imgs = r[1]
+            raw_paths = r[2]
+            changed = False
+
+            # 修正 image_paths_json：剔除确认为损坏的本地路径
+            new_paths = []
+            if raw_paths:
+                try:
+                    paths = json.loads(raw_paths)
+                    if isinstance(paths, list):
+                        for p_str in paths:
+                            if not p_str:
+                                continue
+                            p_clean = str(p_str).replace("\\", "/")
+                            if p_clean in corrupt_rel_paths:
+                                changed = True
+                            else:
+                                new_paths.append(p_clean)
+                        if len(new_paths) != len(paths):
+                            changed = True
+                except Exception:
+                    pass
+
+            # 修正 images_json 中的已失效远端死链
+            new_imgs = []
+            if raw_imgs:
+                try:
+                    imgs = json.loads(raw_imgs)
+                    if isinstance(imgs, list):
+                        for u in imgs:
+                            if not u:
+                                continue
+                            u_str = str(u).strip()
+                            if "_pre/blog" in u_str or "img.nogizaka46.com" in u_str:
+                                changed = True
+                            else:
+                                new_imgs.append(u_str)
+                        if len(new_imgs) != len(imgs):
+                            changed = True
+                except Exception:
+                    pass
+
+            if changed:
+                updates.append((
+                    json.dumps(new_imgs, ensure_ascii=False) if new_imgs else "[]",
+                    json.dumps(new_paths, ensure_ascii=False) if new_paths else "[]",
+                    post_id,
+                ))
+
+        if updates:
+            conn.executemany("""
+                UPDATE blog_posts
+                SET images_json = ?, image_paths_json = ?
+                WHERE id = ?;
+            """, updates)
+            conn.commit()
+            stats["healed_posts"] = len(updates)
+            log_all(f"🩺 博客图片自愈完成: 清理了 {stats['deleted_files']} 个损坏/空文件，修正了 {stats['healed_posts']} 篇博文元数据")
+    except Exception as e:
+        log_all(f"⚠️ 自愈博客元数据异常: {e}", is_debug=True)
+
+    return stats
 
 
 def init_blog_db() -> sqlite3.Connection:
     """初始化博客数据库，返回共享连接。"""
+    global _blog_images_healed
     BLOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(BLOG_DB_PATH), timeout=60.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -140,6 +290,11 @@ def init_blog_db() -> sqlite3.Connection:
         except sqlite3.OperationalError:
             pass  # 列已存在
     conn.commit()
+
+    if not _blog_images_healed:
+        _blog_images_healed = True
+        heal_corrupt_blog_images(conn)
+
     return conn
 
 _BASE_DIR = Path(__file__).resolve().parent.parent

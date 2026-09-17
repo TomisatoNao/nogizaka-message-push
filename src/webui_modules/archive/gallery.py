@@ -204,68 +204,90 @@ def _get_blog_gallery(
                 ORDER BY p.date {order_dir}, p.id {order_dir}, CAST(j.key AS INTEGER) ASC
                 LIMIT ? OFFSET ?;
             """
-            rows = blog_db.execute(photos_sql, params + [per_page, offset]).fetchall()
+            from src.blog_fetcher import BLOG_IMAGE_DIR
 
             photos = []
-            for r in rows:
-                post_id = r[0]
-                g_key = r[1]
-                author = r[2]
-                title = r[3]
-                dt = r[4] or ""
-                idx = r[5]
-                img_val = r[6]
-                paths_raw = r[7]
-                if not img_val:
-                    continue
+            fetch_limit = per_page
+            fetch_offset = offset
 
-                idx_int = int(idx) if str(idx).isdigit() else 0
-                clean_local = ""
-                if paths_raw:
-                    try:
-                        paths = json.loads(paths_raw)
-                        if isinstance(paths, list) and 0 <= idx_int < len(paths) and paths[idx_int]:
-                            clean_local = str(paths[idx_int]).replace("\\", "/")
-                    except Exception:
-                        pass
+            while len(photos) < per_page:
+                batch_rows = blog_db.execute(photos_sql, params + [fetch_limit, fetch_offset]).fetchall()
+                if not batch_rows:
+                    break
+                for r in batch_rows:
+                    post_id = r[0]
+                    g_key = r[1]
+                    author = r[2]
+                    title = r[3]
+                    dt = r[4] or ""
+                    idx = r[5]
+                    img_val = r[6]
+                    paths_raw = r[7]
+                    if not img_val:
+                        continue
 
-                url = ""
-                if clean_local:
-                    url = _blog_media_url(clean_local)
+                    idx_int = int(idx) if str(idx).isdigit() else 0
+                    clean_local = ""
+                    if paths_raw:
+                        try:
+                            paths = json.loads(paths_raw)
+                            if isinstance(paths, list) and 0 <= idx_int < len(paths) and paths[idx_int]:
+                                clean_local = str(paths[idx_int]).replace("\\", "/")
+                        except Exception:
+                            pass
 
-                if not url:
-                    val_str = str(img_val).strip()
-                    if val_str.startswith("http://") or val_str.startswith("https://"):
-                        url = val_str
-                    elif val_str.startswith("/"):
-                        base = (
-                            "https://www.nogizaka46.com"
-                            if g_key == "nogizaka"
-                            else "https://sakurazaka46.com"
-                            if g_key == "sakurazaka"
-                            else "https://www.hinatazaka46.com"
-                        )
-                        url = base + val_str
-                    elif val_str:
-                        url = _blog_media_url(val_str.replace("\\", "/"))
+                    url = ""
+                    if clean_local:
+                        full_p = BLOG_IMAGE_DIR / clean_local
+                        if full_p.exists() and full_p.stat().st_size <= 200:
+                            clean_local = ""
+                        else:
+                            url = _blog_media_url(clean_local)
 
-                if not url:
-                    continue
+                    if not url:
+                        val_str = str(img_val).strip()
+                        if "_pre/blog" in val_str or "img.nogizaka46.com" in val_str:
+                            continue
+                        if val_str.startswith("http://") or val_str.startswith("https://"):
+                            url = val_str
+                        elif val_str.startswith("/"):
+                            base = (
+                                "https://www.nogizaka46.com"
+                                if g_key == "nogizaka"
+                                else "https://sakurazaka46.com"
+                                if g_key == "sakurazaka"
+                                else "https://www.hinatazaka46.com"
+                            )
+                            url = base + val_str
+                        elif val_str:
+                            full_p = BLOG_IMAGE_DIR / val_str.replace("\\", "/")
+                            if full_p.exists() and full_p.stat().st_size <= 200:
+                                continue
+                            url = _blog_media_url(val_str.replace("\\", "/"))
 
-                photos.append({
-                    "id": f"blog_{post_id}_{idx}",
-                    "blog_id": str(post_id),
-                    "source": "blog",
-                    "group_key": g_key,
-                    "member_name": author,
-                    "member_dir": _archive.member_dir_name(author),
-                    "published_at": dt,
-                    "text": title,
-                    "url": url,
-                    "local_file": clean_local or (str(img_val) if not str(img_val).startswith("http") else ""),
-                    "year": int(dt[:4]) if len(dt) >= 4 and dt[:4].isdigit() else None,
-                    "month": int(dt[5:7]) if len(dt) >= 7 and dt[5:7].isdigit() else None,
-                })
+                    if not url:
+                        continue
+
+                    photos.append({
+                        "id": f"blog_{post_id}_{idx}",
+                        "blog_id": str(post_id),
+                        "source": "blog",
+                        "group_key": g_key,
+                        "member_name": author,
+                        "member_dir": _archive.member_dir_name(author),
+                        "published_at": dt,
+                        "text": title,
+                        "url": url,
+                        "local_file": clean_local or (str(img_val) if not str(img_val).startswith("http") else ""),
+                        "year": int(dt[:4]) if len(dt) >= 4 and dt[:4].isdigit() else None,
+                        "month": int(dt[5:7]) if len(dt) >= 7 and dt[5:7].isdigit() else None,
+                    })
+                    if len(photos) >= per_page:
+                        break
+
+                fetch_offset += len(batch_rows)
+                if len(batch_rows) < fetch_limit:
+                    break
 
             total_pages = (total_photos + per_page - 1) // per_page if total_photos > 0 else 1
             return {
@@ -324,9 +346,15 @@ def _get_blog_gallery(
                         clean_local = str(paths[idx]).replace("\\", "/")
                     url = ""
                     if clean_local:
-                        url = _blog_media_url(clean_local)
+                        full_p = BLOG_IMAGE_DIR / clean_local
+                        if full_p.exists() and full_p.stat().st_size <= 200:
+                            clean_local = ""
+                        else:
+                            url = _blog_media_url(clean_local)
                     if not url:
                         val_str = str(img_val).strip()
+                        if "_pre/blog" in val_str or "img.nogizaka46.com" in val_str:
+                            continue
                         if val_str.startswith("http://") or val_str.startswith("https://"):
                             url = val_str
                         elif val_str.startswith("/"):
@@ -339,6 +367,9 @@ def _get_blog_gallery(
                             )
                             url = base + val_str
                         elif val_str:
+                            full_p = BLOG_IMAGE_DIR / val_str.replace("\\", "/")
+                            if full_p.exists() and full_p.stat().st_size <= 200:
+                                continue
                             url = _blog_media_url(val_str.replace("\\", "/"))
                     if not url:
                         continue
@@ -423,6 +454,7 @@ def get_gallery_years(member: str = "", source: str = "all") -> dict:
                         SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
                         FROM blog_posts p, json_each({json_target}) j
                         WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
+                          AND j.value NOT LIKE '%_pre/blog%' AND j.value NOT LIKE '%img.nogizaka46.com%'
                         GROUP BY y
                         ORDER BY y DESC;
                     """
