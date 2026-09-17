@@ -102,6 +102,30 @@ _blog_count_cache: dict[tuple, tuple[float, int]] = {}
 _BLOG_COUNT_CACHE_TTL = 120.0
 
 
+def _get_blog_image_expr(cols: set[str]) -> tuple[str, str]:
+    """返回用于匹配包含图片的 WHERE 子句与 json_each 解构表达式。"""
+    has_images = "images_json" in cols
+    has_paths = "image_paths_json" in cols
+
+    if has_images and has_paths:
+        where_expr = (
+            "((p.images_json IS NOT NULL AND p.images_json != '[]' AND p.images_json != '') OR "
+            "(p.image_paths_json IS NOT NULL AND p.image_paths_json != '[]' AND p.image_paths_json != ''))"
+        )
+        json_target = (
+            "CASE WHEN (p.images_json IS NOT NULL AND p.images_json != '[]' AND p.images_json != '') "
+            "THEN p.images_json ELSE p.image_paths_json END"
+        )
+    elif has_images:
+        where_expr = "p.images_json IS NOT NULL AND p.images_json != '[]' AND p.images_json != ''"
+        json_target = "p.images_json"
+    else:
+        where_expr = "p.image_paths_json IS NOT NULL AND p.image_paths_json != '[]' AND p.image_paths_json != ''"
+        json_target = "p.image_paths_json"
+
+    return where_expr, json_target
+
+
 def _get_blog_gallery(
     member: str = "",
     page: int = 1,
@@ -111,12 +135,15 @@ def _get_blog_gallery(
 ) -> dict:
     """从 blog.db 检索博客配图（利用 SQLite json_each 引擎级分页，极速毫秒响应）。"""
     try:
+        from src.webui_modules.archive.common import _blog_table_columns
         from src.webui_modules.archive_handlers import get_blog_db
         blog_db = get_blog_db()
         if not blog_db:
             return {"ok": True, "total": 0, "photos": [], "page": page, "per_page": per_page, "has_more": False}
 
-        where = ["p.image_paths_json IS NOT NULL", "p.image_paths_json != '[]'", "p.image_paths_json != ''"]
+        cols = _blog_table_columns(blog_db)
+        img_where, json_target = _get_blog_image_expr(cols)
+        where = [img_where]
         params: list[object] = []
 
         if member:
@@ -144,17 +171,18 @@ def _get_blog_gallery(
             else:
                 count_sql = f"""
                     SELECT COUNT(*)
-                    FROM blog_posts p, json_each(p.image_paths_json) j
-                    WHERE {where_str};
+                    FROM blog_posts p, json_each({json_target}) j
+                    WHERE {where_str} AND j.value IS NOT NULL AND j.value != '';
                 """
                 total_photos = blog_db.execute(count_sql, params).fetchone()[0]
                 _blog_count_cache[cache_key] = (now, total_photos)
 
             offset = (page - 1) * per_page
+            paths_col = "p.image_paths_json" if "image_paths_json" in cols else "NULL"
             photos_sql = f"""
-                SELECT p.id, p.group_key, p.author, p.title, p.date, j.key, j.value
-                FROM blog_posts p, json_each(p.image_paths_json) j
-                WHERE {where_str}
+                SELECT p.id, p.group_key, p.author, p.title, p.date, j.key, j.value, {paths_col}
+                FROM blog_posts p, json_each({json_target}) j
+                WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
                 ORDER BY p.date DESC, p.id DESC, CAST(j.key AS INTEGER) ASC
                 LIMIT ? OFFSET ?;
             """
@@ -168,13 +196,44 @@ def _get_blog_gallery(
                 title = r[3]
                 dt = r[4] or ""
                 idx = r[5]
-                img_rel = r[6]
-                if not img_rel:
+                img_val = r[6]
+                paths_raw = r[7]
+                if not img_val:
                     continue
-                clean_path = str(img_rel).replace("\\", "/")
-                url = _blog_media_url(clean_path)
+
+                idx_int = int(idx) if str(idx).isdigit() else 0
+                clean_local = ""
+                if paths_raw:
+                    try:
+                        paths = json.loads(paths_raw)
+                        if isinstance(paths, list) and 0 <= idx_int < len(paths) and paths[idx_int]:
+                            clean_local = str(paths[idx_int]).replace("\\", "/")
+                    except Exception:
+                        pass
+
+                url = ""
+                if clean_local:
+                    url = _blog_media_url(clean_local)
+
+                if not url:
+                    val_str = str(img_val).strip()
+                    if val_str.startswith("http://") or val_str.startswith("https://"):
+                        url = val_str
+                    elif val_str.startswith("/"):
+                        base = (
+                            "https://www.nogizaka46.com"
+                            if g_key == "nogizaka"
+                            else "https://sakurazaka46.com"
+                            if g_key == "sakurazaka"
+                            else "https://www.hinatazaka46.com"
+                        )
+                        url = base + val_str
+                    elif val_str:
+                        url = _blog_media_url(val_str.replace("\\", "/"))
+
                 if not url:
                     continue
+
                 photos.append({
                     "id": f"blog_{post_id}_{idx}",
                     "blog_id": str(post_id),
@@ -185,7 +244,7 @@ def _get_blog_gallery(
                     "published_at": dt,
                     "text": title,
                     "url": url,
-                    "local_file": clean_path,
+                    "local_file": clean_local or (str(img_val) if not str(img_val).startswith("http") else ""),
                     "year": int(dt[:4]) if len(dt) >= 4 and dt[:4].isdigit() else None,
                     "month": int(dt[5:7]) if len(dt) >= 7 and dt[5:7].isdigit() else None,
                 })
@@ -204,8 +263,13 @@ def _get_blog_gallery(
             }
         except Exception:
             # 降级方案：针对不支持 json_each 的旧 SQLite 环境
+            select_cols = ["p.id", "p.group_key", "p.author", "p.title", "p.date"]
+            if "images_json" in cols:
+                select_cols.append("p.images_json")
+            if "image_paths_json" in cols:
+                select_cols.append("p.image_paths_json")
             posts_sql = f"""
-                SELECT p.id, p.group_key, p.author, p.title, p.date, p.image_paths_json
+                SELECT {', '.join(select_cols)}
                 FROM blog_posts p
                 WHERE {where_str}
                 ORDER BY p.date DESC, p.id DESC;
@@ -218,18 +282,46 @@ def _get_blog_gallery(
                 author = r[2]
                 title = r[3]
                 dt = r[4] or ""
-                imgs_raw = r[5]
+                extra = r[5:]
                 imgs = []
-                if imgs_raw:
+                paths = []
+                if "images_json" in cols and extra:
                     try:
-                        imgs = json.loads(imgs_raw)
-                    except (ValueError, TypeError):
-                        imgs = []
-                for idx, img_rel in enumerate(imgs):
-                    if not img_rel:
+                        imgs = json.loads(extra[0]) if extra[0] else []
+                    except Exception:
+                        pass
+                if "image_paths_json" in cols and extra:
+                    p_idx = 1 if "images_json" in cols else 0
+                    if p_idx < len(extra):
+                        try:
+                            paths = json.loads(extra[p_idx]) if extra[p_idx] else []
+                        except Exception:
+                            pass
+                source_list = imgs if (isinstance(imgs, list) and imgs) else paths if isinstance(paths, list) else []
+                for idx, img_val in enumerate(source_list):
+                    if not img_val:
                         continue
-                    clean_path = img_rel.replace("\\", "/")
-                    url = _blog_media_url(clean_path)
+                    clean_local = ""
+                    if isinstance(paths, list) and idx < len(paths) and paths[idx]:
+                        clean_local = str(paths[idx]).replace("\\", "/")
+                    url = ""
+                    if clean_local:
+                        url = _blog_media_url(clean_local)
+                    if not url:
+                        val_str = str(img_val).strip()
+                        if val_str.startswith("http://") or val_str.startswith("https://"):
+                            url = val_str
+                        elif val_str.startswith("/"):
+                            base = (
+                                "https://www.nogizaka46.com"
+                                if g_key == "nogizaka"
+                                else "https://sakurazaka46.com"
+                                if g_key == "sakurazaka"
+                                else "https://www.hinatazaka46.com"
+                            )
+                            url = base + val_str
+                        elif val_str:
+                            url = _blog_media_url(val_str.replace("\\", "/"))
                     if not url:
                         continue
                     all_photos.append({
@@ -242,7 +334,7 @@ def _get_blog_gallery(
                         "published_at": dt,
                         "text": title,
                         "url": url,
-                        "local_file": clean_path,
+                        "local_file": clean_local or (str(img_val) if not str(img_val).startswith("http") else ""),
                         "year": int(dt[:4]) if len(dt) >= 4 and dt[:4].isdigit() else None,
                         "month": int(dt[5:7]) if len(dt) >= 7 and dt[5:7].isdigit() else None,
                     })
@@ -324,28 +416,43 @@ def get_gallery_members() -> dict:
 
         if blog_db:
             try:
+                from src.webui_modules.archive.common import _blog_table_columns
+                b_cols = _blog_table_columns(blog_db)
+                where_expr, json_target = _get_blog_image_expr(b_cols)
                 try:
-                    b_rows = blog_db.execute("""
+                    b_rows = blog_db.execute(f"""
                         SELECT p.group_key, p.author, COUNT(*)
-                        FROM blog_posts p, json_each(p.image_paths_json) j
-                        WHERE p.image_paths_json IS NOT NULL AND p.image_paths_json != '' AND p.image_paths_json != '[]'
+                        FROM blog_posts p, json_each({json_target}) j
+                        WHERE {where_expr} AND j.value IS NOT NULL AND j.value != ''
                         GROUP BY p.group_key, p.author;
                     """).fetchall()
                 except Exception:
-                    b_posts = blog_db.execute("""
-                        SELECT group_key, author, image_paths_json
+                    select_cols = ["group_key", "author"]
+                    if "images_json" in b_cols:
+                        select_cols.append("images_json")
+                    if "image_paths_json" in b_cols:
+                        select_cols.append("image_paths_json")
+                    b_posts = blog_db.execute(f"""
+                        SELECT {', '.join(select_cols)}
                         FROM blog_posts
-                        WHERE image_paths_json IS NOT NULL AND image_paths_json != '' AND image_paths_json != '[]';
+                        WHERE {where_expr};
                     """).fetchall()
                     counts_dict = {}
-                    for g_k, auth, j_raw in b_posts:
+                    for row in b_posts:
+                        g_k = row[0]
+                        auth = row[1]
                         if not auth:
                             continue
-                        try:
-                            imgs = json.loads(j_raw)
-                            c = len([img for img in imgs if img])
-                        except Exception:
-                            c = 0
+                        c = 0
+                        for j_raw in row[2:]:
+                            if j_raw:
+                                try:
+                                    imgs = json.loads(j_raw)
+                                    if isinstance(imgs, list) and imgs:
+                                        c = len([img for img in imgs if img])
+                                        break
+                                except Exception:
+                                    pass
                         counts_dict[(g_k, auth)] = counts_dict.get((g_k, auth), 0) + c
                     b_rows = [(k[0], k[1], v) for k, v in counts_dict.items()]
 

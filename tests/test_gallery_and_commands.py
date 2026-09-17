@@ -380,3 +380,78 @@ def test_gallery_members_merging_and_blog_only(temp_archive_env, monkeypatch):
     assert handled is True
     assert h.payload["ok"] is True
     assert len(h.payload["members"]) >= 2
+
+
+def test_blog_gallery_remote_images_fallback(temp_archive_env, monkeypatch):
+    """验证博客配图仅存在远程 URL（未下载本地路径）时，仍能完整统计并正确渲染画廊卡片。"""
+    from src.webui_modules.archive.gallery import _get_blog_gallery, get_gallery_members, handle_gallery
+    import src.webui_modules.archive.gallery as gm
+
+    blog_conn = sqlite3.connect(":memory:")
+    blog_conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            images_json TEXT,
+            image_paths_json TEXT
+        );
+    """)
+    # 模拟远藤樱仅有远程 URL（如 5 张图），本地 image_paths_json 为空列表
+    blog_conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, images_json, image_paths_json)
+        VALUES (
+            101, 'nogizaka', '遠藤 さくら', '乃木坂三昧', '2026-09-01 20:28:00',
+            '["https://www.nogizaka46.com/files/img1.jpg", "https://www.nogizaka46.com/files/img2.jpg", "https://www.nogizaka46.com/files/img3.jpg"]',
+            '[]'
+        );
+    """)
+    # 第二篇博客，2 张图，image_paths_json 为 None
+    blog_conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, images_json, image_paths_json)
+        VALUES (
+            102, 'nogizaka', '遠藤 さくら', 'ナイショ', '2026-08-01 19:58:00',
+            '["https://www.nogizaka46.com/files/img4.jpg", "https://www.nogizaka46.com/files/img5.jpg"]',
+            NULL
+        );
+    """)
+    blog_conn.commit()
+
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: blog_conn)
+    gm._gallery_members_cache = None
+    gm._blog_count_cache.clear()
+
+    # 1. 验证名册统计总数正确纳入所有 5 张图片（而不是 0 或仅有本地的）
+    mem_res = get_gallery_members()
+    assert mem_res["ok"] is True
+    endo = next((m for m in mem_res["members"] if "遠藤" in m["display"]), None)
+    assert endo is not None
+    assert endo["blog_photos"] == 5
+    assert endo["total_photos"] == 5
+
+    # 2. 验证 _get_blog_gallery 分页查询正确返回 5 张图片及远程 URL
+    gal_res = _get_blog_gallery(member="遠藤 さくら", page=1, per_page=10)
+    assert gal_res["ok"] is True
+    assert gal_res["total"] == 5
+    assert len(gal_res["photos"]) == 5
+    assert gal_res["photos"][0]["url"].startswith("https://www.nogizaka46.com/")
+    assert gal_res["photos"][0]["member_name"] == "遠藤 さくら"
+
+    # 3. 验证 handle_gallery HTTP 端点
+    class MockHandler:
+        def __init__(self, path):
+            self.path = path
+            self.payload = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+
+    h = MockHandler("/api/archive/gallery?member=遠藤さくら&source=blog")
+    handled = handle_gallery(h, "gallery", lambda need_admin: True, lambda: {})
+    assert handled is True
+    assert h.payload["ok"] is True
+    assert h.payload["total"] == 5
+    assert len(h.payload["photos"]) == 5
+

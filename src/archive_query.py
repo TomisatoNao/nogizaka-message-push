@@ -552,6 +552,48 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
     except Exception as ex:
         log_all(f"⚠️ 随机抽取照片异常: {ex}", is_debug=True)
 
+    # 2. 如果 messages 中无可用照片，尝试从博客本地配图中抽取
+    try:
+        from src.blog_fetcher import BLOG_IMAGE_DIR, init_blog_db
+        blog_db = init_blog_db()
+        if blog_db:
+            b_where = ["image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != ''"]
+            b_params: list[object] = []
+            if member_dir:
+                norm_m = member_dir.replace(" ", "").replace("　", "").replace("_", "")
+                b_where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
+                b_params.append(norm_m)
+            b_sql = f"""
+                SELECT id, group_key, author, title, date, image_paths_json
+                FROM blog_posts
+                WHERE {' AND '.join(b_where)}
+                ORDER BY RANDOM() LIMIT 20;
+            """
+            b_rows = blog_db.execute(b_sql, b_params).fetchall()
+            for br in b_rows:
+                paths = json.loads(br[5]) if br[5] else []
+                for p in paths:
+                    if not p:
+                        continue
+                    clean_p = str(p).replace("\\", "/")
+                    full_p = BLOG_IMAGE_DIR / Path(clean_p)
+                    if full_p.is_file():
+                        return {
+                            "id": f"blog_{br[0]}",
+                            "member_name": str(br[2]),
+                            "member_dir": member_dir or str(br[2]),
+                            "published_at": br[4] or "",
+                            "text": str(br[3] or "").strip(),
+                            "translation": "",
+                            "local_file": clean_p,
+                            "abs_path": full_p.resolve(),
+                            "url": f"/api/archive/blog_media/{clean_p}",
+                            "width": None,
+                            "height": None,
+                        }
+    except Exception as ex:
+        log_all(f"⚠️ 从博客抽取随机照片异常: {ex}", is_debug=True)
+
     return None
 
 
