@@ -5419,9 +5419,14 @@ async function loadGalleryPhotos(reset = true) {
       const badgeText = isBlog ? "📄 博客" : "💬 消息";
       const badgeClass = isBlog ? "gallery-badge blog" : "gallery-badge msg";
 
+      let thumbUrl = photo.url;
+      if (photo.url && (photo.url.startsWith("/api/archive/media/") || photo.url.startsWith("/api/archive/blog_media/"))) {
+        thumbUrl += (photo.url.includes("?") ? "&thumb=1" : "?thumb=1");
+      }
+
       card.innerHTML =
         '<div class="' + badgeClass + '">' + badgeText + '</div>' +
-        '<img src="' + esc(photo.url) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
+        '<img src="' + esc(thumbUrl) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
         '<div class="gallery-overlay">' +
           '<div class="gallery-meta">' + esc(photo.member_name || "") + ' · ' + esc(dateStr) + '</div>' +
           (photo.text ? '<div class="gallery-caption">' + esc(photo.text) + '</div>' : '') +

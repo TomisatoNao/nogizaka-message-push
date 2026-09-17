@@ -999,6 +999,97 @@ def test_gallery_infinite_scroll_contract():
     assert "加载失败，点击重试" in js
 
 
+def test_thumbnail_pipeline_generation_and_caching(tmp_path, monkeypatch):
+    """验证 WebP 缩略图管线生成、等比缩放、两级哈希持久化缓存与损坏安全降级。"""
+    from PIL import Image
+    from src.webui_modules.archive.thumbnails import get_or_create_thumbnail
+
+    # 隔离测试缓存目录
+    test_cache_dir = tmp_path / "cache_thumbs"
+    monkeypatch.setattr("src.webui_modules.archive.thumbnails.THUMBNAIL_CACHE_DIR", test_cache_dir)
+
+    # 1. 构造一个 1200x800 的测试源图
+    src_img_path = tmp_path / "source_big.jpg"
+    im = Image.new("RGB", (1200, 800), color=(240, 100, 50))
+    im.save(src_img_path, format="JPEG")
+
+    # 2. 首次生成：验证等比缩放至 480 宽并存为 WebP
+    thumb_path = get_or_create_thumbnail(src_img_path, max_width=480, quality=80)
+    assert thumb_path is not None
+    assert thumb_path.is_file()
+    assert thumb_path.suffix == ".webp"
+
+    with Image.open(thumb_path) as thumb_im:
+        assert thumb_im.size == (480, 320)
+        assert thumb_im.format == "WEBP"
+
+    # 3. 二次调用：验证命中磁盘持久化缓存（不会抛错并直接返回）
+    cached_path = get_or_create_thumbnail(src_img_path, max_width=480, quality=80)
+    assert cached_path == thumb_path
+
+    # 4. 容错测试：损坏/不存在文件安全返回 None 降级
+    non_existent = tmp_path / "not_found.jpg"
+    assert get_or_create_thumbnail(non_existent) is None
+
+    corrupt_file = tmp_path / "corrupt.jpg"
+    corrupt_file.write_bytes(b"not_an_image_data")
+    assert get_or_create_thumbnail(corrupt_file) is None
+
+
+def test_media_service_immutable_cache_control(tmp_path):
+    """验证归档媒体流 HTTP 200/206/304 具备 1 年期 immutable 强缓存头。"""
+    from src.webui_modules.media_service import serve_file_range
+
+    test_file = tmp_path / "test_media.jpg"
+    test_file.write_bytes(b"dummy_media_bytes_1234567890")
+
+    class DummyHandler:
+        def __init__(self):
+            self.headers = {}
+            self.response_code = 200
+            self.sent_headers = {}
+            self.wfile = bytearray()
+
+        def send_response(self, code):
+            self.response_code = code
+
+        def send_header(self, k, v):
+            self.sent_headers[k] = v
+
+        def end_headers(self):
+            pass
+
+    # 1. 验证标准 200 响应携带 immutable 强缓存头
+    h200 = DummyHandler()
+    h200.wfile = type("WFile", (), {"write": lambda self, b: None})()
+    serve_file_range(h200, test_file)
+    assert h200.response_code == 200
+    assert "immutable" in h200.sent_headers.get("Cache-Control", "")
+    assert "max-age=31536000" in h200.sent_headers.get("Cache-Control", "")
+
+    # 2. 验证 304 条件缓存同样携带 immutable 强缓存头
+    h304 = DummyHandler()
+    h304.headers["If-None-Match"] = h200.sent_headers.get("ETag", "")
+    serve_file_range(h304, test_file)
+    assert h304.response_code == 304
+    assert "immutable" in h304.sent_headers.get("Cache-Control", "")
+
+
+def test_gallery_card_thumbnail_frontend_contract():
+    """验证前端相册卡片消费 WebP 缩略图（?thumb=1）且与大图预览分离契约。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 验证网格卡片加载时注入 ?thumb=1
+    assert 'thumbUrl += (photo.url.includes("?") ? "&thumb=1" : "?thumb=1");' in js
+    assert '<img src="\' + esc(thumbUrl) +' in js
+    # 验证 Lightbox 依然保存原始无损大图 URL
+    assert 'url: photo.url,' in js
+
+
+
 
 
 

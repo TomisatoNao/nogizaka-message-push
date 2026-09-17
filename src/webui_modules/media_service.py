@@ -11,7 +11,11 @@ from pathlib import Path
 import re
 
 
-def serve_file_range(handler, path: Path) -> None:
+def serve_file_range(
+    handler,
+    path: Path,
+    cache_control: str = "public, max-age=31536000, immutable",
+) -> None:
     """为 HTTP 请求处理器提供媒体文件流式分片服务。"""
     st = path.stat()
     size = st.st_size
@@ -34,7 +38,7 @@ def serve_file_range(handler, path: Path) -> None:
         if fresh:
             handler.send_response(304)
             handler.send_header("ETag", etag)
-            handler.send_header("Cache-Control", "private, no-cache")
+            handler.send_header("Cache-Control", cache_control)
             handler.end_headers()
             return
 
@@ -61,7 +65,7 @@ def serve_file_range(handler, path: Path) -> None:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     handler.send_header("ETag", etag)
     handler.send_header("Last-Modified", last_modified)
-    handler.send_header("Cache-Control", "private, no-cache")
+    handler.send_header("Cache-Control", cache_control)
     handler.end_headers()
     try:
         with open(path, "rb") as f:

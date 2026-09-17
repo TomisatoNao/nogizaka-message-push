@@ -741,6 +741,12 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         if not full.is_file() or full.stat().st_size <= 200:
             _send_json_resp(handler, {"ok": False, "errors": ["媒体不存在或已损坏"]}, 404)
             return True
+        if qp("thumb").lower() in ("1", "true", "yes"):
+            from src.webui_modules.archive.thumbnails import get_or_create_thumbnail
+            thumb_path = get_or_create_thumbnail(full)
+            if thumb_path and thumb_path.is_file():
+                serve_file_range(handler, thumb_path)
+                return True
         serve_file_range(handler, full)
         return True
 
