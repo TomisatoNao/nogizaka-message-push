@@ -331,3 +331,21 @@ async def test_service_start_stop_cleans_queue():
     await service.stop()
     assert service.running is False
     assert service._queue.empty() is True
+
+
+def test_default_tomisato_nao_prompt_humanized():
+    from src.platforms.napcat_chat import DEFAULT_TOMISATO_NAO_PROMPT
+
+    # 1. 严格禁止把粉丝称呼为闹友/なお友/闹糕
+    assert "严禁使用「闹友」、「なお友」、「闹糕」" in DEFAULT_TOMISATO_NAO_PROMPT
+    assert "直接使用人称/指示代词「你」（单人）或「你们」（群体/大家）" in DEFAULT_TOMISATO_NAO_PROMPT
+
+    # 2. Few-shot 范例部分绝不可出现任何闹友/なお友/闹糕等虚假标签
+    few_shot_part = DEFAULT_TOMISATO_NAO_PROMPT.split("【Few-shot 语感参考范例】")[-1]
+    for forbidden in ["闹友", "なお友", "闹糕", "粉丝"]:
+        assert forbidden not in few_shot_part
+
+    # 3. 包含核心纪律约束
+    assert "严禁输出任何计算机代码" in DEFAULT_TOMISATO_NAO_PROMPT
+    assert "严禁承认自己是 AI" in DEFAULT_TOMISATO_NAO_PROMPT
+
