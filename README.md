@@ -111,11 +111,9 @@ flowchart TD
 
 适用于群晖 Synology NAS、QNAP、Unraid、1Panel、Portainer、云服务器及本地 Docker 环境。
 
-> [!CAUTION]
-> **重要目录挂载避坑提示**：
-> 项目中的 `config/` 目录不仅包含 `config.json`，还包含核心 Python 模块（如 `config.py`、`credentials.py`）。
-> **切勿在宿主机挂载一个空目录覆盖 `/app/config`**，否则会导致容器内缺失源码模块而报错 `ModuleNotFoundError`。
-> **正确方式**：请先使用 `git clone` 完整克隆本项目代码后再启动 Compose；若仅单文件运行，请确保本地 `config/` 包含源码文件，或者仅单独挂载 `config.json` 文件（如 `./config/config.json:/app/config/config.json`）。
+> [!TIP]
+> **目录与配置持久化说明**：
+> 宿主机的 `./config` 目录仅用于持久化用户的 `config.json` 配置文件与修改历史快照，不包含任何程序源码。首次部署时，无论宿主机 `./config` 目录是否存在或为空，容器启动时均会自动从默认模板安全初始化配置文件，开箱即用。
 
 1. **克隆代码并准备环境**：
    ```bash
@@ -574,9 +572,9 @@ INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 ## ❓ 常见故障排查 / FAQ
 
 <details>
-<summary><b>Q1: Docker 部署启动报错「No module named 'config.config'」？</b></summary>
+<summary><b>Q1: 旧版 Docker 部署启动报错「No module named 'config.config'」？</b></summary>
 
-这是因为在宿主机挂载了一个空目录覆盖了容器内的 `/app/config`。`config/` 目录中包含系统的核心 Python 模块代码。解决办法：请使用 `git clone` 下载完整源码后再启动，或者仅将 `config/config.json` 作为单文件挂载，不要挂载整个空目录覆盖 `/app/config`。
+该问题属于历史旧版本的代码与配置混部缺陷。当前最新版本已完成全方位架构升级，所有核心源码均已迁入只读镜像层 `src/config/`，宿主机挂载空 `./config` 不会再影响程序运行。如遇此问题，请执行 `git pull` 并拉取最新 Docker 镜像（`docker compose pull`）重启即可自动解决。
 </details>
 
 <details>
