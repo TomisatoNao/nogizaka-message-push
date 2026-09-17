@@ -1093,6 +1093,32 @@ def test_gallery_card_thumbnail_frontend_contract():
     assert '$("lbImg").removeAttribute("src");' in js
 
 
+def test_blog_images_optimization_and_fallback_contract():
+    """验证博客页卡片封面 WebP 缩略图接入、三级降级容错及阅读器 0ms 占位契约。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 1. 缩略图生成接入契约
+    assert "function _getBlogThumbUrl(url)" in js
+    assert 'url.startsWith("/api/archive/blog_media/")' in js
+    assert 'let coverThumbUrl = _getBlogThumbUrl(coverUrl);' in js
+    assert 'const coverThumbUrl = _getBlogThumbUrl(coverUrl);' in js
+
+    # 2. 三级降级容错契约（缩略图 -> 本地原图 -> 官方远程 -> 文本占位）
+    assert 'data-full-src="' in js
+    assert 'dataset.triedFull !== "1"' in js
+    assert 'dataset.triedFull = "1"' in js
+    assert 'heroCoverImg.src = fullSrc;' in js
+    assert 'coverImg.src = fullSrc;' in js
+    assert '<div class="bc-cover no-pic">📝</div>' in js
+
+    # 3. 博客正文阅读器图片点击 0ms 秒开占位契约
+    assert "openLightbox(idx, img, null, img.src);" in js
+
+
+
 
 
 

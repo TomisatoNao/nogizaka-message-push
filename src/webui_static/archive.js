@@ -1437,6 +1437,14 @@ function renderBlogPagination(curPage, total) {
   container.innerHTML = html;
 }
 
+function _getBlogThumbUrl(url) {
+  if (!url) return "";
+  if (url.startsWith("/api/archive/blog_media/") || url.startsWith("/api/archive/media/")) {
+    return url + (url.includes("?") ? "&thumb=1" : "?thumb=1");
+  }
+  return url;
+}
+
 function renderBlogHero(post) {
   const hero = $("blogHero");
   hero.style.display = "block";
@@ -1446,11 +1454,12 @@ function renderBlogHero(post) {
   // 列表接口只返回摘要和封面；正文在打开详情时按需加载。
   let bodyHtml = post.body_html || "";
   let coverUrl = post.cover || _getCoverUrl(bodyHtml);
+  let coverThumbUrl = _getBlogThumbUrl(coverUrl);
   const excerptText = post.excerpt || bodyHtml.replace(/<[^>]+>/g, "");
 
   let coverHtml = '';
   if (coverUrl) {
-    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverUrl) + '\')"><img src="' + esc(coverUrl) + '" data-orig-src="' + esc(post.cover_original || "") + '" loading="lazy" decoding="async" alt=""></div>';
+    coverHtml = '<div class="bh-cover" style="background-image: url(\'' + esc(coverThumbUrl) + '\')"><img src="' + esc(coverThumbUrl) + '" data-full-src="' + esc(coverUrl) + '" data-orig-src="' + esc(post.cover_original || "") + '" loading="lazy" decoding="async" alt=""></div>';
   } else {
     // 无封面链接：保留原有无封面样式（📝 占位）
     coverHtml = '<div class="bh-cover no-pic" style="font-size:48px; color:var(--muted)">📝</div>';
@@ -1464,13 +1473,23 @@ function renderBlogHero(post) {
       '<div class="bh-excerpt">' + esc(excerptText.substring(0, 150)) + (excerptText.length > 150 ? '...' : '') + '</div>' +
     '</div>';
 
-  // 封面图加载失败（404/防盗链/资源不存在）→ 降级为 📝 占位
+  // 封面图加载失败：先回退到本地原图，若仍失败回退到官方远程，最后降级为 📝 占位
   const heroCoverImg = hero.querySelector('.bh-cover img');
   if (heroCoverImg) {
     heroCoverImg.addEventListener('error', () => {
+      const fullSrc = heroCoverImg.dataset.fullSrc;
+      if (fullSrc && heroCoverImg.src !== fullSrc && heroCoverImg.dataset.triedFull !== "1") {
+        heroCoverImg.dataset.triedFull = "1";
+        heroCoverImg.src = fullSrc;
+        const coverBox = hero.querySelector('.bh-cover');
+        if (coverBox) coverBox.style.backgroundImage = 'url(\'' + esc(fullSrc) + '\')';
+        return;
+      }
       if (post.cover_original && heroCoverImg.dataset.fallback !== "1") {
         heroCoverImg.dataset.fallback = "1";
         heroCoverImg.src = post.cover_original;
+        const coverBox = hero.querySelector('.bh-cover');
+        if (coverBox) coverBox.style.backgroundImage = 'url(\'' + esc(post.cover_original) + '\')';
         return;
       }
       const cover = heroCoverImg.parentElement;
@@ -1491,6 +1510,7 @@ function renderBlogMiniCard(post, container) {
   const dateStr = (post.date || "").substring(0, 16);
 
   const coverUrl = post.cover || _getCoverUrl(post.body_html || "");
+  const coverThumbUrl = _getBlogThumbUrl(coverUrl);
 
   const card = document.createElement("div");
   card.className = "bmc-card blog-card-mini";
@@ -1498,7 +1518,7 @@ function renderBlogMiniCard(post, container) {
 
   let html = '';
   if (coverUrl) {
-    html += '<div class="bc-cover"><img src="' + esc(coverUrl) + '" data-orig-src="' + esc(post.cover_original || "") + '" alt="" loading="lazy"></div>';
+    html += '<div class="bc-cover"><img src="' + esc(coverThumbUrl) + '" data-full-src="' + esc(coverUrl) + '" data-orig-src="' + esc(post.cover_original || "") + '" alt="" loading="lazy"></div>';
   } else {
     // 无封面链接：保留原有无封面样式（📝 占位）
     html += '<div class="bc-cover no-pic">📝</div>';
@@ -1525,10 +1545,16 @@ function renderBlogMiniCard(post, container) {
     
   card.innerHTML = html;
 
-  // 缩略图加载失败（404/防盗链/资源不存在）→ 降级为 📝 占位
+  // 缩略图加载失败：先回退到本地原图，若仍失败回退到官方远程，最后降级为 📝 占位
   const coverImg = card.querySelector('.bc-cover img');
   if (coverImg) {
     coverImg.addEventListener('error', () => {
+      const fullSrc = coverImg.dataset.fullSrc;
+      if (fullSrc && coverImg.src !== fullSrc && coverImg.dataset.triedFull !== "1") {
+        coverImg.dataset.triedFull = "1";
+        coverImg.src = fullSrc;
+        return;
+      }
       if (post.cover_original && coverImg.dataset.fallback !== "1") {
         coverImg.dataset.fallback = "1";
         coverImg.src = post.cover_original;
@@ -1748,7 +1774,7 @@ function renderCurrentBlogContent() {
     }
     img.onclick = () => {
       images = blogImages;
-      openLightbox(idx, img);
+      openLightbox(idx, img, null, img.src);
     };
   });
 
