@@ -11,6 +11,9 @@ from pathlib import Path
 import re
 
 
+mimetypes.add_type("image/webp", ".webp")
+
+
 def serve_file_range(
     handler,
     path: Path,
@@ -21,7 +24,18 @@ def serve_file_range(
     size = st.st_size
     etag = f'"{int(st.st_mtime)}-{size:x}"'
     last_modified = formatdate(st.st_mtime, usegmt=True)
-    content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    content_type = mimetypes.guess_type(str(path))[0]
+    if not content_type:
+        ext = path.suffix.lower()
+        if ext == ".webp":
+            content_type = "image/webp"
+        elif ext in (".jpg", ".jpeg"):
+            content_type = "image/jpeg"
+        elif ext == ".png":
+            content_type = "image/png"
+        else:
+            content_type = "application/octet-stream"
+
 
     # 条件请求（无 Range 时才处理 304）
     if not handler.headers.get("Range"):

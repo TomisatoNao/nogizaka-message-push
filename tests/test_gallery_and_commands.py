@@ -1087,6 +1087,11 @@ def test_gallery_card_thumbnail_frontend_contract():
     assert '<img src="\' + esc(thumbUrl) +' in js
     # 验证 Lightbox 依然保存原始无损大图 URL
     assert 'url: photo.url,' in js
+    # 验证跨页去重与灯箱无缝渐进占位防止错位闪烁
+    assert "existingUrls.has(photo.url)" in js
+    assert 'function openLightbox(i, opener, caption, placeholderUrl)' in js
+    assert '$("lbImg").removeAttribute("src");' in js
+
 
 
 

@@ -2955,7 +2955,10 @@ function renderBubble(msg) {
 
 // ── 灯箱 ─────────────────────────────────────────
 let lbIndex = 0;
-function openLightbox(i, opener, caption) {
+let lbImageLoadVersion = 0;
+
+function openLightbox(i, opener, caption, placeholderUrl) {
+  const currentVersion = ++lbImageLoadVersion;
   if (typeof i === "string") {
     if (opener) lightboxOpener = opener;
     $("lbImg").src = i;
@@ -2972,8 +2975,29 @@ function openLightbox(i, opener, caption) {
   if (isNaN(idx) || idx < 0 || idx >= images.length) return;
   if (opener) lightboxOpener = opener;
   lbIndex = idx;
-  $("lbImg").src = images[idx].url;
-  $("lbImg").alt = images[idx].caption || "归档图片";
+  const item = images[idx];
+  const targetUrl = item.url;
+  const targetPlaceholder = placeholderUrl || item.thumbUrl || "";
+
+  // 1. 优先使用当前已完成的缩略图立即占位展示（0ms秒开，彻底杜绝上一张旧图残留）
+  if (targetPlaceholder) {
+    $("lbImg").src = targetPlaceholder;
+  } else {
+    $("lbImg").removeAttribute("src");
+  }
+  $("lbImg").alt = item.caption || "归档图片";
+
+  // 2. 后台无缝加载高清原图，加载完毕平滑替换
+  if (targetUrl && targetUrl !== targetPlaceholder) {
+    const preloader = new Image();
+    preloader.src = targetUrl;
+    preloader.onload = () => {
+      if (currentVersion === lbImageLoadVersion && $("lightbox").classList.contains("open")) {
+        $("lbImg").src = targetUrl;
+      }
+    };
+  }
+
   if (images.length > 1) {
     $("lbCounter").style.display = "";
     $("lbCounter").textContent = (idx + 1) + " / " + images.length;
@@ -2993,6 +3017,10 @@ function closeLightbox() {
   if (!box.classList.contains("open")) return;
   box.classList.remove("open");
   box.setAttribute("aria-hidden", "true");
+  ++lbImageLoadVersion;
+  if ($("lbImg")) {
+    $("lbImg").removeAttribute("src");
+  }
   if (lightboxOpener && document.contains(lightboxOpener)) lightboxOpener.focus();
   lightboxOpener = null;
 }
@@ -5152,10 +5180,11 @@ function renderGalleryYearChips() {
   });
 }
 
-function openGalleryLightbox(idx) {
+function openGalleryLightbox(idx, placeholderUrl) {
   if (idx < 0 || idx >= curGalleryImages.length) return;
   images = curGalleryImages;
-  openLightbox(idx);
+  const item = curGalleryImages[idx];
+  openLightbox(idx, null, null, placeholderUrl || (item ? item.thumbUrl : ""));
 }
 
 async function loadGalleryMembers() {
@@ -5393,9 +5422,14 @@ async function loadGalleryPhotos(reset = true) {
     }
 
     const fragment = document.createDocumentFragment();
-    const startIdx = curGalleryImages.length;
-    list.forEach((photo, i) => {
-      const globalIdx = startIdx + i;
+    const existingUrls = new Set(curGalleryImages.map(img => img.url));
+
+    list.forEach((photo) => {
+      if (!photo || !photo.url) return;
+      if (existingUrls.has(photo.url)) return;
+      existingUrls.add(photo.url);
+
+      const globalIdx = curGalleryImages.length;
       let dateStr = photo.published_at || "";
       try {
         const dt = new Date(photo.published_at);
@@ -5404,8 +5438,14 @@ async function loadGalleryPhotos(reset = true) {
         }
       } catch (_) {}
 
+      let thumbUrl = photo.url;
+      if (photo.url && (photo.url.startsWith("/api/archive/media/") || photo.url.startsWith("/api/archive/blog_media/"))) {
+        thumbUrl += (photo.url.includes("?") ? "&thumb=1" : "?thumb=1");
+      }
+
       curGalleryImages.push({
         url: photo.url,
+        thumbUrl: thumbUrl,
         caption: "【" + (photo.member_name || "") + "】" + dateStr + (photo.text ? " · " + photo.text.slice(0, 60) : ""),
       });
 
@@ -5419,11 +5459,6 @@ async function loadGalleryPhotos(reset = true) {
       const badgeText = isBlog ? "📄 博客" : "💬 消息";
       const badgeClass = isBlog ? "gallery-badge blog" : "gallery-badge msg";
 
-      let thumbUrl = photo.url;
-      if (photo.url && (photo.url.startsWith("/api/archive/media/") || photo.url.startsWith("/api/archive/blog_media/"))) {
-        thumbUrl += (photo.url.includes("?") ? "&thumb=1" : "?thumb=1");
-      }
-
       card.innerHTML =
         '<div class="' + badgeClass + '">' + badgeText + '</div>' +
         '<img src="' + esc(thumbUrl) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
@@ -5432,11 +5467,11 @@ async function loadGalleryPhotos(reset = true) {
           (photo.text ? '<div class="gallery-caption">' + esc(photo.text) + '</div>' : '') +
         '</div>';
 
-      card.addEventListener("click", () => openGalleryLightbox(globalIdx));
+      card.addEventListener("click", () => openGalleryLightbox(globalIdx, thumbUrl));
       card.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          openGalleryLightbox(globalIdx);
+          openGalleryLightbox(globalIdx, thumbUrl);
         }
       });
 
