@@ -959,16 +959,16 @@ def test_gallery_per_page_performance_optimization_contract():
     root = Path(__file__).resolve().parent.parent
     js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
 
-    # 1. 前端计算契约：移动端采用 16 张，桌面端采用 24 张，消除 40 张导致的渲染与流量负担
-    assert "const targetCards = isMobile ? 16 : 24;" in js
-    assert "curGalleryPerPage = 24;" in js
+    # 1. 前端计算契约：移动端采用 16 张，桌面端以 20 张为基准（5 列时 4 行共 20 张），消除 40 张导致的渲染与流量负担
+    assert "const targetCards = isMobile ? 16 : 20;" in js
+    assert "curGalleryPerPage = 20;" in js
 
-    # 2. 后端函数签名默认值契约：默认 24 张
+    # 2. 后端函数签名默认值契约：默认 20 张
     blog_sig = inspect.signature(_get_blog_gallery)
-    assert blog_sig.parameters["per_page"].default == 24
+    assert blog_sig.parameters["per_page"].default == 20
 
     msg_sig = inspect.signature(get_gallery_photos)
-    assert msg_sig.parameters["per_page"].default == 24
+    assert msg_sig.parameters["per_page"].default == 20
 
 
 

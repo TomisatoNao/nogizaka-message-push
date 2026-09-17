@@ -57,9 +57,9 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         page = 1
 
     try:
-        per_page = max(1, min(100, int(qp("per_page", "24"))))
+        per_page = max(1, min(100, int(qp("per_page", "20"))))
     except (ValueError, TypeError):
-        per_page = 24
+        per_page = 20
 
     year = None
     if qp("year"):
@@ -145,7 +145,7 @@ def _get_blog_image_expr(cols: set[str]) -> tuple[str, str]:
 def _get_blog_gallery(
     member: str = "",
     page: int = 1,
-    per_page: int = 24,
+    per_page: int = 20,
     year: int | None = None,
     month: int | None = None,
     order: str = "desc",

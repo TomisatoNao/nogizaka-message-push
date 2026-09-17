@@ -5277,14 +5277,15 @@ function getGalleryGridCols() {
 function getGalleryPerPage() {
   const cols = getGalleryGridCols();
   const isMobile = window.innerWidth <= 768;
-  // 优化单页图片数量，优先保障流畅度与低延迟渲染：
-  // 移动端卡片较大，单页加载 16 张；桌面端单页加载 24 张（同时严格按列数 cols 取整行，消除悬空残缺行）
-  const targetCards = isMobile ? 16 : 24;
+  // 优化单页图片数量，优先保证性能与秒开：
+  // 移动端单页加载 16 张（2 列时 8 行）；
+  // 桌面端以 20 张为基准（5 列时为 4 行整整 20 张，6 列时为 3 行共 18 张，严格按整行填充消除末尾残缺）
+  const targetCards = isMobile ? 16 : 20;
   const rows = Math.max(2, Math.round(targetCards / cols));
   return Math.min(60, Math.max(cols, rows * cols));
 }
 
-let curGalleryPerPage = 24;
+let curGalleryPerPage = 20;
 let galleryLoadVersion = 0;
 
 async function loadGalleryPhotos(reset = true) {

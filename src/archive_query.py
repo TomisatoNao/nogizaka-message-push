@@ -733,7 +733,7 @@ def get_gallery_photos(
     member_dir: str | None = None,
     source: str = "all",
     page: int = 1,
-    per_page: int = 24,
+    per_page: int = 20,
     year: int | None = None,
     month: int | None = None,
     order: str = "desc",
