@@ -10,7 +10,7 @@ import secrets
 import time
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-import config.config as cfg
+import src.config.config as cfg
 from src.webui_modules.media_service import serve_file_range
 
 _PROCESS_SECRET = secrets.token_bytes(32)

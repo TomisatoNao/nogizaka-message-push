@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src import fetcher
 from src.notifier import DeliveryReport
 from src.social.fetchers.instagram_fetcher import InstagramFetcher

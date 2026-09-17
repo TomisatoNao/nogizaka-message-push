@@ -4,7 +4,7 @@ import asyncio
 
 import httpx
 
-from config import credentials
+from src.config import credentials
 
 
 def _configure_web_account(monkeypatch):

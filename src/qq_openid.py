@@ -19,7 +19,7 @@ import time
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 
 # 订阅群聊与单聊事件（openid 来自 C2C_MESSAGE_CREATE）
 GROUP_AND_C2C_EVENT_INTENT = 1 << 25

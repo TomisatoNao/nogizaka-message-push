@@ -10,7 +10,7 @@ import logging
 import threading
 from collections.abc import Callable
 import httpx
-import config.config as cfg
+import src.config.config as cfg
 
 log = logging.getLogger("collink")
 

@@ -4,7 +4,7 @@ import base64
 import json
 import time
 
-from config import credentials
+from src.config import credentials
 
 
 def _jwt_with_exp(exp: int) -> str:

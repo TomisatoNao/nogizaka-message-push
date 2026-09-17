@@ -12,7 +12,7 @@ import sqlite3
 import threading
 from urllib.parse import quote
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive as _archive
 from src.webui_modules.archive import common as _archive_common
 from src.webui_modules.archive.common import _send_json_resp

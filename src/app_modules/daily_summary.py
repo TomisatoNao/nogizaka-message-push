@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import traceback
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive, health
 from src.logger import log_all
 
@@ -68,7 +68,7 @@ def _storage_line() -> str:
 
 def _build_daily_summary() -> str:
     """生成全量每日运行摘要（整合 Message、三团博客、社交媒体、通道健康与存储监控）。"""
-    from config.credentials import get_token_health
+    from src.config.credentials import get_token_health
 
     app_mod = sys.modules.get("src.app")
     storage_line_fn = getattr(app_mod, "_storage_line", _storage_line) if app_mod else _storage_line

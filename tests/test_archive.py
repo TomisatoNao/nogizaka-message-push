@@ -27,7 +27,7 @@ def _http(method: str, url: str, headers: dict | None = None):
 
 
 def main() -> None:
-    import config.config as cfg
+    import src.config.config as cfg
     from src import archive
 
     tmpdir = Path(tempfile.mkdtemp(prefix="archive_test_"))

@@ -10,7 +10,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import config.config as cfg  # noqa: E402
+import src.config.config as cfg  # noqa: E402
 from src.audit import record_event  # noqa: E402
 from tools import backup_data  # noqa: E402
 

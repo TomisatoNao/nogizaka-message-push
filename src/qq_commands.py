@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-import config.config as cfg
+import src.config.config as cfg
 
 JST = timezone(timedelta(hours=9))
 MAX_REPLY_CHARS = 1400       # 官方 Bot 单条消息上限保守值
@@ -58,7 +58,7 @@ def _cmd_ping(_args: str) -> str:
 
 
 def _cmd_status(_args: str) -> str:
-    from config.credentials import get_token_health
+    from src.config.credentials import get_token_health
     from src import health
 
     snap = health.get_tracker().snapshot()

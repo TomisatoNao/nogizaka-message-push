@@ -12,8 +12,8 @@ import sys
 import traceback
 import httpx
 
-import config.config as cfg
-from config.credentials import (
+import src.config.config as cfg
+from src.config.credentials import (
     ACCOUNT_CREDS,
     clear_loop_state as clear_credentials_loop_state,
     get_token_health,
@@ -24,7 +24,7 @@ from config.credentials import (
     refresh_token,
     validate_account_cred,
 )
-from config.watcher import start_watcher
+from src.config.watcher import start_watcher
 from src import archive, blog_fetcher, fetcher, health, http_pool, tagger, translator
 from src.app_modules.daily_summary import (
     DISK_WARN_BYTES,
@@ -880,7 +880,7 @@ async def main() -> None:
             napcat_monitor.start()
 
         # 6. 可选启动 config.json 文件监控
-        config_path = Path(__file__).resolve().parent.parent / "config" / "config.json"
+        config_path = getattr(cfg, "_CONFIG_PATH", Path(__file__).resolve().parent.parent / "config" / "config.json")
         observer = start_watcher(config_path, on_reload=_on_config_reload)
 
         # 6.5 启动社交媒体监控守护（X / Instagram / TikTok / TikTok Live）

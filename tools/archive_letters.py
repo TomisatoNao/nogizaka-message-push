@@ -18,8 +18,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import httpx
-import config.config as cfg
-from config.credentials import (
+import src.config.config as cfg
+from src.config.credentials import (
     load_all_accounts,
     ACCOUNT_CREDS,
     get_source_headers_for_account,

@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup, NavigableString, Comment
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 from src.utils import RateLimiter
 

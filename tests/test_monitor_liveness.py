@@ -10,7 +10,7 @@ import urllib.request
 
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src import health
 from src.app_modules import message_worker
 

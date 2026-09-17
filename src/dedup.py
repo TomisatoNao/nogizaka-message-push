@@ -6,7 +6,7 @@ import os
 import shutil
 
 # 统一通过 cfg.X 访问，热重载后 sent_ids_max 等标量才能生效
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 
 

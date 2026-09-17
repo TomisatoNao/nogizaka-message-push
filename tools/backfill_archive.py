@@ -36,8 +36,8 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 
 import httpx
 
-import config.config as cfg
-from config.credentials import (
+import src.config.config as cfg
+from src.config.credentials import (
     load_all_accounts,
     proactive_refresh_if_expiring,
     validate_account_cred,

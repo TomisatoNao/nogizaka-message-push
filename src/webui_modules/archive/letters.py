@@ -8,7 +8,7 @@ import asyncio
 import concurrent.futures
 from urllib.parse import parse_qs
 
-import config.config as cfg
+import src.config.config as cfg
 import httpx
 from src import archive as _archive
 from src.webui_modules.archive.common import _send_json_resp

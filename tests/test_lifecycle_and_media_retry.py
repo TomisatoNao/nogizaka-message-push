@@ -410,7 +410,7 @@ async def test_chunked_upload_uses_one_part_finish_and_complete_contract(monkeyp
 
 def test_credentials_initialize_tolerance():
     """验证 credentials.initialize 兼容无参调用，且不会被 None 冲掉已有 client。"""
-    from config import credentials
+    from src.config import credentials
 
     fake_client = object()
     credentials.initialize(fake_client)

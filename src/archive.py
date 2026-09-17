@@ -27,7 +27,7 @@ from pathlib import Path
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 from src.async_utils import cancel_tasks_bounded, gather_cancel_safe
 from src.archive_query import (
@@ -848,11 +848,11 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
     # 自动解析账号凭据 headers（私有媒体资源需附带鉴权请求头）
     if not headers:
         try:
-            from config.credentials import get_source_headers_for_account
+            from src.config.credentials import get_source_headers_for_account
             account_id = msg.get("account_id", "")
             group_type = msg.get("group_type", "")
             if not account_id or not group_type:
-                from config.config import MONITOR_LIST
+                from src.config.config import MONITOR_LIST
                 for m in MONITOR_LIST:
                     if m.get("m_name") == m_name or m.get("name") == m_name:
                         account_id = account_id or m.get("account_id", "")
@@ -963,7 +963,7 @@ def extract_upload_time(msg: dict) -> str | None:
 
 def infer_member_group(name: str) -> str:
     """根据成员姓名或配置推断所属团体：'nogizaka' | 'sakurazaka' | 'hinatazaka' | 'yodel' | ''。"""
-    import config.config as cfg
+    import src.config.config as cfg
     from src.sakamichi_roster import infer_group
     norm = name.replace(" ", "").replace("　", "").replace("_", "")
     for m in getattr(cfg, "MONITOR_LIST", []):
@@ -998,7 +998,7 @@ async def archive_message(member: dict, msg: dict, translated: str = "") -> None
         await _merge_write(m_name, dt, record)
         _local_file = ""
         if cfg.ARCHIVE_MEDIA and msg.get("file") and msg.get("type") in _MEDIA_TYPES:
-            from config.credentials import get_source_headers_for_account
+            from src.config.credentials import get_source_headers_for_account
             headers = get_source_headers_for_account(
                 member.get("account_id", "") or msg.get("account_id", ""),
                 member.get("group_type", "") or msg.get("group_type", "")
@@ -1034,7 +1034,7 @@ async def archive_messages_batch(
     if not m_name or not msgs:
         return 0
 
-    from config.credentials import get_source_headers_for_account
+    from src.config.credentials import get_source_headers_for_account
     headers = get_source_headers_for_account(
         member.get("account_id", "") or (msgs[0].get("account_id", "") if msgs else ""),
         member.get("group_type", "") or (msgs[0].get("group_type", "") if msgs else "")

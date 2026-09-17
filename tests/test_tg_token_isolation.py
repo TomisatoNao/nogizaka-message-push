@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import config.config as cfg  # noqa: E402
+import src.config.config as cfg  # noqa: E402
 from src.webui_modules import config_service, system_handlers  # noqa: E402
 from src.platforms import tgbot  # noqa: E402
 

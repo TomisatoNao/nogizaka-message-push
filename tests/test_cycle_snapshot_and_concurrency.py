@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import config.config as cfg
-from config.config import CycleSnapshot, _mutate_container, get_cycle_snapshot
+import src.config.config as cfg
+from src.config.config import CycleSnapshot, _mutate_container, get_cycle_snapshot
 from src import fetcher
 from src.app_modules import message_worker
 

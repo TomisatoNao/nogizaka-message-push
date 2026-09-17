@@ -3,7 +3,7 @@ import asyncio
 import httpx
 
 # 统一通过 cfg.X 访问，热重载后标量值（超时、限速间隔等）才能生效
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 
 from src.platforms import qq_official_media

@@ -11,10 +11,10 @@ from urllib.parse import quote
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive
 from src.logger import format_httpx_error, log_all, log_response
-from config.credentials import (
+from src.config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
     get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
     get_refresh_state, is_account_fetch_available,

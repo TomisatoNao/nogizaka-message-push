@@ -69,7 +69,7 @@ class InstagramFetcher(SocialFetcher):
         self._on_session_lost = on_session_lost
         self._session = requests.Session()
         try:
-            import config.config as cfg
+            import src.config.config as cfg
         except Exception:
             cfg = None
         proxy = (

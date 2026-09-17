@@ -115,7 +115,7 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
 
     # Telegram Bot 名称会映射到 .env 变量；重复或归一化后冲突会导致
     # 两个路由意外共用同一凭证，因此在保存前直接阻止。
-    from config.config import tg_token_env_key
+    from src.config.config import tg_token_env_key
     tg_names: set[str] = set()
     tg_env_keys: dict[str, str] = {}
     for b in raw.get("tg_bots", []):
@@ -293,7 +293,7 @@ def set_on_reload_callback(cb) -> None:
 
 def _trigger_reload() -> bool:
     """写回后触发进程内热重载（测试中可 monkeypatch 掉）。"""
-    from config.config import reload as _reload
+    from src.config.config import reload as _reload
     from src.logger import log_all
 
     ok = _reload()
@@ -394,7 +394,7 @@ def _rotate_account_creds(account_id: str) -> None:
         auth.delete_account_credential(account_id)
     except (sqlite3.Error, OSError, AttributeError):
         pass
-    import config.config as cfg
+    import src.config.config as cfg
     if getattr(cfg, "CRED_DIR", None):
         cred_file = Path(cfg.CRED_DIR) / f"{account_id}.json"
         try:
@@ -402,7 +402,7 @@ def _rotate_account_creds(account_id: str) -> None:
         except OSError:
             pass
     try:
-        from config import credentials as creds_mod
+        from src.config import credentials as creds_mod
         creds_mod.ACCOUNT_CREDS.pop(account_id, None)
         clear_state = getattr(creds_mod, "clear_refresh_state", None)
         if clear_state is not None:

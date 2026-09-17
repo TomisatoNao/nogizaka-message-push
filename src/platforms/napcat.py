@@ -12,7 +12,7 @@ from src.utils import utc_to_jst
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.constants import ROLE_KEY, ROLE_TRANSLATION
 from src.logger import format_httpx_error, log_all
 

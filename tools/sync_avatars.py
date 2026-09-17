@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.avatar_manager import sync_all_avatars, get_avatar_db
-import config.config as cfg
+import src.config.config as cfg
 
 
 async def main():

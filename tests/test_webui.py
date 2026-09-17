@@ -60,7 +60,7 @@ def _http(method: str, url: str, body: dict | None = None, headers: dict | None 
 def main() -> None:
     import json5
 
-    import config.config as cfg
+    import src.config.config as cfg
     from src import webui
 
     # 本套件测管理端功能本身；鉴权矩阵由 test_auth 覆盖，这里显式关掉

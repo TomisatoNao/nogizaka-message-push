@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive
 from src.webui_modules.archive.messages import handle_messages
 

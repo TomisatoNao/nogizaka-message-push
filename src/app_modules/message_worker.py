@@ -14,8 +14,8 @@ import uuid
 
 import httpx
 
-import config.config as cfg
-from config.credentials import proactive_refresh_if_expiring
+import src.config.config as cfg
+from src.config.credentials import proactive_refresh_if_expiring
 from src import fetcher, health, http_pool
 from src.app_modules.daily_summary import _get_jst_now
 from src.app_modules.process_lock import _stop_requested

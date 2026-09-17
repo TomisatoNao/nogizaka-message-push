@@ -405,7 +405,7 @@ def check_session(cookies: dict | None = None, *, proxy: str = "",
     proxies_dict = None
     if not proxy:
         try:
-            from config import config as cfg
+            from src.config import config as cfg
             proxy = (
                 getattr(cfg, "PROXY", "")
                 or (getattr(cfg, "SOCIAL_CONFIG", {}).get("proxy", "") if cfg else "")

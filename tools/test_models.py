@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.translator import _PROMPT_TEMPLATE
 
 # 取自乃木坂46 官博的一段示例

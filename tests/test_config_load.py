@@ -15,7 +15,7 @@ if hasattr(sys.stdout, "reconfigure"):
 def main() -> None:
     # Test 1: 所有变量加载并类型正确
     print("=== Test 1: 变量加载 ===")
-    from config.config import (
+    from src.config.config import (
         ENABLE_NAPCAT_QQ, ENABLE_QQ_OFFICIAL_BOT, QQ_BOT_API, QQ_USER_AGENT,
         QQ_OFFICIAL_TOKEN_URL, QQ_OFFICIAL_API_BASE, QQ_OFFICIAL_MIN_INTERVAL,
         QQ_OFFICIAL_TIMEOUT, QQ_OFFICIAL_MEDIA_MAX_BYTES, QQ_OFFICIAL_BOTS,
@@ -103,7 +103,7 @@ def main() -> None:
 
     # Test 5: 热重载
     print("=== Test 5: 热重载 ===")
-    from config.config import reload
+    from src.config.config import reload
     assert reload(), "reload() should succeed with unchanged config"
     print("✅ Test 5 通过\n")
 

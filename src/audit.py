@@ -26,7 +26,7 @@ _SENSITIVE_KEYS = frozenset({
 
 
 def _log_path() -> Path:
-    import config.config as cfg
+    import src.config.config as cfg
     return Path(getattr(cfg, "AUDIT_LOG_FILE", "logs/audit.jsonl"))
 
 

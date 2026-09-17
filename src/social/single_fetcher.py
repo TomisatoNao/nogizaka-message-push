@@ -95,7 +95,7 @@ def _get_proxy(config: dict | None = None) -> str:
     """提取代理配置：优先 config 显式设置，其次全局 cfg.PROXY / SOCIAL_CONFIG，最后环境变量。"""
     cfg_dict = config or {}
     try:
-        import config.config as cfg
+        import src.config.config as cfg
     except Exception:
         cfg = None
 

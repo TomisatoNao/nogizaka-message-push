@@ -7,7 +7,7 @@ import asyncio
 import httpx
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src import health
 from src.platforms import napcat
 

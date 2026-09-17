@@ -68,7 +68,7 @@ def _get_proxy(load_raw_config) -> str:
         social_cfg = raw_cfg.get("social") or {}
         proxy = raw_cfg.get("proxy") or (social_cfg.get("proxy") if isinstance(social_cfg, dict) else "") or ""
     try:
-        import config.config as app_cfg
+        import src.config.config as app_cfg
 
         proxy = proxy or getattr(app_cfg, "PROXY", "")
     except ImportError:

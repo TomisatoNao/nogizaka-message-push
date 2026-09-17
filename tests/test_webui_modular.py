@@ -84,7 +84,7 @@ def test_system_handlers_env():
 
 def test_member_handler_uses_current_directory_api(monkeypatch):
     """成员选择器必须调用当前 fetch_member_directory，而不是已删除的旧符号。"""
-    import config.credentials as credentials
+    import src.config.credentials as credentials
     from src import member_directory
 
     class FakeClient:
@@ -1546,7 +1546,7 @@ def test_archive_retry_download_validation(monkeypatch):
 def test_accounts_verify_route(monkeypatch):
     from unittest.mock import MagicMock
     from src.webui import _Handler
-    import config.credentials as creds
+    import src.config.credentials as creds
 
     handler = _Handler.__new__(_Handler)
     handler.path = "/api/accounts/verify"
@@ -1607,7 +1607,7 @@ def test_accounts_smart_parse_route(monkeypatch):
 def test_accounts_rename_route(monkeypatch):
     from unittest.mock import MagicMock
     from src.webui import _Handler
-    import config.credentials as creds
+    import src.config.credentials as creds
 
     handler = _Handler.__new__(_Handler)
     handler.path = "/api/accounts/rename"

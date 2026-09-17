@@ -161,7 +161,7 @@ def test_time_record_skip() -> None:
     import asyncio
     import os
     import tempfile
-    from config.credentials import write_time_record
+    from src.config.credentials import write_time_record
 
     async def run() -> None:
         path = os.path.join(tempfile.gettempdir(), "_nmp_time_test.txt")
@@ -229,7 +229,7 @@ def test_powershell_scripts_have_bom() -> None:
         checked += 1
 def test_cookie_cleaner() -> None:
     print("=== _clean_cookie_string ===")
-    from config.credentials import _clean_cookie_string
+    from src.config.credentials import _clean_cookie_string
 
     # 1) 标准单行
     c1 = _clean_cookie_string("session=abc123; S5SI=def456; Path=/; Domain=.nogizaka46.com; Secure; HttpOnly")

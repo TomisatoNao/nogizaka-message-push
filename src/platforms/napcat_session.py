@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 
 

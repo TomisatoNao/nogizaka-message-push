@@ -7,6 +7,7 @@
 # ============================================================
 from __future__ import annotations
 
+import sys as _sys
 import time
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def start_watcher(
             pass
         return None
 
-    from config.config import reload as _reload
+    from src.config.config import reload as _reload
     from src.logger import log_all
 
     _last_reload = 0.0
@@ -69,3 +70,8 @@ def start_watcher(
     observer.start()
     log_all("👁️ config.json 文件监控已启动（自动热重载）")
     return observer
+
+
+_sys.modules.setdefault("config.watcher", _sys.modules[__name__])
+
+

@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive
 from src.platforms import qq_official
 

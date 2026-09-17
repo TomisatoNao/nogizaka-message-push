@@ -386,7 +386,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         # 1. 静态页面与资产
         if path in ("", "/", "/index.html"):
-            import config.config as cfg
+            import src.config.config as cfg
             user = self._current_user()
             if user is None and getattr(cfg, "AUTH_ENABLED", False) and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
                 self._redirect("/archive")
@@ -741,7 +741,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": ["缺少 account 参数"]}, 400)
                 return
             try:
-                from config.credentials import verify_and_handshake_account
+                from src.config.credentials import verify_and_handshake_account
                 import asyncio
                 main_loop = None
                 try:
@@ -804,7 +804,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": ["缺少 old_id 或 new_id 参数"]}, 400)
                 return
             try:
-                from config import credentials
+                from src.config import credentials
                 credentials.rename_account(old_id, new_id)
                 from src.logger import log_all
                 log_all(f"🔄 账号凭证与状态已同步重命名: {old_id} -> {new_id}")
@@ -987,7 +987,7 @@ def start_webui(
     _on_openid_cb = on_openid
 
     if host is None or port is None:
-        import config.config as cfg
+        import src.config.config as cfg
         host = host or getattr(cfg, "WEB_ADMIN_HOST", "127.0.0.1")
         port = port if port is not None else getattr(cfg, "WEB_ADMIN_PORT", 46046)
 
@@ -1012,7 +1012,7 @@ def start_webui(
             daemon=True,
         ).start()
 
-    import config.config as cfg
+    import src.config.config as cfg
     has_auth = False
     if getattr(cfg, "AUTH_ENABLED", False):
         from src import auth as _auth
@@ -1041,7 +1041,7 @@ def start_webui(
 
 
 if __name__ == "__main__":
-    import config.config as _cfg  # noqa: F401
+    import src.config.config as _cfg  # noqa: F401
     from src.logger import log_all
 
     server = start_webui()

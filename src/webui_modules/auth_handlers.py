@@ -20,7 +20,7 @@ from html import escape as html_escape
 from urllib.parse import quote, urlparse
 
 from src import auth as _auth
-import config.config as cfg
+import src.config.config as cfg
 from src.audit import record_event
 from src.webui_modules.static_handler import send_json
 

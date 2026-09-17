@@ -75,7 +75,7 @@ async def _check_listener_sync(cfg) -> None:
 
 
 def main() -> None:
-    import config.config as cfg
+    import src.config.config as cfg
     from src import qq_commands
 
     saved = {

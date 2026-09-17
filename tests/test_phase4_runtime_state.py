@@ -8,7 +8,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_credentials_runtime_locks_are_loop_scoped_and_cleanable():
-    from config import credentials
+    from src.config import credentials
 
     loop = asyncio.get_running_loop()
     suffix = f"phase4-{id(loop)}"
@@ -409,7 +409,7 @@ async def test_route_lane_failure_does_not_block_healthy_route(monkeypatch):
 def test_pending_route_suspend_and_resume_preserves_recovery_state(tmp_path, monkeypatch):
     """停用路由不再反复回放；恢复同一 ID 后仍可补偿且不丢记录。"""
 
-    import config.config as cfg
+    import src.config.config as cfg
     from src import archive, delivery_state
 
     monkeypatch.setattr(cfg, "ARCHIVE_DIR", str(tmp_path), raising=False)
@@ -461,7 +461,7 @@ def test_pending_route_suspend_and_resume_preserves_recovery_state(tmp_path, mon
 def test_successful_route_advances_to_next_pending_message(tmp_path, monkeypatch):
     """补偿 lane 成功一条后，阻塞指针应指向下一条而不是整条清空。"""
 
-    import config.config as cfg
+    import src.config.config as cfg
     from src import archive, delivery_state
 
     monkeypatch.setattr(cfg, "ARCHIVE_DIR", str(tmp_path), raising=False)

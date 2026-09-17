@@ -20,7 +20,7 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 
 _MEDIA_FILE_TYPES = {
@@ -478,7 +478,7 @@ async def download_media_payloads(member: dict,
     if not items:
         return []
 
-    from config.credentials import get_source_headers_for_account
+    from src.config.credentials import get_source_headers_for_account
 
     headers = get_source_headers_for_account(member.get("account_id", ""), member.get("group_type", ""))
     m_name = member.get("m_name") or member.get("name") or ""

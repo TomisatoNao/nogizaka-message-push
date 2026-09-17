@@ -133,7 +133,7 @@ async def test_send_to_group():
 def test_allowed_senders():
     print("\n── Test 5: allowed_senders() 模式与结构测试 ──")
     import src.qq_commands as qc
-    import config.config as cfg
+    import src.config.config as cfg
 
     # 1. 默认 configured 模式：自动聚合 QQ_OFFICIAL_BOTS 中的 target_openid 与 group_openid
     cfg.QQ_COMMANDS_MODE = "configured"

@@ -10,7 +10,7 @@ import io
 import json
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive as _archive
 from src import auth as _auth
 from src.webui_modules.archive.messages import handle_messages

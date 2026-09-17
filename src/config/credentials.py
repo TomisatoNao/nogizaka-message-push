@@ -8,13 +8,14 @@ import hashlib
 import json
 import os
 import sqlite3
+import sys as _sys
 import time
 from datetime import datetime, timezone
 
 import httpx
 
 # 统一通过 cfg.X 访问，热重载后标量值（告警冷却、刷新阈值等）才能生效
-import config.config as cfg
+import src.config.config as cfg
 from src.health import ErrorTier, get_tracker as _health_tracker
 from src.logger import format_httpx_error, log_all, log_response
 
@@ -1252,3 +1253,8 @@ def rename_account(old_id: str, new_id: str) -> None:
         auth.rename_account_credential(old_id, new_id)
     except (ImportError, OSError, sqlite3.Error) as exc:
         log_all(f"⚠️ 重命名账号 {old_id} 的持久化凭证失败: {type(exc).__name__}: {exc}", is_error=True)
+
+
+_sys.modules.setdefault("config.credentials", _sys.modules[__name__])
+
+

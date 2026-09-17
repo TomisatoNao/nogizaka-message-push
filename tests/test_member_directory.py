@@ -95,7 +95,7 @@ def test_subscription_sync_continues_after_one_account_failure(monkeypatch):
 
     monkeypatch.setattr(member_directory.cfg, "ACCOUNTS", {"healthy": {}, "broken": {}})
     monkeypatch.setattr(member_directory, "fetch_member_directory", fake_fetch)
-    import config.credentials as credentials
+    import src.config.credentials as credentials
     monkeypatch.setattr(credentials, "validate_account_cred", lambda _account: (True, ""))
 
     stats, failures = asyncio.run(

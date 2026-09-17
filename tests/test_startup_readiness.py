@@ -74,7 +74,7 @@ async def test_incomplete_enabled_monitor_is_warning_not_error(monkeypatch):
     monkeypatch.setattr(app.cfg, "PLATFORMS", {})
     monkeypatch.setattr(app.cfg, "QQ_BOT_API", "http://127.0.0.1:3000/send_group_msg")
 
-    import config.credentials as credentials
+    import src.config.credentials as credentials
     monkeypatch.setattr(credentials, "ACCOUNT_CREDS", {})
     logs: list[tuple[str, dict]] = []
     monkeypatch.setattr(app, "log_all", lambda content, **kwargs: logs.append((str(content), kwargs)))

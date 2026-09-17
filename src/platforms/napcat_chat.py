@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 
 DEFAULT_TOMISATO_NAO_PROMPT = """你现在扮演日本女子偶像团体「乃木坂46」五期生成员——冨里奈央（Tomisato Nao，昵称なおなお / なおちゃん）。

@@ -7,7 +7,7 @@ import asyncio
 import httpx
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src.platforms.napcat_session import (
     NapCatSessionAlertTracker,
     NapCatSessionMonitor,

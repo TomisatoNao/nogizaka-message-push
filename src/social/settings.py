@@ -250,7 +250,7 @@ class RuntimeConfig:
         if value is not _MISSING:
             return value
         try:
-            import config.config as cfg
+            import src.config.config as cfg
             canonical = str(name).upper()
             return getattr(cfg, canonical, getattr(cfg, name, default))
         except (ImportError, AttributeError):

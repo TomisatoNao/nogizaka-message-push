@@ -8,7 +8,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 from src.platforms.napcat import record_send_timeout, send_qq_message
 from src.platforms import qq_official
@@ -514,7 +514,7 @@ async def send_blog_post(post: dict) -> bool:
     import json
     import os
     import httpx
-    import config.config as cfg
+    import src.config.config as cfg
     from src.logger import log_all
 
     group_key = post.get("group_key", "")

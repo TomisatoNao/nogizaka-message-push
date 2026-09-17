@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config.config as cfg  # noqa: E402
+import src.config.config as cfg  # noqa: E402
 from src.qq_openid import listen_once  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src.platforms import napcat
 from src.social.adapters import NapCatAdapter
 from src.social.contracts import DeliveryTarget

@@ -263,7 +263,7 @@ class MediaDownloader:
     @property
     def proxy(self) -> str:
         try:
-            import config.config as cfg
+            import src.config.config as cfg
         except Exception:
             cfg = None
         candidate = (

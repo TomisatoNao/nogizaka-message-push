@@ -67,7 +67,7 @@ class TikTokFetcher(SocialFetcher):
         super().__init__(config, store, downloader)
         self._session = requests.Session()
         try:
-            import config.config as cfg
+            import src.config.config as cfg
         except Exception:
             cfg = None
         proxy = (

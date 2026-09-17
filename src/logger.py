@@ -10,7 +10,7 @@ from collections import deque
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
-import config.config as cfg
+import src.config.config as cfg
 
 # ---- ANSI 彩色支持检测 ----
 _ANSI_SUPPORTED: bool = (

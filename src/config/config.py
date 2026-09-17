@@ -15,18 +15,31 @@ from types import MappingProxyType as _MappingProxyType
 from typing import Any as _Any, Mapping as _Mapping
 from pathlib import Path as _Path
 
+# ── 路径常量（运行时推导，不放入 JSON）─────────────────────────
+_BASE_DIR = _Path(__file__).resolve().parent.parent.parent
+
 # ── 加载 .env（如已安装 python-dotenv）────────────────────────
 try:
     from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
+    _load_dotenv(_BASE_DIR / ".env")
 except ImportError:
     pass
 
-# ── 路径常量（运行时推导，不放入 JSON）─────────────────────────
-_BASE_DIR = _Path(__file__).resolve().parent.parent
-_CONFIG_PATH = _Path(__file__).resolve().parent / "config.json"
-_EXAMPLE_PATH = _Path(__file__).resolve().parent / "config.example.json"
-_SCHEMA_PATH = _Path(__file__).resolve().parent / "config.schema.json"
+_env_cfg_path = _os.getenv("CONFIG_PATH")
+if _env_cfg_path:
+    _CONFIG_PATH = _Path(_env_cfg_path).resolve()
+else:
+    _cand1 = _BASE_DIR / "config" / "config.json"
+    _cand2 = _BASE_DIR / "data" / "config.json"
+    _CONFIG_PATH = _cand2 if (not _cand1.exists() and _cand2.exists()) else _cand1
+
+_EXAMPLE_PATH = _CONFIG_PATH.parent / "config.example.json"
+if not _EXAMPLE_PATH.is_file():
+    _EXAMPLE_PATH = _BASE_DIR / "config" / "config.example.json"
+
+_SCHEMA_PATH = _CONFIG_PATH.parent / "config.schema.json"
+if not _SCHEMA_PATH.is_file():
+    _SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
 
 
 # ── 内置默认值（config.json 可覆盖，.env 可覆盖布尔开关）─────────
@@ -1164,3 +1177,8 @@ def get(key: str):
     """按 JSON key 读取当前配置值（绕过 import 缓存，始终反映最新值）。
        对于需要热重载的标量值，推荐使用此方法而非模块级 import。"""
     return getattr(_sys.modules[__name__], _KEY_TO_VAR.get(key, key), None)
+
+
+# 注册至 sys.modules 内存单例，无缝支持旧式 import config.config as cfg
+_sys.modules.setdefault("config.config", _sys.modules[__name__])
+

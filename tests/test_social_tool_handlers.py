@@ -239,7 +239,7 @@ def test_manual_push_handler_reports_delivery_summary(monkeypatch):
 
 
 def test_webui_dispatches_social_tool_routes_instead_of_404(monkeypatch):
-    import config.config as cfg
+    import src.config.config as cfg
     from src import webui
 
     monkeypatch.setattr(cfg, "AUTH_ENABLED", False)

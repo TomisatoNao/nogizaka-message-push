@@ -183,7 +183,7 @@ def test_gallery_webui_endpoint(temp_archive_env, monkeypatch):
 def test_napcat_listener_handles_command(temp_archive_env, monkeypatch):
     """验证 NapCatInboundListener 接收到 /抽张美图 时优先分发给指令模块。"""
     from src.platforms.napcat_listener import NapCatInboundListener
-    import config.config as cfg
+    import src.config.config as cfg
 
     monkeypatch.setattr(cfg, "ENABLE_NAPCAT_QQ", True)
     monkeypatch.setattr(cfg, "NAPCAT_ROUTES", [{"group_id": 123456}])
@@ -459,7 +459,7 @@ def test_blog_gallery_remote_images_fallback(temp_archive_env, monkeypatch):
 
 def test_napcat_command_mukai_resolution(temp_archive_env, monkeypatch):
     """验证输入 /美图 向井 时精准匹配向井纯叶，且绝不误回退至群默认成员（冨里奈央）。"""
-    import config.config as cfg
+    import src.config.config as cfg
     from src.platforms.napcat_commands import NapCatCommandHandler
 
     # 模拟群 533072575 默认推送冨里奈央
@@ -1364,7 +1364,7 @@ def test_gallery_combined_pagination_no_photo_loss(temp_archive_env, tmp_path, m
 def test_message_thumbnail_cache_privacy_contract(temp_archive_env, monkeypatch):
     """验证私密消息缩略图缓存头安全对齐：私密模式下必须为 private，杜绝公开缓存泄露。"""
     from types import SimpleNamespace
-    import config.config as cfg
+    import src.config.config as cfg
     from src.webui_modules.archive.messages import handle_messages
 
     from PIL import Image

@@ -15,8 +15,8 @@ from collections.abc import Iterable
 
 import httpx
 
-import config.config as cfg
-from config.credentials import (
+import src.config.config as cfg
+from src.config.credentials import (
     ACCOUNT_CREDS,
     get_mobile_api_base,
     get_mobile_headers,
@@ -274,7 +274,7 @@ async def sync_all_accounts_subscriptions(
     ``account_ids`` 用于启动阶段只同步当前监控项引用的账号；省略时保持原有
     行为，遍历配置中的全部账号（供管理端手动同步使用）。
     """
-    from config.credentials import is_account_fetch_available, validate_account_cred
+    from src.config.credentials import is_account_fetch_available, validate_account_cred
     stats = {}
     errors = {}
     should_close = False

@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Callable
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive as _archive
 from src.logger import log_all
 

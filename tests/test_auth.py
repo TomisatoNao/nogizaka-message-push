@@ -61,7 +61,7 @@ def _cookie(headers: dict, name: str) -> str:
 
 
 def main() -> None:
-    import config.config as cfg
+    import src.config.config as cfg
     from src import auth
 
     tmpdir = Path(tempfile.mkdtemp(prefix="auth_test_"))

@@ -14,7 +14,7 @@ import urllib.error
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.utils import format_bytes, get_storage_breakdown
-import config.config as cfg
+import src.config.config as cfg
 from src.webui import _Handler
 
 

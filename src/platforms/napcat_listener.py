@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from urllib.parse import urlsplit
 
-import config.config as cfg
+import src.config.config as cfg
 
 from src.logger import log_all
 from src.social.url_utils import extract_social_urls

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 from src.platforms.qq_official_media import (
     _MEDIA_FILE_TYPES,

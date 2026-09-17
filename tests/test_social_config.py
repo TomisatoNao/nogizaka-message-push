@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import config.config as cfg
+import src.config.config as cfg
 from src.social.delivery import SocialDeliveryDispatcher
 from src.social.models import Post
 from src.social.settings import RuntimeConfig

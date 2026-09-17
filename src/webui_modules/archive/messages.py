@@ -8,7 +8,7 @@ import json
 import os
 from urllib.parse import parse_qs, unquote
 
-import config.config as cfg
+import src.config.config as cfg
 from src import archive as _archive
 from src import auth as _auth
 from src.audit import record_event

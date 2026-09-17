@@ -63,7 +63,7 @@ def env_status(raw_config: dict | None = None) -> dict:
     }
 
     # 延迟导入，避免 WebUI 模块导入阶段改变配置加载顺序。
-    from config.config import tg_token_env_key
+    from src.config.config import tg_token_env_key
 
     tg_status: dict[str, dict[str, str | bool]] = {}
     declared = raw_config.get("tg_bots", []) if isinstance(raw_config, dict) else []
@@ -107,8 +107,8 @@ def handle_status(handler, on_poll_cb=None) -> None:
         }
 
     try:
-        from config import credentials as creds_mod
-        import config.config as cfg
+        from src.config import credentials as creds_mod
+        import src.config.config as cfg
         live = {}
         for acc_id in cfg.ACCOUNTS:
             token = creds_mod.get_token_health(acc_id)
@@ -144,7 +144,7 @@ def handle_logs(handler) -> None:
         return
 
     if source in ("error", "response", "system", "audit"):
-        import config.config as cfg
+        import src.config.config as cfg
         if source == "error":
             fp = Path(cfg.ERROR_LOG_FILE)
         elif source == "system":
@@ -282,7 +282,7 @@ def handle_members(handler, load_raw_config_fn) -> None:
         # 管理端运行在 HTTP 线程中，不能复用主事件循环中的 AsyncClient。
         # 使用与 tools/list_members.py 相同的当前目录 API，并在本次请求结束后
         # 关闭临时客户端，避免旧版 get_member_directory_async 重构后失效。
-        from config.credentials import (
+        from src.config.credentials import (
             is_account_fetch_available,
             load_all_accounts,
             validate_account_cred,
@@ -565,7 +565,7 @@ async def smart_parse_credentials_text(raw: str, account: str = "") -> dict:
                             if p_trim and "=" in p_trim:
                                 cookies.append(p_trim)
                     if cookies:
-                        from config.credentials import _clean_cookie_string
+                        from src.config.credentials import _clean_cookie_string
                         merged = {}
                         for c_item in cookies:
                             merged.update(_clean_cookie_string(c_item))
@@ -585,7 +585,7 @@ async def smart_parse_credentials_text(raw: str, account: str = "") -> dict:
             token_candidates.append(m.group(1).strip())
 
         if token_candidates:
-            from config.credentials import _decode_token_exp
+            from src.config.credentials import _decode_token_exp
             token_candidates = list(dict.fromkeys(token_candidates))
             token_candidates.sort(key=lambda t: _decode_token_exp(t) or 0, reverse=True)
             result["token"] = token_candidates[0]
@@ -611,7 +611,7 @@ async def smart_parse_credentials_text(raw: str, account: str = "") -> dict:
             cookie_candidates.append(m.group(1).strip())
 
         if cookie_candidates:
-            from config.credentials import _clean_cookie_string
+            from src.config.credentials import _clean_cookie_string
             merged_cookies = {}
             cookie_candidates.sort(key=lambda c: ("session=" in c.lower(), len(c)))
             for cand in cookie_candidates:

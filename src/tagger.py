@@ -17,7 +17,7 @@ try:
 except ImportError:
     _HAS_PIL = False
 
-import config.config as cfg
+import src.config.config as cfg
 from src.logger import log_all
 from src.async_utils import cancel_tasks_bounded
 from src.utils import RateLimiter
