@@ -111,17 +111,8 @@ flowchart TD
 
 适用于群晖 Synology NAS、QNAP、Unraid、1Panel、Portainer、云服务器及本地 Docker 环境。
 
-> [!TIP]
-> **目录与配置持久化说明**：
-> 宿主机的 `./config` 目录仅用于持久化用户的 `config.json` 配置文件与修改历史快照，不包含任何程序源码。首次部署时，无论宿主机 `./config` 目录是否存在或为空，容器启动时均会自动从默认模板安全初始化配置文件，开箱即用。
-
-1. **克隆代码并准备环境**：
-   ```bash
-   git clone https://github.com/TomisatoNao/nogizaka-message-push.git
-   cd nogizaka-message-push
-   ```
-
-2. **检查或创建 `docker-compose.yml`**：
+1. **准备 `docker-compose.yml`**：
+   在任意目录创建 `docker-compose.yml`（若使用群晖 Container Manager、1Panel、Portainer 等面板，直接新建项目并粘贴以下内容即可）：
    ```yaml
    services:
      sakamichi-push:
@@ -140,12 +131,12 @@ flowchart TD
          - ./.env:/app/.env
    ```
 
-3. **一键拉起服务**：
+2. **一键启动服务**：
    ```bash
    docker compose up -d
    ```
 
-4. **查看初始管理员账号与密码**：
+3. **获取初始管理员账号与密码**：
    ```bash
    docker logs sakamichi-push
    ```
