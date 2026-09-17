@@ -4,7 +4,7 @@
 
 # Sakamichi Message Push (坂道消息推送与归档系统)
 
-> **乃木坂46 / 櫻坂46 / 日向坂46 / yodel Message 私密消息 · 官方博客 · 社交媒体（𝕏 / Instagram / TikTok / Live 直播录制）全自动智能监控、Google Gemini & 智谱清言 AI 多引擎双语翻译、多通道格式化广播与本地永久持久化归档系统。**
+> **乃木坂46 / 櫻坂46 / 日向坂46 / yodel Message 私密消息 · 官方博客 · 社交媒体（𝕏 / Instagram / TikTok / Live 直播录制）全自动智能监控、Google Gemini & 智谱清言 AI 多引擎双语翻译、多通道格式化广播、本地永久持久化归档与纯享美图画廊系统。**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
@@ -13,7 +13,7 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg?style=flat-square)](https://github.com/astral-sh/ruff)
 [![Tests: Pytest](https://img.shields.io/badge/tests-pytest%20passing-success.svg?style=flat-square)](tests/)
 
-[🚀 快速开始](#-快速开始--quick-start) • [✨ 核心特性](#-核心特性--features) • [🧩 系统架构](#-系统核心架构--architecture) • [🖥️ WebUI 指南](#️-web-管理端与日常运维) • [🛠️ 运维与工具](#️-命令行辅助工具与进阶配置) • [❓ 常见问题](#-常见故障排查--faq)
+[🚀 快速开始](#-快速开始--quick-start) • [🌐 部署与网络拓扑](#-网络拓扑与协同部署-nas--windows-napcat) • [✨ 核心特性](#-核心特性--features) • [🖼️ 相册画廊与互动抽图](#-相册画廊与-qq-群本地互动抽图) • [🖥️ WebUI 门户](#️-web-管理端与日常运维) • [🤖 机器人指令](#-机器人指令矩阵) • [🛠️ 运维与工具](#️-命令行辅助工具与进阶配置) • [❓ 常见问题](#-常见故障排查--faq)
 
 </div>
 
@@ -24,9 +24,11 @@
 - 🔄 **全平台聚合监控**：支持乃木坂46、櫻坂46、日向坂46及 yodel（毕业成员/官方）Message 消息、官方博客、𝕏 (Twitter)、Instagram (Feed/Story/Reels)、TikTok 视频及 **TikTok Live 直播开播秒级探测与 ffmpeg 无损录制**；
 - 🤖 **AI 双引擎智能翻译**：Google Gemini 与智谱清言（GLM 系列）**智能轮流调度与自动容灾**，呈现偶像口吻的地道中文；
 - 📢 **全通道解耦分发**：支持 **QQ 群（NapCat OneBot11）**、**Telegram 频道（HTML 富文本）** 及 **QQ 官方开放平台机器人（个人/群聊/交互指令）**，支持独立备注与精细过滤；QQ 官方 Bot 媒体支持公开 URL 直取与官方分片上传；
-- 🔁 **失败目标补偿**：成员消息与社交动态按“内容 × 推送目标”记录投递状态；已成功的目标不会重复发送，失败目标会在后续巡查中自动补偿（博客完整投递队列仍属于后续增强项）；
+- 🎲 **QQ 群本地互动抽图 & AI 拟人化闲聊**：内置零 Token 消耗的 `/抽张美图` 加权公平抽图指令（毫秒响应、多层防刷、严格过滤与零 SQL 注入），并支持基于大模型的偶像拟人自然语言群聊交互；
+- 🖼️ **纯享美图画廊 (Gallery)**：汇聚 Message 私密照片与官方博客配图，支持全量成员名册与作者多维检索、年份时间轴筛选、瀑布流无限滚动与 WebP 缩略图极速秒开（压缩率 99.4%）；
+- 🔁 **失败目标精准补偿**：成员消息与社交动态按“内容 × 推送目标”记录投递状态；已成功的目标不会重复发送，失败目标会在后续巡查中自动补偿；
 - 💾 **本地永久归档与全文检索**：全量多媒体（原图/语音/视频/粉丝信件）本地落盘；内置 **SQLite WAL + FTS5 全文索引** 与 **Gemini Vision 图片智能打标**；
-- 📱 **现代化响应式 Web 门户**：三坂便当卡大盘、时光隧道、三态双语博客阅读器、Message 时间线画廊，移动端原生 Action Sheet 深度适配，**全过程界面点选，无需修改任何代码或配置**。
+- 📱 **现代化响应式 Web 门户**：三坂便当卡大盘、时光隧道、三态双语博客阅读器、Message 时间线画廊，移动端原生 Action Sheet 深度适配，绝大部分监控项、通道路由与账号凭证均支持 Web 界面可视化管理。
 
 ```mermaid
 flowchart TD
@@ -45,14 +47,14 @@ flowchart TD
     end
 
     subgraph S4["📢 解耦推送通道 (Pub/Sub)"]
-        Push1["🐧 QQ 群 (NapCat OneBot11)<br/>多群路由分发 · 群直观备注"]
+        Push1["🐧 QQ 群 (NapCat OneBot11)<br/>多群路由分发 · 群直观备注 · 互动抽图"]
         Push2["✈️ Telegram 频道 (HTML / MediaGroup)<br/>多 Bot 路由 · 频道备注"]
         Push3["🤖 QQ 官方 Bot (私聊 / 群聊 / 指令交互)<br/>公开 URL 直取 · 官方分片上传 · 单次压缩兜底"]
     end
 
     subgraph S5["💾 存储与可视化呈现 (Persistence & WebUI)"]
-        DB["SQLite WAL 统一持久化架构<br/>• archive.db (Message 归档与 FTS5 索引)<br/>• blogs.db (博客归档与双语译文)<br/>• auth.db (安全鉴权与加密凭证)<br/>• social_state.db (社媒去重与状态)"]
-        WebUI["🖥️ 现代化 Web 管理端 & 双语阅读器<br/>(http://127.0.0.1:46046/)"]
+        DB["SQLite WAL 统一持久化架构<br/>• archive.db (Message 归档与 FTS5 索引)<br/>• blogs.db (博客归档与双语译文)<br/>• auth.db (安全鉴权与受限凭证隔离存储)<br/>• social_state.db (社媒去重与状态)"]
+        WebUI["🖥️ 现代化 Web 管理端 & 双语阅读器 & 纯享相册<br/>(http://127.0.0.1:46046/)"]
     end
 
     Trigger --> P1 & P2 & P3
@@ -75,19 +77,25 @@ flowchart TD
     - [🖥️ 首次登录与 Web 界面极简配置 (4 步搞定)](#️-首次登录与-web-界面极简配置-4-步搞定)
     - [🔑 Message 账号凭证极简提取指南 (Web 一键复制，1 分钟搞定)](#-message-账号凭证极简提取指南-web-一键复制1-分钟搞定)
     - [🔑 初始管理员账号与密码重置](#-初始管理员账号与密码重置)
+  - [🌐 网络拓扑与协同部署 (NAS + Windows NapCat)](#-网络拓扑与协同部署-nas--windows-napcat)
+    - [1. 常见协同部署架构拓扑](#1-常见协同部署架构拓扑)
+    - [2. NapCat 主动推送与媒体回取配置](#2-napcat-主动推送与媒体回取配置)
+    - [3. NapCat 入站事件监听 (群指令 / 社媒链接 / AI闲聊)](#3-napcat-入站事件监听-群指令--社媒链接--ai闲聊)
   - [✨ 核心特性 / Features](#-核心特性--features)
     - [1. Message 私密消息、yodel 与粉丝信件归档](#1-message-私密消息yodel-与粉丝信件归档)
     - [2. 官方博客智能解析与双语阅读器](#2-官方博客智能解析与双语阅读器)
     - [3. 全平台社交媒体监控与直播录制](#3-全平台社交媒体监控与直播录制)
     - [4. AI 双引擎翻译与全渠道格式化排版](#4-ai-双引擎翻译与全渠道格式化排版)
-    - [5. 安全架构与双角色权限体系](#5-安全架构与双角色权限体系)
-  - [🧩 系统核心架构 / Architecture](#-系统核心架构--architecture)
-    - [1. Pub/Sub 订阅分发模型与渠道备注](#1-pubsub-订阅分发模型与渠道备注)
-    - [2. 单次鉴权下载流水线 (Single-Download Flow)](#2-单次鉴权下载流水线-single-download-flow)
-    - [3. 凭证全自动握手续期机制 (Web vs Mobile)](#3-凭证全自动握手续期机制-web-vs-mobile)
+    - [5. 安全架构与权限体系](#5-安全架构与权限体系)
+  - [🖼️ 相册画廊与 QQ 群本地互动抽图](#-相册画廊与-qq-群本地互动抽图)
+    - [1. Web 纯享相册画廊 (Gallery)](#1-web-纯享相册画廊-gallery)
+    - [2. NapCat QQ 群本地互动抽图指令](#2-napcat-qq-群本地互动抽图指令)
+    - [3. NapCat 偶像拟人化群聊对话](#3-napcat-偶像拟人化群聊对话)
   - [🖥️ Web 管理端与日常运维](#️-web-管理端与日常运维)
-    - [1. 七大管理页签一览](#1-七大管理页签一览)
-    - [2. QQ 官方机器人私聊指令矩阵](#2-qq-官方机器人私聊指令矩阵)
+    - [七大管理页签一览](#七大管理页签一览)
+  - [🤖 机器人指令矩阵](#-机器人指令矩阵)
+    - [1. QQ 群 NapCat 本地指令](#1-qq-群-napcat-本地指令)
+    - [2. QQ 官方机器人指令 (私聊 / 群聊 @Bot)](#2-qq-官方机器人指令-私聊--群聊-bot)
   - [🛠️ 命令行辅助工具与进阶配置](#️-命令行辅助工具与进阶配置)
     - [1. `tools/` 运维管理工具矩阵](#1-tools-运维管理工具矩阵)
     - [2. 服务化后台守护 (Windows / Linux)](#2-服务化后台守护-windows--linux)
@@ -101,9 +109,21 @@ flowchart TD
 
 ### 方式 A：Docker Compose 部署 (强烈推荐)
 
-适用于群晖 Synology、QNAP、Unraid、1Panel、Portainer、云服务器及本地 Docker 环境。
+适用于群晖 Synology NAS、QNAP、Unraid、1Panel、Portainer、云服务器及本地 Docker 环境。
 
-1. **新建目录并创建 `docker-compose.yml`**：
+> [!CAUTION]
+> **重要目录挂载避坑提示**：
+> 项目中的 `config/` 目录不仅包含 `config.json`，还包含核心 Python 模块（如 `config.py`、`credentials.py`）。
+> **切勿在宿主机挂载一个空目录覆盖 `/app/config`**，否则会导致容器内缺失源码模块而报错 `ModuleNotFoundError`。
+> **正确方式**：请先使用 `git clone` 完整克隆本项目代码后再启动 Compose；若仅单文件运行，请确保本地 `config/` 包含源码文件，或者仅单独挂载 `config.json` 文件（如 `./config/config.json:/app/config/config.json`）。
+
+1. **克隆代码并准备环境**：
+   ```bash
+   git clone https://github.com/TomisatoNao/nogizaka-message-push.git
+   cd nogizaka-message-push
+   ```
+
+2. **检查或创建 `docker-compose.yml`**：
    ```yaml
    services:
      sakamichi-push:
@@ -111,7 +131,8 @@ flowchart TD
        container_name: sakamichi-push
        restart: unless-stopped
        ports:
-         - "127.0.0.1:46046:46046"
+         - "46046:46046"  # WebUI 管理端与媒体服务端口
+         - "46047:46047"  # 可选：NapCat 入站事件监听端口（反向 WS / HTTP POST）
        environment:
          - TZ=Asia/Tokyo
        volumes:
@@ -121,20 +142,20 @@ flowchart TD
          - ./.env:/app/.env
    ```
 
-2. **一键拉起服务**：
+3. **一键拉起服务**：
    ```bash
    docker compose up -d
    ```
 
-3. **查看初始密码**：
+4. **查看初始管理员账号与密码**：
    ```bash
    docker logs sakamichi-push
    ```
-   在服务器本机打开浏览器访问 **`http://127.0.0.1:46046/`** 登录。需要远程访问时，请通过 HTTPS 反向代理公开该地址。常见的 Lucky、Nginx、Caddy 配置会自动适配同域访问；生产环境仍应将 `auth.cookie_secure` 设为 `true`。
+   控制台将输出随机生成的初始管理员密码。在浏览器访问 **`http://<服务器IP>:46046/`** 即可登录。
 
 #### 已有 Docker 部署的升级
 
-`docker compose up -d` 不会保证重新拉取已经存在的镜像。升级前先拉取新镜像，再重建容器并检查健康状态：
+升级前先拉取新镜像，再重建容器并检查健康状态：
 
 ```bash
 docker compose pull
@@ -142,135 +163,6 @@ docker compose up -d
 docker compose ps
 curl -fsS http://127.0.0.1:46046/api/health/status
 ```
-
-生产环境建议将 `image` 固定到已通过 CI 的版本标签或镜像 digest，而不是长期依赖会漂移的 `latest`。
-
-#### NapCat QQ 群推送部署方式
-
-NapCat 有两种常见部署方式，请按实际网络拓扑选择：
-
-**方式 1：与主程序同一份 Compose（群晖推荐）**
-
-使用仓库自带的 `docker-compose.with-napcat.yml`。该文件中的 NapCat OneBot HTTP 端口为 `36036`（`3000` 是其他部署的常见端口），两个容器会加入同一个 Docker 网络，主程序通过服务名访问 NapCat：
-
-```yaml
-NAPCAT_API_BASE=http://napcat:36036
-NAPCAT_API_TOKEN=<OneBot_HTTP_Token>
-NAPCAT_MEDIA_BASE_URL=http://sakamichi-push:46046
-```
-
-其中 `<OneBot_HTTP_Token>` 是 NapCat OneBot HTTP 服务的 Token，**不是** NapCat WebUI 登录 Token；若 NapCat 未启用 HTTP Token，则将 `NAPCAT_API_TOKEN` 留空。媒体基地址必须是 NapCat 容器能够访问的地址；同一 Compose 网络优先使用 `http://sakamichi-push:46046`。
-
-从仓库目录启动同机部署：
-
-```bash
-git clone https://github.com/TomisatoNao/nogizaka-message-push.git
-cd nogizaka-message-push
-docker compose -f docker-compose.with-napcat.yml up -d
-```
-
-NapCat 网页控制台默认在 `http://<群晖IP>:6099/`，OneBot HTTP 接口由 Compose 内部的
-`napcat:36036` 提供。首次启动后先在 NapCat 控制台完成 QQ 登录，再在本系统 Web 管理端保存路由并发送测试消息。
-
-**方式 2：NapCat 在另一台电脑或另一套容器**
-
-将 NapCat 基地址和 Token 分开配置，例如：
-
-```text
-NAPCAT_API_BASE=http://192.168.1.20:3000
-NAPCAT_API_TOKEN=<OneBot_HTTP_Token>
-```
-
-同时将 `NAPCAT_MEDIA_BASE_URL` 设置为主程序对 NapCat 可访问的 HTTP 地址，例如 `http://192.168.1.10:46046`。不要填写主程序容器内部的 `/app/data/...` 路径；远程 NapCat 无法读取该路径，会出现 `ENOENT`。
-
-远程 NapCat 还必须能访问这个媒体地址的 `/api/social/media/...` 路径；因此主程序的
-`web_admin.host` 不能只绑定 `127.0.0.1`。原生部署请绑定主程序所在局域网地址，Docker
-部署请在容器内监听 `0.0.0.0`，再用端口映射和防火墙限制 NapCat 主机来源。管理端已启用账号
-鉴权时，签名媒体 URL 不依赖浏览器 Cookie，但仍不要把 46046 直接暴露到公网。
-
-> **配置优先级**：Compose 环境变量 / `.env` 会覆盖 `config/config.json`。新版优先使用 `NAPCAT_API_BASE` 与 `NAPCAT_API_TOKEN`；旧的 `QQ_BOT_API` / `NAPCAT_API_URL` 完整 URL 仍兼容，但不建议继续使用。
-
-多媒体动态（例如 Instagram 轮播）会优先调用 OneBot 的
-`send_group_forward_msg`，折叠为一条群消息，以减少群消息条数消耗。反向 WebSocket
-入站会自动把 NapCat 事件中的 `self_id` 用作转发节点身份；定时监控没有事件上下文时，
-可在 `.env` 设置 `NAPCAT_FORWARD_USER_ID`（NapCat 登录 QQ 号）和可选的
-`NAPCAT_FORWARD_NICKNAME`。未配置身份时会安全回退到原有普通消息链。
-
-部署或修改后执行：
-
-```bash
-docker compose -f docker-compose.with-napcat.yml up -d --force-recreate
-docker logs --tail 100 sakamichi-push
-curl -fsS http://127.0.0.1:46046/api/health/status
-```
-
-预期日志包含 `NapCat QQ 连通正常` 和 `启动状态：READY`。
-
-#### NapCat 群消息中的社媒链接自动解析（可选）
-
-如果希望群友在指定 QQ 群直接发送 X / Instagram / TikTok / 抖音链接，主程序可以
-通过独立的 OneBot 入站端口解析并回帖。该功能默认关闭，且默认不翻译、不归档，避免
-增加处理时间。只会处理 `napcat_routes` 中已经配置的群号；其它群即使能访问端口也会
-被丢弃。
-
-1. 在 `.env` 设置一个仅用于事件上报的高强度随机值：
-
-   ```bash
-   NAPCAT_EVENT_TOKEN=<与 NapCat 事件上报配置相同的随机 Token>
-   ```
-
-2. 在 `config/config.json` 开启并按需调整队列：
-
-   ```json
-   "napcat_inbound": {
-     "enabled": true,
-     "transport": "http_post",
-     "listen_host": "0.0.0.0",
-     "listen_port": 46047,
-     "event_path": "/api/napcat/events",
-     "translate": false,
-     "archive": false,
-     "queue_size": 32,
-     "workers": 2,
-     "cooldown_seconds": 10
-   }
-   ```
-
-   同时保持 `channels.napcat`（或环境变量 `ENABLE_NAPCAT_QQ`）为 `true`，否则主程序会
-   主动不绑定入站端口。
-
-3. 在 NapCat 的 OneBot 11 HTTP 事件上报中填写：
-
-   - 同一 Compose：`http://sakamichi-push:46047/api/napcat/events`
-   - Windows NapCat：`http://<NAS局域网IP>:46047/api/napcat/events`
-   - 请求头使用 `Authorization: Bearer <NAPCAT_EVENT_TOKEN>`（也兼容
-     `X-OneBot-Token`）。
-
-   同一 Compose 的 `46047` 只走 Docker 内网即可；Compose 默认只把宿主机绑定到
-   `127.0.0.1`。Windows NapCat 跨主机时，在 `.env` 将 `NAPCAT_EVENT_BIND` 改为 NAS
-   局域网 IP 后重建容器，再按局域网/ VPN 防火墙规则放行。不要把该端口直接暴露到公网。Token 缺失、错误或群号不在白名单时，主程序
-   不会执行任何解析或发送。接收端只做鉴权、大小检查、链接提取和有界排队，解析/下载/回帖
-   在后台工作线程执行，不会阻塞主轮询。
-
-   如果更希望由 Windows NapCat 主动保持连接，也可以把 `transport` 改为
-   `reverse_ws`，然后在 NapCat「网络配置 → WebSocket 客户端」中填写：
-
-   - 同一 Compose：`ws://sakamichi-push:46047/api/napcat/events`
-   - Windows NapCat：`ws://<NAS局域网IP>:46047/api/napcat/events`
-
-   WebSocket 客户端的 Token 仍填写同一个 `NAPCAT_EVENT_TOKEN`，消息格式选择
-   `array`，建议关闭「上报自身消息」并保留自动重连。HTTP 客户端和 WebSocket
-   客户端二选一，避免同一条群消息重复上报；当前主程序实现的是反向 WS（NapCat
-   作为客户端），不是让主程序主动连接 NapCat WebSocket 服务端。
-
-   本地首次接入前可运行无副作用自检（不会启动主程序、不会读取社媒凭证，也不会向 QQ 群发消息）：
-
-   ```bash
-   python tools/test_napcat_local.py
-   ```
-
-   自检默认使用 `127.0.0.1:46047`、路由群号 `707891867` 和 `.env` 中的
-   `NAPCAT_EVENT_TOKEN`；需要更换测试群号时使用 `--group-id <群号>`。
 
 ---
 
@@ -304,14 +196,12 @@ curl -fsS http://127.0.0.1:46046/api/health/status
 
 3. **打开浏览器**：访问 **`http://127.0.0.1:46046/`** 即可直接登录。
 
-首次运行在未配置监控账号、推送通道时属于正常的“等待配置”状态：控制台会保留启动、配置提示和初始密码，但不会把未启用功能打印成 ERROR，也不会对账号池预设发起续期或订阅请求。配置完成后，`/api/status` 会在 `startup.state` 显示 `READY`；未配置完整时显示 `SETUP_REQUIRED`，已启用任务发生真实外部故障时显示 `DEGRADED`。
-
 ---
 
 ### 🖥️ 首次登录与 Web 界面极简配置 (4 步搞定)
 
 > [!TIP]
-> **全流程图形化配置**：登录后台后，所有设置均可直接在网页端点选完成，**无需手动打开或编辑任何配置文件**！
+> **图形化全流程运维**：登录后台后，所有监控项、翻译密钥、推送路由均可在网页端直接点选配置并热重载，日常使用无需手动编辑 JSON 配置文件！
 
 1. **配置 AI 翻译**：进入「⚙️ 系统设置」，录入 Google Gemini API Key（[免费获取](https://aistudio.google.com/apikey)）或智谱开放平台 API Key（[免费获取](https://open.bigmodel.cn/)，国内免翻直连）；
 2. **开启推送渠道**：进入「📢 推送通道」，开启 Telegram 频道、NapCat QQ 群 或 QQ 官方机器人，设置「备注名」（如 `乃木坂主群`），并点击「📨 发送测试」验证连通性；
@@ -323,7 +213,7 @@ curl -fsS http://127.0.0.1:46046/api/health/status
 ### 🔑 Message 账号凭证极简提取指南 (Web 一键复制，1 分钟搞定)
 
 > [!TIP]
-> **无需任何抓包软件**：无需安装 Fiddler、Charles、Mitmproxy 等抓包工具，直接在电脑浏览器（Chrome / Edge 等）利用自带的开发者工具（F12）即可 **1 分钟内完成全套凭证复制**，系统支持 cURL 智能一键解析！
+> **无需安装任何抓包软件**：直接在电脑浏览器（Chrome / Edge 等）利用自带的开发者工具（F12）即可 **1 分钟内完成全套凭证复制**，系统支持 cURL 智能一键解析！
 
 ```mermaid
 flowchart LR
@@ -347,11 +237,11 @@ flowchart LR
 3. **右键点击 `signin` 请求** ➔ **「复制 (Copy)」** ➔ 选择 **「以 cURL (bash) 格式复制」** 或 **「以 cURL (cmd) 格式复制」**。复制结果必须包含请求 URL 与请求体。
 
 #### 步骤 3：粘贴至 Web 管理端，一键解析并自动握手
-1. 打开本系统 Web 管理后台（`http://127.0.0.1:46046/`）➔ 进入 **「👥 账号与成员」** 页面；
+1. 打开本系统 Web 管理后台（`http://<IP>:46046/`）➔ 进入 **「👥 账号与成员」** 页面；
 2. 找到对应团体账号，点击 **「🔑 填写凭证」** 按钮；
 3. 点击展开 **「📋 智能一键解析」**，直接将刚才复制的整段 cURL 代码粘贴到文本框中，点击 **「🚀 解析并填充」**；
 4. 系统将瞬间自动提取并填入 `access_token`、`refresh_token`、`session` Cookie 及 `user_id` 等全部参数；
-5. 点击 **「🔐 保存并自动握手」**，系统会自动发起鉴权握手；在 session 与 refresh_token 仍有效时，巡查前会按 JWT 剩余寿命自动续期。若官方拒绝续期或凭据已经失效，需要重新粘贴新的 cURL。
+5. 点击 **「🔐 保存并自动握手」**，系统会自动发起鉴权握手；在 session 与 refresh_token 仍有效时，巡查前会按 JWT 剩余寿命自动续期。
 
 ---
 
@@ -369,12 +259,92 @@ python tools/manage_users.py reset
 
 ---
 
+## 🌐 网络拓扑与协同部署 (NAS + Windows NapCat)
+
+当主程序部署在 NAS（群晖/Linux Docker）而 NapCat 运行在 Windows PC（或其它主机）时，两端存在清晰的**双向协同网络拓扑**：
+
+```mermaid
+flowchart LR
+    subgraph NAS["🖥️ 群晖 Synology NAS (Docker 容器: sakamichi-push)"]
+        direction TB
+        Main["主程序 (main.py)"]
+        MediaSrv["WebUI 与媒体服务<br/>(端口: 46046)"]
+        Inbound["OneBot 事件入站监听<br/>(端口: 46047)"]
+        Main --> MediaSrv
+        Inbound --> Main
+    end
+
+    subgraph PC["💻 Windows PC (NapCat 客户端)"]
+        direction TB
+        NC["NapCat OneBot 11"]
+        NCHttp["OneBot HTTP 服务<br/>(默认端口: 3000 / 36036)"]
+        NCWS["WebSocket 客户端 (反向 WS)"]
+        NC --> NCHttp
+        NCWS --> NC
+    end
+
+    subgraph QQ["🐧 腾讯 QQ 官方生态"]
+        Group["QQ 群聊 / 好友"]
+    end
+
+    Main -- "1. 发送消息 (HTTP POST)" --> NCHttp
+    NCHttp -- "2. 回取图片/视频 (HTTP GET)" --> MediaSrv
+    NCWS -. "3. 上报群事件/指令 (反向 WS / HTTP POST)" .-> Inbound
+    NC <--> QQ
+```
+
+### 1. 常见协同部署架构拓扑
+
+| 通信方向 | 协议 / 端口 | 作用与配置项 |
+|---|---|---|
+| **主程序 ➔ NapCat** | HTTP POST (`:3000` 或 `:36036`) | 主程序主动向 NapCat 发送群消息推送。<br/>配置项：`NAPCAT_API_BASE=http://<Windows-IP>:3000` |
+| **NapCat ➔ 主程序 (媒体回取)** | HTTP GET (`:46046`) | NapCat 接收到本地文件链接时，回取媒体字节以发送群聊。<br/>配置项：`NAPCAT_MEDIA_BASE_URL=http://<NAS-IP>:46046` |
+| **NapCat ➔ 主程序 (事件入站)** | 反向 WebSocket / HTTP POST (`:46047`) | NapCat 将群消息、抽图指令、社媒链接上报给主程序。<br/>WS 地址：`ws://<NAS-IP>:46047/api/napcat/events` |
+
+### 2. NapCat 主动推送与媒体回取配置
+
+在 NAS 端 `.env` 或 `docker-compose.yml` 环境变量中设置：
+
+```bash
+# Windows NapCat 的 OneBot HTTP 地址
+NAPCAT_API_BASE=http://192.168.22.20:3000
+NAPCAT_API_TOKEN=<NapCat中设置的OneBot_Token>
+
+# 告知 NapCat 从何处回取 NAS 上的图片媒体（必须是 NapCat PC 能访问的 NAS 地址）
+NAPCAT_MEDIA_BASE_URL=http://192.168.22.13:46046
+```
+
+> [!WARNING]
+> 切勿将 `NAPCAT_MEDIA_BASE_URL` 填为 `/app/data/...` 或 `127.0.0.1`，否则远程 Windows NapCat 会因无法读取 NAS 容器路径报错 `ENOENT`。
+
+### 3. NapCat 入站事件监听 (群指令 / 社媒链接 / AI闲聊)
+
+当群友发送 `/抽张美图`、分享 X/Ins/TikTok 链接或 @机器人 聊天时，通过 `46047` 端口接入处理：
+
+1. **主程序开启入站**（在 `config/config.json` 或 Web 端设置）：
+   ```json
+   "napcat_inbound": {
+     "enabled": true,
+     "transport": "reverse_ws",
+     "listen_host": "0.0.0.0",
+     "listen_port": 46047,
+     "event_path": "/api/napcat/events",
+     "cooldown_seconds": 10
+   }
+   ```
+2. **在 Windows NapCat 控制台中配置反向 WebSocket**：
+   - 地址：`ws://192.168.22.13:46047/api/napcat/events`
+   - Token：与 `.env` 中 `NAPCAT_EVENT_TOKEN` 一致
+   - 消息格式：选择 `Array`
+
+---
+
 ## ✨ 核心特性 / Features
 
 ### 1. Message 私密消息、yodel 与粉丝信件归档
 - **四团 Message 原生解析**：支持乃木坂46、櫻坂46、日向坂46及 yodel 平台的多媒体消息（文本、原图、音频语音、高清视频）；
-- **粉丝信件 (Fan Letters) 归档**：从 CloudFront 私有 CDN 完整保存你发给成员的高清信纸长图原图、正文、发送时间与收藏标记；
-- **极速冷启动与全文搜索**：基于 SQLite WAL 模式与 FTS5 引擎，万级历史记录毫秒级中日双语搜索，Gzip 极速传输，冷启动就绪时间 **<1 秒**；
+- **粉丝信件 (Fan Letters) 归档**：从 CloudFront 私有 CDN 完整保存发给成员的高清信纸长图原图、正文、发送时间与收藏标记；
+- **秒级就绪与全文检索**：基于 SQLite WAL 模式与 FTS5 引擎，万级历史记录毫秒级中日双语搜索，Gzip 极速传输；
 - **Gemini Vision 智能打标**：自动对消息图片进行 10 种类目（自拍/合照/舞台/外出/美食等）语义打标。
 
 ### 2. 官方博客智能解析与双语阅读器
@@ -386,7 +356,7 @@ python tools/manage_users.py reset
 ### 3. 全平台社交媒体监控与直播录制
 - **多平台抓取与登录边界**：
   - **𝕏 (Twitter)**：三级降级容灾，自动提取原图无损直链（`?name=orig`）与无障碍 Alt 文本并翻译；
-  - **Instagram**：公开帖子 / Reel / 图片优先使用匿名 Embed 解析（即使私有 `media/info` 返回 403 也可继续）；Feed 与 24h 快拍（Story）仍需有效 Cookies，内置安全频控限流熔断；
+  - **Instagram**：公开帖子 / Reel / 图片优先使用匿名 Embed 解析；Feed 与 24h 快拍（Story）仍需有效 Cookies，内置安全频控限流熔断；
   - **TikTok**：短视频、图文幻灯片及原声音频无水印提取；
 - **TikTok Live 直播开播守护**：8 秒超轻量探测（单次约 120 字节），开播瞬间毫秒级捕获 HLS/FLV 流并拉起 ffmpeg 无损切片录制，优雅停机保护 Moov Atom；
 - **成员目录与社媒分层**：Message 监控成员仅从乃木坂46、樱坂46、日向坂46及 yodel 的官方账号目录同步；X / Instagram / TikTok 等其他社媒账号统一在动态监控页面配置。
@@ -396,100 +366,63 @@ python tools/manage_users.py reset
 - **zakablog 博客排版规范**：全渠道推送统一样式（Header 信息头 + AI 翻译模型溯源徽章 + 双语对照正文 + 多图/长图卡片）；
 - **Message 居中徽章排版**：日文原文与中文译文之间嵌入 `─── 🌐 译文 (模型名) ───` 来源徽章。
 
-### 5. 安全架构与双角色权限体系
+### 5. 安全架构与权限体系
 - **RBAC 双角色模型**：`admin` 拥有完整管理权限；`viewer` 仅可查阅归档与阅读器；支持一键开启 `auth.archive_public` 供同好免登录公开查阅归档；
-- **密码哈希与防锁死保护**：`scrypt` 强加盐哈希，`hmac.compare_digest` 常时比对，IP 连续输错临时锁定，系统严格禁止删除最后一个管理员账号。
+- **受限凭证隔离存储**：账号凭据保存在本地受限数据库 `data/auth.db` 中隔离管理，用户密码采用 `scrypt` 强加盐哈希，`hmac.compare_digest` 常时比对，IP 连续输错临时锁定，禁止删除最后一个管理员账号。
 
 ---
 
-## 🧩 系统核心架构 / Architecture
+## 🖼️ 相册画廊与 QQ 群本地互动抽图
 
-### 1. Pub/Sub 订阅分发模型与渠道备注
+### 1. Web 纯享相册画廊 (Gallery)
 
-```mermaid
-flowchart LR
-    subgraph Data["📡 采集源层 (Producers)"]
-        M1["💬 Message 消息"]
-        M2["📝 官方博客"]
-        M3["🌐 社媒 (𝕏/IG/TikTok/Live)"]
-    end
+访问 WebUI 顶部的 **「🖼️ 相册」** 标签，即可进入专为坂道偶像打造的高清图片瀑布流画廊：
 
-    subgraph Hub["⚡ 事件路由总线"]
-        HUB["类型过滤 · 白名单匹配 · 格式化渲染"]
-    end
+- **双源自动聚合**：同时汇聚各成员在 Message 私密消息中发送的照片，以及在官方博客中发布的配图；
+- **WebP 缩略图极速秒开**：通过后台内置轻量缩略图流水线，将头像与网格图片等比预生成高压缩 WebP（单张仅 4~5 KB，相比动辄 1MB 的原图压缩率达 **99.4%**），数百张图片 50ms 级全量秒开；
+- **全屏 Lightbox 原图查看**：点击卡片即刻拉起全屏灯箱，无缝加载 100% 原始无损大图，支持键盘左右键翻页与一键原图下载；
+- **年份时间轴智能筛选**：支持按年（如 `2024`、`2025`）快速定位历史美图，无缝搭配逆序与正序浏览。
 
-    subgraph Targets["📢 消费通道层 (Subscribers)"]
-        T1["🐧 QQ 群 (NapCat)<br/>[乃木坂主群]"]
-        T2["✈️ Telegram<br/>[5期生频道]"]
-        T3["🤖 QQ 官方 Bot<br/>[官方测试群]"]
-    end
+### 2. NapCat QQ 群本地互动抽图指令
 
-    M1 & M2 & M3 --> HUB
-    HUB --> T1 & T2 & T3
+群友在授权的 QQ 群内发送如下指令，即可免消耗 Token 毫秒级抽取偶像美图：
+
+```text
+/抽张美图
+/抽张美图 冨里奈央
+/美图 金川纱耶
+/photo 向井纯叶
 ```
 
-- **全渠道备注支持**：每个群、每个 Bot 均支持直观备注（如 `乃木坂主群`、`5期生频道`），管理端与弹窗清晰展示；
-- **独立过滤与订阅开关**：各通道可独立勾选接收的内容类型，并设置 `member_filter`、`blog_filter`、`social_filter`；新建 QQ 官方 Bot、NapCat 路由或 Telegram Bot 默认不订阅任何内容，按需增量勾选，已有配置保持不变。
+- **加权公平抽选**：根据该小偶像在消息库与博客库中的实际图片数量比例进行加权抽样，彻底解决传统回退机制导致的重复抽图偏差；
+- **别名与简繁体互通**：支持常见简繁体汉字（如“纯叶”自动识别为“純葉”、“贺喜”识别为“賀喜”）；
+- **三道安全防线，0 SQL 注入风险**：
+  1. **严格正则白名单**：输入参数通过 `re.sub(r"[^\w\u4e00-\u9fa5\u3040-\u30ff]", "", arg)` 剥离所有标点符号与特殊字符；
+  2. **静态名册枚举比对**：仅在系统已归档目录、官方名册（`sakamichi_roster`）及监控名单中比对，查无此人立即友好阻断；
+  3. **100% 参数化预编译查询**：底层 SQLite 交互全部采用 `?` 原生占位符绑定，完全杜绝字符串拼接。
+- **频控冷却防刷**：内置单群 4 秒、单用户 8 秒冷却时间，避免高频刷屏。
 
-社媒动态的事件总线由四个可替换边界组成：`MessagePreparationService` 负责翻译、
-Alt 文本和正文格式化；`RoutePlanner` 负责过滤器与目标路由；`DeliveryService`
-负责并发投递、逐路由补偿重试和统一结果；`ArchiveService` 与
-`DeliveryStateRepository` 分别负责幂等归档和投递状态。Telegram、NapCat、QQ
-官方 Bot 通过 `ChannelAdapter` 接入，定时监控、WebUI 和 QQ 指令共享同一投递服务。
+### 3. NapCat 偶像拟人化群聊对话
 
-#### QQ 官方 Bot 媒体上传策略
+开启 `napcat_chat` 模块后，群友在 QQ 群内 `@机器人` 并输入文字，机器人将调用所配置的大模型以偶像拟人口吻自然回复：
 
-公开社媒或博客媒体发送到 QQ 官方 Bot 时，按以下顺序处理：
-
-1. 有公开 HTTP(S) 地址时，优先交给 QQ 服务端按 URL 取文件，避免每个 Bot 重复下载和编码；
-2. 没有可用 URL 时，本地媒体超过约 2 MiB 先走官方 `upload_prepare` 分片上传，保留原始画质；
-3. 只有分片链路明确失败、且媒体确实可以缩小时，才执行一次压缩兜底，不会循环压缩同一文件；
-4. 非幂等的媒体上传和最终发消息遇到超时或未知回包时不自动重复提交，避免“日志失败但群里已经收到”造成重复消息。分片的同一 `upload_id` 内部仍允许有限重试。
-
-### 2. 单次鉴权下载流水线 (Single-Download Flow)
-
-针对坂道 Message 托管在 CloudFront 上的私有鉴权媒体，系统采用单次流水线架构：
-
+```jsonc
+"napcat_chat": {
+  "enabled": true,
+  "model": "gemini-2.5-flash",
+  "system_prompt": "你是乃木坂46五期生冨里奈央，性格元气可爱，喜欢用(ˊᵕˋ˶ )等颜文字与粉丝互动...",
+  "max_history": 6,
+  "cooldown_seconds": 5
+}
 ```
-收到新消息
-   ↓
-1. AI 双引擎轮巡翻译
-   ↓
-2. 【归档模块】携带账号凭证 Headers 从 CloudFront 统一鉴权下载至本地磁盘（仅 1 次网络请求）
-   ↓
-3. 【推送模块】各推送通道直接读取本地磁盘文件字节秒级上传分发（0 次额外网络请求）
-   ↓
-4. 上传至各通道，完成推送
-```
-
-上面的流程适用于 Message 私有媒体：归档阶段只下载一次，推送阶段复用本地文件。公开社媒/博客媒体发送到 QQ 官方 Bot 时，改用上方的 URL 直取与分片上传策略。
-
-### 3. 凭证全自动握手续期机制 (Web vs Mobile)
-
-系统全面支持 **Web（网页端会话）** 与 **Mobile（移动端 OAuth）** 双模式：
-
-```
-浏览器 F12 复制 signin cURL
-   ↓
-Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_token / session Cookie
-   ↓
-安全写入 SQLite (data/auth.db)
-   ↓
-每次巡查前校验 JWT 剩余寿命 (exp)
-   ├─ 剩余 > 300s ─── 直接使用现有 Token 请求 Message
-   └─ 剩余 ≤ 300s ─── 后台自动带 session Cookie 握手续期，0 秒无感刷新
-```
-
-- **0 秒全套凭证捕获**：在浏览器开发者工具中，复制登录时 `signin` 请求的 cURL 并在 WebUI 粘贴，系统自动解构出 Token、User ID 与持久会话 Cookie；
-- **自动续期与失效保护**：每次巡查前严格校验 JWT `exp` 寿命，当 Token 剩余有效期不足 300 秒且会话仍有效时，后台自动静默发起握手续期；若 API 明确拒绝凭据，系统会停止该账号的抓取并提示重新配置，不承诺永久有效。
 
 ---
 
 ## 🖥️ Web 管理端与日常运维
 
-管理端监听于 **`http://127.0.0.1:46046/`**。
+管理端监听于 **`http://<IP>:46046/`**。
 
-### 1. 七大管理页签一览
+### 七大管理页签一览
 
 管理员可见 7 个页签；`viewer` 角色不显示「用户」页签，只能访问消息与博客归档。
 
@@ -498,26 +431,33 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 | **📊 状态** | 实时巡查轮次、下次倒计时、各账号 Token 剩余寿命、通道健康度、立即巡查与测试推送。 |
 | **👥 账号与成员** | 账号凭证在线填报与握手测试；**成员订阅状态胶囊（🌟已订阅·至9/1、⏳曾订阅、⚫离线）**；未订阅成员智能跳过轮询抓取。 |
 | **📢 推送通道** | NapCat QQ、Telegram、QQ 官方 Bot 开关、API 配置、**渠道备注名**、订阅开关与白名单过滤。 |
-| **🌐 动态监控** | 全局 JST 日间/深夜/休眠时段、Message 与官方博客独立频率、𝕏 (Twitter)、Instagram (Feed/Story)、TikTok 短视频与 TikTok Live 直播录制总控。休眠只暂停新的内容轮询，不影响健康检查、告警、手动操作或已经开始的直播录制。 |
-| **⚙️ 系统设置** | 只保留 QQ/NapCat 发送节流、告警冷却、单路超时、AI 翻译、代理、本地归档和每日健康报告；监控频率统一在「动态监控」。 |
-| **🔑 用户** | scrypt 加盐哈希用户鉴权、在线增删用户、分配角色、随机高强度密码生成。 |
+| **🌐 动态监控** | 全局 JST 日间/深夜/休眠时段、Message 与官方博客独立频率、𝕏 (Twitter)、Instagram (Feed/Story)、TikTok 短视频与 TikTok Live 直播录制总控。 |
+| **⚙️ 系统设置** | QQ/NapCat 发送节流、告警冷却、单路超时、AI 翻译密钥、网络代理、本地归档与每日健康报告。 |
+| **🔑 用户** | scrypt 加盐哈希用户鉴权、在线增删用户、分配角色、随机高强度密码生成、游客公开浏览开关。 |
 | **🛠️ 高级** | 实时脱敏运行日志控制台、全局 JSON 配置可视化在线编辑及 **10 份历史配置快照一键回滚**。 |
 
-在「👥 成员工具」中选择「归档三团全量博客」即可按团体批量回填历史博客。团体默认不选，
-可多选乃木坂、樱坂、日向坂；任务会在后台按团顺序运行，进度和失败摘要写入系统日志。
-全量回填保存正文、原始图片 URL 和本地图片，重复运行会跳过已有文章并补齐缺失媒体，
-不会自动调用翻译。需要只补抓某位成员时，使用弹窗中的「高级：按成员 URL 补抓」。
+---
 
-### 2. QQ 官方机器人私聊指令矩阵
+## 🤖 机器人指令矩阵
 
-启用 QQ 官方 Bot 并在后台开启「指令监听」后，授权管理员私聊机器人即可直接发送交互指令（走被动回复通道，不消耗主动推送额度）：
+### 1. QQ 群 NapCat 本地指令
+
+在已加入 NapCat 路由白名单的群聊中直接发送：
+
+| 指令 | 别名 | 参数说明 | 行为描述 |
+|---|---|---|---|
+| `/抽张美图` | `/抽美图`、`/随机美图`、`/美图`、`/pic`、`/photo` | 可选小偶像名字（如 `冨里奈央`） | 从本地归档与博客库中加权公平抽选一张美图并展示发送日期与正文；未传参数时优先抽选当前群绑定的专属成员。 |
+
+### 2. QQ 官方机器人指令 (私聊 / 群聊 @Bot)
+
+启用 QQ 官方 Bot 并在后台开启「指令监听」后，授权白名单管理员私聊机器人或在群内 @机器人 发送：
 
 | 指令 | 说明 | 示例 |
 |---|---|---|
-| `/help` | 查看支持的完整指令菜单 | `/help` |
-| `/ping` | 快速测试机器人连接状态与网络延迟 | `/ping` |
-| `/status` | 实时查看系统运行时间、巡查轮次与账号状态 | `/status` |
-| `/members` | 查看当前监控的所有成员与绑定通道 | `/members` |
+| `/help` | 查看支持的完整官方指令菜单 | `/help` 或 `菜单` |
+| `/ping` | 快速测试机器人连接状态与网络延迟 | `/ping` 或 `测试` |
+| `/status` | 实时查看系统运行时间、巡查轮次与账号状态 | `/status` 或 `状态` |
+| `/members` | 查看当前监控的所有成员与绑定通道 | `/members` 或 `监控` |
 
 ---
 
@@ -534,7 +474,7 @@ Web 管理端「智能一键解析」➔ 自动提取 access_token / refresh_tok
 | `archive_letters.py` | `python tools/archive_letters.py [成员名]` | 归档粉丝信件（Fan Letters）高清信纸原图入库 |
 | `backfill_archive.py` | `python tools/backfill_archive.py 冨里奈央 --from 2023-01-01` | 回填指定成员的历史 Message 消息与媒体 |
 | `archive_member.py` | `python tools/archive_member.py <博客URL> --translate` | 归档全量历史博客、下载原图并进行 AI 补翻 |
-| `backfill_blogs.py` | `python tools/backfill_blogs.py --group nogizaka --group sakurazaka --download-images` | 按团体顺序回填全量历史博客；可下载本地图片，重复运行会跳过已有文章并补齐缺失媒体 |
+| `backfill_blogs.py` | `python tools/backfill_blogs.py --group nogizaka --download-images` | 按团体顺序批量回填全量历史博客与图片 |
 | `sync_archive_db.py` | `python tools/sync_archive_db.py` | 扫描本地磁盘归档并全量重构 SQLite 数据库与 FTS5 索引 |
 | `tag_images.py` | `python tools/tag_images.py --member 冨里奈央` | 批量对历史归档图片调用 Gemini Vision 补全标签 |
 | `get_qq_openid.py` | `python tools/get_qq_openid.py [APP_ID] [SECRET]` | 快速捕获 QQ 官方 Bot 私聊用户的 `target_openid` |
@@ -566,31 +506,12 @@ bash tools/install_systemd.sh --stop       # 停止服务
 ```
 </details>
 
-### 3. 审计、备份与健康监控
-
-- Web 管理端的登录、注销、用户管理、归档自定义标签、配置/密钥变更，以及重启/立即巡查会写入 `logs/audit.jsonl`；在「📟 控制台实时运行日志」中切换到「管理审计日志」即可查看。审计记录会自动脱敏，并按大小滚动保留。
-- 备份默认包含 `config/` 与 `data/`，**可能含凭据数据库**；备份文件请保存在受限位置，不要上传至公开仓库。
-
-```bash
-# 创建备份，默认保留最近 7 份
-python tools/backup_data.py create
-
-# 校验备份完整性（不写入数据）
-python tools/backup_data.py verify backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz
-
-# 仅预演恢复；确认已停止服务后才执行下一条
-python tools/backup_data.py restore backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz
-python tools/backup_data.py restore backups/sakamichi-backup-YYYYMMDD-HHMMSS.tar.gz --apply
-```
-
-- 使用 Uptime Kuma 等工具监控 `https://<你的域名>/api/health/status`。项目已有的 QQ/TG/官方 Bot 告警通道会沿用各通道的 `push_alert` 配置发送运行告警；NapCat 会话从在线变为离线（包括 `KickedOffline`）时也会按同一规则发送一次告警，恢复在线后发送恢复通知。
-
-### 4. 进阶底层配置结构参考
+### 3. 进阶底层配置结构参考
 
 <details>
 <summary><b>底层配置文件结构参考（仅供自动化脚本与开发者查阅，点击展开）</b></summary>
 
-Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env` 文件。其核心结构如下：
+Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env` 文件。核心结构如下：
 
 #### `config/config.json` 结构示例
 ```jsonc
@@ -635,35 +556,16 @@ Web 管理端保存的配置会自动持久化至 `config/config.json` 与 `.env
 }
 ```
 
-`day_interval` / `night_interval` 是 Message 每轮完成后的随机等待区间；博客使用
-`blog_monitor` 内的独立区间，X、TikTok 和 TikTok Live 使用各自平台的秒数。Instagram
-Feed/Reels 使用两个明确的随机区间，Story 另有按账号的安全限频。`monitor_schedule`
-统一以 JST 判定日间、深夜和休眠；旧版顶层 `sleep_hours`、`day_start_hour` 等键仍可读取，
-新配置优先使用嵌套块。修改后点击管理端“保存并热重载”，下一轮任务读取新快照。
-
-> Docker Compose 默认只将管理端发布到宿主机 `127.0.0.1:46046`。需要远程访问时，请使用 HTTPS 反向代理并把 `auth.cookie_secure` 设为 `true`；不要直接将 HTTP 管理端暴露到公网。应用会自动接受与请求 Host 相同的 HTTPS Origin；若要锁定唯一访问域名或代理没有保留 Host，可在 `web_admin.origin` 填写完整外部地址。
-
 #### `.env` 环境变量列表
 ```bash
 GEMINI_API_KEY=AIzaSy...               # Google Gemini API Key
 ZHIPU_API_KEY=df488cc9...              # 智谱开放平台 API Key
 TG_BOT1_TOKEN=123456:ABC...            # config.json 中 tg_bot1 的专属 Token
-# TG_BOT2_TOKEN=123456:XYZ...           # config.json 中 tg_bot2 的专属 Token
 WEB_ADMIN_TOKEN=your_token             # Web 管理端外部 API 调用 Token (可选)
-NAPCAT_EVENT_TOKEN=change_me           # NapCat 入站事件 Token（可选功能，建议随机长值）
-NAPCAT_MEDIA_SIGNING_SECRET=change_me  # 远程媒体签名密钥（建议使用 32 字节以上随机值）
+NAPCAT_EVENT_TOKEN=change_me           # NapCat 入站事件 Token（建议长随机字符串）
+NAPCAT_MEDIA_SIGNING_SECRET=change_me  # 远程媒体签名密钥
 INSTAGRAM_SESSIONID=123456789%3Axxx    # Instagram 24h 快拍凭证 (可选)
 ```
-
-Telegram 每个 Bot 必须配置独立的 `<Bot 名称大写>_TOKEN` 环境变量（例如
-`tg_bot1` 对应 `TG_BOT1_TOKEN`）。旧版全局 `TG_BOT_TOKEN` 已废弃，即使仍存在也不会
-被读取；未配置专属 Token 的 Bot 会在启动时明确跳过。
-
-> Instagram 单条公开帖子通常无需登录：解析器会在私有接口被拒后自动打开
-> `/p/<code>/embed/captioned/`，提取公开 CDN 图片或视频，再由下载器直下。
-> 账号 Feed、Story、私密/年龄限制/地区限制内容仍需在后台配置完整 Cookies。
-> Cookies 长期保存在 `data/social.db`，yt-dlp 使用的 Netscape 文件只在单次调用
-> 期间临时生成并清理，不会再把登录凭证拼成原始 `Cookie` 请求头。
 
 </details>
 
@@ -672,83 +574,53 @@ Telegram 每个 Bot 必须配置独立的 `<Bot 名称大写>_TOKEN` 环境变�
 ## ❓ 常见故障排查 / FAQ
 
 <details>
-<summary><b>Q1: 首次启动没看清 admin 密码怎么办？</b></summary>
+<summary><b>Q1: Docker 部署启动报错「No module named 'config.config'」？</b></summary>
+
+这是因为在宿主机挂载了一个空目录覆盖了容器内的 `/app/config`。`config/` 目录中包含系统的核心 Python 模块代码。解决办法：请使用 `git clone` 下载完整源码后再启动，或者仅将 `config/config.json` 作为单文件挂载，不要挂载整个空目录覆盖 `/app/config`。
+</details>
+
+<details>
+<summary><b>Q2: 首次启动没看清 admin 密码怎么办？</b></summary>
 
 在项目根目录下执行 `python tools/manage_users.py passwd admin <你的新密码>` 即可直接重设；或者执行 `python tools/manage_users.py reset` 重新生成初始随机密码。
 </details>
 
 <details>
-<summary><b>Q2: 提示「没有任何可用推送目标」？</b></summary>
+<summary><b>Q3: 提示「没有任何可用推送目标」？</b></summary>
 
 进入 Web 管理端「📢 推送通道」，开启对应的通道（如 NapCat / Telegram / QQ 官方 Bot），并在路由规则中确保该通道已勾选对应的消息类型，且 `member_filter` / `blog_filter` 未将目标内容过滤掉。
 </details>
 
 <details>
-<summary><b>Q3: Telegram 推送报错 Chat not found？</b></summary>
+<summary><b>Q4: Telegram 推送报错 Chat not found？</b></summary>
 
-请确保你创建的 Telegram Bot 已被拉入目标频道，并已被赋予「Post Messages（发布消息）」管理员权限。频道 ID 通常为 `-100` 开头的数字，可使用 `@getidsbot` 获取。
+请确保创建的 Telegram Bot 已被拉入目标频道，并已被赋予「Post Messages（发布消息）」管理员权限。频道 ID 通常为 `-100` 开头的数字，可使用 `@getidsbot` 获取。
 </details>
 
 <details>
-<summary><b>Q4: QQ 官方 Bot 报错 40093011 (上传文件大小超过限制)？</b></summary>
+<summary><b>Q5: 动态推送出现 C:\app\data\... ENOENT 错误？</b></summary>
 
-公开媒体会优先让 QQ 服务端按 URL 取文件；本地媒体优先走官方分片上传，只有分片明确失败且可缩小时才执行一次压缩兜底。直传和最终发消息超时后不会自动重试，因此不会因为不确定的回包重复发送；请确保使用的代码为最新版本。
+这是运行在 Windows 上的 NapCat 收到了主程序容器内的 Linux 本地文件路径。请在 `.env` 中正确配置 `NAPCAT_MEDIA_BASE_URL=http://<NAS局域网IP>:46046`，让 NapCat 通过 HTTP 回取媒体流，而不是直接寻找本地文件。
 </details>
 
 <details>
-<summary><b>Q5: 为什么有原文但没有中文翻译？</b></summary>
+<summary><b>Q6: 为什么有原文但没有中文翻译？</b></summary>
 
 请进入 Web 管理端「⚙️ 系统设置」，检查是否已录入 `GEMINI_API_KEY` 或 `ZHIPU_API_KEY`。推荐同时录入两者，系统将自动开启双活轮询与故障容灾。
 </details>
 
 <details>
-<summary><b>Q6: 如何将 Message 归档免登录公开给同好浏览？</b></summary>
+<summary><b>Q7: 如何将 Message 归档免登录公开给同好浏览？</b></summary>
 
 在 Web 管理端「🔑 用户」页签中开启「归档公开访问（游客免登录）」并保存（对应 `auth.archive_public: true`）。此时管理后台仍然受密码保护，而 `/archive` 页面允许所有人匿名查阅。
 </details>
 
 <details>
-<summary><b>Q7: 复制了 cURL 粘贴后提示「未包含有效凭证」或找不到 signin 请求？</b></summary>
+<summary><b>Q8: 复制了 cURL 粘贴后提示「未包含有效凭证」或找不到 signin 请求？</b></summary>
 
-1. **务必勾选「保留日志 (Preserve log)」**：第三方账号（Google/Apple/Sony）登录过程伴随多次 302 重定向，若未勾选保留日志，关键的 `signin` 请求会在页面跳转时被浏览器 DevTools 自动清空；
-2. **推荐使用无痕窗口 (Incognito)**：若浏览器已有持久缓存，直接访问可能会跳过 `signin` 授权请求。打开无痕窗口重新从 `/welcome` 页面点击登录即可完整捕获；
-3. **只能复制 `signin` 请求**：`profile` / `timeline` 即使包含访问令牌，也可能没有登录响应的 `Set-Cookie`，无法补齐完整会话。若找不到 `signin`，请清空网络记录后重新走一遍登录流程，不要用其它接口替代。
-</details>
-
-<details>
-<summary><b>Q8: 更新后如何确认运行的是新版本？</b></summary>
-
-Docker 部署请先执行 `docker compose pull && docker compose up -d`，再请求 `/api/health/status` 验证服务已恢复。若使用自定义部署脚本，应先确认脚本同步的 Git 提交，再执行同样的健康检查；不要只刷新浏览器页面判断版本是否更新。
-</details>
-
-<details>
-<summary><b>Q9: NapCat 启动检查 HTTP 403，但测试推送也失败？</b></summary>
-
-优先检查 OneBot HTTP Token。`WEBUI_TOKEN` 只用于 NapCat 网页控制台，不能作为 OneBot API Token。使用 `curl` 验证：
-
-```bash
-curl -i -H "Authorization: Bearer <OneBot_HTTP_Token>" http://<NapCat主机>:<OneBot_HTTP_Port>/get_status
-```
-
-同一 Compose 部署的 `<OneBot_HTTP_Port>` 是 `36036`；其他部署按 NapCat 实际端口填写。若返回 `token verify failed!`，说明 Token 错误；若返回 HTTP 200，再检查 `NAPCAT_API_BASE` / `NAPCAT_API_TOKEN` 是否被 Compose 环境变量覆盖。启动检查和实际推送使用同一地址及鉴权信息。
-</details>
-
-<details>
-<summary><b>Q10: 动态推送出现 C:\app\data\... ENOENT？</b></summary>
-
-这是远程 NapCat 收到了主程序容器的本地文件路径。请配置 `NAPCAT_MEDIA_BASE_URL`，同一 Compose 使用 `http://sakamichi-push:46046`，跨主机使用群晖可访问的内网 HTTP 地址，然后重建容器。推送日志应出现 `/api/social/media/`，而不是 `file:///` 或 `C:\app\data\`。
-</details>
-
-<details>
-<summary><b>Q11: 健康检查显示 DEGRADED，但通道后来已经恢复？</b></summary>
-
-启动检查只反映启动瞬间状态。确认外部服务已恢复后重启主程序容器，或执行管理端“重新载入”。如果 NapCat 容器比主程序启动更慢，请等待 NapCat 完成登录后再重启主程序。
-</details>
-
-<details>
-<summary><b>Q12: NapCat 被 KickedOffline 后，告警会发到哪里？</b></summary>
-
-后台会话探针确认 QQ 账号离线后，只在这次离线生命周期发送一次“NapCat QQ 会话已离线”告警；探针持续失败不会重复刷屏，明确恢复在线后再发送恢复通知。告警目标沿用各路由的 `push_alert` 开关，因此请至少配置一个仍可用的 Telegram 或 QQ 官方 Bot 告警目标作为带外通知。NapCat 自己的群路由在 QQ 被踢下线期间可能无法发送，这是平台状态导致的正常现象。
+1. **务必勾选「保留日志 (Preserve log)」**：登录过程伴随多次 302 重定向，若未勾选保留日志，关键的 `signin` 请求会被浏览器清空；
+2. **推荐使用无痕窗口 (Incognito)**：避免历史 Cookies 缓存导致跳过登录；
+3. **只能复制 `signin` 请求**：`profile` / `timeline` 接口没有登录响应的 `Set-Cookie`，无法完成持久握手。
 </details>
 
 ---
