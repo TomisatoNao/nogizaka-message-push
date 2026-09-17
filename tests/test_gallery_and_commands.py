@@ -971,6 +971,34 @@ def test_gallery_per_page_performance_optimization_contract():
     assert msg_sig.parameters["per_page"].default == 20
 
 
+def test_gallery_infinite_scroll_contract():
+    """验证相册无感无限滚动（IntersectionObserver 触底预载与优雅到底提示）前端契约。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    html = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 1. HTML 节点完整性契约：包含加载哨兵/按钮与到底提示
+    assert 'id="galleryLoadMore"' in html
+    assert 'id="galleryEndHint"' in html
+    assert '已加载全部图片' in html
+
+    # 2. CSS 样式契约：包含到底提示的居中、低对比与分割线修饰
+    assert ".gallery-end-hint {" in css
+    assert "#galleryLoadMore:disabled" in css
+
+    # 3. JS 行为契约：基于 IntersectionObserver 的触底预载与状态管理
+    assert "initGalleryObserver" in js
+    assert "IntersectionObserver" in js
+    assert 'rootMargin: "350px 0px"' in js
+    assert "galleryObserver.observe(sentinel)" in js
+    assert 'endHint.style.display = (!curGalleryHasMore && curGalleryImages.length > 0) ? "block" : "none";' in js
+    assert "正在加载更多图片..." in js
+    assert "加载失败，点击重试" in js
+
+
 
 
 

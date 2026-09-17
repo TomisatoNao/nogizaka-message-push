@@ -5287,6 +5287,28 @@ function getGalleryPerPage() {
 
 let curGalleryPerPage = 20;
 let galleryLoadVersion = 0;
+let galleryObserver = null;
+
+function initGalleryObserver() {
+  const sentinel = $("galleryLoadMore");
+  if (!sentinel || typeof IntersectionObserver === "undefined") return;
+  if (galleryObserver) return;
+  galleryObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting && !curGalleryLoading && curGalleryHasMore) {
+        const grid = $("galleryGrid");
+        if (!grid || grid.style.display === "none") return;
+        curGalleryPage += 1;
+        loadGalleryPhotos(false);
+      }
+    });
+  }, {
+    root: null,
+    rootMargin: "350px 0px",
+    threshold: 0.01,
+  });
+  galleryObserver.observe(sentinel);
+}
 
 async function loadGalleryPhotos(reset = true) {
   if (!reset && curGalleryLoading) return;
@@ -5296,6 +5318,7 @@ async function loadGalleryPhotos(reset = true) {
   const cardsBox = $("galleryCards");
   const statsBox = $("galleryStats");
   const loadMoreBtn = $("galleryLoadMore");
+  const endHint = $("galleryEndHint");
   if (!cardsBox) {
     curGalleryLoading = false;
     return;
@@ -5307,12 +5330,19 @@ async function loadGalleryPhotos(reset = true) {
     curGalleryPerPage = getGalleryPerPage();
     cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;">正在加载相册图片...</div></div>';
     if (statsBox) statsBox.textContent = "";
-    if (loadMoreBtn) loadMoreBtn.style.display = "none";
+    if (loadMoreBtn) {
+      loadMoreBtn.style.display = "none";
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = "加载更多图片 ↓";
+    }
+    if (endHint) endHint.style.display = "none";
   } else {
     if (loadMoreBtn) {
       loadMoreBtn.disabled = true;
-      loadMoreBtn.textContent = "正在加载更多...";
+      loadMoreBtn.innerHTML = '<span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;">🔄</span> 正在加载更多图片...';
+      loadMoreBtn.style.display = "block";
     }
+    if (endHint) endHint.style.display = "none";
   }
 
   try {
@@ -5328,6 +5358,13 @@ async function loadGalleryPhotos(reset = true) {
     if (!data.ok) {
       if (reset) {
         cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载失败：' + esc((data.errors || []).join("; ")) + '</div>';
+      } else {
+        curGalleryPage = Math.max(1, curGalleryPage - 1);
+        if (loadMoreBtn) {
+          loadMoreBtn.disabled = false;
+          loadMoreBtn.textContent = "加载失败，点击重试 🔄";
+          loadMoreBtn.style.display = "block";
+        }
       }
       return;
     }
@@ -5346,6 +5383,8 @@ async function loadGalleryPhotos(reset = true) {
         '<div style="font-size:15px;font-weight:600;color:var(--text-strong);">暂无匹配的图片</div>' +
         '<div style="font-size:13px;margin-top:6px;">未在当前筛选条件下找到本地图片，可尝试切换成员或来源。</div>' +
         '</div>';
+      if (loadMoreBtn) loadMoreBtn.style.display = "none";
+      if (endHint) endHint.style.display = "none";
       return;
     }
 
@@ -5409,10 +5448,21 @@ async function loadGalleryPhotos(reset = true) {
         loadMoreBtn.style.display = "none";
       }
     }
+    if (endHint) {
+      endHint.style.display = (!curGalleryHasMore && curGalleryImages.length > 0) ? "block" : "none";
+    }
+    initGalleryObserver();
   } catch (err) {
     if (myVersion !== galleryLoadVersion) return;
     if (reset) {
       cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
+    } else {
+      curGalleryPage = Math.max(1, curGalleryPage - 1);
+      if (loadMoreBtn) {
+        loadMoreBtn.disabled = false;
+        loadMoreBtn.textContent = "加载失败，点击重试 🔄";
+        loadMoreBtn.style.display = "block";
+      }
     }
   } finally {
     if (myVersion === galleryLoadVersion) {
@@ -5598,9 +5648,10 @@ if ($("btnGallerySortOrder")) {
 
 if ($("galleryLoadMore")) {
   $("galleryLoadMore").addEventListener("click", () => {
-    if (curGalleryHasMore && !curGalleryLoading) {
+    if (!curGalleryLoading && (curGalleryHasMore || $("galleryLoadMore").textContent.includes("重试"))) {
       curGalleryPage += 1;
       loadGalleryPhotos(false);
     }
   });
+  initGalleryObserver();
 }
