@@ -19,6 +19,8 @@ _count_cache: dict[str, tuple[float, int]] = {}
 _day_cache: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
 _random_photo_counts_cache: dict[str, tuple[float, int, int]] = {}
 _RANDOM_PHOTO_COUNTS_CACHE_TTL = 300.0
+_msg_gallery_count_cache: dict[tuple, tuple[float, int]] = {}
+_MSG_GALLERY_COUNT_CACHE_TTL = 300.0
 
 
 def _get_archive_root() -> Path:
@@ -773,7 +775,14 @@ def get_gallery_photos(
     """
 
     try:
-        total = conn.execute(count_sql, params).fetchone()[0]
+        cache_key = (member_dir or "", year, month)
+        now = time.monotonic()
+        cached = _msg_gallery_count_cache.get(cache_key)
+        if cached and (now - cached[0]) < _MSG_GALLERY_COUNT_CACHE_TTL:
+            total = cached[1]
+        else:
+            total = conn.execute(count_sql, params).fetchone()[0]
+            _msg_gallery_count_cache[cache_key] = (now, total)
         photos = []
         fetch_limit = per_page
         fetch_offset = offset

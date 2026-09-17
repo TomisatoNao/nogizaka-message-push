@@ -62,11 +62,22 @@ def temp_archive_env(tmp_path, monkeypatch):
     monkeypatch.setattr("src.archive_query._get_archive_root", lambda: archive_dir)
     monkeypatch.setattr("src.blog_fetcher.init_blog_db", lambda: None)
 
+    import src.webui_modules.archive.gallery as gm
+    import src.archive_query as aq
+    gm._gallery_total_cache.clear()
+    gm._gallery_years_cache.clear()
+    gm._gallery_members_cache = None
+    aq._msg_gallery_count_cache.clear()
+
     yield {
         "archive_dir": archive_dir,
         "conn": conn,
     }
 
+    gm._gallery_total_cache.clear()
+    gm._gallery_years_cache.clear()
+    gm._gallery_members_cache = None
+    aq._msg_gallery_count_cache.clear()
     conn.close()
 
 
