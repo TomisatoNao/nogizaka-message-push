@@ -349,3 +349,41 @@ def test_default_tomisato_nao_prompt_humanized():
     assert "严禁输出任何计算机代码" in DEFAULT_TOMISATO_NAO_PROMPT
     assert "严禁承认自己是 AI" in DEFAULT_TOMISATO_NAO_PROMPT
 
+
+def test_sanitize_ai_reply_filters_forbidden_vocatives():
+    from src.platforms.napcat_chat import _sanitize_ai_reply
+
+    # 1. 真实群聊截屏复现：包含“闹友今天过得怎么样呀”
+    raw_shot = "来啦来啦！奈央刚好在偷偷吃布丁呢，闹友今天过得怎么样呀？(´v｀)"
+    assert _sanitize_ai_reply(raw_shot) == "来啦来啦！奈央刚好在偷偷吃布丁呢，你今天过得怎么样呀？(´v｀)"
+
+    # 2. 句首独立呼唤：闹友，下午好 -> 下午好
+    assert _sanitize_ai_reply("闹友，下午好呀～") == "下午好呀～"
+    assert _sanitize_ai_reply("闹友！奈央在发呆呢") == "奈央在发呆呢"
+
+    # 3. 群体称呼：闹友们 / なお友们 / 闹糕们 -> 你们
+    assert _sanitize_ai_reply("闹友们今天开心吗？") == "你们今天开心吗？"
+    assert _sanitize_ai_reply("なお友们在干嘛呢") == "你们在干嘛呢"
+
+    # 4. 其他单独出现的称谓 -> 你
+    assert _sanitize_ai_reply("なお友今天吃什么了") == "你今天吃什么了"
+    assert _sanitize_ai_reply("闹糕今天怎么样") == "你今天怎么样"
+    assert _sanitize_ai_reply("其实闹友你很棒") == "其实你很棒"
+
+
+def test_legacy_prompt_self_healing():
+    from src.platforms.napcat_chat import DEFAULT_TOMISATO_NAO_PROMPT, NapCatChatService
+
+    # 模拟历史 config.json 中写死的旧版带“闹友”的 prompt
+    legacy_prompt = (
+        "你现在正在自己的粉丝专属群（QQ群）里，称呼粉丝为「闹友」，直接进行对话。\n"
+        "群友：奈央晚安！\n奈央：闹友晚安呀～"
+    )
+    service = NapCatChatService(config_provider=lambda: _chat_config(system_prompt=legacy_prompt))
+
+    # 验证内存中已被静默自愈为最新的规范提示词，彻底剔除旧版脏配置
+    active_prompt = service.settings()["system_prompt"]
+    assert active_prompt == DEFAULT_TOMISATO_NAO_PROMPT
+    assert "严禁使用「闹友」" in active_prompt
+
+

@@ -85,6 +85,23 @@ def _sanitize_log_text(text: str, max_chars: int = 40) -> str:
     return cleaned[:max_chars] + ("…" if len(cleaned) > max_chars else "")
 
 
+def _sanitize_ai_reply(text: str) -> str:
+    """确定性脱敏与人称修正：彻底剔除闹友/なお友/闹糕等刻意营业称谓，强制校准为指示代词你/你们。"""
+    if not text:
+        return text
+    # 1. 替换群体称谓：闹友们 / なお友们 / 闹糕们 / 粉丝们 -> 你们
+    cleaned = re.sub(r"(?:闹友|なお友|闹糕|粉丝)们", "你们", text)
+    # 2. 句首或标点后的独立呼唤称谓移除：如 '闹友，下午好' -> '下午好'；'来啦！闹友，今天...' -> '来啦！今天...'
+    cleaned = re.sub(r"(^|[。！？\n~～!?,，])\s*(?:闹友|なお友|闹糕)[，,！!~～\s]+", r"\1", cleaned)
+    # 3. 常见关联短语替换：如 '闹友你' -> '你'
+    cleaned = re.sub(r"(?:闹友|なお友|闹糕)\s*你", "你", cleaned)
+    # 4. 其余单独出现的 '闹友'/'なお友'/'闹糕' 替换为代词 '你'
+    cleaned = re.sub(r"(?:闹友|なお友|闹糕)", "你", cleaned)
+    # 5. 去除多余的重复代词（如 '你你' -> '你'）
+    cleaned = re.sub(r"你{2,}", "你", cleaned)
+    return cleaned.strip()
+
+
 @dataclass(frozen=True)
 class NapCatChatJob:
     """待处理的一条 AI 对话任务。"""
@@ -191,7 +208,14 @@ class NapCatChatService:
         context_ttl = float(chat_cfg.get("context_ttl_seconds", 600.0))
         max_query_length = int(chat_cfg.get("max_query_length", 500))
         workers = int(chat_cfg.get("workers", 2))
-        system_prompt = str(chat_cfg.get("system_prompt") or "").strip() or DEFAULT_TOMISATO_NAO_PROMPT
+        raw_prompt = str(chat_cfg.get("system_prompt") or "").strip()
+        # 静默自愈迁移：若配置中遗留历史版本的刻意粉丝称谓（闹友/なお友/闹糕/粉丝专属群），
+        # 内存中自动纠正为最新的 DEFAULT_TOMISATO_NAO_PROMPT，彻底切断历史脏配置干扰
+        legacy_tokens = ("闹友", "なお友", "闹糕", "粉丝专属群", "粉丝（なお友", "粉丝（闹糕")
+        if any(token in raw_prompt for token in legacy_tokens):
+            system_prompt = DEFAULT_TOMISATO_NAO_PROMPT
+        else:
+            system_prompt = raw_prompt or DEFAULT_TOMISATO_NAO_PROMPT
 
         return {
             "enabled": enabled,
@@ -320,7 +344,13 @@ class NapCatChatService:
         if key in self._contexts:
             updated_at, history = self._contexts[key]
             if now - updated_at <= ttl:
-                return list(history)
+                return [
+                    {
+                        "role": str(msg.get("role") or "user"),
+                        "content": _sanitize_ai_reply(str(msg.get("content") or "")),
+                    }
+                    for msg in history
+                ]
             del self._contexts[key]
         return []
 
@@ -330,8 +360,8 @@ class NapCatChatService:
         max_turns = int(self.settings().get("max_context_turns", 6))
         history = self.get_context(group_id, user_id)
 
-        history.append({"role": "user", "content": user_msg})
-        history.append({"role": "assistant", "content": bot_msg})
+        history.append({"role": "user", "content": _sanitize_ai_reply(user_msg)})
+        history.append({"role": "assistant", "content": _sanitize_ai_reply(bot_msg)})
 
         if len(history) > max_turns:
             history = history[-max_turns:]
@@ -487,7 +517,7 @@ class NapCatChatService:
                 content = "むむ？( ˶'ᵕ'˶) 奈央看着这些符号像天书一样头都大啦！奈央不懂代码，我们聊点草莓大福或甜甜圈吧～いひひ(ˊᵕˋ˶ )"
 
         content = re.sub(r"^#+\s*", "", content, flags=re.MULTILINE)
-        content = content.strip().strip('"').strip("'")
+        content = _sanitize_ai_reply(content.strip().strip('"').strip("'"))
         if not content:
             content = "诶嘿嘿～奈央刚刚稍微走神戳脸颊去啦(ˊᵕˋ˶ ), 能再跟奈央说一遍嘛？"
 
@@ -502,6 +532,7 @@ class NapCatChatService:
             started_at = time.monotonic()
             try:
                 reply = await self.call_cpa(job.group_id, job.user_id, job.text)
+                reply = _sanitize_ai_reply(reply)
                 chain: list[dict[str, object]] = []
                 if job.user_id:
                     chain.append({"type": "at", "data": {"qq": job.user_id}})
