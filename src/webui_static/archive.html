@@ -258,42 +258,48 @@
   </div>
   <div id="galleryGrid" class="gallery-grid" style="display:none;">
     <div class="toolbar gallery-toolbar">
-      <div class="member-dropdown-wrap" id="galleryMemberDropdownWrap">
-        <button class="btn member-select-btn" id="btnGalleryMemberDropdown" type="button" title="点击切换成员画廊或查看全员聚合">
-          <span class="m-icon">📷</span>
-          <span class="m-cur-name" id="curGalleryMemberDisplay">全部成员 (聚合)</span>
-          <span class="m-cur-count" id="curGalleryMemberCount"></span>
-          <span class="arrow">▾</span>
-        </button>
-        <div class="member-popover" id="galleryMemberPopover" style="display:none;">
-          <div class="member-popover-header">
-            <div class="member-popover-search">
-              <span class="search-icon">🔍</span>
-              <input type="text" id="galleryMemberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
-              <button class="clear-btn" id="btnGalleryMemberSearchClear" type="button" style="display:none;">✕</button>
+      <div class="gallery-toolbar-row gallery-toolbar-row1">
+        <div class="member-dropdown-wrap" id="galleryMemberDropdownWrap">
+          <button class="btn member-select-btn" id="btnGalleryMemberDropdown" type="button" title="点击切换成员画廊或查看全员聚合">
+            <span class="m-icon">📷</span>
+            <span class="m-cur-name" id="curGalleryMemberDisplay">全部成员 (聚合)</span>
+            <span class="m-cur-count" id="curGalleryMemberCount"></span>
+            <span class="arrow">▾</span>
+          </button>
+          <div class="member-popover" id="galleryMemberPopover" style="display:none;">
+            <div class="member-popover-header">
+              <div class="member-popover-search">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="galleryMemberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
+                <button class="clear-btn" id="btnGalleryMemberSearchClear" type="button" style="display:none;">✕</button>
+              </div>
+              <span class="member-count-badge" id="galleryMemberTotalBadge">全部成员</span>
             </div>
-            <span class="member-count-badge" id="galleryMemberTotalBadge">全部成员</span>
+            <div class="member-popover-list" id="galleryMemberPopoverList"></div>
           </div>
-          <div class="member-popover-list" id="galleryMemberPopoverList"></div>
+        </div>
+
+        <div class="gallery-source-chips" id="gallerySourceChips">
+          <button class="chip active" data-source="all" type="button">全部来源</button>
+          <button class="chip" data-source="message" type="button">💬 消息配图</button>
+          <button class="chip" data-source="blog" type="button">📄 博客配图</button>
         </div>
       </div>
 
-      <div class="gallery-source-chips" id="gallerySourceChips">
-        <button class="chip active" data-source="all" type="button">全部来源</button>
-        <button class="chip" data-source="message" type="button">💬 消息配图</button>
-        <button class="chip" data-source="blog" type="button">📄 博客配图</button>
+      <div class="gallery-toolbar-row gallery-toolbar-row2">
+        <div class="gallery-year-chips" id="galleryYearChips" aria-label="年份筛选">
+          <button class="chip active" data-year="" type="button">全部年份</button>
+        </div>
       </div>
 
-      <div class="gallery-year-chips" id="galleryYearChips" aria-label="年份筛选">
-        <button class="chip active" data-year="" type="button">全部年份</button>
+      <div class="gallery-toolbar-row gallery-toolbar-row3">
+        <button class="btn gallery-sort-btn" id="btnGallerySortOrder" type="button" title="切换时间排序：最新优先 ⇄ 最早优先">
+          <span class="sort-icon" id="gallerySortIcon">↓</span>
+          <span id="gallerySortOrderText">最新优先</span>
+        </button>
+
+        <span class="stats" id="galleryStats"></span>
       </div>
-
-      <button class="btn gallery-sort-btn" id="btnGallerySortOrder" type="button" title="切换时间排序：最新优先 ⇄ 最早优先">
-        <span class="sort-icon" id="gallerySortIcon">↓</span>
-        <span id="gallerySortOrderText">最新优先</span>
-      </button>
-
-      <span class="stats" id="galleryStats" style="margin-left:auto;"></span>
     </div>
     <div id="galleryCards" class="gallery-cards"></div>
     <button class="nav" id="galleryLoadMore" style="display:none;margin:28px auto 16px;">加载更多图片 ↓</button>

@@ -9,12 +9,16 @@ from datetime import datetime
 import json
 from pathlib import Path
 import sqlite3
+import random
+import time
 
 from src.logger import log_all
 
 _MEDIA_TYPES = ("picture", "image", "video", "voice", "audio")
 _count_cache: dict[str, tuple[float, int]] = {}
 _day_cache: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
+_random_photo_counts_cache: dict[str, tuple[float, int, int]] = {}
+_RANDOM_PHOTO_COUNTS_CACHE_TTL = 300.0
 
 
 def _get_archive_root() -> Path:
@@ -499,12 +503,59 @@ def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
     return ok_ids, fail_ids
 
 
-def get_random_photo(member_dir: str | None = None) -> dict | None:
-    """从 archive.db 随机抽选一张本地存在的照片消息。
+def _get_random_photo_counts(member_dir: str | None = None) -> tuple[int, int]:
+    """获取指定成员在消息与博客中的有效照片数量 (count_msg, count_blog)。"""
+    cache_key = member_dir or ""
+    now = time.monotonic()
+    cached = _random_photo_counts_cache.get(cache_key)
+    if cached and (now - cached[0]) < _RANDOM_PHOTO_COUNTS_CACHE_TTL:
+        return cached[1], cached[2]
 
-    :param member_dir: 可选成员目录名，若指定则仅在该成员归档中抽选。
-    :return: 包含文件绝对路径、时间、成员名和文字的字典；未找到时返回 None。
-    """
+    c_msg = 0
+    c_blog = 0
+
+    conn_msg = _get_init_db()
+    if conn_msg:
+        try:
+            m_sql = "SELECT COUNT(*) FROM messages WHERE type IN ('picture', 'image') AND local_file IS NOT NULL AND local_file != ''"
+            m_params: list[object] = []
+            if member_dir:
+                m_sql += " AND member_dir = ?"
+                m_params.append(member_dir)
+            c_msg = conn_msg.execute(m_sql, m_params).fetchone()[0]
+        except Exception as ex:
+            log_all(f"⚠️ 统计消息图片数量异常: {ex}", is_debug=True)
+
+    try:
+        from src.blog_fetcher import init_blog_db
+        blog_db = init_blog_db()
+        if blog_db:
+            norm_m = member_dir.replace(" ", "").replace("　", "").replace("_", "") if member_dir else ""
+            b_where = ["((image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != '') OR (images_json IS NOT NULL AND images_json != '[]' AND images_json != ''))"]
+            b_params: list[object] = []
+            if norm_m:
+                b_where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
+                b_params.append(norm_m)
+            try:
+                b_sql = f"""
+                    SELECT SUM(json_array_length(CASE WHEN image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != '' THEN image_paths_json ELSE images_json END))
+                    FROM blog_posts
+                    WHERE {' AND '.join(b_where)};
+                """
+                r = blog_db.execute(b_sql, b_params).fetchone()[0]
+                c_blog = int(r or 0)
+            except Exception:
+                cnt_posts = blog_db.execute(f"SELECT COUNT(*) FROM blog_posts WHERE {' AND '.join(b_where)};", b_params).fetchone()[0]
+                c_blog = int(cnt_posts or 0) * 3
+    except Exception as ex:
+        log_all(f"⚠️ 统计博客图片数量异常: {ex}", is_debug=True)
+
+    _random_photo_counts_cache[cache_key] = (now, c_msg, c_blog)
+    return c_msg, c_blog
+
+
+def _draw_message_photo(member_dir: str | None = None) -> dict | None:
+    """从 archive.db 随机抽选一张本地存在的照片消息。"""
     conn = _get_init_db()
     if not conn:
         return None
@@ -528,7 +579,7 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
             m_dir = r[2]
             rel = r[7]
             full_path = root / m_dir / rel
-            if full_path.is_file():
+            if full_path.is_file() and full_path.stat().st_size > 0:
                 rj = {}
                 if r[8]:
                     try:
@@ -538,6 +589,7 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
                 pub = r[3] or r[4] or ""
                 return {
                     "id": str(r[0]),
+                    "source": "message",
                     "member_name": str(r[1]),
                     "member_dir": m_dir,
                     "published_at": pub,
@@ -550,84 +602,129 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
                     "height": rj.get("thumbnail_height"),
                 }
     except Exception as ex:
-        log_all(f"⚠️ 随机抽取照片异常: {ex}", is_debug=True)
+        log_all(f"⚠️ 随机抽取消息照片异常: {ex}", is_debug=True)
 
-    # 2. 如果 messages 中无可用照片，尝试从博客本地配图中抽取
+    return None
+
+
+def _draw_blog_photo(member_dir: str | None = None) -> dict | None:
+    """从 blogs.db 随机抽选一张博客配图（支持本地文件与远程官方图片降级）。"""
     try:
         from src.blog_fetcher import BLOG_IMAGE_DIR, init_blog_db
         blog_db = init_blog_db()
-        if blog_db:
-            b_where = ["image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != ''"]
-            b_params: list[object] = []
-            if member_dir:
-                norm_m = member_dir.replace(" ", "").replace("　", "").replace("_", "")
-                b_where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
-                b_params.append(norm_m)
-            b_sql = f"""
-                SELECT id, group_key, author, title, date, image_paths_json
+        if not blog_db:
+            return None
+
+        norm_m = member_dir.replace(" ", "").replace("　", "").replace("_", "") if member_dir else ""
+        b_where = ["image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != ''"]
+        b_params: list[object] = []
+        if norm_m:
+            b_where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
+            b_params.append(norm_m)
+
+        b_sql = f"""
+            SELECT id, group_key, author, title, date, image_paths_json
+            FROM blog_posts
+            WHERE {' AND '.join(b_where)}
+            ORDER BY RANDOM() LIMIT 20;
+        """
+        b_rows = blog_db.execute(b_sql, b_params).fetchall()
+        for br in b_rows:
+            paths = json.loads(br[5]) if br[5] else []
+            valid_paths = [p for p in paths if p]
+            random.shuffle(valid_paths)
+            for p in valid_paths:
+                clean_p = str(p).replace(chr(92), "/")
+                full_p = BLOG_IMAGE_DIR / Path(clean_p)
+                if full_p.is_file() and full_p.stat().st_size > 200:
+                    return {
+                        "id": f"blog_{br[0]}",
+                        "source": "blog",
+                        "member_name": member_dir or str(br[2]),
+                        "member_dir": member_dir or str(br[2]),
+                        "published_at": br[4] or "",
+                        "text": str(br[3] or "").strip(),
+                        "translation": "",
+                        "local_file": clean_p,
+                        "abs_path": full_p.resolve(),
+                        "remote_url": "",
+                        "url": f"/api/archive/blog_media/{clean_p}",
+                        "width": None,
+                        "height": None,
+                    }
+
+        # 若无本地博客图片且指定了成员，尝试抽取带有远程配图的博客
+        if norm_m:
+            r_sql = """
+                SELECT id, group_key, author, title, date, images_json
                 FROM blog_posts
-                WHERE {' AND '.join(b_where)}
+                WHERE images_json IS NOT NULL AND images_json != '[]' AND images_json != ''
+                  AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?
                 ORDER BY RANDOM() LIMIT 20;
             """
-            b_rows = blog_db.execute(b_sql, b_params).fetchall()
-            for br in b_rows:
-                paths = json.loads(br[5]) if br[5] else []
-                for p in paths:
-                    if not p:
-                        continue
-                    clean_p = str(p).replace("\\", "/")
-                    full_p = BLOG_IMAGE_DIR / Path(clean_p)
-                    if full_p.is_file() and full_p.stat().st_size > 200:
-                        return {
-                            "id": f"blog_{br[0]}",
-                            "member_name": str(br[2]),
-                            "member_dir": member_dir or str(br[2]),
-                            "published_at": br[4] or "",
-                            "text": str(br[3] or "").strip(),
-                            "translation": "",
-                            "local_file": clean_p,
-                            "abs_path": full_p.resolve(),
-                            "remote_url": "",
-                            "url": f"/api/archive/blog_media/{clean_p}",
-                            "width": None,
-                            "height": None,
-                        }
-
-            # 3. 若无本地博客图片且指定了成员，尝试抽取带有远程配图的博客
-            if member_dir:
-                r_sql = """
-                    SELECT id, group_key, author, title, date, images_json
-                    FROM blog_posts
-                    WHERE images_json IS NOT NULL AND images_json != '[]' AND images_json != ''
-                      AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?
-                    ORDER BY RANDOM() LIMIT 20;
-                """
-                r_rows = blog_db.execute(r_sql, [norm_m]).fetchall()
-                for rr in r_rows:
-                    imgs = json.loads(rr[5]) if rr[5] else []
-                    for img_url in imgs:
-                        if (
-                            img_url
-                            and (str(img_url).startswith("http://") or str(img_url).startswith("https://"))
-                            and "_pre/blog" not in str(img_url)
-                            and "img.nogizaka46.com" not in str(img_url)
-                        ):
-                            return {
-                                "id": f"blog_remote_{rr[0]}",
-                                "member_name": str(rr[2]),
-                                "member_dir": member_dir or str(rr[2]),
-                                "published_at": rr[4] or "",
-                                "text": str(rr[3] or "").strip(),
-                                "translation": "",
-                                "local_file": "",
-                                "abs_path": None,
-                                "remote_url": str(img_url),
-                                "url": str(img_url),
-                                "width": None,
-                                "height": None,
-                            }
+            r_rows = blog_db.execute(r_sql, [norm_m]).fetchall()
+            for rr in r_rows:
+                imgs = json.loads(rr[5]) if rr[5] else []
+                valid_imgs = [
+                    u for u in imgs
+                    if u and (str(u).startswith("http://") or str(u).startswith("https://"))
+                    and "_pre/blog" not in str(u) and "img.nogizaka46.com" not in str(u)
+                ]
+                random.shuffle(valid_imgs)
+                for img_url in valid_imgs:
+                    return {
+                        "id": f"blog_remote_{rr[0]}",
+                        "source": "blog",
+                        "member_name": member_dir or str(rr[2]),
+                        "member_dir": member_dir or str(rr[2]),
+                        "published_at": rr[4] or "",
+                        "text": str(rr[3] or "").strip(),
+                        "translation": "",
+                        "local_file": "",
+                        "abs_path": None,
+                        "remote_url": str(img_url),
+                        "url": str(img_url),
+                        "width": None,
+                        "height": None,
+                    }
     except Exception as ex:
         log_all(f"⚠️ 从博客抽取随机照片异常: {ex}", is_debug=True)
+
+    return None
+
+
+def get_random_photo(member_dir: str | None = None) -> dict | None:
+    """从消息归档或博客库中多源加权公平随机抽选一张小偶像照片。
+
+    根据消息和博客中该成员拥有的真实图片数量比例进行加权抽样，
+    彻底消除级联阶梯式回退造成的抽样有偏（例如消息仅1张而博客有114张时导致总是重复发单张消息的bug）。
+    若首选数据源抽取失败（如磁盘文件被删），则自动无缝降级回退至另一数据源。
+
+    :param member_dir: 可选成员目录名，若指定则仅在该成员归档中抽选。
+    :return: 包含文件绝对路径、时间、成员名和文字的字典；未找到时返回 None。
+    """
+    c_msg, c_blog = _get_random_photo_counts(member_dir)
+
+    order: list[str] = []
+    if c_msg > 0 and c_blog > 0:
+        chosen = random.choices(["msg", "blog"], weights=[c_msg, c_blog], k=1)[0]
+        order = [chosen, "blog" if chosen == "msg" else "msg"]
+    elif c_msg > 0:
+        order = ["msg", "blog"]
+    elif c_blog > 0:
+        order = ["blog", "msg"]
+    else:
+        order = ["msg", "blog"]
+
+    for pool in order:
+        if pool == "msg":
+            photo = _draw_message_photo(member_dir)
+            if photo:
+                return photo
+        elif pool == "blog":
+            photo = _draw_blog_photo(member_dir)
+            if photo:
+                return photo
 
     return None
 

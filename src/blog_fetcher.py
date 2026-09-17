@@ -101,7 +101,7 @@ _in_flight_blogs: set[str] = set()
 _blog_images_healed: bool = False
 
 
-def heal_corrupt_blog_images(db: sqlite3.Connection | None = None) -> dict[str, int]:
+def heal_corrupt_blog_images(db: sqlite3.Connection | None = None, force: bool = False) -> dict[str, int]:
     """自愈检测与修复历史损坏的博客图片与失效元数据（强向下兼容与自动静默自愈）。
 
     1. 扫描磁盘：清理 0 字节文件与 HTTP 404 HTML 伪图片，并清理空文件夹。
@@ -109,6 +109,25 @@ def heal_corrupt_blog_images(db: sqlite3.Connection | None = None) -> dict[str, 
     """
     stats = {"deleted_files": 0, "healed_posts": 0}
     corrupt_rel_paths: set[str] = set()
+
+    conn = db or init_blog_db()
+
+    # 检查水位线：避免每次进程启动或短时间内重复执行全盘 4 万文件遍历，24 小时仅需自愈扫描一次
+    if not force:
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS blog_watermarks (
+                    group_key TEXT PRIMARY KEY,
+                    last_url TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+            """)
+            cur = conn.execute("SELECT updated_at FROM blog_watermarks WHERE group_key = '__images_healed__';")
+            row = cur.fetchone()
+            if row and (time.time() - float(row[0])) < 86400.0:
+                return stats
+        except Exception:
+            pass
 
     # 1. 扫描磁盘上的损坏文件
     if BLOG_IMAGE_DIR.exists():
@@ -233,6 +252,22 @@ def heal_corrupt_blog_images(db: sqlite3.Connection | None = None) -> dict[str, 
             conn.commit()
             stats["healed_posts"] = len(updates)
             log_all(f"🩺 博客图片自愈完成: 清理了 {stats['deleted_files']} 个损坏/空文件，修正了 {stats['healed_posts']} 篇博文元数据")
+
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS blog_watermarks (
+                    group_key TEXT PRIMARY KEY,
+                    last_url TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+            """)
+            conn.execute(
+                "INSERT INTO blog_watermarks(group_key, last_url, updated_at) VALUES ('__images_healed__', 'done', ?) ON CONFLICT(group_key) DO UPDATE SET updated_at = excluded.updated_at;",
+                (time.time(),)
+            )
+            conn.commit()
+        except Exception:
+            pass
     except Exception as e:
         log_all(f"⚠️ 自愈博客元数据异常: {e}", is_debug=True)
 

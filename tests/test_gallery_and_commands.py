@@ -60,6 +60,7 @@ def temp_archive_env(tmp_path, monkeypatch):
     monkeypatch.setattr("src.archive.init_db", lambda: conn)
     monkeypatch.setattr("src.archive_query._get_init_db", lambda: conn)
     monkeypatch.setattr("src.archive_query._get_archive_root", lambda: archive_dir)
+    monkeypatch.setattr("src.blog_fetcher.init_blog_db", lambda: None)
 
     yield {
         "archive_dir": archive_dir,
@@ -799,6 +800,154 @@ def test_gallery_member_switch_year_fallback_contract():
     assert "galleryYearsVersion" in js
     assert "galleryLoadVersion" in js
     assert "myVersion !== galleryLoadVersion" in js
+
+
+def test_gallery_toolbar_three_rows_layout_contract():
+    """验证相册筛选栏无论成员年份多少均严格保持图二的清晰三行排版布局规范。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    html = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+
+    # 1. 结构契约：三行独立容器必须存在
+    assert "gallery-toolbar-row1" in html
+    assert "gallery-toolbar-row2" in html
+    assert "gallery-toolbar-row3" in html
+
+    # 2. 元素归属语义契约：
+    # Row 1: 包含成员下拉选择与来源切换胶囊
+    r1_idx = html.find("gallery-toolbar-row1")
+    r2_idx = html.find("gallery-toolbar-row2")
+    r3_idx = html.find("gallery-toolbar-row3")
+    assert r1_idx < r2_idx < r3_idx
+
+    r1_content = html[r1_idx:r2_idx]
+    assert "galleryMemberDropdownWrap" in r1_content
+    assert "gallerySourceChips" in r1_content
+
+    # Row 2: 年份切换胶囊独占整行
+    r2_content = html[r2_idx:r3_idx]
+    assert "galleryYearChips" in r2_content
+
+    # Row 3: 时间排序按钮在左，统计数量在右
+    r3_end = html.find("</div>", r3_idx)
+    r3_content = html[r3_idx:r3_end + 300]
+    assert "btnGallerySortOrder" in r3_content
+    assert "galleryStats" in r3_content
+
+    # 3. CSS 样式契约
+    assert ".gallery-toolbar {" in css
+    assert "flex-direction: column;" in css
+    assert ".gallery-toolbar-row" in css
+    assert ".gallery-toolbar-row1" in css
+    assert ".gallery-toolbar-row2" in css
+    assert ".gallery-toolbar-row3" in css
+    assert "justify-content: space-between;" in css
+
+
+def test_fair_random_photo_weighted_sampling(tmp_path, monkeypatch):
+    """验证 /美图 抽图多源加权公平随机算法：彻底消除级联偏置，支持博客与消息双向抽选及安全降级。"""
+    from collections import Counter
+    import src.blog_fetcher as bf
+    import src.archive_query as aq
+
+    # 1. 构建独立测试归档 messages 数据库（只有 1 张照片）
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir(parents=True)
+    conn_msg = sqlite3.connect(str(archive_dir / "archive.db"))
+    conn_msg.execute("""
+        CREATE TABLE messages (
+            id TEXT PRIMARY KEY,
+            member_name TEXT NOT NULL,
+            member_dir TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            type TEXT,
+            published_at TEXT,
+            updated_at TEXT,
+            text TEXT,
+            translation TEXT,
+            tags TEXT,
+            local_file TEXT,
+            raw_json TEXT NOT NULL
+        );
+    """)
+    m_dir = archive_dir / "海邉朱莉" / "2025" / "01" / "picture"
+    m_dir.mkdir(parents=True)
+    msg_pic = m_dir / "msg_single.jpg"
+    msg_pic.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 300)
+    conn_msg.execute("""
+        INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, text, local_file, raw_json)
+        VALUES ('msg_kaibe_1', '海邉朱莉', '海邉朱莉', 2025, 1, 'picture', '2025-01-10T12:00:00Z', '初次见面！', '2025/01/picture/msg_single.jpg', '{}');
+    """)
+    conn_msg.commit()
+
+    # 2. 构建独立测试博客数据库（有 5 篇博文，共 10 张配图）
+    blog_img_dir = tmp_path / "blog_images"
+    blog_img_dir.mkdir(parents=True)
+    conn_blog = sqlite3.connect(str(tmp_path / "blogs.db"))
+    conn_blog.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            image_paths_json TEXT,
+            images_json TEXT
+        );
+    """)
+    conn_blog.execute("""
+        CREATE TABLE IF NOT EXISTS blog_watermarks (
+            group_key TEXT PRIMARY KEY,
+            last_url TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+    """)
+
+    blog_files = []
+    for i in range(1, 6):
+        p_dir = blog_img_dir / "nogizaka" / f"post_{i}"
+        p_dir.mkdir(parents=True)
+        f1 = p_dir / "01.jpg"
+        f1.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 300)
+        f2 = p_dir / "02.jpg"
+        f2.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 300)
+        rel1 = f"nogizaka/post_{i}/01.jpg"
+        rel2 = f"nogizaka/post_{i}/02.jpg"
+        blog_files.extend([f1, f2])
+        conn_blog.execute(
+            "INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json) VALUES (?, 'nogizaka', '海邉 朱莉', ?, '2026-03-10 12:00:00', ?);",
+            (i, f"博文_{i}", json.dumps([rel1, rel2]))
+        )
+    conn_blog.commit()
+
+    # Mock 环境
+    monkeypatch.setattr(aq, "_get_init_db", lambda: conn_msg)
+    monkeypatch.setattr(aq, "_get_archive_root", lambda: archive_dir)
+    monkeypatch.setattr(bf, "init_blog_db", lambda: conn_blog)
+    monkeypatch.setattr(bf, "BLOG_IMAGE_DIR", blog_img_dir)
+    aq._random_photo_counts_cache.clear()
+
+    # 3. 抽样 40 次：因为博客有 10 张图，消息只有 1 张图，加权算法下必须能抽中大量博客图片！
+    draws = Counter()
+    for _ in range(40):
+        photo = aq.get_random_photo(member_dir="海邉朱莉")
+        assert photo is not None
+        draws[photo["source"]] += 1
+
+    # 验证博客图片必须被抽中且占主要多数（原版代码博客为 0%）
+    assert draws["blog"] > 0
+    assert draws["blog"] >= draws["message"]
+
+    # 4. 容错测试：当博客图片被删除时，安全降级抽中消息图片
+    for f in blog_files:
+        f.unlink(missing_ok=True)
+    fallback_photo = aq.get_random_photo(member_dir="海邉朱莉")
+    assert fallback_photo is not None
+    assert fallback_photo["source"] == "message"
+    assert fallback_photo["id"] == "msg_kaibe_1"
+
 
 
 
