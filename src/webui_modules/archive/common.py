@@ -76,16 +76,7 @@ def _get_matching_blog_authors(blog_db: sqlite3.Connection, member: str) -> list
     if not member or not blog_db:
         return []
 
-    # 1. 优先尝试直接命中（若 member 与库中存储一致，快速返回）
-    try:
-        if blog_db.execute(
-            "SELECT 1 FROM blog_posts WHERE author = ? LIMIT 1;", (member,)
-        ).fetchone():
-            return [member]
-    except Exception:
-        pass
-
-    # 2. 从当前连接快速提取不重复作者列表并进行内存归一化匹配
+    # 从当前连接提取所有不同作者，并在 Python 内存中归一化匹配所有变体（包括带空格/无空格/下划线）
     try:
         rows = blog_db.execute(
             "SELECT DISTINCT author FROM blog_posts WHERE author IS NOT NULL AND author != ''"
