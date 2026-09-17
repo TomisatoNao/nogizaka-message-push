@@ -133,7 +133,10 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     # 3. 月份列表
     if sub == "months":
         raw_m = qp("member")
-        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        if not raw_m:
+            _send_json_resp(handler, {"ok": False, "errors": ["缺少成员参数 member"]}, 400)
+            return True
+        member = _archive.member_dir_name(raw_m)
         if not member or member not in _archive.list_members():
             _send_json_resp(handler, {"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
             return True
@@ -165,7 +168,10 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     # 4. 消息分页
     if sub == "messages":
         raw_m = qp("member")
-        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        if not raw_m:
+            _send_json_resp(handler, {"ok": False, "errors": ["缺少成员参数 member"]}, 400)
+            return True
+        member = _archive.member_dir_name(raw_m)
         if not member or member not in _archive.list_members():
             _send_json_resp(handler, {"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
             return True
@@ -403,7 +409,10 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     # 5. 日历热力图
     if sub == "calendar":
         raw_m = qp("member")
-        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        if not raw_m:
+            _send_json_resp(handler, {"ok": False, "errors": ["缺少成员参数 member"]}, 400)
+            return True
+        member = _archive.member_dir_name(raw_m)
         if not member or member not in _archive.list_members():
             _send_json_resp(handler, {"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
             return True
@@ -455,7 +464,10 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     # 6. FTS5 全文搜索
     if sub == "search":
         raw_m = qp("member")
-        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        if not raw_m:
+            _send_json_resp(handler, {"ok": False, "errors": ["缺少成员参数 member"]}, 400)
+            return True
+        member = _archive.member_dir_name(raw_m)
         if not member or member not in _archive.list_members():
             _send_json_resp(handler, {"ok": False, "errors": [f"未归档的成员: {raw_m!r}"]}, 404)
             return True

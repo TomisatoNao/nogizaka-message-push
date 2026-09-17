@@ -390,11 +390,11 @@ function escRegex(s) {
 
 function initInfiniteScroll() {
   window.addEventListener("scroll", () => {
+    if (curMode !== "msg") return;
     if (pageLoading || page >= totalPages) return;
     const scrollBottom = window.innerHeight + window.scrollY;
     const docHeight = document.documentElement.scrollHeight;
     if (docHeight - scrollBottom < 350) {
-      if ($("blogGrid").style.display !== "none") return;
       page++;
       loadPage();
     }
@@ -514,6 +514,7 @@ async function loadCalendar() {
   if (curMode === "blog") {
     return loadBlogCalendar();
   }
+  if (curMode !== "msg" || !curMember) return;
   const version = ++calendarVersion;
   if (calendarAbort) calendarAbort.abort();
   calendarAbort = new AbortController();
@@ -758,6 +759,10 @@ function switchMainTab(mode, keepHash) {
   setHtmlViewClass(mode);
   try { localStorage.setItem("archive_last_main_tab", mode); } catch (_) {}
   syncNavTabs(mode);
+  if (mode !== "msg") {
+    if ($("emptyHint")) $("emptyHint").hidden = true;
+    if ($("loadMore")) $("loadMore").hidden = true;
+  }
 
   if (mode === "home") {
     if (!keepHash) goHome();
@@ -2399,7 +2404,7 @@ async function selectMonth(year, month) {
 }
 
 async function loadPage() {
-  if (curMode === "blog") return;
+  if (curMode !== "msg" || !curMember) return;
   const version = contentVersion;
   contentAbort = new AbortController();
   setPageLoading(true);
@@ -2493,6 +2498,7 @@ function startSearch(q, updateHash = true) {
     loadBlogPage(1, updateHash);
     return;
   }
+  if (curMode !== "msg") return;
   if (updateHash) syncHash();
   if (!searchQuery) {
     loadCalendar();
@@ -2537,14 +2543,11 @@ function clearSearch() {
   syncSearchInput();
   syncMessageMonthFooter();
   if (curMode === "blog") {
-
     loadBlogCalendar();
-
     loadBlogPage(1, true);
-
     return;
-
   }
+  if (curMode !== "msg") return;
   loadCalendar();
   if (curYM) selectMonth(curYM.year, curYM.month);
 }
@@ -3310,8 +3313,8 @@ $("nextMonthBottom").addEventListener("click", () => {
   navigateAdjacentMonth(-1, { scrollToTop: true });
 });
 $("loadMore").addEventListener("click", () => {
+  if (curMode !== "msg") return;
   if (pageLoading || page >= totalPages) return;
-  if ($("blogGrid").style.display !== "none") return;
   page++;
   loadPage();
 });

@@ -1166,15 +1166,22 @@ def test_view_components_isolation_contract():
     # 2. 验证 CSS 视图强隔离规则（杜绝首屏网络请求未完成时的组件暴露闪烁）
     assert "html.view-gallery #archiveSide" in css
     assert "html.view-gallery .msg-search-toolbar" in css
+    assert "html.view-gallery #emptyHint" in css
+    assert "html.view-gallery #loadMore" in css
     assert "html.view-letter #archiveSide" in css
     assert "html.view-letter .msg-search-toolbar" in css
+    assert "html.view-letter #emptyHint" in css
     assert "html.view-blog #tagToggleWrap" in css
+    assert "html.view-blog #emptyHint" in css
     assert "html.view-home #archiveSide" in css
     assert "html.view-home .msg-search-toolbar" in css
+    assert "html.view-home #emptyHint" in css
 
-    # 3. 验证 JS boot() 预热预路由隔离逻辑
+    # 3. 验证 JS boot() 预热预路由隔离与模式防穿透逻辑
     assert '$("archiveSide").style.display = "none";' in js
     assert '$("tagToggleWrap").style.display = "none";' in js
+    assert 'if (curMode !== "msg") return;' in js
+    assert 'if (curMode !== "msg" || !curMember) return;' in js
 
 
 def test_gallery_pagination_end_of_data_contract(temp_archive_env):
