@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 import config.config as cfg
@@ -33,28 +32,20 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     if sub == "avatar":
         name = qp("name")
         group = qp("group")
+        is_raw = qp("raw") == "1"
         from src import avatar_manager
         rel_path = avatar_manager.get_member_avatar_path(name, group)
         if rel_path:
-            full_path = Path("data/avatars") / rel_path
-            if full_path.exists():
-                ext = full_path.suffix.lower()
-                ctype = "image/jpeg"
-                if ext == ".png":
-                    ctype = "image/png"
-                elif ext == ".webp":
-                    ctype = "image/webp"
-                try:
-                    data = full_path.read_bytes()
-                    handler.send_response(200)
-                    handler.send_header("Content-Type", ctype)
-                    handler.send_header("Content-Length", str(len(data)))
-                    handler.send_header("Cache-Control", "public, max-age=2592000")
-                    handler.end_headers()
-                    handler.wfile.write(data)
-                    return True
-                except Exception:
-                    pass
+            full_path = avatar_manager.AVATAR_DIR / rel_path
+            if full_path.is_file():
+                if not is_raw:
+                    from src.webui_modules.archive.thumbnails import get_or_create_thumbnail
+                    thumb_path = get_or_create_thumbnail(full_path, max_width=160, quality=85)
+                    if thumb_path and thumb_path.is_file():
+                        serve_file_range(handler, thumb_path, cache_control="public, max-age=31536000, immutable")
+                        return True
+                serve_file_range(handler, full_path, cache_control="public, max-age=2592000")
+                return True
         _send_json_resp(handler, {"ok": False, "errors": ["Avatar not found"]}, 404)
         return True
 

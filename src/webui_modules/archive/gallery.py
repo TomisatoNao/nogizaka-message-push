@@ -108,7 +108,7 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
         res["total"] = res.get("total", 0) + blog_total
         res["total_pages"] = (res["total"] + per_page - 1) // per_page if res["total"] > 0 else 1
-        res["has_more"] = page < res["total_pages"]
+        res["has_more"] = bool(len(res.get("photos", [])) == per_page and page < res["total_pages"])
 
     _send_json_resp(handler, res)
     return True
@@ -298,7 +298,7 @@ def _get_blog_gallery(
                 "per_page": per_page,
                 "total": total_photos,
                 "total_pages": total_pages,
-                "has_more": page < total_pages,
+                "has_more": bool(len(photos) == per_page and page < total_pages),
                 "photos": photos,
             }
         except Exception:
@@ -401,7 +401,7 @@ def _get_blog_gallery(
                 "per_page": per_page,
                 "total": total_photos,
                 "total_pages": total_pages,
-                "has_more": page < total_pages,
+                "has_more": bool(len(photos) == per_page and page < total_pages),
                 "photos": photos,
             }
     except Exception as ex:

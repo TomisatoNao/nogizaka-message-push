@@ -1177,6 +1177,94 @@ def test_view_components_isolation_contract():
     assert '$("tagToggleWrap").style.display = "none";' in js
 
 
+def test_gallery_pagination_end_of_data_contract(temp_archive_env):
+    """验证相册瀑布流在数据末尾与空洞场景下的 has_more 契约与前端平滑触底自愈。"""
+    from src import archive as _archive
+    from pathlib import Path
+
+    # 1. 验证后端在返回数量少于 per_page 时严格返回 has_more=False
+    data = _archive.get_gallery_photos(member_dir="冨里奈央", page=1, per_page=50)
+    if len(data.get("photos", [])) < 50:
+        assert data.get("has_more") is False
+
+    # 2. 验证前端 archive.js 触底与哨兵复检契约
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    assert "checkGallerySentinelInView" in js
+    assert "if (!reset && (!list.length || list.length < curGalleryPerPage))" in js
+    assert "curGalleryHasMore = false;" in js
+
+
+def test_global_avatar_webp_thumbnail_pipeline(tmp_path, monkeypatch):
+    """验证全局成员头像 WebP 极速缩略图管线、缓存契约与 raw=1 原图回退机制。"""
+    from src import avatar_manager
+    from src.webui_modules.archive.messages import handle_messages
+    from types import SimpleNamespace
+    from PIL import Image
+
+    # 创建独立的测试数据库与头像目录
+    db_path = tmp_path / "test_archive.db"
+    avatar_dir = tmp_path / "avatars"
+    monkeypatch.setattr(avatar_manager, "AVATAR_DB_PATH", db_path)
+    monkeypatch.setattr(avatar_manager, "AVATAR_DIR", avatar_dir)
+
+    # 创建一个较大尺寸的测试头像原图 (500x500 PNG)
+    nogi_dir = avatar_dir / "nogizaka"
+    nogi_dir.mkdir(parents=True, exist_ok=True)
+    avatar_file = nogi_dir / "賀喜遥香.png"
+    img = Image.new("RGB", (500, 500), color=(128, 64, 200))
+    img.save(avatar_file, format="PNG")
+
+    avatar_manager.save_member_avatar_record(
+        group_key="nogizaka",
+        name="賀喜 遥香",
+        display_name="賀喜 遥香",
+        avatar_url="https://example.com/kaki.png",
+        local_file="nogizaka/賀喜遥香.png"
+    )
+
+    # 1. 默认请求：应触发 WebP 缩略图生成并输出 160px WebP
+    headers_thumb = {}
+    data_thumb = []
+    h_thumb = SimpleNamespace(
+        path="/api/archive/avatar?group=nogizaka&name=賀喜遥香",
+        headers={},
+        send_response=lambda code: headers_thumb.update({"status": code}),
+        send_header=lambda k, v: headers_thumb.update({k: v}),
+        end_headers=lambda: None,
+    )
+    h_thumb.wfile = SimpleNamespace(write=lambda b: data_thumb.append(b))
+
+    handled = handle_messages(h_thumb, "avatar", lambda **_: True, None)
+    assert handled is True
+    assert headers_thumb.get("status") == 200
+    assert headers_thumb.get("Content-Type") == "image/webp"
+    assert "public" in headers_thumb.get("Cache-Control", "")
+    assert "immutable" in headers_thumb.get("Cache-Control", "")
+    thumb_bytes = b"".join(data_thumb)
+    assert len(thumb_bytes) > 0
+
+    # 2. raw=1 请求：应返回原始 PNG 文件
+    headers_raw = {}
+    data_raw = []
+    h_raw = SimpleNamespace(
+        path="/api/archive/avatar?group=nogizaka&name=賀喜遥香&raw=1",
+        headers={},
+        send_response=lambda code: headers_raw.update({"status": code}),
+        send_header=lambda k, v: headers_raw.update({k: v}),
+        end_headers=lambda: None,
+    )
+    h_raw.wfile = SimpleNamespace(write=lambda b: data_raw.append(b))
+
+    handled_raw = handle_messages(h_raw, "avatar", lambda **_: True, None)
+    assert handled_raw is True
+    assert headers_raw.get("status") == 200
+    assert headers_raw.get("Content-Type") == "image/png"
+    raw_bytes = b"".join(data_raw)
+    assert len(raw_bytes) == avatar_file.stat().st_size
+
+
+
 
 
 

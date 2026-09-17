@@ -5445,6 +5445,19 @@ let curGalleryPerPage = 20;
 let galleryLoadVersion = 0;
 let galleryObserver = null;
 
+function checkGallerySentinelInView() {
+  const sentinel = $("galleryLoadMore");
+  const grid = $("galleryGrid");
+  if (!sentinel || !grid || grid.style.display === "none") return;
+  if (curGalleryLoading || !curGalleryHasMore) return;
+  const rect = sentinel.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  if (rect.top <= vh + 350) {
+    curGalleryPage += 1;
+    loadGalleryPhotos(false);
+  }
+}
+
 function initGalleryObserver() {
   const sentinel = $("galleryLoadMore");
   if (!sentinel || typeof IntersectionObserver === "undefined") return;
@@ -5528,6 +5541,9 @@ async function loadGalleryPhotos(reset = true) {
     const list = data.photos || [];
     curGalleryTotal = data.total || 0;
     curGalleryHasMore = !!data.has_more;
+    if (!reset && (!list.length || list.length < curGalleryPerPage)) {
+      curGalleryHasMore = false;
+    }
 
     if (statsBox) {
       statsBox.textContent = "共 " + curGalleryTotal.toLocaleString() + " 张图片";
@@ -5634,6 +5650,11 @@ async function loadGalleryPhotos(reset = true) {
   } finally {
     if (myVersion === galleryLoadVersion) {
       curGalleryLoading = false;
+      if (curGalleryHasMore) {
+        requestAnimationFrame(() => {
+          checkGallerySentinelInView();
+        });
+      }
     }
   }
 }
@@ -5815,9 +5836,14 @@ if ($("btnGallerySortOrder")) {
 
 if ($("galleryLoadMore")) {
   $("galleryLoadMore").addEventListener("click", () => {
-    if (!curGalleryLoading && (curGalleryHasMore || $("galleryLoadMore").textContent.includes("重试"))) {
-      curGalleryPage += 1;
-      loadGalleryPhotos(false);
+    if (!curGalleryLoading) {
+      if (curGalleryHasMore || $("galleryLoadMore").textContent.includes("重试")) {
+        curGalleryPage += 1;
+        loadGalleryPhotos(false);
+      } else {
+        $("galleryLoadMore").style.display = "none";
+        if ($("galleryEndHint")) $("galleryEndHint").style.display = "block";
+      }
     }
   });
   initGalleryObserver();

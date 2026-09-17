@@ -328,6 +328,31 @@ def get_member_avatar_path(name: str, group_key: str = "") -> Optional[str]:
             local_file = row[0]
             if local_file and (AVATAR_DIR / local_file).exists() and (AVATAR_DIR / local_file).stat().st_size > 500:
                 return local_file
+            remote_url = row[1]
+            if remote_url and remote_url.startswith("http"):
+                try:
+                    import urllib.request
+                    target_grp = group_key or "general"
+                    dest_dir = AVATAR_DIR / target_grp
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    ext = remote_url.rsplit(".", 1)[-1].split("?")[0].lower()
+                    if ext not in ("jpg", "jpeg", "png", "webp"):
+                        ext = "jpg"
+                    fname = f"{_safe_filename(norm)}.{ext}"
+                    fpath = dest_dir / fname
+                    req = urllib.request.Request(remote_url, headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Referer": "https://www.nogizaka46.com/" if "nogizaka" in target_grp else "https://sakurazaka46.com/",
+                    })
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        content = resp.read()
+                        if len(content) > 200:
+                            fpath.write_bytes(content)
+                            rel = f"{target_grp}/{fname}"
+                            save_member_avatar_record(target_grp, norm, norm, remote_url, rel)
+                            return rel
+                except Exception:
+                    pass
     except Exception:  # nosec B110
         pass
     finally:
@@ -356,8 +381,8 @@ def get_member_avatar_map() -> dict[str, str]:
                 res[f"{g_key}:{name}"] = f"/api/archive/avatar?group={g_key}&name={name}"
                 res[name] = f"/api/archive/avatar?group={g_key}&name={name}"
             elif remote_url:
-                res[f"{g_key}:{name}"] = remote_url
-                res[name] = remote_url
+                res[f"{g_key}:{name}"] = f"/api/archive/avatar?group={g_key}&name={name}"
+                res[name] = f"/api/archive/avatar?group={g_key}&name={name}"
     except Exception:  # nosec B110
         pass
     finally:

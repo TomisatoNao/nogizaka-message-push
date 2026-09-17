@@ -825,7 +825,7 @@ def get_gallery_photos(
             "per_page": per_page,
             "total": total,
             "total_pages": total_pages,
-            "has_more": page < total_pages,
+            "has_more": bool(len(photos) == per_page and page < total_pages),
             "photos": photos,
         }
     except Exception as ex:
