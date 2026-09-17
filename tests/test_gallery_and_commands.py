@@ -315,5 +315,68 @@ def test_gallery_tab_selection_and_wording_contract():
     assert '" 张美图"' not in js
     assert '暂无匹配的图片' in js
     assert '正在加载相册图片...' in js
+def test_gallery_members_merging_and_blog_only(temp_archive_env, monkeypatch):
+    """验证相册名册合并了消息照片与仅博客配图的成员，且统计单位为'张'。"""
+    from src.webui_modules.archive.gallery import get_gallery_members, handle_gallery
+    import src.webui_modules.archive.gallery as gm
 
+    # 构造 mock blog db
+    blog_conn = sqlite3.connect(":memory:")
+    blog_conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            image_paths_json TEXT
+        );
+    """)
+    # 插入仅博客成员远藤樱
+    blog_conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json)
+        VALUES (1, 'nogizaka', '遠藤 さくら', '秋風', '2024-09-15 10:00:00', '["blogs/1/01.jpg", "blogs/1/02.jpg"]');
+    """)
+    # 插入既有消息也有博客的冨里奈央
+    blog_conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json)
+        VALUES (2, 'nogizaka', '冨里 奈央', '晴れの日', '2024-09-16 12:00:00', '["blogs/2/01.jpg"]');
+    """)
+    blog_conn.commit()
 
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: blog_conn)
+    gm._gallery_members_cache = None
+
+    res = get_gallery_members()
+    assert res["ok"] is True
+    members = res["members"]
+
+    # 1. 验证既有消息也有博客的成员
+    tomisato = next((m for m in members if "冨里" in m["display"]), None)
+    assert tomisato is not None
+    assert tomisato["msg_photos"] == 2
+    assert tomisato["blog_photos"] == 1
+    assert tomisato["total_photos"] == 3
+
+    # 2. 验证仅有博客的成员（远藤樱）被成功纳入画廊名册
+    endo = next((m for m in members if "遠藤" in m["display"] or "远藤" in m["display"]), None)
+    assert endo is not None
+    assert endo["msg_photos"] == 0
+    assert endo["blog_photos"] == 2
+    assert endo["total_photos"] == 2
+    assert endo["group"] == "nogizaka"
+
+    # 3. 验证 HTTP 路由命中
+    class MockHandler:
+        def __init__(self):
+            self.path = "/api/archive/gallery_members"
+            self.payload = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+
+    h = MockHandler()
+    handled = handle_gallery(h, "gallery_members", lambda need_admin: True, lambda: {})
+    assert handled is True
+    assert h.payload["ok"] is True
+    assert len(h.payload["members"]) >= 2

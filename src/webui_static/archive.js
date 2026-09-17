@@ -776,7 +776,8 @@ function switchMainTab(mode, keepHash) {
   } else if (mode === "gallery") {
     let saved = null;
     try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
-    const wanted = (saved !== null && (saved === "" || members.some(m => m.name === saved)))
+    const activeList = galleryMembers.length ? galleryMembers : members;
+    const wanted = (saved !== null && (saved === "" || activeList.some(m => m.name === saved || m.display === saved)))
       ? saved
       : (curGalleryMember || "");
     selectGalleryMember(wanted);
@@ -829,6 +830,8 @@ async function loadMembers(skipSelect = false) {
   renderMemberPopover("");
   
   loadBlogGroupChips();
+  // 异步预热相册成员全量名册（含仅博客配图的成员）
+  loadGalleryMembers();
 
   // skipSelect=true 或非消息模式时只渲染 chips，不自动跳转
   if (skipSelect || curMode !== "msg") return;
@@ -5032,11 +5035,71 @@ let curGalleryTotal = 0;
 let curGalleryHasMore = false;
 let curGalleryLoading = false;
 let curGalleryImages = [];
+let galleryMembers = [];
+let galleryMembersLoading = false;
 
 function openGalleryLightbox(idx) {
   if (idx < 0 || idx >= curGalleryImages.length) return;
   images = curGalleryImages;
   openLightbox(idx);
+}
+
+async function loadGalleryMembers() {
+  if (galleryMembers.length) return galleryMembers;
+  if (galleryMembersLoading) return [];
+  galleryMembersLoading = true;
+  try {
+    const res = await api("/api/archive/gallery_members");
+    if (res && res.ok && Array.isArray(res.members)) {
+      galleryMembers = res.members;
+      updateGalleryMemberButtonDisplay();
+      renderGalleryMemberPopover();
+      return galleryMembers;
+    }
+  } catch (_) {}
+  finally {
+    galleryMembersLoading = false;
+  }
+  return [];
+}
+
+function findGalleryMemberObj(nameOrDisplay) {
+  if (!nameOrDisplay) return null;
+  const list = galleryMembers.length ? galleryMembers : members;
+  const norm = nameOrDisplay.replace(/[\s_　]/g, "");
+  return list.find(m => {
+    const mNorm = (m.name || "").replace(/[\s_　]/g, "");
+    const dNorm = (m.display || "").replace(/[\s_　]/g, "");
+    return mNorm === norm || dNorm === norm;
+  }) || null;
+}
+
+function getGalleryMemberCountNum(m) {
+  if (!m) return 0;
+  if (curGallerySource === "blog") {
+    return m.blog_photos !== undefined ? m.blog_photos : (m.total || 0);
+  } else if (curGallerySource === "message") {
+    return m.msg_photos !== undefined ? m.msg_photos : (m.total || 0);
+  } else {
+    return m.total_photos !== undefined ? m.total_photos : (m.total || 0);
+  }
+}
+
+function updateGalleryMemberButtonDisplay() {
+  const disp = $("curGalleryMemberDisplay");
+  const countDisp = $("curGalleryMemberCount");
+  if (!disp) return;
+  if (!curGalleryMember) {
+    disp.textContent = "全部成员 (聚合)";
+    if (countDisp) countDisp.textContent = "";
+    return;
+  }
+  const mObj = findGalleryMemberObj(curGalleryMember);
+  disp.textContent = (mObj && mObj.display) ? mObj.display : curGalleryMember;
+  if (countDisp) {
+    const cnt = mObj ? getGalleryMemberCountNum(mObj) : 0;
+    countDisp.textContent = cnt ? "（" + Number(cnt).toLocaleString() + " 张）" : "";
+  }
 }
 
 async function selectGalleryMember(mName, updateHash = true) {
@@ -5046,18 +5109,7 @@ async function selectGalleryMember(mName, updateHash = true) {
   curGalleryMember = mName || "";
   try { localStorage.setItem("archive_last_gallery_member", curGalleryMember); } catch (_) {}
 
-  const disp = $("curGalleryMemberDisplay");
-  const countDisp = $("curGalleryMemberCount");
-  if (disp) {
-    if (!curGalleryMember) {
-      disp.textContent = "全部成员 (聚合)";
-      if (countDisp) countDisp.textContent = "";
-    } else {
-      const mObj = members.find(m => m.name === curGalleryMember) || { name: curGalleryMember, display: curGalleryMember };
-      disp.textContent = mObj.display || curGalleryMember;
-      if (countDisp) countDisp.textContent = mObj.total ? "（" + mObj.total.toLocaleString() + "）" : "";
-    }
-  }
+  updateGalleryMemberButtonDisplay();
 
   syncNavTabs("gallery");
 
@@ -5085,7 +5137,11 @@ async function selectGalleryMember(mName, updateHash = true) {
     setTimeout(() => { selfHashUpdate = false; }, 0);
   }
 
-  renderGalleryMemberPopover();
+  if (!galleryMembers.length) {
+    loadGalleryMembers();
+  } else {
+    renderGalleryMemberPopover();
+  }
   await loadGalleryPhotos(true);
 }
 
@@ -5248,6 +5304,8 @@ function renderGalleryMemberPopover(filterKeyword = "") {
   list.innerHTML = "";
   const kw = filterKeyword.toLowerCase().trim();
 
+  const activeList = galleryMembers.length ? galleryMembers : members;
+
   // 1. 顶部固定选项：全部成员 (聚合)
   const allItem = document.createElement("div");
   allItem.className = "member-popover-item" + (!curGalleryMember ? " active" : "");
@@ -5256,16 +5314,16 @@ function renderGalleryMemberPopover(filterKeyword = "") {
     '<span class="mpi-avatar" style="background:var(--accent);color:#fff;">👥</span>' +
     '<span class="mpi-name">全部成员 (聚合)</span>' +
     '</div>' +
-    '<span class="m-cnt">' + members.length + ' 人</span>';
+    '<span class="m-cnt">' + activeList.length + ' 人</span>';
   allItem.addEventListener("click", () => {
     closeGalleryMemberPopover();
     selectGalleryMember("");
   });
   list.appendChild(allItem);
 
-  const filtered = members.filter(m => !kw || m.display.toLowerCase().includes(kw) || m.name.toLowerCase().includes(kw));
+  const filtered = activeList.filter(m => !kw || m.display.toLowerCase().includes(kw) || m.name.toLowerCase().includes(kw));
   if ($("galleryMemberTotalBadge")) {
-    $("galleryMemberTotalBadge").textContent = "共 " + members.length + " 人" + (kw ? " · 匹配 " + filtered.length + " 人" : "");
+    $("galleryMemberTotalBadge").textContent = "共 " + activeList.length + " 人" + (kw ? " · 匹配 " + filtered.length + " 人" : "");
   }
 
   const groups = [
@@ -5295,14 +5353,21 @@ function renderGalleryMemberPopover(filterKeyword = "") {
         avatarHTML = '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>';
       }
 
-      const isCur = curGalleryMember === m.name;
+      const curNorm = (curGalleryMember || "").replace(/[\s_　]/g, "");
+      const mNorm = (m.name || "").replace(/[\s_　]/g, "");
+      const dNorm = (m.display || "").replace(/[\s_　]/g, "");
+      const isCur = curNorm && (curNorm === mNorm || curNorm === dNorm);
+
+      const countNum = getGalleryMemberCountNum(m);
+      const countText = countNum.toLocaleString() + " 张";
+
       const item = document.createElement("div");
       item.className = "member-popover-item " + g.cls + (isCur ? " active" : "");
       item.innerHTML = '<div class="m-name-txt">' +
                        avatarHTML +
                        '<span class="mpi-name">' + esc(m.display) + '</span>' +
                        '</div>' +
-                       '<span class="m-cnt">' + (m.total || 0).toLocaleString() + ' 条</span>';
+                       '<span class="m-cnt">' + esc(countText) + '</span>';
 
       item.addEventListener("click", () => {
         closeGalleryMemberPopover();
@@ -5326,6 +5391,9 @@ function openGalleryMemberPopover() {
   }
   const clearBtn = $("btnGalleryMemberSearchClear");
   if (clearBtn) clearBtn.style.display = "none";
+  if (!galleryMembers.length) {
+    loadGalleryMembers();
+  }
   renderGalleryMemberPopover("");
 }
 
@@ -5387,6 +5455,8 @@ if ($("gallerySourceChips")) {
       if (curGallerySource === src) return;
       curGallerySource = src;
       chips.forEach(c => c.classList.toggle("active", c === chip));
+      updateGalleryMemberButtonDisplay();
+      renderGalleryMemberPopover();
       loadGalleryPhotos(true);
     });
   });

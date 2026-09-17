@@ -14,10 +14,15 @@ from src.webui_modules.archive.common import _blog_media_url, _send_json_resp
 
 def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     """处理相册画廊子路由，命中返回 True，未命中返回 False。"""
-    if sub != "gallery":
+    if sub not in {"gallery", "gallery_members"}:
         return False
 
     if not guard_fn(need_admin=False):
+        return True
+
+    if sub == "gallery_members":
+        data = get_gallery_members()
+        _send_json_resp(handler, data)
         return True
 
     qs = parse_qs(handler.path.partition("?")[2])
@@ -261,3 +266,120 @@ def _get_blog_gallery(
     except Exception as ex:
         return {"ok": False, "errors": [f"博客图片查询异常: {ex}"], "total": 0, "photos": []}
 
+
+
+_gallery_members_cache: tuple[float, list[dict]] | None = None
+_GALLERY_MEMBERS_CACHE_TTL = 300.0
+
+
+def get_gallery_members() -> dict:
+    """获取所有相册成员（合并含照片的消息成员与含配图的博客作者），返回归一化名册与各源照片数。"""
+    global _gallery_members_cache
+    now = _time.monotonic()
+    if _gallery_members_cache and (now - _gallery_members_cache[0]) < _GALLERY_MEMBERS_CACHE_TTL:
+        return {"ok": True, "members": _gallery_members_cache[1]}
+
+    try:
+        from src import avatar_manager
+        from src.sakamichi_roster import get_member_sort_tuple
+        from src.webui_modules.archive_handlers import get_blog_db
+
+        avatar_map = avatar_manager.get_member_avatar_map()
+        members_by_norm: dict[str, dict] = {}
+
+        # 1. 查询 messages 归档表中含有本地有效图片的成员与数量
+        conn = _archive.init_db()
+        if conn:
+            try:
+                m_rows = conn.execute("""
+                    SELECT member_dir, member_name, COUNT(*)
+                    FROM messages
+                    WHERE type IN ('picture', 'image') AND local_file IS NOT NULL AND local_file != ''
+                    GROUP BY member_dir;
+                """).fetchall()
+                for m_dir, m_name, cnt in m_rows:
+                    if not m_dir:
+                        continue
+                    norm = m_dir.replace(" ", "").replace("　", "").replace("_", "")
+                    grp = _archive.infer_member_group(m_dir)
+                    display = m_name.replace("_", " ") if m_name else m_dir.replace("_", " ")
+                    avatar = avatar_map.get(f"{grp}:{norm}") or avatar_map.get(norm) or ""
+                    members_by_norm[norm] = {
+                        "name": m_dir,
+                        "display": display,
+                        "group": grp,
+                        "avatar": avatar,
+                        "msg_photos": cnt,
+                        "blog_photos": 0,
+                        "total_photos": cnt,
+                    }
+            except Exception:
+                pass
+
+        # 2. 查询 blogs.db 中含有有效配图的作者与数量（支持即使无 message 归档的成员）
+        try:
+            blog_db = get_blog_db()
+        except Exception:
+            blog_db = None
+
+        if blog_db:
+            try:
+                try:
+                    b_rows = blog_db.execute("""
+                        SELECT p.group_key, p.author, COUNT(*)
+                        FROM blog_posts p, json_each(p.image_paths_json) j
+                        WHERE p.image_paths_json IS NOT NULL AND p.image_paths_json != '' AND p.image_paths_json != '[]'
+                        GROUP BY p.group_key, p.author;
+                    """).fetchall()
+                except Exception:
+                    b_posts = blog_db.execute("""
+                        SELECT group_key, author, image_paths_json
+                        FROM blog_posts
+                        WHERE image_paths_json IS NOT NULL AND image_paths_json != '' AND image_paths_json != '[]';
+                    """).fetchall()
+                    counts_dict = {}
+                    for g_k, auth, j_raw in b_posts:
+                        if not auth:
+                            continue
+                        try:
+                            imgs = json.loads(j_raw)
+                            c = len([img for img in imgs if img])
+                        except Exception:
+                            c = 0
+                        counts_dict[(g_k, auth)] = counts_dict.get((g_k, auth), 0) + c
+                    b_rows = [(k[0], k[1], v) for k, v in counts_dict.items()]
+
+                for grp, author, cnt in b_rows:
+                    if not author or not author.strip() or cnt <= 0:
+                        continue
+                    a_clean = author.strip()
+                    norm = a_clean.replace(" ", "").replace("　", "").replace("_", "")
+                    if norm in members_by_norm:
+                        members_by_norm[norm]["blog_photos"] += cnt
+                        members_by_norm[norm]["total_photos"] += cnt
+                        if not members_by_norm[norm]["avatar"]:
+                            members_by_norm[norm]["avatar"] = avatar_map.get(f"{grp}:{norm}") or avatar_map.get(norm) or ""
+                    else:
+                        m_dir = _archive.member_dir_name(a_clean)
+                        resolved_grp = grp or _archive.infer_member_group(a_clean)
+                        avatar = avatar_map.get(f"{resolved_grp}:{norm}") or avatar_map.get(norm) or ""
+                        members_by_norm[norm] = {
+                            "name": m_dir,
+                            "display": a_clean,
+                            "group": resolved_grp,
+                            "avatar": avatar,
+                            "msg_photos": 0,
+                            "blog_photos": cnt,
+                            "total_photos": cnt,
+                        }
+            except Exception:
+                pass
+
+        # 3. 按团队与坂道名册自然顺序排序
+        res_list = list(members_by_norm.values())
+        res_list.sort(key=lambda x: get_member_sort_tuple(x["group"], x["name"]))
+
+        _gallery_members_cache = (now, res_list)
+        return {"ok": True, "members": res_list}
+    except Exception as ex:
+        return {"ok": False, "errors": [f"获取相册成员异常: {ex}"], "members": []}
