@@ -5044,7 +5044,7 @@ let curGalleryImages = [];
 let galleryMembers = [];
 let galleryMembersLoading = false;
 let galleryYears = [];
-let galleryYearsLoading = false;
+let galleryYearsVersion = 0;
 
 function syncGallerySourceChips() {
   const wrap = $("gallerySourceChips");
@@ -5087,21 +5087,24 @@ function syncGalleryHash() {
 
 async function loadGalleryYears() {
   const container = $("galleryYearChips");
-  if (!container) return;
-  if (galleryYearsLoading) return;
-  galleryYearsLoading = true;
+  if (!container) return false;
+  const myVersion = ++galleryYearsVersion;
   try {
     let url = "/api/archive/gallery_years?source=" + encodeURIComponent(curGallerySource);
     if (curGalleryMember) url += "&member=" + encodeURIComponent(curGalleryMember);
     const res = await api(url);
+    if (myVersion !== galleryYearsVersion) return false;
     if (res && res.ok && Array.isArray(res.years)) {
       galleryYears = res.years;
+      if (curGalleryYear && !galleryYears.some(item => String(item.year) === String(curGalleryYear))) {
+        curGalleryYear = "";
+        syncGalleryHash();
+      }
       renderGalleryYearChips();
+      return true;
     }
   } catch (_) {}
-  finally {
-    galleryYearsLoading = false;
-  }
+  return false;
 }
 
 function renderGalleryYearChips() {
@@ -5241,16 +5244,15 @@ async function selectGalleryMember(mName, updateHash = true) {
   const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
   if (searchTb) searchTb.style.display = "none";
 
-  if (updateHash) {
-    syncGalleryHash();
-  }
-
   if (!galleryMembers.length) {
     loadGalleryMembers();
   } else {
     renderGalleryMemberPopover();
   }
-  loadGalleryYears();
+  await loadGalleryYears();
+  if (updateHash) {
+    syncGalleryHash();
+  }
   await loadGalleryPhotos(true);
 }
 
@@ -5281,9 +5283,11 @@ function getGalleryPerPage() {
 }
 
 let curGalleryPerPage = 40;
+let galleryLoadVersion = 0;
 
 async function loadGalleryPhotos(reset = true) {
-  if (curGalleryLoading) return;
+  if (!reset && curGalleryLoading) return;
+  const myVersion = reset ? ++galleryLoadVersion : galleryLoadVersion;
   curGalleryLoading = true;
 
   const cardsBox = $("galleryCards");
@@ -5317,6 +5321,7 @@ async function loadGalleryPhotos(reset = true) {
       url += "&year=" + encodeURIComponent(curGalleryYear);
     }
     const data = await api(url);
+    if (myVersion !== galleryLoadVersion) return;
     if (!data.ok) {
       if (reset) {
         cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载失败：' + esc((data.errors || []).join("; ")) + '</div>';
@@ -5402,11 +5407,14 @@ async function loadGalleryPhotos(reset = true) {
       }
     }
   } catch (err) {
+    if (myVersion !== galleryLoadVersion) return;
     if (reset) {
       cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
     }
   } finally {
-    curGalleryLoading = false;
+    if (myVersion === galleryLoadVersion) {
+      curGalleryLoading = false;
+    }
   }
 }
 
@@ -5562,16 +5570,16 @@ document.addEventListener("click", (e) => {
 if ($("gallerySourceChips")) {
   const chips = $("gallerySourceChips").querySelectorAll(".chip");
   chips.forEach(chip => {
-    chip.addEventListener("click", () => {
+    chip.addEventListener("click", async () => {
       const src = chip.getAttribute("data-source") || "all";
       if (curGallerySource === src) return;
       curGallerySource = src;
       chips.forEach(c => c.classList.toggle("active", c === chip));
       updateGalleryMemberButtonDisplay();
       renderGalleryMemberPopover();
-      loadGalleryYears();
+      await loadGalleryYears();
       syncGalleryHash();
-      loadGalleryPhotos(true);
+      await loadGalleryPhotos(true);
     });
   });
 }

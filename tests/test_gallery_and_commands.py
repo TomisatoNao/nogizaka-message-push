@@ -779,5 +779,28 @@ def test_gallery_card_error_handling_contract():
     assert ".gallery-card img.img-broken" in css
 
 
+def test_gallery_member_switch_year_fallback_contract():
+    """验证成员切换时先完成年份校验与自愈回退，再加载相册图片，杜绝异步竞争导致的 0 张图片空白假象。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 1. 切换成员时必须 await loadGalleryYears() 确保年份校验先于 loadGalleryPhotos 完成
+    select_fn = js[js.find("async function selectGalleryMember"):js.find("function getGalleryGridCols")]
+    assert "await loadGalleryYears();" in select_fn
+    assert select_fn.find("await loadGalleryYears();") < select_fn.find("await loadGalleryPhotos(true);")
+
+    # 2. loadGalleryYears 中具备失效年份自愈重置逻辑
+    load_years_fn = js[js.find("async function loadGalleryYears"):js.find("function renderGalleryYearChips")]
+    assert "!galleryYears.some(item => String(item.year) === String(curGalleryYear))" in load_years_fn
+    assert 'curGalleryYear = "";' in load_years_fn
+
+    # 3. 具备版本号屏障（galleryLoadVersion 和 galleryYearsVersion）防止过时异步回调竞态覆盖
+    assert "galleryYearsVersion" in js
+    assert "galleryLoadVersion" in js
+    assert "myVersion !== galleryLoadVersion" in js
+
+
+
 
 
