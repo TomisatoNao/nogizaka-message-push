@@ -61,6 +61,7 @@ def _is_route_handled(method: str, path: str, monkeypatch: pytest.MonkeyPatch | 
     from src.webui_modules.archive.messages import handle_messages
     from src.webui_modules.archive.letters import handle_letters
     from src.webui_modules.archive.blogs import handle_blogs
+    from src.webui_modules.archive.gallery import handle_gallery
 
     # 屏蔽真实外部进程启动与日志风暴
     if monkeypatch:
@@ -93,6 +94,8 @@ def _is_route_handled(method: str, path: str, monkeypatch: pytest.MonkeyPatch | 
         if handle_letters(mock_handler, sub_clean, guard_fn, read_body_fn):
             return True
         if handle_blogs(mock_handler, sub_clean, guard_fn, read_body_fn):
+            return True
+        if handle_gallery(mock_handler, sub_clean, guard_fn, read_body_fn):
             return True
         return False
 
