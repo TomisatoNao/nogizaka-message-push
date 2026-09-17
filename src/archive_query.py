@@ -587,10 +587,40 @@ def get_random_photo(member_dir: str | None = None) -> dict | None:
                             "translation": "",
                             "local_file": clean_p,
                             "abs_path": full_p.resolve(),
+                            "remote_url": "",
                             "url": f"/api/archive/blog_media/{clean_p}",
                             "width": None,
                             "height": None,
                         }
+
+            # 3. 若无本地博客图片且指定了成员，尝试抽取带有远程配图的博客
+            if member_dir:
+                r_sql = """
+                    SELECT id, group_key, author, title, date, images_json
+                    FROM blog_posts
+                    WHERE images_json IS NOT NULL AND images_json != '[]' AND images_json != ''
+                      AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?
+                    ORDER BY RANDOM() LIMIT 20;
+                """
+                r_rows = blog_db.execute(r_sql, [norm_m]).fetchall()
+                for rr in r_rows:
+                    imgs = json.loads(rr[5]) if rr[5] else []
+                    for img_url in imgs:
+                        if img_url and (str(img_url).startswith("http://") or str(img_url).startswith("https://")):
+                            return {
+                                "id": f"blog_remote_{rr[0]}",
+                                "member_name": str(rr[2]),
+                                "member_dir": member_dir or str(rr[2]),
+                                "published_at": rr[4] or "",
+                                "text": str(rr[3] or "").strip(),
+                                "translation": "",
+                                "local_file": "",
+                                "abs_path": None,
+                                "remote_url": str(img_url),
+                                "url": str(img_url),
+                                "width": None,
+                                "height": None,
+                            }
     except Exception as ex:
         log_all(f"⚠️ 从博客抽取随机照片异常: {ex}", is_debug=True)
 
@@ -604,8 +634,9 @@ def get_gallery_photos(
     per_page: int = 40,
     year: int | None = None,
     month: int | None = None,
+    order: str = "desc",
 ) -> dict:
-    """分页获取归档美图画廊数据（支持按成员、年月及来源过滤）。"""
+    """分页获取归档美图画廊数据（支持按成员、年月、排序及来源过滤）。"""
     conn = _get_init_db()
     if not conn:
         return {"ok": False, "errors": ["数据库未初始化"], "total": 0, "photos": []}
@@ -614,6 +645,7 @@ def get_gallery_photos(
     per_page = max(1, min(100, int(per_page)))
     offset = (page - 1) * per_page
     root = _get_archive_root()
+    order_dir = "ASC" if str(order).lower() == "asc" else "DESC"
 
     where_clauses = ["type IN ('picture', 'image')", "local_file IS NOT NULL", "local_file != ''"]
     params: list[object] = []
@@ -634,7 +666,7 @@ def get_gallery_photos(
         SELECT id, member_name, member_dir, published_at, updated_at, text, translation, local_file, year, month, raw_json
         FROM messages
         WHERE {where_str}
-        ORDER BY published_at DESC, id DESC
+        ORDER BY published_at {order_dir}, id {order_dir}
         LIMIT ? OFFSET ?;
     """
 
@@ -697,3 +729,30 @@ def get_gallery_photos(
     except Exception as ex:
         log_all(f"⚠️ 查询美图画廊异常: {ex}", is_debug=True)
         return {"ok": False, "errors": [str(ex)], "total": 0, "photos": []}
+
+
+def get_gallery_message_years(member_dir: str | None = None) -> dict[int, int]:
+    """获取归档美图消息包含的年份分布及数量字典 {year: count}。"""
+    conn = _get_init_db()
+    if not conn:
+        return {}
+    where_clauses = ["type IN ('picture', 'image')", "local_file IS NOT NULL", "local_file != ''", "year IS NOT NULL"]
+    params: list[object] = []
+    if member_dir:
+        where_clauses.append("member_dir = ?")
+        params.append(member_dir)
+    where_str = " AND ".join(where_clauses)
+    sql = f"""
+        SELECT year, COUNT(*)
+        FROM messages
+        WHERE {where_str}
+        GROUP BY year
+        ORDER BY year DESC;
+    """
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return {int(r[0]): int(r[1]) for r in rows if r[0]}
+    except Exception as ex:
+        log_all(f"⚠️ 查询归档美图年份异常: {ex}", is_debug=True)
+        return {}
+

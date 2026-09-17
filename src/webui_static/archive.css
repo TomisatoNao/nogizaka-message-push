@@ -2966,6 +2966,66 @@ html.view-gallery #galleryGrid { display: block !important; }
   align-items: center;
 }
 
+.gallery-year-chips {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gallery-year-chips .chip {
+  padding: 5px 11px;
+  font-size: 13px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.gallery-year-chips .chip .year-cnt {
+  font-size: 11px;
+  opacity: 0.75;
+  margin-left: 3px;
+}
+
+.gallery-year-chips .chip.active .year-cnt {
+  opacity: 0.9;
+}
+
+.gallery-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 550;
+  border-radius: 999px;
+  background: var(--card-solid, var(--card));
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.gallery-sort-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft, rgba(123, 44, 191, 0.08));
+}
+
+.gallery-sort-btn.order-asc {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft, rgba(123, 44, 191, 0.08));
+}
+
+.gallery-sort-btn .sort-icon {
+  font-size: 13px;
+  font-weight: bold;
+}
+
 .gallery-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -2975,6 +3035,17 @@ html.view-gallery #galleryGrid { display: block !important; }
 
 @media (max-width: 768px) {
   .gallery-grid { padding: 12px 12px 36px; }
+  .gallery-year-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .gallery-year-chips::-webkit-scrollbar {
+    display: none;
+  }
   .gallery-cards {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
     gap: 8px;

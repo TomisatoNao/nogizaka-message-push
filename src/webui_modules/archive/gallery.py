@@ -14,7 +14,7 @@ from src.webui_modules.archive.common import _blog_media_url, _send_json_resp
 
 def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     """处理相册画廊子路由，命中返回 True，未命中返回 False。"""
-    if sub not in {"gallery", "gallery_members"}:
+    if sub not in {"gallery", "gallery_members", "gallery_years"}:
         return False
 
     if not guard_fn(need_admin=False):
@@ -22,6 +22,17 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
     if sub == "gallery_members":
         data = get_gallery_members()
+        _send_json_resp(handler, data)
+        return True
+
+    if sub == "gallery_years":
+        qs = parse_qs(handler.path.partition("?")[2])
+        raw_m = (qs.get("member") or [""])[0]
+        member = _archive.member_dir_name(raw_m) if raw_m else ""
+        source = (qs.get("source") or ["all"])[0].lower().strip()
+        if source not in {"all", "message", "blog"}:
+            source = "all"
+        data = get_gallery_years(member=member, source=source)
         _send_json_resp(handler, data)
         return True
 
@@ -35,6 +46,10 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     source = qp("source", "all").lower().strip()
     if source not in {"all", "message", "blog"}:
         source = "all"
+
+    order = qp("order", "desc").lower().strip()
+    if order not in {"asc", "desc"}:
+        order = "desc"
 
     try:
         page = max(1, int(qp("page", "1")))
@@ -62,7 +77,7 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
     # 如果只查博客图片
     if source == "blog":
-        data = _get_blog_gallery(member=member, page=page, per_page=per_page, year=year, month=month)
+        data = _get_blog_gallery(member=member, page=page, per_page=per_page, year=year, month=month, order=order)
         _send_json_resp(handler, data)
         return True
 
@@ -74,11 +89,12 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         per_page=per_page,
         year=year,
         month=month,
+        order=order,
     )
 
-    # 若为 all 模式，结合博客美图按时间倒序混编呈现
+    # 若为 all 模式，结合博客美图按时间排序混编呈现
     if source == "all" and res.get("ok"):
-        blog_data = _get_blog_gallery(member=member, page=page, per_page=per_page, year=year, month=month)
+        blog_data = _get_blog_gallery(member=member, page=page, per_page=per_page, year=year, month=month, order=order)
         blog_total = blog_data.get("total", 0)
         blog_photos = blog_data.get("photos", [])
 
@@ -86,7 +102,7 @@ def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             combined = sorted(
                 res.get("photos", []) + blog_photos,
                 key=lambda x: str(x.get("published_at") or ""),
-                reverse=True,
+                reverse=(order == "desc"),
             )
             res["photos"] = combined[:per_page]
 
@@ -132,6 +148,7 @@ def _get_blog_gallery(
     per_page: int = 40,
     year: int | None = None,
     month: int | None = None,
+    order: str = "desc",
 ) -> dict:
     """从 blog.db 检索博客配图（利用 SQLite json_each 引擎级分页，极速毫秒响应）。"""
     try:
@@ -160,6 +177,7 @@ def _get_blog_gallery(
             params.append(ym_str)
 
         where_str = " AND ".join(where)
+        order_dir = "ASC" if str(order).lower() == "asc" else "DESC"
 
         # 1. 尝试使用 SQLite json_each 引擎级极速分页
         try:
@@ -183,7 +201,7 @@ def _get_blog_gallery(
                 SELECT p.id, p.group_key, p.author, p.title, p.date, j.key, j.value, {paths_col}
                 FROM blog_posts p, json_each({json_target}) j
                 WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
-                ORDER BY p.date DESC, p.id DESC, CAST(j.key AS INTEGER) ASC
+                ORDER BY p.date {order_dir}, p.id {order_dir}, CAST(j.key AS INTEGER) ASC
                 LIMIT ? OFFSET ?;
             """
             rows = blog_db.execute(photos_sql, params + [per_page, offset]).fetchall()
@@ -272,7 +290,7 @@ def _get_blog_gallery(
                 SELECT {', '.join(select_cols)}
                 FROM blog_posts p
                 WHERE {where_str}
-                ORDER BY p.date DESC, p.id DESC;
+                ORDER BY p.date {order_dir}, p.id {order_dir};
             """
             rows = blog_db.execute(posts_sql, params).fetchall()
             all_photos = []
@@ -358,6 +376,104 @@ def _get_blog_gallery(
     except Exception as ex:
         return {"ok": False, "errors": [f"博客图片查询异常: {ex}"], "total": 0, "photos": []}
 
+
+_gallery_years_cache: dict[tuple, tuple[float, dict]] = {}
+_GALLERY_YEARS_CACHE_TTL = 120.0
+
+
+def get_gallery_years(member: str = "", source: str = "all") -> dict:
+    """获取指定成员及来源下的年份分布列表及照片统计。"""
+    cache_key = (member, source)
+    now = _time.monotonic()
+    cached = _gallery_years_cache.get(cache_key)
+    if cached and (now - cached[0]) < _GALLERY_YEARS_CACHE_TTL:
+        return cached[1]
+
+    counts_by_year: dict[int, int] = {}
+
+    # 1. 检索归档消息配图年份
+    if source in {"all", "message"}:
+        try:
+            m_years = _archive.get_gallery_message_years(member_dir=member if member else None)
+            for y, c in m_years.items():
+                if 2010 <= y <= 2035:
+                    counts_by_year[y] = counts_by_year.get(y, 0) + c
+        except Exception:
+            pass
+
+    # 2. 检索博客配图年份
+    if source in {"all", "blog"}:
+        try:
+            from src.webui_modules.archive.common import _blog_table_columns
+            from src.webui_modules.archive_handlers import get_blog_db
+            blog_db = get_blog_db()
+            if blog_db:
+                cols = _blog_table_columns(blog_db)
+                img_where, json_target = _get_blog_image_expr(cols)
+                where = [img_where, "p.date IS NOT NULL", "LENGTH(p.date) >= 4"]
+                params: list[object] = []
+                if member:
+                    norm_m = member.replace(" ", "").replace("　", "").replace("_", "")
+                    where.append("REPLACE(REPLACE(REPLACE(p.author, ' ', ''), '　', ''), '_', '') = ?")
+                    params.append(norm_m)
+                where_str = " AND ".join(where)
+
+                try:
+                    sql = f"""
+                        SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
+                        FROM blog_posts p, json_each({json_target}) j
+                        WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
+                        GROUP BY y
+                        ORDER BY y DESC;
+                    """
+                    b_rows = blog_db.execute(sql, params).fetchall()
+                    for r in b_rows:
+                        if r[0]:
+                            y = int(r[0])
+                            if 2010 <= y <= 2035:
+                                counts_by_year[y] = counts_by_year.get(y, 0) + int(r[1])
+                except Exception:
+                    # 降级：若不支持 json_each
+                    select_cols = ["p.date"]
+                    if "images_json" in cols:
+                        select_cols.append("p.images_json")
+                    if "image_paths_json" in cols:
+                        select_cols.append("p.image_paths_json")
+                    b_posts = blog_db.execute(f"SELECT {', '.join(select_cols)} FROM blog_posts p WHERE {where_str};", params).fetchall()
+                    for row in b_posts:
+                        dt = row[0] or ""
+                        if len(dt) >= 4 and dt[:4].isdigit():
+                            y = int(dt[:4])
+                            if not (2010 <= y <= 2035):
+                                continue
+                            c = 0
+                            for j_raw in row[1:]:
+                                if j_raw:
+                                    try:
+                                        imgs = json.loads(j_raw)
+                                        if isinstance(imgs, list) and imgs:
+                                            c = len([img for img in imgs if img])
+                                            break
+                                    except Exception:
+                                        pass
+                            if c > 0:
+                                counts_by_year[y] = counts_by_year.get(y, 0) + c
+        except Exception:
+            pass
+
+    sorted_years = sorted(counts_by_year.keys(), reverse=True)
+    years_data = [{"year": y, "count": counts_by_year[y]} for y in sorted_years]
+    total = sum(counts_by_year.values())
+
+    res = {
+        "ok": True,
+        "member": member,
+        "source": source,
+        "years": years_data,
+        "total": total,
+    }
+    _gallery_years_cache[cache_key] = (now, res)
+    return res
 
 
 _gallery_members_cache: tuple[float, list[dict]] | None = None

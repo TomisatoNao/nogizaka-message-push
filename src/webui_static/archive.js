@@ -4044,13 +4044,17 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
   const rawHash = (location.hash || "").replace(/^#/, "");
   const p = new URLSearchParams(rawHash);
 
-  // 0. 相册画廊模式：#gallery, #gallery=..., #source=...
+  // 0. 相册画廊模式：#gallery, #gallery=..., #source=..., #year=..., #order=...
   if (p.has("gallery") || rawHash === "gallery") {
     let saved = null;
     try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
     const mem = p.get("gallery") || (saved !== null ? saved : curGalleryMember) || "";
     const source = p.get("source") || curGallerySource || "all";
+    const year = p.get("year") || "";
+    const order = p.get("order") || "desc";
     curGallerySource = source;
+    curGalleryYear = year;
+    curGalleryOrder = order === "asc" ? "asc" : "desc";
     await selectGalleryMember(mem, false);
     return;
   }
@@ -5030,6 +5034,8 @@ if ($("btnSyncLetters")) {
 // ══════════════════════════════════════════════════════════════════
 let curGalleryMember = "";
 let curGallerySource = "all";
+let curGalleryYear = "";
+let curGalleryOrder = "desc";
 let curGalleryPage = 1;
 let curGalleryTotal = 0;
 let curGalleryHasMore = false;
@@ -5037,6 +5043,111 @@ let curGalleryLoading = false;
 let curGalleryImages = [];
 let galleryMembers = [];
 let galleryMembersLoading = false;
+let galleryYears = [];
+let galleryYearsLoading = false;
+
+function syncGallerySourceChips() {
+  const wrap = $("gallerySourceChips");
+  if (!wrap) return;
+  const chips = wrap.querySelectorAll(".chip");
+  chips.forEach(c => {
+    const s = c.getAttribute("data-source") || "all";
+    c.classList.toggle("active", s === curGallerySource);
+  });
+}
+
+function syncGallerySortButton() {
+  const btn = $("btnGallerySortOrder");
+  const txt = $("gallerySortOrderText");
+  const icon = $("gallerySortIcon");
+  if (!btn) return;
+  if (curGalleryOrder === "asc") {
+    btn.classList.add("order-asc");
+    btn.setAttribute("title", "当前最早优先（时间正序），点击切换为最新优先");
+    if (txt) txt.textContent = "最早优先";
+    if (icon) icon.textContent = "↑";
+  } else {
+    btn.classList.remove("order-asc");
+    btn.setAttribute("title", "当前最新优先（时间倒序），点击切换为最早优先");
+    if (txt) txt.textContent = "最新优先";
+    if (icon) icon.textContent = "↓";
+  }
+}
+
+function syncGalleryHash() {
+  const params = new URLSearchParams();
+  params.set("gallery", curGalleryMember);
+  if (curGallerySource && curGallerySource !== "all") params.set("source", curGallerySource);
+  if (curGalleryYear) params.set("year", curGalleryYear);
+  if (curGalleryOrder && curGalleryOrder !== "desc") params.set("order", curGalleryOrder);
+  selfHashUpdate = true;
+  location.hash = params.toString();
+  setTimeout(() => { selfHashUpdate = false; }, 0);
+}
+
+async function loadGalleryYears() {
+  const container = $("galleryYearChips");
+  if (!container) return;
+  if (galleryYearsLoading) return;
+  galleryYearsLoading = true;
+  try {
+    let url = "/api/archive/gallery_years?source=" + encodeURIComponent(curGallerySource);
+    if (curGalleryMember) url += "&member=" + encodeURIComponent(curGalleryMember);
+    const res = await api(url);
+    if (res && res.ok && Array.isArray(res.years)) {
+      galleryYears = res.years;
+      renderGalleryYearChips();
+    }
+  } catch (_) {}
+  finally {
+    galleryYearsLoading = false;
+  }
+}
+
+function renderGalleryYearChips() {
+  const container = $("galleryYearChips");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (curGalleryYear && !galleryYears.some(item => String(item.year) === String(curGalleryYear))) {
+    curGalleryYear = "";
+    syncGalleryHash();
+  }
+
+  // 全部年份 chip
+  const allChip = document.createElement("button");
+  allChip.type = "button";
+  allChip.className = "chip" + (!curGalleryYear ? " active" : "");
+  allChip.setAttribute("data-year", "");
+  allChip.textContent = "全部年份";
+  allChip.addEventListener("click", () => {
+    if (curGalleryYear === "") return;
+    curGalleryYear = "";
+    container.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === allChip));
+    syncGalleryHash();
+    loadGalleryPhotos(true);
+  });
+  container.appendChild(allChip);
+
+  if (!galleryYears.length) return;
+
+  galleryYears.forEach(item => {
+    const yStr = String(item.year);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip" + (curGalleryYear === yStr ? " active" : "");
+    chip.setAttribute("data-year", yStr);
+    chip.innerHTML = esc(yStr) + '年<span class="year-cnt">(' + Number(item.count).toLocaleString() + ')</span>';
+    chip.addEventListener("click", () => {
+      if (curGalleryYear === yStr) return;
+      curGalleryYear = yStr;
+      container.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === chip));
+      syncGalleryHash();
+      loadGalleryPhotos(true);
+    });
+    container.appendChild(chip);
+  });
+}
 
 function openGalleryLightbox(idx) {
   if (idx < 0 || idx >= curGalleryImages.length) return;
@@ -5110,6 +5221,8 @@ async function selectGalleryMember(mName, updateHash = true) {
   try { localStorage.setItem("archive_last_gallery_member", curGalleryMember); } catch (_) {}
 
   updateGalleryMemberButtonDisplay();
+  syncGallerySourceChips();
+  syncGallerySortButton();
 
   syncNavTabs("gallery");
 
@@ -5129,12 +5242,7 @@ async function selectGalleryMember(mName, updateHash = true) {
   if (searchTb) searchTb.style.display = "none";
 
   if (updateHash) {
-    const params = new URLSearchParams();
-    params.set("gallery", curGalleryMember);
-    if (curGallerySource && curGallerySource !== "all") params.set("source", curGallerySource);
-    selfHashUpdate = true;
-    location.hash = params.toString();
-    setTimeout(() => { selfHashUpdate = false; }, 0);
+    syncGalleryHash();
   }
 
   if (!galleryMembers.length) {
@@ -5142,6 +5250,7 @@ async function selectGalleryMember(mName, updateHash = true) {
   } else {
     renderGalleryMemberPopover();
   }
+  loadGalleryYears();
   await loadGalleryPhotos(true);
 }
 
@@ -5200,9 +5309,12 @@ async function loadGalleryPhotos(reset = true) {
   }
 
   try {
-    let url = "/api/archive/gallery?page=" + curGalleryPage + "&per_page=" + curGalleryPerPage + "&source=" + encodeURIComponent(curGallerySource);
+    let url = "/api/archive/gallery?page=" + curGalleryPage + "&per_page=" + curGalleryPerPage + "&source=" + encodeURIComponent(curGallerySource) + "&order=" + encodeURIComponent(curGalleryOrder);
     if (curGalleryMember) {
       url += "&member=" + encodeURIComponent(curGalleryMember);
+    }
+    if (curGalleryYear) {
+      url += "&year=" + encodeURIComponent(curGalleryYear);
     }
     const data = await api(url);
     if (!data.ok) {
@@ -5457,8 +5569,19 @@ if ($("gallerySourceChips")) {
       chips.forEach(c => c.classList.toggle("active", c === chip));
       updateGalleryMemberButtonDisplay();
       renderGalleryMemberPopover();
+      loadGalleryYears();
+      syncGalleryHash();
       loadGalleryPhotos(true);
     });
+  });
+}
+
+if ($("btnGallerySortOrder")) {
+  $("btnGallerySortOrder").addEventListener("click", () => {
+    curGalleryOrder = curGalleryOrder === "desc" ? "asc" : "desc";
+    syncGallerySortButton();
+    syncGalleryHash();
+    loadGalleryPhotos(true);
   });
 }
 

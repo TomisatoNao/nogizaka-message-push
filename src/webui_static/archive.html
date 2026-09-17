@@ -284,6 +284,15 @@
         <button class="chip" data-source="blog" type="button">📄 博客配图</button>
       </div>
 
+      <div class="gallery-year-chips" id="galleryYearChips" aria-label="年份筛选">
+        <button class="chip active" data-year="" type="button">全部年份</button>
+      </div>
+
+      <button class="btn gallery-sort-btn" id="btnGallerySortOrder" type="button" title="切换时间排序：最新优先 ⇄ 最早优先">
+        <span class="sort-icon" id="gallerySortIcon">↓</span>
+        <span id="gallerySortOrderText">最新优先</span>
+      </button>
+
       <span class="stats" id="galleryStats" style="margin-left:auto;"></span>
     </div>
     <div id="galleryCards" class="gallery-cards"></div>

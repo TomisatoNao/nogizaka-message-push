@@ -455,3 +455,174 @@ def test_blog_gallery_remote_images_fallback(temp_archive_env, monkeypatch):
     assert h.payload["total"] == 5
     assert len(h.payload["photos"]) == 5
 
+
+def test_napcat_command_mukai_resolution(temp_archive_env, monkeypatch):
+    """验证输入 /美图 向井 时精准匹配向井纯叶，且绝不误回退至群默认成员（冨里奈央）。"""
+    import config.config as cfg
+    from src.platforms.napcat_commands import NapCatCommandHandler
+
+    # 模拟群 533072575 默认推送冨里奈央
+    monkeypatch.setattr(cfg, "NAPCAT_ROUTES", [
+        {"group_id": "533072575", "member_filter": ["冨里奈央"], "remark": "冨里群"}
+    ])
+
+    # 模拟 blog_posts 中有向井纯叶的数据
+    blog_conn = sqlite3.connect(":memory:")
+    blog_conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            image_paths_json TEXT,
+            images_json TEXT
+        );
+    """)
+    blog_conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json, images_json)
+        VALUES (36, 'sakurazaka', '向井 純葉', '連れ出して', '2026-08-07 21:24', '["sakurazaka/01.jpg"]', '[]');
+    """)
+    blog_conn.commit()
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: blog_conn)
+
+    handler = NapCatCommandHandler()
+
+    # 1. 验证无参数时，正确使用群默认小偶像（冨里奈央）
+    m_default, is_unmatched = handler._resolve_target_member("533072575", "")
+    assert is_unmatched is False
+    assert m_default == "冨里奈央"
+
+    # 2. 验证输入 "向井" 时，命中向井纯叶，绝不误回退至冨里奈央
+    m_mukai, is_unmatched = handler._resolve_target_member("533072575", "向井")
+    assert is_unmatched is False
+    assert "向井" in m_mukai and ("純葉" in m_mukai or "纯叶" in m_mukai)
+
+    # 3. 验证输入简体 "向井纯叶" 时，命中向井纯叶
+    m_itoha, is_unmatched = handler._resolve_target_member("533072575", "向井纯叶")
+    assert is_unmatched is False
+    assert "向井" in m_itoha and ("純葉" in m_itoha or "纯叶" in m_itoha)
+
+    # 4. 验证输入未知参数时，明确返回 is_unmatched=True，禁止回退群默认
+    m_unknown, is_unmatched = handler._resolve_target_member("533072575", "不存在的小偶像XYZ")
+    assert is_unmatched is True
+    assert m_unknown is None
+
+
+def test_gallery_years_and_sort_order(temp_archive_env, monkeypatch):
+    """验证相册年份分布聚合统计与时间正序/倒序切换能力。"""
+    from src.webui_modules.archive.gallery import (
+        _get_blog_gallery,
+        get_gallery_years,
+        handle_gallery,
+    )
+    import src.webui_modules.archive.gallery as gm
+
+    # 1. 验证消息年份统计
+    msg_years = _archive.get_gallery_message_years("冨里奈央")
+    assert 2024 in msg_years
+    assert msg_years[2024] == 2
+
+    # 2. 构造多篇包含不同年份的博客
+    blog_conn = sqlite3.connect(":memory:")
+    blog_conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            image_paths_json TEXT,
+            images_json TEXT
+        );
+    """)
+    blog_conn.execute("""
+        INSERT INTO blog_posts (id, group_key, author, title, date, image_paths_json, images_json)
+        VALUES
+            (1, 'nogizaka', '冨里 奈央', '2023博客', '2023-05-01 10:00:00', '["blogs/2023.jpg"]', '[]'),
+            (2, 'nogizaka', '冨里 奈央', '2025博客', '2025-06-01 12:00:00', '["blogs/2025.jpg"]', '[]'),
+            (3, 'sakurazaka', '向井 純葉', '2024博客', '2024-07-01 14:00:00', '["blogs/2024.jpg"]', '[]');
+    """)
+    blog_conn.commit()
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: blog_conn)
+    gm._gallery_years_cache.clear()
+    gm._blog_count_cache.clear()
+
+    # 3. 聚合年份测试 (冨里奈央: 消息 2024:2, 博客 2023:1, 2025:1 => 总计 2025, 2024, 2023)
+    years_all = get_gallery_years(member="冨里奈央", source="all")
+    assert years_all["ok"] is True
+    assert years_all["total"] == 4
+    y_map = {item["year"]: item["count"] for item in years_all["years"]}
+    assert y_map[2025] == 1
+    assert y_map[2024] == 2
+    assert y_map[2023] == 1
+
+    # 只查博客源
+    years_blog = get_gallery_years(member="冨里奈央", source="blog")
+    y_blog_map = {item["year"]: item["count"] for item in years_blog["years"]}
+    assert 2024 not in y_blog_map
+    assert y_blog_map[2025] == 1
+    assert y_blog_map[2023] == 1
+
+    # 4. 验证时间正序 (order=asc) 与倒序 (order=desc)
+    res_desc = _get_blog_gallery(member="冨里奈央", order="desc")
+    assert res_desc["photos"][0]["published_at"].startswith("2025")
+    assert res_desc["photos"][1]["published_at"].startswith("2023")
+
+    res_asc = _get_blog_gallery(member="冨里奈央", order="asc")
+    assert res_asc["photos"][0]["published_at"].startswith("2023")
+    assert res_asc["photos"][1]["published_at"].startswith("2025")
+
+    # 5. 验证 handle_gallery HTTP 路由
+    class MockHandler:
+        def __init__(self, path):
+            self.path = path
+            self.payload = None
+
+        def _send_json(self, payload, code=200):
+            self.payload = payload
+
+    # 测试 sub == "gallery_years"
+    h_years = MockHandler("/api/archive/gallery_years?member=冨里奈央&source=all")
+    handled = handle_gallery(h_years, "gallery_years", lambda need_admin: True, lambda: {})
+    assert handled is True
+    assert h_years.payload["ok"] is True
+    assert len(h_years.payload["years"]) == 3
+
+    # 测试 sub == "gallery" 带 order=asc 参数
+    h_gal = MockHandler("/api/archive/gallery?member=冨里奈央&source=all&order=asc")
+    handled_gal = handle_gallery(h_gal, "gallery", lambda need_admin: True, lambda: {})
+    assert handled_gal is True
+    assert h_gal.payload["ok"] is True
+    # 最早的应该是 2023 年博客图片
+    assert h_gal.payload["photos"][0]["published_at"].startswith("2023")
+
+
+def test_gallery_year_chips_and_sort_btn_contract():
+    """验证前端模板与样式包含年份胶囊筛选和正/倒序按钮规范。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    html = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 1. archive.html
+    assert 'id="galleryYearChips"' in html
+    assert 'id="btnGallerySortOrder"' in html
+    assert 'id="gallerySortOrderText"' in html
+
+    # 2. archive.css
+    assert '.gallery-year-chips' in css
+    assert '.gallery-sort-btn' in css
+    assert '.gallery-sort-btn.order-asc' in css
+
+    # 3. archive.js
+    assert 'curGalleryYear' in js
+    assert 'curGalleryOrder' in js
+    assert 'loadGalleryYears' in js
+    assert 'renderGalleryYearChips' in js
+    assert 'syncGallerySortButton' in js
+    assert 'btnGallerySortOrder' in js
+
+
+
