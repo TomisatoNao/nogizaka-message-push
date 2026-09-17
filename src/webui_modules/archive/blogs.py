@@ -111,9 +111,14 @@ def _blog_calendar_days(db: sqlite3.Connection, group: str, author: str = "", qu
     ]
     params: list[str] = [group]
     if author:
-        normalized_author = author.replace(" ", "").replace("　", "").replace("_", "")
-        where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
-        params.append(normalized_author)
+        from src.webui_modules.archive.common import _get_matching_blog_authors
+        matched = _get_matching_blog_authors(db, author)
+        if matched:
+            placeholders = ", ".join(["?"] * len(matched))
+            where.append(f"author IN ({placeholders})")
+            params.extend(matched)
+        else:
+            return {}
 
     if query:
         terms = [t.lower() for t in query.split() if t.strip()]
@@ -295,9 +300,14 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             where = "WHERE group_key=?"
             params: list = [group]
             if author:
-                norm_author = author.replace(" ", "").replace("　", "").replace("_", "")
-                where += " AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?"
-                params.append(norm_author)
+                from src.webui_modules.archive.common import _get_matching_blog_authors
+                matched = _get_matching_blog_authors(db, author)
+                if matched:
+                    placeholders = ", ".join(["?"] * len(matched))
+                    where += f" AND author IN ({placeholders})"
+                    params.extend(matched)
+                else:
+                    where += " AND 1=0"
             if date_filter:
                 where += " AND substr(date,1,10)=?"
                 params.append(date_filter)

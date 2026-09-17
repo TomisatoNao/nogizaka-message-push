@@ -172,15 +172,24 @@ def _get_gallery_total_count(
             from src.webui_modules.archive_handlers import get_blog_db
             blog_db = get_blog_db()
             if blog_db:
-                from src.webui_modules.archive.common import _blog_table_columns
+                from src.webui_modules.archive.common import _blog_table_columns, _get_matching_blog_authors
                 b_cols = _blog_table_columns(blog_db)
                 img_where, json_target = _get_blog_image_expr(b_cols)
-                b_where = [img_where, "j.value IS NOT NULL", "j.value != ''"]
+                b_where = [
+                    img_where,
+                    "j.value IS NOT NULL",
+                    "j.value != ''",
+                    "j.value NOT LIKE '%_pre/blog%'",
+                    "j.value NOT LIKE '%img.nogizaka46.com%'",
+                ]
                 b_params: list[object] = []
                 if member:
-                    norm_m = member.replace(" ", "").replace("　", "").replace("_", "")
-                    b_where.append("REPLACE(REPLACE(REPLACE(p.author, ' ', ''), '　', ''), '_', '') = ?")
-                    b_params.append(norm_m)
+                    matched_authors = _get_matching_blog_authors(blog_db, member)
+                    if not matched_authors:
+                        return total
+                    placeholders = ", ".join(["?"] * len(matched_authors))
+                    b_where.append(f"p.author IN ({placeholders})")
+                    b_params.extend(matched_authors)
                 if year:
                     b_where.append("substr(p.date, 1, 4) = ?")
                     b_params.append(f"{year:04d}")
@@ -245,9 +254,13 @@ def _get_blog_gallery(
         params: list[object] = []
 
         if member:
-            norm_m = member.replace(" ", "").replace("　", "").replace("_", "")
-            where.append("REPLACE(REPLACE(REPLACE(p.author, ' ', ''), '　', ''), '_', '') = ?")
-            params.append(norm_m)
+            from src.webui_modules.archive.common import _get_matching_blog_authors
+            matched_authors = _get_matching_blog_authors(blog_db, member)
+            if not matched_authors:
+                return {"ok": True, "total": 0, "photos": [], "page": page, "per_page": per_page, "has_more": False}
+            placeholders = ", ".join(["?"] * len(matched_authors))
+            where.append(f"p.author IN ({placeholders})")
+            params.extend(matched_authors)
         if year:
             y_str = f"{year:04d}"
             where.append("substr(p.date, 1, 4) = ?")
@@ -584,9 +597,13 @@ def _fetch_blog_gallery_photos(
     params: list[object] = []
 
     if member:
-        norm_m = member.replace(" ", "").replace("　", "").replace("_", "")
-        where.append("REPLACE(REPLACE(REPLACE(p.author, ' ', ''), '　', ''), '_', '') = ?")
-        params.append(norm_m)
+        from src.webui_modules.archive.common import _get_matching_blog_authors
+        matched_authors = _get_matching_blog_authors(blog_db, member)
+        if not matched_authors:
+            return []
+        placeholders = ", ".join(["?"] * len(matched_authors))
+        where.append(f"p.author IN ({placeholders})")
+        params.extend(matched_authors)
     if year:
         where.append("substr(p.date, 1, 4) = ?")
         params.append(f"{year:04d}")
@@ -867,61 +884,103 @@ def get_gallery_years(member: str = "", source: str = "all") -> dict:
     # 2. 检索博客配图年份
     if source in {"all", "blog"}:
         try:
-            from src.webui_modules.archive.common import _blog_table_columns
+            from src.webui_modules.archive.common import _blog_table_columns, _get_matching_blog_authors
             from src.webui_modules.archive_handlers import get_blog_db
             blog_db = get_blog_db()
             if blog_db:
                 cols = _blog_table_columns(blog_db)
-                img_where, json_target = _get_blog_image_expr(cols)
-                where = [img_where, "p.date IS NOT NULL", "LENGTH(p.date) >= 4"]
-                params: list[object] = []
                 if member:
-                    norm_m = member.replace(" ", "").replace("　", "").replace("_", "")
-                    where.append("REPLACE(REPLACE(REPLACE(p.author, ' ', ''), '　', ''), '_', '') = ?")
-                    params.append(norm_m)
-                where_str = " AND ".join(where)
+                    matched_authors = _get_matching_blog_authors(blog_db, member)
+                    if matched_authors:
+                        placeholders = ", ".join(["?"] * len(matched_authors))
+                        select_cols = ["p.date"]
+                        if "images_json" in cols:
+                            select_cols.append("p.images_json")
+                        if "image_paths_json" in cols:
+                            select_cols.append("p.image_paths_json")
+                        img_where, _ = _get_blog_image_expr(cols)
+                        sql = f"""
+                            SELECT {', '.join(select_cols)}
+                            FROM blog_posts p
+                            WHERE p.author IN ({placeholders})
+                              AND p.date IS NOT NULL AND LENGTH(p.date) >= 4
+                              AND {img_where};
+                        """
+                        b_posts = blog_db.execute(sql, matched_authors).fetchall()
+                        for row in b_posts:
+                            dt = row[0] or ""
+                            if len(dt) >= 4 and dt[:4].isdigit():
+                                y = int(dt[:4])
+                                if not (2010 <= y <= 2035):
+                                    continue
+                                c = 0
+                                for j_raw in row[1:]:
+                                    if j_raw:
+                                        try:
+                                            imgs = json.loads(j_raw)
+                                            if isinstance(imgs, list) and imgs:
+                                                valid_imgs = [
+                                                    img for img in imgs
+                                                    if img and "_pre/blog" not in str(img) and "img.nogizaka46.com" not in str(img)
+                                                ]
+                                                if valid_imgs:
+                                                    c = len(valid_imgs)
+                                                    break
+                                        except Exception:
+                                            pass
+                                if c > 0:
+                                    counts_by_year[y] = counts_by_year.get(y, 0) + c
+                else:
+                    img_where, json_target = _get_blog_image_expr(cols)
+                    where = [img_where, "p.date IS NOT NULL", "LENGTH(p.date) >= 4"]
+                    where_str = " AND ".join(where)
 
-                try:
-                    sql = f"""
-                        SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
-                        FROM blog_posts p, json_each({json_target}) j
-                        WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
-                          AND j.value NOT LIKE '%_pre/blog%' AND j.value NOT LIKE '%img.nogizaka46.com%'
-                        GROUP BY y
-                        ORDER BY y DESC;
-                    """
-                    b_rows = blog_db.execute(sql, params).fetchall()
-                    for r in b_rows:
-                        if r[0]:
-                            y = int(r[0])
-                            if 2010 <= y <= 2035:
-                                counts_by_year[y] = counts_by_year.get(y, 0) + int(r[1])
-                except Exception:
-                    # 降级：若不支持 json_each
-                    select_cols = ["p.date"]
-                    if "images_json" in cols:
-                        select_cols.append("p.images_json")
-                    if "image_paths_json" in cols:
-                        select_cols.append("p.image_paths_json")
-                    b_posts = blog_db.execute(f"SELECT {', '.join(select_cols)} FROM blog_posts p WHERE {where_str};", params).fetchall()
-                    for row in b_posts:
-                        dt = row[0] or ""
-                        if len(dt) >= 4 and dt[:4].isdigit():
-                            y = int(dt[:4])
-                            if not (2010 <= y <= 2035):
-                                continue
-                            c = 0
-                            for j_raw in row[1:]:
-                                if j_raw:
-                                    try:
-                                        imgs = json.loads(j_raw)
-                                        if isinstance(imgs, list) and imgs:
-                                            c = len([img for img in imgs if img])
-                                            break
-                                    except Exception:
-                                        pass
-                            if c > 0:
-                                counts_by_year[y] = counts_by_year.get(y, 0) + c
+                    try:
+                        sql = f"""
+                            SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
+                            FROM blog_posts p, json_each({json_target}) j
+                            WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
+                              AND j.value NOT LIKE '%_pre/blog%' AND j.value NOT LIKE '%img.nogizaka46.com%'
+                            GROUP BY y
+                            ORDER BY y DESC;
+                        """
+                        b_rows = blog_db.execute(sql).fetchall()
+                        for r in b_rows:
+                            if r[0]:
+                                y = int(r[0])
+                                if 2010 <= y <= 2035:
+                                    counts_by_year[y] = counts_by_year.get(y, 0) + int(r[1])
+                    except Exception:
+                        # 降级：若不支持 json_each
+                        select_cols = ["p.date"]
+                        if "images_json" in cols:
+                            select_cols.append("p.images_json")
+                        if "image_paths_json" in cols:
+                            select_cols.append("p.image_paths_json")
+                        b_posts = blog_db.execute(f"SELECT {', '.join(select_cols)} FROM blog_posts p WHERE {where_str};").fetchall()
+                        for row in b_posts:
+                            dt = row[0] or ""
+                            if len(dt) >= 4 and dt[:4].isdigit():
+                                y = int(dt[:4])
+                                if not (2010 <= y <= 2035):
+                                    continue
+                                c = 0
+                                for j_raw in row[1:]:
+                                    if j_raw:
+                                        try:
+                                            imgs = json.loads(j_raw)
+                                            if isinstance(imgs, list) and imgs:
+                                                valid_imgs = [
+                                                    img for img in imgs
+                                                    if img and "_pre/blog" not in str(img) and "img.nogizaka46.com" not in str(img)
+                                                ]
+                                                if valid_imgs:
+                                                    c = len(valid_imgs)
+                                                    break
+                                        except Exception:
+                                            pass
+                                if c > 0:
+                                    counts_by_year[y] = counts_by_year.get(y, 0) + c
         except Exception:
             pass
 

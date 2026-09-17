@@ -536,8 +536,14 @@ def _get_random_photo_counts(member_dir: str | None = None) -> tuple[int, int]:
             b_where = ["((image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != '') OR (images_json IS NOT NULL AND images_json != '[]' AND images_json != ''))"]
             b_params: list[object] = []
             if norm_m:
-                b_where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
-                b_params.append(norm_m)
+                from src.webui_modules.archive.common import _get_matching_blog_authors
+                matched = _get_matching_blog_authors(blog_db, norm_m)
+                if matched:
+                    placeholders = ", ".join(["?"] * len(matched))
+                    b_where.append(f"author IN ({placeholders})")
+                    b_params.extend(matched)
+                else:
+                    b_where.append("1=0")
             try:
                 b_sql = f"""
                     SELECT SUM(json_array_length(CASE WHEN image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != '' THEN image_paths_json ELSE images_json END))
@@ -621,8 +627,14 @@ def _draw_blog_photo(member_dir: str | None = None) -> dict | None:
         b_where = ["image_paths_json IS NOT NULL AND image_paths_json != '[]' AND image_paths_json != ''"]
         b_params: list[object] = []
         if norm_m:
-            b_where.append("REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?")
-            b_params.append(norm_m)
+            from src.webui_modules.archive.common import _get_matching_blog_authors
+            matched = _get_matching_blog_authors(blog_db, norm_m)
+            if matched:
+                placeholders = ", ".join(["?"] * len(matched))
+                b_where.append(f"author IN ({placeholders})")
+                b_params.extend(matched)
+            else:
+                b_where.append("1=0")
 
         b_sql = f"""
             SELECT id, group_key, author, title, date, image_paths_json
@@ -657,14 +669,20 @@ def _draw_blog_photo(member_dir: str | None = None) -> dict | None:
 
         # 若无本地博客图片且指定了成员，尝试抽取带有远程配图的博客
         if norm_m:
-            r_sql = """
-                SELECT id, group_key, author, title, date, images_json
-                FROM blog_posts
-                WHERE images_json IS NOT NULL AND images_json != '[]' AND images_json != ''
-                  AND REPLACE(REPLACE(REPLACE(author, ' ', ''), '　', ''), '_', '') = ?
-                ORDER BY RANDOM() LIMIT 20;
-            """
-            r_rows = blog_db.execute(r_sql, [norm_m]).fetchall()
+            from src.webui_modules.archive.common import _get_matching_blog_authors
+            matched = _get_matching_blog_authors(blog_db, norm_m)
+            if matched:
+                placeholders = ", ".join(["?"] * len(matched))
+                r_sql = f"""
+                    SELECT id, group_key, author, title, date, images_json
+                    FROM blog_posts
+                    WHERE images_json IS NOT NULL AND images_json != '[]' AND images_json != ''
+                      AND author IN ({placeholders})
+                    ORDER BY RANDOM() LIMIT 20;
+                """
+                r_rows = blog_db.execute(r_sql, matched).fetchall()
+            else:
+                r_rows = []
             for rr in r_rows:
                 imgs = json.loads(rr[5]) if rr[5] else []
                 valid_imgs = [

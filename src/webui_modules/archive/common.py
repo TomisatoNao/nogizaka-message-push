@@ -60,3 +60,53 @@ def _blog_media_url(relative_path: str) -> str:
         return ""
     parts = str(relative_path).replace("\\", "/").strip("/").split("/")
     return "/api/archive/blog_media/" + "/".join(quote(part) for part in parts if part)
+
+
+_blog_authors_cache: tuple[int, float, list[str]] | None = None
+_BLOG_AUTHORS_CACHE_TTL = 300.0
+
+
+def clear_blog_authors_cache() -> None:
+    """清理博客作者全局内存缓存。"""
+    global _blog_authors_cache
+    _blog_authors_cache = None
+
+
+def _get_matching_blog_authors(blog_db: sqlite3.Connection, member: str) -> list[str]:
+    """根据输入的成员名或目录名，从 blog_posts 中高效匹配真实存储的 author 列表。
+
+    通过内存归一化匹配，避免在 SQL WHERE 子句中使用 REPLACE(...) 函数导致索引失效。
+    """
+    global _blog_authors_cache
+    if not member or not blog_db:
+        return []
+    import time
+
+    now = time.monotonic()
+    db_id = id(blog_db)
+    all_authors = None
+    if (
+        _blog_authors_cache
+        and _blog_authors_cache[0] == db_id
+        and (now - _blog_authors_cache[1]) < _BLOG_AUTHORS_CACHE_TTL
+    ):
+        all_authors = _blog_authors_cache[2]
+
+    if all_authors is None:
+        try:
+            rows = blog_db.execute(
+                "SELECT DISTINCT author FROM blog_posts WHERE author IS NOT NULL AND author != ''"
+            ).fetchall()
+            all_authors = [str(r[0]) for r in rows if r[0]]
+            _blog_authors_cache = (db_id, now, all_authors)
+        except Exception:
+            all_authors = []
+
+    norm_target = member.replace(" ", "").replace("　", "").replace("_", "").lower()
+    matched = [
+        a
+        for a in all_authors
+        if a.replace(" ", "").replace("　", "").replace("_", "").lower() == norm_target
+    ]
+    return matched
+
