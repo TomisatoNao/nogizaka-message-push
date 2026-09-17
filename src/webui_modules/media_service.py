@@ -17,7 +17,7 @@ mimetypes.add_type("image/webp", ".webp")
 def serve_file_range(
     handler,
     path: Path,
-    cache_control: str = "public, max-age=31536000, immutable",
+    cache_control: str = "private, no-cache",
 ) -> None:
     """为 HTTP 请求处理器提供媒体文件流式分片服务。"""
     st = path.stat()

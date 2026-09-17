@@ -636,9 +636,9 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             from src.webui_modules.archive.thumbnails import get_or_create_thumbnail
             thumb_path = get_or_create_thumbnail(full)
             if thumb_path and thumb_path.is_file():
-                serve_file_range(handler, thumb_path)
+                serve_file_range(handler, thumb_path, cache_control="public, max-age=31536000, immutable")
                 return True
-        serve_file_range(handler, full)
+        serve_file_range(handler, full, cache_control="private, no-cache")
         return True
 
     # 9. 后台历史消息全量回填

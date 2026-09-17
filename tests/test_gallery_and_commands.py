@@ -1059,10 +1059,10 @@ def test_media_service_immutable_cache_control(tmp_path):
         def end_headers(self):
             pass
 
-    # 1. 验证标准 200 响应携带 immutable 强缓存头
+    # 1. 验证标准 200 响应携带自定义 immutable 强缓存头
     h200 = DummyHandler()
     h200.wfile = type("WFile", (), {"write": lambda self, b: None})()
-    serve_file_range(h200, test_file)
+    serve_file_range(h200, test_file, cache_control="public, max-age=31536000, immutable")
     assert h200.response_code == 200
     assert "immutable" in h200.sent_headers.get("Cache-Control", "")
     assert "max-age=31536000" in h200.sent_headers.get("Cache-Control", "")
@@ -1070,7 +1070,7 @@ def test_media_service_immutable_cache_control(tmp_path):
     # 2. 验证 304 条件缓存同样携带 immutable 强缓存头
     h304 = DummyHandler()
     h304.headers["If-None-Match"] = h200.sent_headers.get("ETag", "")
-    serve_file_range(h304, test_file)
+    serve_file_range(h304, test_file, cache_control="public, max-age=31536000, immutable")
     assert h304.response_code == 304
     assert "immutable" in h304.sent_headers.get("Cache-Control", "")
 
