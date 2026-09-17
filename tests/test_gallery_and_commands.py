@@ -1150,6 +1150,34 @@ def test_gallery_lightbox_original_image_and_actions_contract():
     assert 'a.download = filename;' in js
 
 
+def test_view_components_isolation_contract():
+    """验证相册、信件、博客和首页各视图首屏预加载时的组件强隔离契约。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    html = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 1. 验证 HTML 语义类名与元素 ID
+    assert 'class="toolbar msg-search-toolbar"' in html
+    assert 'id="tagToggleWrap"' in html
+
+    # 2. 验证 CSS 视图强隔离规则（杜绝首屏网络请求未完成时的组件暴露闪烁）
+    assert "html.view-gallery #archiveSide" in css
+    assert "html.view-gallery .msg-search-toolbar" in css
+    assert "html.view-letter #archiveSide" in css
+    assert "html.view-letter .msg-search-toolbar" in css
+    assert "html.view-blog #tagToggleWrap" in css
+    assert "html.view-home #archiveSide" in css
+    assert "html.view-home .msg-search-toolbar" in css
+
+    # 3. 验证 JS boot() 预热预路由隔离逻辑
+    assert '$("archiveSide").style.display = "none";' in js
+    assert '$("tagToggleWrap").style.display = "none";' in js
+
+
+
 
 
 

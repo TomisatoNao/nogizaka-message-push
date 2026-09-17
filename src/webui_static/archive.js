@@ -4375,9 +4375,9 @@ async function boot() {
   }
 
   const p = new URLSearchParams((location.hash || "").replace(/^#/, ""));
-  // 极速预处理：如果 URL 包含博客 ID，0ms 同步打开阅读器容器与骨架，彻底消除任何闪烁
+  // 极速预处理：如果 URL 包含博客 ID 或博客路由，0ms 同步打开视图骨架，彻底消除任何闪烁
   const earlyBlogId = p.get("id") || p.get("blog_id") || p.get("post");
-  if (earlyBlogId) {
+  if (earlyBlogId || p.has("blog") || (location.hash || "").replace(/^#/, "") === "blog") {
     setHtmlViewClass("blog");
     syncNavTabs("blog");
     if ($("archiveHome")) $("archiveHome").classList.remove("active");
@@ -4385,20 +4385,25 @@ async function boot() {
     if (layout) layout.style.display = '';
     if ($("blogGrid")) $("blogGrid").style.display = "";
     if ($("timeline")) $("timeline").style.display = "none";
+    if ($("galleryGrid")) $("galleryGrid").style.display = "none";
+    if ($("letterGrid")) $("letterGrid").style.display = "none";
     const msgTb = document.querySelector(".msg-toolbar");
     if (msgTb) msgTb.style.display = "none";
-    const reader = $("blogReader");
-    if (reader) {
-      reader.style.display = "";
-      $("brTitle").textContent = "正在打开博客...";
-      $("brContent").innerHTML = '<div class="home-skeleton" style="padding:32px 16px;"><div class="sk-hero" style="height:40px;width:65%;margin-bottom:20px;"></div><div class="sk-strip"><div></div><div></div><div></div></div><div class="sk-msg" style="margin-top:20px;"><div></div><div></div><div></div></div></div>';
-      document.documentElement.classList.add("modal-open");
-      document.body.classList.add("modal-open");
-      document.body.style.overflow = "hidden";
+    if ($("tagToggleWrap")) $("tagToggleWrap").style.display = "none";
+    if (earlyBlogId) {
+      const reader = $("blogReader");
+      if (reader) {
+        reader.style.display = "";
+        $("brTitle").textContent = "正在打开博客...";
+        $("brContent").innerHTML = '<div class="home-skeleton" style="padding:32px 16px;"><div class="sk-hero" style="height:40px;width:65%;margin-bottom:20px;"></div><div class="sk-strip"><div></div><div></div><div></div></div><div class="sk-msg" style="margin-top:20px;"><div></div><div></div><div></div></div></div>';
+        document.documentElement.classList.add("modal-open");
+        document.body.classList.add("modal-open");
+        document.body.style.overflow = "hidden";
+      }
     }
   }
 
-  // 极速预处理：如果 URL 包含相册路由 #gallery
+  // 极速预处理：如果 URL 包含相册路由 #gallery，0ms 同步隔离隐藏消息专属控件
   if (p.has("gallery") || (location.hash || "").replace(/^#/, "") === "gallery") {
     setHtmlViewClass("gallery");
     syncNavTabs("gallery");
@@ -4409,8 +4414,11 @@ async function boot() {
     if ($("blogGrid")) $("blogGrid").style.display = "none";
     if ($("letterGrid")) $("letterGrid").style.display = "none";
     if ($("galleryGrid")) $("galleryGrid").style.display = "block";
+    if ($("archiveSide")) $("archiveSide").style.display = "none";
     const msgTb = document.querySelector(".msg-toolbar");
     if (msgTb) msgTb.style.display = "none";
+    const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
+    if (searchTb) searchTb.style.display = "none";
   }
 
   // 极速预处理：如果 URL 包含信件路由 #letter，0ms 同步切换至信件视图骨架，杜绝页面抖动
@@ -4428,8 +4436,11 @@ async function boot() {
     if ($("blogGrid")) $("blogGrid").style.display = "none";
     if ($("galleryGrid")) $("galleryGrid").style.display = "none";
     if ($("letterGrid")) $("letterGrid").style.display = "block";
+    if ($("archiveSide")) $("archiveSide").style.display = "none";
     const msgTb = document.querySelector(".msg-toolbar");
     if (msgTb) msgTb.style.display = "none";
+    const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
+    if (searchTb) searchTb.style.display = "none";
   }
 
   curType = p.get("t") || "";

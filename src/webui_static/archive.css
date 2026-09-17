@@ -29,15 +29,32 @@ html.view-msg #tabMsg { background: var(--card-solid) !important; color: var(--t
 html.view-gallery #tabGallery { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 html.view-letter #tabLetter { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 
-html.view-blog .msg-toolbar,
-html.view-letter .msg-toolbar,
+/* 视图强隔离规则：首屏与预加载时 0ms 屏蔽非所属视图的一切组件，杜绝错位串味与闪烁 */
+/* 1. 相册视图：彻底隐藏日历边栏、消息工具栏、消息搜索栏与时间轴 */
+html.view-gallery #archiveSide,
 html.view-gallery .msg-toolbar,
-html.view-home .msg-toolbar { display: none !important; }
-html.view-blog #timeline,
-html.view-letter #timeline,
+html.view-gallery .msg-search-toolbar,
 html.view-gallery #timeline { display: none !important; }
-html.view-blog #blogGrid { display: block !important; }
 html.view-gallery #galleryGrid { display: block !important; }
+
+/* 2. 信件视图：彻底隐藏日历边栏、消息工具栏、消息搜索栏与时间轴 */
+html.view-letter #archiveSide,
+html.view-letter .msg-toolbar,
+html.view-letter .msg-search-toolbar,
+html.view-letter #timeline { display: none !important; }
+html.view-letter #letterGrid { display: block !important; }
+
+/* 3. 博客视图：隐藏消息工具栏、时间轴及消息专属“显示标签”复选框 */
+html.view-blog .msg-toolbar,
+html.view-blog #timeline,
+html.view-blog #tagToggleWrap { display: none !important; }
+html.view-blog #blogGrid { display: block !important; }
+
+/* 4. 首页视图：隐藏日历边栏、消息工具栏、消息搜索栏与时间轴 */
+html.view-home #archiveSide,
+html.view-home .msg-toolbar,
+html.view-home .msg-search-toolbar,
+html.view-home #timeline { display: none !important; }
 
   #memberSelect { max-width: 200px; padding: 5px 8px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--field); color: var(--text);
