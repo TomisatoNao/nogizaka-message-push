@@ -2989,9 +2989,17 @@ function openLightbox(i, opener, caption, placeholderUrl) {
     if (opener) lightboxOpener = opener;
     $("lbImg").src = i;
     $("lbImg").alt = caption || "图片预览";
+    $("lbImg").classList.remove("lb-preview");
+    $("lbImg").classList.add("lb-full");
     $("lbCounter").style.display = "none";
     $("lbPrev").style.display = "none";
     $("lbNext").style.display = "none";
+    if ($("lbOriginalBtn")) {
+      $("lbOriginalBtn").href = i;
+      $("lbOriginalBtn").style.display = "inline-flex";
+    }
+    if ($("lbDownloadBtn")) $("lbDownloadBtn").style.display = "inline-flex";
+    if ($("lbStatus")) $("lbStatus").style.display = "none";
     $("lightbox").classList.add("open");
     $("lightbox").setAttribute("aria-hidden", "false");
     $("lbClose").focus();
@@ -3005,23 +3013,77 @@ function openLightbox(i, opener, caption, placeholderUrl) {
   const targetUrl = item.url;
   const targetPlaceholder = placeholderUrl || item.thumbUrl || "";
 
-  // 1. 优先使用当前已完成的缩略图立即占位展示（0ms秒开，彻底杜绝上一张旧图残留）
-  if (targetPlaceholder) {
-    $("lbImg").src = targetPlaceholder;
-  } else {
-    $("lbImg").removeAttribute("src");
+  // 1. 设置“查看原图”链接与下载入口
+  if ($("lbOriginalBtn")) {
+    $("lbOriginalBtn").href = targetUrl || targetPlaceholder || "#";
+    $("lbOriginalBtn").style.display = targetUrl ? "inline-flex" : "none";
   }
+  if ($("lbDownloadBtn")) {
+    $("lbDownloadBtn").style.display = targetUrl ? "inline-flex" : "none";
+  }
+
   $("lbImg").alt = item.caption || "归档图片";
 
-  // 2. 后台无缝加载高清原图，加载完毕平滑替换
-  if (targetUrl && targetUrl !== targetPlaceholder) {
-    const preloader = new Image();
-    preloader.src = targetUrl;
-    preloader.onload = () => {
-      if (currentVersion === lbImageLoadVersion && $("lightbox").classList.contains("open")) {
-        $("lbImg").src = targetUrl;
+  // 2. 优先使用当前已加载的缩略图立即占位展示（0ms秒开，彻底杜绝上一张旧图残留与黑屏等待）
+  if (targetPlaceholder) {
+    $("lbImg").src = targetPlaceholder;
+    $("lbImg").classList.add("lb-preview");
+    $("lbImg").classList.remove("lb-full");
+  } else {
+    $("lbImg").removeAttribute("src");
+    $("lbImg").classList.remove("lb-preview", "lb-full");
+  }
+
+  // 3. 后台加载原图并平滑替换，确保 100% 触发且无事件竞态遗漏
+  if (targetUrl) {
+    if (targetUrl === targetPlaceholder) {
+      // 已经是原图链接
+      $("lbImg").classList.remove("lb-preview");
+      $("lbImg").classList.add("lb-full");
+      if ($("lbStatus")) $("lbStatus").style.display = "none";
+    } else {
+      if ($("lbStatus")) {
+        $("lbStatus").innerHTML = '<span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;">🔄</span> 正在加载高清原图...';
+        $("lbStatus").style.display = "inline-flex";
       }
-    };
+
+      const preloader = new Image();
+      const onDone = () => {
+        if (currentVersion === lbImageLoadVersion && $("lightbox").classList.contains("open")) {
+          $("lbImg").src = targetUrl;
+          $("lbImg").classList.remove("lb-preview");
+          $("lbImg").classList.add("lb-full");
+          if ($("lbStatus")) {
+            $("lbStatus").innerHTML = '✓ 已加载高清原图';
+            setTimeout(() => {
+              if (currentVersion === lbImageLoadVersion && $("lbStatus")) {
+                $("lbStatus").style.display = "none";
+              }
+            }, 1200);
+          }
+        }
+      };
+
+      preloader.onload = onDone;
+      preloader.onerror = () => {
+        if (currentVersion === lbImageLoadVersion && $("lightbox").classList.contains("open")) {
+          if ($("lbStatus")) {
+            $("lbStatus").innerHTML = '⚠️ 原图加载受阻，当前显示预览图';
+            setTimeout(() => {
+              if (currentVersion === lbImageLoadVersion && $("lbStatus")) {
+                $("lbStatus").style.display = "none";
+              }
+            }, 2500);
+          }
+        }
+      };
+
+      // 先绑定事件回调再赋值 src，杜绝内存缓存同步完成导致事件丢失
+      preloader.src = targetUrl;
+      if (preloader.complete && preloader.naturalWidth > 0) {
+        onDone();
+      }
+    }
   }
 
   if (images.length > 1) {
@@ -3046,7 +3108,9 @@ function closeLightbox() {
   ++lbImageLoadVersion;
   if ($("lbImg")) {
     $("lbImg").removeAttribute("src");
+    $("lbImg").classList.remove("lb-preview", "lb-full");
   }
+  if ($("lbStatus")) $("lbStatus").style.display = "none";
   if (lightboxOpener && document.contains(lightboxOpener)) lightboxOpener.focus();
   lightboxOpener = null;
 }
@@ -3058,6 +3122,30 @@ function lbMove(delta) {
 $("lightbox").addEventListener("click", (e) => {
   if (e.target === $("lightbox") || e.target === $("lbImg")) closeLightbox();
 });
+if ($("lbActions")) {
+  $("lbActions").addEventListener("click", (e) => e.stopPropagation());
+}
+if ($("lbDownloadBtn")) {
+  $("lbDownloadBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const item = images[lbIndex];
+    const url = item ? item.url : ($("lbImg") ? $("lbImg").src : "");
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    let filename = url.split("/").pop() || "photo.jpg";
+    if (filename.includes("?")) filename = filename.split("?")[0];
+    if (item && item.caption) {
+      const safeCaption = item.caption.replace(/[\\/:*?"<>|\r\n\t]/g, "_").slice(0, 30);
+      if (safeCaption) filename = safeCaption + "_" + filename;
+    }
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast("💾 正在下载原图: " + filename);
+  });
+}
 $("lbClose").addEventListener("click", closeLightbox);
 $("lbPrev").addEventListener("click", (e) => { e.stopPropagation(); lbMove(-1); });
 $("lbNext").addEventListener("click", (e) => { e.stopPropagation(); lbMove(1); });
@@ -3068,10 +3156,12 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") lbMove(-1);
     if (e.key === "ArrowRight") lbMove(1);
     if (e.key === "Tab") {
-      const focusable = [$("lbClose"), $("lbPrev"), $("lbNext")];
-      const index = focusable.indexOf(document.activeElement);
-      e.preventDefault();
-      focusable[(index + (e.shiftKey ? focusable.length - 1 : 1)) % focusable.length].focus();
+      const focusable = [$("lbOriginalBtn"), $("lbDownloadBtn"), $("lbClose"), $("lbPrev"), $("lbNext")].filter(el => el && el.style.display !== "none" && !el.disabled);
+      if (focusable.length) {
+        const index = focusable.indexOf(document.activeElement);
+        e.preventDefault();
+        focusable[(index + (e.shiftKey ? focusable.length - 1 : 1)) % focusable.length].focus();
+      }
     }
     return;
   }

@@ -1118,6 +1118,39 @@ def test_blog_images_optimization_and_fallback_contract():
     assert "openLightbox(idx, img, null, img.src);" in js
 
 
+def test_gallery_lightbox_original_image_and_actions_contract():
+    """验证灯箱查看高清原图加载保障、查看/下载原图入口及竞态消除契约。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    html = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    # 1. 验证 HTML 动作栏、原图直达链接与下载按钮契约
+    assert 'id="lbActions"' in html
+    assert 'id="lbOriginalBtn"' in html
+    assert 'id="lbDownloadBtn"' in html
+    assert 'id="lbStatus"' in html
+
+    # 2. 验证 CSS 样式契约
+    assert ".lb-actions" in css
+    assert ".lb-status" in css
+    assert ".lb-btn" in css
+    assert "#lightbox img.lb-preview" in css
+    assert "#lightbox img.lb-full" in css
+
+    # 3. 验证 JS 原图加载逻辑契约（事件先于赋值，解决事件丢失与缓存竞态）
+    assert "preloader.onload = onDone;" in js
+    assert "preloader.onerror =" in js
+    assert "preloader.src = targetUrl;" in js
+    assert "if (preloader.complete && preloader.naturalWidth > 0)" in js
+    assert '$("lbOriginalBtn").href = targetUrl' in js
+    assert '$("lbDownloadBtn")' in js
+    assert 'a.download = filename;' in js
+
+
+
 
 
 
