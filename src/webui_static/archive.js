@@ -5177,6 +5177,7 @@ async function loadGalleryPhotos(reset = true) {
       cardsBox.innerHTML = "";
     }
 
+    const fragment = document.createDocumentFragment();
     const startIdx = curGalleryImages.length;
     list.forEach((photo, i) => {
       const globalIdx = startIdx + i;
@@ -5205,7 +5206,7 @@ async function loadGalleryPhotos(reset = true) {
 
       card.innerHTML =
         '<div class="' + badgeClass + '">' + badgeText + '</div>' +
-        '<img src="' + esc(photo.url) + '" loading="lazy" decoding="async" alt="图片" onerror="this.parentElement.style.display=\'none\';" />' +
+        '<img src="' + esc(photo.url) + '" loading="lazy" decoding="async" alt="图片" onload="this.classList.add(\'loaded\');" onerror="this.parentElement.style.display=\'none\';" />' +
         '<div class="gallery-overlay">' +
           '<div class="gallery-meta">' + esc(photo.member_name || "") + ' · ' + esc(dateStr) + '</div>' +
           (photo.text ? '<div class="gallery-caption">' + esc(photo.text) + '</div>' : '') +
@@ -5219,8 +5220,9 @@ async function loadGalleryPhotos(reset = true) {
         }
       });
 
-      cardsBox.appendChild(card);
+      fragment.appendChild(card);
     });
+    cardsBox.appendChild(fragment);
 
     if (loadMoreBtn) {
       if (curGalleryHasMore) {

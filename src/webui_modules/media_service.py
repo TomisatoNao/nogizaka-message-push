@@ -34,7 +34,7 @@ def serve_file_range(handler, path: Path) -> None:
         if fresh:
             handler.send_response(304)
             handler.send_header("ETag", etag)
-            handler.send_header("Cache-Control", "private, no-cache")
+            handler.send_header("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
             handler.end_headers()
             return
 
@@ -61,7 +61,7 @@ def serve_file_range(handler, path: Path) -> None:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     handler.send_header("ETag", etag)
     handler.send_header("Last-Modified", last_modified)
-    handler.send_header("Cache-Control", "private, no-cache")
+    handler.send_header("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
     handler.end_headers()
     try:
         with open(path, "rb") as f:

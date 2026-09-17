@@ -2986,11 +2986,21 @@ html.view-gallery #galleryGrid { display: block !important; }
   border-radius: 12px;
   overflow: hidden;
   background: var(--card);
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.06) 50%, rgba(255, 255, 255, 0.02) 100%);
+  background-size: 200% 100%;
+  animation: gallerySkeleton 1.8s infinite ease-in-out;
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
   aspect-ratio: 3 / 4;
   cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: 200px 267px;
   transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+@keyframes gallerySkeleton {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .gallery-card:hover {
@@ -3004,7 +3014,12 @@ html.view-gallery #galleryGrid { display: block !important; }
   height: 100%;
   object-fit: cover;
   display: block;
-  transition: transform 0.35s ease;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.35s ease;
+}
+
+.gallery-card img.loaded {
+  opacity: 1;
 }
 
 .gallery-card:hover img {
