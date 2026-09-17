@@ -28,6 +28,7 @@ _lock_owners:         dict[tuple, asyncio.AbstractEventLoop | None] = {}
 _alert_last_sent:     dict[str, float]         = {}
 _http_client:         httpx.AsyncClient | None = None
 _auth_http_client:    httpx.AsyncClient | None = None
+_client_loop:         asyncio.AbstractEventLoop | None = None
 _last_time_written:   dict[str, str]           = {}   # write_time_record 的值缓存
 
 # 续期失败状态只保存在进程内：它是网络熔断/退避状态，不是凭据本身。
@@ -88,6 +89,13 @@ def clear_loop_state(loop: asyncio.AbstractEventLoop | None = None) -> int:
     if current is not None and current[0] is loop:
         _refresh_semaphores.pop(loop_id, None)
         removed += 1
+
+    global _http_client, _auth_http_client, _client_loop
+    if _client_loop is loop or loop is None:
+        _http_client = None
+        _auth_http_client = None
+        _client_loop = None
+
     return removed
 
 
@@ -101,11 +109,15 @@ def initialize(
     ``auth_client`` 可选：主程序为 Token 续期提供独立连接池，避免媒体/翻译
     请求占满普通连接池。单独运行工具时未传入则回退到 ``client``。
     """
-    global _http_client, _auth_http_client
+    global _http_client, _auth_http_client, _client_loop
     if client is not None:
         _http_client = client
     if auth_client is not None:
         _auth_http_client = auth_client
+    try:
+        _client_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _client_loop = None
 
 
 def _get_refresh_semaphore() -> asyncio.Semaphore:
@@ -279,20 +291,32 @@ async def _post(url: str, *, headers: dict,
     except RuntimeError:
         curr_loop = None
 
-    # 续期优先使用隔离的认证连接池；单独脚本未注入时回退普通客户端。
-    for candidate in (_auth_http_client, _http_client):
-        if candidate is None or candidate.is_closed or curr_loop is None:
-            continue
-        transport = getattr(candidate, "_transport", None)
-        client_loop = getattr(transport, "_loop", None)
-        if client_loop is None or client_loop is curr_loop:
-            client_to_use = candidate
-            break
+    # 仅当当前运行的事件循环正是初始化绑定的 loop 且该 loop 处于活动状态时，才复用长连接客户端；
+    # 线程池中由 asyncio.run 创建的临时 loop 或跨线程环境，绝不能直接复用已有连接池，
+    # 避免连接池内部绑定的旧 loop 被关闭后触发 "Event loop is closed"。
+    can_reuse = (
+        curr_loop is not None
+        and _client_loop is not None
+        and curr_loop is _client_loop
+        and not curr_loop.is_closed()
+    )
+    if can_reuse:
+        for candidate in (_auth_http_client, _http_client):
+            if candidate is not None and not candidate.is_closed:
+                client_to_use = candidate
+                break
 
     if client_to_use is not None:
-        return await client_to_use.post(
-            url, headers=headers, json=json_body, content=content, timeout=15,
-        )
+        try:
+            return await client_to_use.post(
+                url, headers=headers, json=json_body, content=content, timeout=15,
+            )
+        except RuntimeError as e:
+            if "closed" in str(e).lower():
+                log_all(f"⚠️ 复用 HTTP 客户端检测到底层事件循环已关闭 ({e})，自愈回退到独立临时客户端重试", is_warning=True)
+            else:
+                raise
+
     async with httpx.AsyncClient(
         timeout=15,
         proxy=getattr(cfg, "PROXY", "") or None,
@@ -571,6 +595,10 @@ async def refresh_mobile_token(account_id: str, target_group: int,
             failure_kind = "response_invalid"
             failure_detail = f"{type(e).__name__}: {e}"
             log_all(f"🔥 账号 {account_id} 移动端续期处理失败: {type(e).__name__}: {e}", is_error=True)
+        except RuntimeError as e:
+            failure_kind = "transient_network"
+            failure_detail = f"事件循环调度异常: {e}"
+            log_all(f"⚠️ 账号 {account_id} 移动端续期运行环境异常: {type(e).__name__}: {e}", is_warning=True)
         except Exception as e:  # 最终边界：刷新失败必须记录，不能让主巡查崩溃。
             failure_kind = "response_invalid"
             failure_detail = f"{type(e).__name__}: {e}"
@@ -948,6 +976,10 @@ async def refresh_token(account_id: str, target_group: int,
             failure_kind = "response_invalid"
             failure_detail = f"{type(e).__name__}: {e}"
             log_all(f"🔥 账号 {account_id} Web 续期处理失败: {type(e).__name__}: {e}", is_error=True)
+        except RuntimeError as e:
+            failure_kind = "transient_network"
+            failure_detail = f"事件循环调度异常: {e}"
+            log_all(f"⚠️ 账号 {account_id} Web 续期运行环境异常: {type(e).__name__}: {e}", is_warning=True)
         except Exception as e:  # 最终边界：刷新失败必须记录，不能让主巡查崩溃。
             failure_kind = "response_invalid"
             failure_detail = f"{type(e).__name__}: {e}"
@@ -1145,20 +1177,34 @@ async def verify_and_handshake_account(account_id: str, custom_client: httpx.Asy
 
         try:
             client_to_use = custom_client
-            if client_to_use is None and _http_client is not None and not _http_client.is_closed:
+            if client_to_use is None:
+                curr_loop = None
                 try:
                     curr_loop = asyncio.get_running_loop()
-                    transport = getattr(_http_client, "_transport", None)
-                    client_loop = getattr(transport, "_loop", None)
-                    if client_loop is None or client_loop is curr_loop:
-                        client_to_use = _http_client
                 except RuntimeError:
-                    client_to_use = None
+                    pass
+                can_reuse = (
+                    curr_loop is not None
+                    and _client_loop is not None
+                    and curr_loop is _client_loop
+                    and not curr_loop.is_closed()
+                )
+                if can_reuse and _http_client is not None and not _http_client.is_closed:
+                    client_to_use = _http_client
 
+            proxy_val = getattr(cfg, "PROXY", "") or None
             if client_to_use is not None:
-                r = await client_to_use.get(url, headers=headers, timeout=10)
+                try:
+                    r = await client_to_use.get(url, headers=headers, timeout=10)
+                except RuntimeError as e:
+                    if "closed" in str(e).lower():
+                        log_all(f"⚠️ 握手复用客户端事件循环已失效 ({e})，回退到临时客户端", is_warning=True)
+                        async with httpx.AsyncClient(timeout=10, proxy=proxy_val) as c:
+                            r = await c.get(url, headers=headers)
+                    else:
+                        raise
             else:
-                async with httpx.AsyncClient(timeout=10) as c:
+                async with httpx.AsyncClient(timeout=10, proxy=proxy_val) as c:
                     r = await c.get(url, headers=headers)
 
             if r.status_code == 200:

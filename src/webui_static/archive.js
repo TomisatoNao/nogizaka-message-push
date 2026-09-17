@@ -736,19 +736,28 @@ function getDefaultNogiMember() {
 
 function setHtmlViewClass(mode) {
   const root = document.documentElement;
-  root.classList.remove("view-home", "view-msg", "view-blog", "view-letter");
+  root.classList.remove("view-home", "view-msg", "view-blog", "view-letter", "view-gallery");
   if (mode) root.classList.add("view-" + mode);
+}
+
+function syncNavTabs(activeTabName) {
+  const tabs = {
+    home: $("tabHome"),
+    msg: $("tabMsg"),
+    blog: $("tabBlog"),
+    gallery: $("tabGallery"),
+    letter: $("tabLetter")
+  };
+  Object.entries(tabs).forEach(([k, el]) => {
+    if (el) el.classList.toggle("active", k === activeTabName);
+  });
 }
 
 function switchMainTab(mode, keepHash) {
   curMode = mode;
   setHtmlViewClass(mode);
   try { localStorage.setItem("archive_last_main_tab", mode); } catch (_) {}
-  const tabHome = $("tabHome");
-  if (tabHome) tabHome.classList.toggle("active", mode === "home");
-  if ($("tabMsg")) $("tabMsg").classList.toggle("active", mode === "msg");
-  if ($("tabBlog")) $("tabBlog").classList.toggle("active", mode === "blog");
-  if ($("tabLetter")) $("tabLetter").classList.toggle("active", mode === "letter");
+  syncNavTabs(mode);
 
   if (mode === "home") {
     if (!keepHash) goHome();
@@ -764,6 +773,13 @@ function switchMainTab(mode, keepHash) {
           : getDefaultNogiMember();
       selectMember(wanted);
     }
+  } else if (mode === "gallery") {
+    let saved = null;
+    try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
+    const wanted = (saved !== null && (saved === "" || members.some(m => m.name === saved)))
+      ? saved
+      : (curGalleryMember || "");
+    selectGalleryMember(wanted);
   } else if (mode === "blog") {
     let savedGroup = null;
     let savedAuthor = "";
@@ -792,6 +808,7 @@ function switchMainTab(mode, keepHash) {
 if ($("tabHome")) $("tabHome").addEventListener("click", () => goHome());
 if ($("tabMsg")) $("tabMsg").addEventListener("click", () => switchMainTab("msg"));
 if ($("tabBlog")) $("tabBlog").addEventListener("click", () => switchMainTab("blog"));
+if ($("tabGallery")) $("tabGallery").addEventListener("click", () => switchMainTab("gallery"));
 if ($("tabLetter")) $("tabLetter").addEventListener("click", () => switchMainTab("letter"));
 
 // ── 数据加载 ─────────────────────────────────────
@@ -987,10 +1004,7 @@ function _enterMemberMode() {
   setHtmlViewClass("msg");
   curBlogGroup = "";
   hideMessageMonthFooter();
-  if ($("tabHome")) $("tabHome").classList.remove("active");
-  if ($("tabMsg")) $("tabMsg").classList.add("active");
-  if ($("tabBlog")) $("tabBlog").classList.remove("active");
-  if ($("tabLetter")) $("tabLetter").classList.remove("active");
+  syncNavTabs("msg");
 
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
@@ -998,6 +1012,7 @@ function _enterMemberMode() {
   $("archiveSide").style.display = "";
   $("blogGrid").style.display = "none";
   if ($("letterGrid")) $("letterGrid").style.display = "none";
+  if ($("galleryGrid")) $("galleryGrid").style.display = "none";
   $("timeline").style.display = "";
   const msgTb = document.querySelector(".msg-toolbar");
   if (msgTb) msgTb.style.display = "";
@@ -1082,11 +1097,7 @@ async function selectBlogGroup(key, author = "", updateHash = true, routeState =
     ? normalizedQuery(routeState.q) : "";
   syncSearchInput();
   syncChipHighlight();
-
-  if ($("tabHome")) $("tabHome").classList.remove("active");
-  if ($("tabMsg")) $("tabMsg").classList.remove("active");
-  if ($("tabBlog")) $("tabBlog").classList.add("active");
-  if ($("tabLetter")) $("tabLetter").classList.remove("active");
+  syncNavTabs("blog");
 
   const requestedPage = Math.max(1, parseInt(routeState.page, 10) || 1);
   if (updateHash) syncBlogHash(1);
@@ -1097,6 +1108,7 @@ async function selectBlogGroup(key, author = "", updateHash = true, routeState =
   $("timeline").style.display = "none";
   $("blogGrid").style.display = "";
   if ($("letterGrid")) $("letterGrid").style.display = "none";
+  if ($("galleryGrid")) $("galleryGrid").style.display = "none";
   $("archiveSide").style.display = "";
 
   const msgTb = document.querySelector(".msg-toolbar");
@@ -3570,13 +3582,11 @@ async function showHome() {
   curMode = "home";
   hideMessageMonthFooter();
   setHtmlViewClass("home");
-  if ($("tabHome")) $("tabHome").classList.add("active");
-  if ($("tabMsg")) $("tabMsg").classList.remove("active");
-  if ($("tabBlog")) $("tabBlog").classList.remove("active");
-  if ($("tabLetter")) $("tabLetter").classList.remove("active");
+  syncNavTabs("home");
 
   document.querySelector('.layout').style.display = 'none';
   if ($("letterGrid")) $("letterGrid").style.display = "none";
+  if ($("galleryGrid")) $("galleryGrid").style.display = "none";
   if ($("blogGrid")) $("blogGrid").style.display = "none";
   if ($("timeline")) $("timeline").style.display = "none";
   $('backTop').classList.remove('show'); $('backTop').classList.add('force-hide');
@@ -4031,6 +4041,17 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
   const rawHash = (location.hash || "").replace(/^#/, "");
   const p = new URLSearchParams(rawHash);
 
+  // 0. 相册画廊模式：#gallery, #gallery=..., #source=...
+  if (p.has("gallery") || rawHash === "gallery") {
+    let saved = null;
+    try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
+    const mem = p.get("gallery") || (saved !== null ? saved : curGalleryMember) || "";
+    const source = p.get("source") || curGallerySource || "all";
+    curGallerySource = source;
+    await selectGalleryMember(mem, false);
+    return;
+  }
+
   // 1. 博客模式：#blog, #blog=nogizaka, #id=..., #blog_id=...
   const blogId = p.get("id") || p.get("blog_id") || p.get("post");
   if (p.has("blog") || rawHash === "blog" || blogId) {
@@ -4206,8 +4227,8 @@ async function boot() {
   // 极速预处理：如果 URL 包含博客 ID，0ms 同步打开阅读器容器与骨架，彻底消除任何闪烁
   const earlyBlogId = p.get("id") || p.get("blog_id") || p.get("post");
   if (earlyBlogId) {
-    if ($("tabHome")) $("tabHome").classList.remove("active");
-    if ($("tabBlog")) $("tabBlog").classList.add("active");
+    setHtmlViewClass("blog");
+    syncNavTabs("blog");
     if ($("archiveHome")) $("archiveHome").classList.remove("active");
     const layout = document.querySelector('.layout');
     if (layout) layout.style.display = '';
@@ -4226,13 +4247,26 @@ async function boot() {
     }
   }
 
+  // 极速预处理：如果 URL 包含相册路由 #gallery
+  if (p.has("gallery") || (location.hash || "").replace(/^#/, "") === "gallery") {
+    setHtmlViewClass("gallery");
+    syncNavTabs("gallery");
+    if ($("archiveHome")) $("archiveHome").classList.remove("active");
+    const layout = document.querySelector('.layout');
+    if (layout) layout.style.display = '';
+    if ($("timeline")) $("timeline").style.display = "none";
+    if ($("blogGrid")) $("blogGrid").style.display = "none";
+    if ($("letterGrid")) $("letterGrid").style.display = "none";
+    if ($("galleryGrid")) $("galleryGrid").style.display = "block";
+    const msgTb = document.querySelector(".msg-toolbar");
+    if (msgTb) msgTb.style.display = "none";
+  }
+
   // 极速预处理：如果 URL 包含信件路由 #letter，0ms 同步切换至信件视图骨架，杜绝页面抖动
   if (p.has("letter") || (location.hash || "").replace(/^#/, "") === "letter") {
-    if ($("tabHome")) $("tabHome").classList.remove("active");
-    if ($("tabMsg")) $("tabMsg").classList.remove("active");
-    if ($("tabBlog")) $("tabBlog").classList.remove("active");
+    setHtmlViewClass("letter");
+    syncNavTabs("letter");
     if ($("tabLetter")) {
-      $("tabLetter").classList.add("active");
       $("tabLetter").hidden = false;
       $("tabLetter").style.display = "inline-flex";
     }
@@ -4241,6 +4275,7 @@ async function boot() {
     if (layout) layout.style.display = '';
     if ($("timeline")) $("timeline").style.display = "none";
     if ($("blogGrid")) $("blogGrid").style.display = "none";
+    if ($("galleryGrid")) $("galleryGrid").style.display = "none";
     if ($("letterGrid")) $("letterGrid").style.display = "block";
     const msgTb = document.querySelector(".msg-toolbar");
     if (msgTb) msgTb.style.display = "none";
@@ -4712,17 +4747,14 @@ async function selectLetterMember(mName) {
   if (disp) disp.textContent = mObj.display || mName;
   const letterCount = Number(mObj.letters_total || 0);
   if ($("curLetterMemberCount")) $("curLetterMemberCount").textContent = "（" + letterCount.toLocaleString() + "）";
-
-  if ($("tabHome")) $("tabHome").classList.remove("active");
-  if ($("tabMsg")) $("tabMsg").classList.remove("active");
-  if ($("tabBlog")) $("tabBlog").classList.remove("active");
-  if ($("tabLetter")) $("tabLetter").classList.add("active");
+  syncNavTabs("letter");
 
   $('archiveHome').classList.remove('active');
   $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
   document.querySelector('.layout').style.display = '';
   $("timeline").style.display = "none";
   $("blogGrid").style.display = "none";
+  if ($("galleryGrid")) $("galleryGrid").style.display = "none";
   if ($("letterGrid")) $("letterGrid").style.display = "block";
   $("archiveSide").style.display = "none";
 
@@ -4990,3 +5022,379 @@ if ($("btnSyncLetters")) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════
+// 📷 纯享美图画廊 (Photo Gallery) 交互逻辑
+// ══════════════════════════════════════════════════════════════════
+let curGalleryMember = "";
+let curGallerySource = "all";
+let curGalleryPage = 1;
+let curGalleryTotal = 0;
+let curGalleryHasMore = false;
+let curGalleryLoading = false;
+let curGalleryImages = [];
+
+function openGalleryLightbox(idx) {
+  if (idx < 0 || idx >= curGalleryImages.length) return;
+  images = curGalleryImages;
+  openLightbox(idx);
+}
+
+async function selectGalleryMember(mName, updateHash = true) {
+  curMode = "gallery";
+  hideMessageMonthFooter();
+  setHtmlViewClass("gallery");
+  curGalleryMember = mName || "";
+  try { localStorage.setItem("archive_last_gallery_member", curGalleryMember); } catch (_) {}
+
+  const disp = $("curGalleryMemberDisplay");
+  const countDisp = $("curGalleryMemberCount");
+  if (disp) {
+    if (!curGalleryMember) {
+      disp.textContent = "全部成员 (聚合)";
+      if (countDisp) countDisp.textContent = "";
+    } else {
+      const mObj = members.find(m => m.name === curGalleryMember) || { name: curGalleryMember, display: curGalleryMember };
+      disp.textContent = mObj.display || curGalleryMember;
+      if (countDisp) countDisp.textContent = mObj.total ? "（" + mObj.total.toLocaleString() + "）" : "";
+    }
+  }
+
+  syncNavTabs("gallery");
+
+  $('archiveHome').classList.remove('active');
+  $('backTop').style.display = ''; $('backTop').classList.remove('force-hide');
+  const layout = document.querySelector('.layout');
+  if (layout) layout.style.display = '';
+  if ($("timeline")) $("timeline").style.display = "none";
+  if ($("blogGrid")) $("blogGrid").style.display = "none";
+  if ($("letterGrid")) $("letterGrid").style.display = "none";
+  if ($("galleryGrid")) $("galleryGrid").style.display = "block";
+  if ($("archiveSide")) $("archiveSide").style.display = "none";
+
+  const msgTb = document.querySelector(".msg-toolbar");
+  if (msgTb) msgTb.style.display = "none";
+  const searchTb = $("searchBox") ? $("searchBox").closest(".toolbar") : null;
+  if (searchTb) searchTb.style.display = "none";
+
+  if (updateHash) {
+    const params = new URLSearchParams();
+    params.set("gallery", curGalleryMember);
+    if (curGallerySource && curGallerySource !== "all") params.set("source", curGallerySource);
+    selfHashUpdate = true;
+    location.hash = params.toString();
+    setTimeout(() => { selfHashUpdate = false; }, 0);
+  }
+
+  renderGalleryMemberPopover();
+  await loadGalleryPhotos(true);
+}
+
+function getGalleryGridCols() {
+  const cardsBox = $("galleryCards");
+  if (!cardsBox) return 5;
+  try {
+    const comp = window.getComputedStyle(cardsBox);
+    const gridTemplate = comp.getPropertyValue("grid-template-columns");
+    if (gridTemplate && gridTemplate !== "none") {
+      const cols = gridTemplate.trim().split(/\s+/).filter(Boolean).length;
+      if (cols > 0) return cols;
+    }
+  } catch (_) {}
+  const width = cardsBox.clientWidth || window.innerWidth;
+  const isMobile = window.innerWidth <= 768;
+  const minWidth = isMobile ? 130 : 180;
+  const gap = isMobile ? 8 : 14;
+  return Math.max(1, Math.floor((width + gap) / (minWidth + gap)));
+}
+
+function getGalleryPerPage() {
+  const cols = getGalleryGridCols();
+  // 保证单次加载量严格为当前列数 cols 的整数倍，填满完整行，消除悬空空白
+  const targetCards = 40;
+  const rows = Math.max(4, Math.round(targetCards / cols));
+  return Math.min(100, Math.max(cols, rows * cols));
+}
+
+let curGalleryPerPage = 40;
+
+async function loadGalleryPhotos(reset = true) {
+  if (curGalleryLoading) return;
+  curGalleryLoading = true;
+
+  const cardsBox = $("galleryCards");
+  const statsBox = $("galleryStats");
+  const loadMoreBtn = $("galleryLoadMore");
+  if (!cardsBox) {
+    curGalleryLoading = false;
+    return;
+  }
+
+  if (reset) {
+    curGalleryPage = 1;
+    curGalleryImages = [];
+    curGalleryPerPage = getGalleryPerPage();
+    cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;">正在加载相册图片...</div></div>';
+    if (statsBox) statsBox.textContent = "";
+    if (loadMoreBtn) loadMoreBtn.style.display = "none";
+  } else {
+    if (loadMoreBtn) {
+      loadMoreBtn.disabled = true;
+      loadMoreBtn.textContent = "正在加载更多...";
+    }
+  }
+
+  try {
+    let url = "/api/archive/gallery?page=" + curGalleryPage + "&per_page=" + curGalleryPerPage + "&source=" + encodeURIComponent(curGallerySource);
+    if (curGalleryMember) {
+      url += "&member=" + encodeURIComponent(curGalleryMember);
+    }
+    const data = await api(url);
+    if (!data.ok) {
+      if (reset) {
+        cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载失败：' + esc((data.errors || []).join("; ")) + '</div>';
+      }
+      return;
+    }
+
+    const list = data.photos || [];
+    curGalleryTotal = data.total || 0;
+    curGalleryHasMore = !!data.has_more;
+
+    if (statsBox) {
+      statsBox.textContent = "共 " + curGalleryTotal.toLocaleString() + " 张图片";
+    }
+
+    if (reset && !list.length) {
+      cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:16px;">' +
+        '<div style="font-size:38px;margin-bottom:12px;">📷</div>' +
+        '<div style="font-size:15px;font-weight:600;color:var(--text-strong);">暂无匹配的图片</div>' +
+        '<div style="font-size:13px;margin-top:6px;">未在当前筛选条件下找到本地图片，可尝试切换成员或来源。</div>' +
+        '</div>';
+      return;
+    }
+
+    if (reset) {
+      cardsBox.innerHTML = "";
+    }
+
+    const startIdx = curGalleryImages.length;
+    list.forEach((photo, i) => {
+      const globalIdx = startIdx + i;
+      let dateStr = photo.published_at || "";
+      try {
+        const dt = new Date(photo.published_at);
+        if (!isNaN(dt.getTime())) {
+          dateStr = dt.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+        }
+      } catch (_) {}
+
+      curGalleryImages.push({
+        url: photo.url,
+        caption: "【" + (photo.member_name || "") + "】" + dateStr + (photo.text ? " · " + photo.text.slice(0, 60) : ""),
+      });
+
+      const card = document.createElement("div");
+      card.className = "gallery-card";
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      card.setAttribute("title", (photo.member_name ? "【" + photo.member_name + "】" : "") + (photo.text || "点击查看大图"));
+
+      const isBlog = photo.source === "blog";
+      const badgeText = isBlog ? "📄 博客" : "💬 消息";
+      const badgeClass = isBlog ? "gallery-badge blog" : "gallery-badge msg";
+
+      card.innerHTML =
+        '<div class="' + badgeClass + '">' + badgeText + '</div>' +
+        '<img src="' + esc(photo.url) + '" loading="lazy" decoding="async" alt="图片" onerror="this.parentElement.style.display=\'none\';" />' +
+        '<div class="gallery-overlay">' +
+          '<div class="gallery-meta">' + esc(photo.member_name || "") + ' · ' + esc(dateStr) + '</div>' +
+          (photo.text ? '<div class="gallery-caption">' + esc(photo.text) + '</div>' : '') +
+        '</div>';
+
+      card.addEventListener("click", () => openGalleryLightbox(globalIdx));
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openGalleryLightbox(globalIdx);
+        }
+      });
+
+      cardsBox.appendChild(card);
+    });
+
+    if (loadMoreBtn) {
+      if (curGalleryHasMore) {
+        loadMoreBtn.style.display = "block";
+        loadMoreBtn.disabled = false;
+        loadMoreBtn.textContent = "加载更多图片 ↓";
+      } else {
+        loadMoreBtn.style.display = "none";
+      }
+    }
+  } catch (err) {
+    if (reset) {
+      cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
+    }
+  } finally {
+    curGalleryLoading = false;
+  }
+}
+
+function renderGalleryMemberPopover(filterKeyword = "") {
+  const list = $("galleryMemberPopoverList");
+  if (!list) return;
+  list.innerHTML = "";
+  const kw = filterKeyword.toLowerCase().trim();
+
+  // 1. 顶部固定选项：全部成员 (聚合)
+  const allItem = document.createElement("div");
+  allItem.className = "member-popover-item" + (!curGalleryMember ? " active" : "");
+  allItem.innerHTML =
+    '<div class="m-name-txt">' +
+    '<span class="mpi-avatar" style="background:var(--accent);color:#fff;">👥</span>' +
+    '<span class="mpi-name">全部成员 (聚合)</span>' +
+    '</div>' +
+    '<span class="m-cnt">' + members.length + ' 人</span>';
+  allItem.addEventListener("click", () => {
+    closeGalleryMemberPopover();
+    selectGalleryMember("");
+  });
+  list.appendChild(allItem);
+
+  const filtered = members.filter(m => !kw || m.display.toLowerCase().includes(kw) || m.name.toLowerCase().includes(kw));
+  if ($("galleryMemberTotalBadge")) {
+    $("galleryMemberTotalBadge").textContent = "共 " + members.length + " 人" + (kw ? " · 匹配 " + filtered.length + " 人" : "");
+  }
+
+  const groups = [
+    { key: "nogizaka", name: "乃木坂46", icon: "💜", cls: "nogi" },
+    { key: "sakurazaka", name: "樱坂46", icon: "🌸", cls: "sakura" },
+    { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" }
+  ];
+
+  groups.forEach(g => {
+    const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
+    if (!grpMems.length) return;
+
+    const gHead = document.createElement("div");
+    gHead.className = "popover-group-header " + g.cls;
+    gHead.innerHTML = '<span>' + g.icon + ' ' + g.name + '</span><span class="pgh-cnt">' + grpMems.length + ' 人</span>';
+    list.appendChild(gHead);
+
+    grpMems.forEach(m => {
+      let avatarText = (m.display || "").replace(/[\s_　]/g, "");
+      if (avatarText.length > 2) avatarText = avatarText.slice(-2);
+      if (!avatarText) avatarText = "📷";
+
+      let avatarHTML = '';
+      if (m.avatar) {
+        avatarHTML = '<img class="mpi-avatar-img" src="' + esc(m.avatar) + '" loading="lazy" decoding="async" alt="" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'inline-flex\';" /><span class="mpi-avatar ' + g.cls + '" style="display:none;">' + esc(avatarText) + '</span>';
+      } else {
+        avatarHTML = '<span class="mpi-avatar ' + g.cls + '">' + esc(avatarText) + '</span>';
+      }
+
+      const isCur = curGalleryMember === m.name;
+      const item = document.createElement("div");
+      item.className = "member-popover-item " + g.cls + (isCur ? " active" : "");
+      item.innerHTML = '<div class="m-name-txt">' +
+                       avatarHTML +
+                       '<span class="mpi-name">' + esc(m.display) + '</span>' +
+                       '</div>' +
+                       '<span class="m-cnt">' + (m.total || 0).toLocaleString() + ' 条</span>';
+
+      item.addEventListener("click", () => {
+        closeGalleryMemberPopover();
+        selectGalleryMember(m.name);
+      });
+      list.appendChild(item);
+    });
+  });
+}
+
+function openGalleryMemberPopover() {
+  const popover = $("galleryMemberPopover");
+  if (!popover) return;
+  popover.style.display = "block";
+  const btn = $("btnGalleryMemberDropdown");
+  if (btn) btn.classList.add("open");
+  const input = $("galleryMemberSearchInput");
+  if (input) {
+    input.value = "";
+    setTimeout(() => input.focus(), 60);
+  }
+  const clearBtn = $("btnGalleryMemberSearchClear");
+  if (clearBtn) clearBtn.style.display = "none";
+  renderGalleryMemberPopover("");
+}
+
+function closeGalleryMemberPopover() {
+  const popover = $("galleryMemberPopover");
+  if (!popover) return;
+  popover.style.display = "none";
+  const btn = $("btnGalleryMemberDropdown");
+  if (btn) btn.classList.remove("open");
+}
+
+// 绑定相册交互事件
+if ($("btnGalleryMemberDropdown")) {
+  $("btnGalleryMemberDropdown").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("galleryMemberPopover");
+    if (pop && pop.style.display !== "none") {
+      closeGalleryMemberPopover();
+    } else {
+      openGalleryMemberPopover();
+    }
+  });
+}
+
+if ($("galleryMemberSearchInput")) {
+  $("galleryMemberSearchInput").addEventListener("input", (e) => {
+    const val = e.target.value;
+    const clearBtn = $("btnGalleryMemberSearchClear");
+    if (clearBtn) clearBtn.style.display = val ? "inline-flex" : "none";
+    renderGalleryMemberPopover(val);
+  });
+}
+
+if ($("btnGalleryMemberSearchClear")) {
+  $("btnGalleryMemberSearchClear").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const input = $("galleryMemberSearchInput");
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+    $("btnGalleryMemberSearchClear").style.display = "none";
+    renderGalleryMemberPopover("");
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const wrap = $("galleryMemberDropdownWrap");
+  if (wrap && !wrap.contains(e.target)) {
+    closeGalleryMemberPopover();
+  }
+});
+
+if ($("gallerySourceChips")) {
+  const chips = $("gallerySourceChips").querySelectorAll(".chip");
+  chips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      const src = chip.getAttribute("data-source") || "all";
+      if (curGallerySource === src) return;
+      curGallerySource = src;
+      chips.forEach(c => c.classList.toggle("active", c === chip));
+      loadGalleryPhotos(true);
+    });
+  });
+}
+
+if ($("galleryLoadMore")) {
+  $("galleryLoadMore").addEventListener("click", () => {
+    if (curGalleryHasMore && !curGalleryLoading) {
+      curGalleryPage += 1;
+      loadGalleryPhotos(false);
+    }
+  });
+}

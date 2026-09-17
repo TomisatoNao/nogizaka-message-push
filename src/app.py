@@ -914,6 +914,7 @@ async def main() -> None:
             log_all("📝 官方博客独立监控任务已启动", is_debug=True)
 
         loop = asyncio.get_running_loop()
+        _main_loop = loop
 
         # Windows 平台 IOCP 异步操作中止容错（防止 WinError 995 异常中断事件循环）
         def _loop_exception_handler(current_loop, context):

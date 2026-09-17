@@ -743,7 +743,18 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 from config.credentials import verify_and_handshake_account
                 import asyncio
-                h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
+                main_loop = None
+                try:
+                    from src.app import get_main_loop
+                    main_loop = get_main_loop()
+                except ImportError:
+                    pass
+
+                if main_loop is not None and main_loop.is_running():
+                    fut = asyncio.run_coroutine_threadsafe(verify_and_handshake_account(account), main_loop)
+                    h_ok, h_msg, h_details = fut.result(timeout=30)
+                else:
+                    h_ok, h_msg, h_details = asyncio.run(verify_and_handshake_account(account))
                 self._send_json({"ok": h_ok, "msg": h_msg, "details": h_details})
             except Exception as e:
                 self._send_json({"ok": False, "msg": f"验证异常: {e}"}, 500)
@@ -762,7 +773,20 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 import asyncio
-                res = asyncio.run(self._smart_parse_credentials_text(raw_text, account))
+                main_loop = None
+                try:
+                    from src.app import get_main_loop
+                    main_loop = get_main_loop()
+                except ImportError:
+                    pass
+
+                if main_loop is not None and main_loop.is_running():
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._smart_parse_credentials_text(raw_text, account), main_loop
+                    )
+                    res = fut.result(timeout=30)
+                else:
+                    res = asyncio.run(self._smart_parse_credentials_text(raw_text, account))
                 self._send_json({"ok": True, **res})
             except Exception as e:
                 self._send_json({"ok": False, "errors": [f"智能解析异常: {e}"]}, 500)

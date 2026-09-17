@@ -497,3 +497,161 @@ def load_archived_ids(m_name: str) -> tuple[set[str], set[str]]:
             )
             (fail_ids if incomplete else ok_ids).add(mid)
     return ok_ids, fail_ids
+
+
+def get_random_photo(member_dir: str | None = None) -> dict | None:
+    """从 archive.db 随机抽选一张本地存在的照片消息。
+
+    :param member_dir: 可选成员目录名，若指定则仅在该成员归档中抽选。
+    :return: 包含文件绝对路径、时间、成员名和文字的字典；未找到时返回 None。
+    """
+    conn = _get_init_db()
+    if not conn:
+        return None
+
+    root = _get_archive_root()
+    params: list[object] = []
+    sql = """
+        SELECT id, member_name, member_dir, published_at, updated_at, text, translation, local_file, raw_json
+        FROM messages
+        WHERE type IN ('picture', 'image') AND local_file IS NOT NULL AND local_file != ''
+    """
+    if member_dir:
+        sql += " AND member_dir = ?"
+        params.append(member_dir)
+
+    sql += " ORDER BY RANDOM() LIMIT 20;"
+
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        for r in rows:
+            m_dir = r[2]
+            rel = r[7]
+            full_path = root / m_dir / rel
+            if full_path.is_file():
+                rj = {}
+                if r[8]:
+                    try:
+                        rj = json.loads(r[8])
+                    except (ValueError, TypeError):
+                        pass
+                pub = r[3] or r[4] or ""
+                return {
+                    "id": str(r[0]),
+                    "member_name": str(r[1]),
+                    "member_dir": m_dir,
+                    "published_at": pub,
+                    "text": str(r[5] or "").strip(),
+                    "translation": str(r[6] or "").strip(),
+                    "local_file": rel,
+                    "abs_path": full_path.resolve(),
+                    "url": f"/api/archive/media/{m_dir}/{rel}",
+                    "width": rj.get("thumbnail_width"),
+                    "height": rj.get("thumbnail_height"),
+                }
+    except Exception as ex:
+        log_all(f"⚠️ 随机抽取照片异常: {ex}", is_debug=True)
+
+    return None
+
+
+def get_gallery_photos(
+    member_dir: str | None = None,
+    source: str = "all",
+    page: int = 1,
+    per_page: int = 40,
+    year: int | None = None,
+    month: int | None = None,
+) -> dict:
+    """分页获取归档美图画廊数据（支持按成员、年月及来源过滤）。"""
+    conn = _get_init_db()
+    if not conn:
+        return {"ok": False, "errors": ["数据库未初始化"], "total": 0, "photos": []}
+
+    page = max(1, int(page))
+    per_page = max(1, min(100, int(per_page)))
+    offset = (page - 1) * per_page
+    root = _get_archive_root()
+
+    where_clauses = ["type IN ('picture', 'image')", "local_file IS NOT NULL", "local_file != ''"]
+    params: list[object] = []
+
+    if member_dir:
+        where_clauses.append("member_dir = ?")
+        params.append(member_dir)
+    if year:
+        where_clauses.append("year = ?")
+        params.append(int(year))
+    if month:
+        where_clauses.append("month = ?")
+        params.append(int(month))
+
+    where_str = " AND ".join(where_clauses)
+    count_sql = f"SELECT COUNT(*) FROM messages WHERE {where_str};"
+    select_sql = f"""
+        SELECT id, member_name, member_dir, published_at, updated_at, text, translation, local_file, year, month, raw_json
+        FROM messages
+        WHERE {where_str}
+        ORDER BY published_at DESC, id DESC
+        LIMIT ? OFFSET ?;
+    """
+
+    try:
+        total = conn.execute(count_sql, params).fetchone()[0]
+        photos = []
+        fetch_limit = per_page
+        fetch_offset = offset
+
+        while len(photos) < per_page:
+            batch_rows = conn.execute(select_sql, params + [fetch_limit, fetch_offset]).fetchall()
+            if not batch_rows:
+                break
+            for r in batch_rows:
+                m_dir = r[2]
+                rel = r[7]
+                full = root / m_dir / rel
+                if not full.is_file():
+                    continue
+                rj = {}
+                if r[10]:
+                    try:
+                        rj = json.loads(r[10])
+                    except (ValueError, TypeError):
+                        pass
+                pub = r[3] or r[4] or ""
+                photos.append({
+                    "id": str(r[0]),
+                    "source": "message",
+                    "member_name": str(r[1]),
+                    "member_dir": m_dir,
+                    "published_at": pub,
+                    "text": str(r[5] or "").strip(),
+                    "translation": str(r[6] or "").strip(),
+                    "local_file": rel,
+                    "url": f"/api/archive/media/{m_dir}/{rel}",
+                    "w": rj.get("thumbnail_width"),
+                    "h": rj.get("thumbnail_height"),
+                    "year": r[8],
+                    "month": r[9],
+                })
+                if len(photos) >= per_page:
+                    break
+            fetch_offset += len(batch_rows)
+            if len(batch_rows) < fetch_limit:
+                break
+
+        total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+        return {
+            "ok": True,
+            "member": member_dir or "",
+            "source": source,
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "has_more": page < total_pages,
+            "photos": photos,
+        }
+    except Exception as ex:
+        log_all(f"⚠️ 查询美图画廊异常: {ex}", is_debug=True)
+        return {"ok": False, "errors": [str(ex)], "total": 0, "photos": []}

@@ -247,9 +247,13 @@ class NapCatInboundListener:
         self._event_token_from_env = event_token is None
         self._queue: queue.Queue[NapCatInboundJob | None] = queue.Queue(maxsize=32)
         from src.platforms.napcat_chat import NapCatChatService
+        from src.platforms.napcat_commands import NapCatCommandHandler
 
         self._chat_service = NapCatChatService(
             config_provider=self._config_provider,
+            logger=self._log,
+        )
+        self._cmd_handler = NapCatCommandHandler(
             logger=self._log,
         )
         self._workers: list[asyncio.Task] = []
@@ -297,6 +301,10 @@ class NapCatInboundListener:
     @property
     def chat_service(self):
         return self._chat_service
+
+    @property
+    def cmd_handler(self):
+        return self._cmd_handler
 
     def _emit(self, message: str, **kwargs) -> None:
         try:
@@ -559,6 +567,18 @@ class NapCatInboundListener:
         text = event_message_text(event.get("message"), event.get("raw_message"))
         urls = extract_social_urls(text, max_urls=max_links)
         if not urls:
+            # 优先处理本地指令（如 /抽张美图）
+            if getattr(self, "_cmd_handler", None) and self._cmd_handler.is_command(text):
+                cmd_handled, cmd_status = self._cmd_handler.try_handle_command(
+                    group_id=group_id,
+                    user_id=user_id,
+                    raw_text=text,
+                    self_id=self_id,
+                )
+                if cmd_handled:
+                    self._mark("succeeded" if cmd_status == "command_executed" else "rate_limited")
+                    return cmd_status
+
             if self._chat_service and self._chat_service.is_enabled():
                 chat_queued, chat_status = self._chat_service.try_accept_event(event, source=source)
                 if chat_queued:

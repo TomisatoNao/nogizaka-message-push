@@ -46,6 +46,7 @@ from src.webui_modules.archive.home import (
     _release_home_cache,
     handle_home,
 )
+from src.webui_modules.archive.gallery import handle_gallery
 from src.webui_modules.archive.letters import handle_letters
 from src.webui_modules.archive.messages import handle_messages
 from src.webui_modules.static_handler import send_json
@@ -106,7 +107,11 @@ def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None
     if handle_blogs(handler, sub, guard_fn, read_body_json_fn):
         return
 
-    # 4. 首页聚合
+    # 4. 美图画廊
+    if handle_gallery(handler, sub, guard_fn, read_body_json_fn):
+        return
+
+    # 5. 首页聚合
     if sub == "home":
         handle_home(handler, sub, guard_fn, read_body_json_fn)
         return

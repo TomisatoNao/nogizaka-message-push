@@ -5,30 +5,39 @@
 /* 首屏预路由隔离：防止初始渲染时 Tab 和 Toolbar 闪烁 */
 html.view-blog #tabHome,
 html.view-msg #tabHome,
-html.view-letter #tabHome { background: transparent !important; color: var(--muted) !important; font-weight: 500 !important; box-shadow: none !important; }
+html.view-letter #tabHome,
+html.view-gallery #tabHome { background: transparent !important; color: var(--muted) !important; font-weight: 500 !important; box-shadow: none !important; }
 
 html.view-blog #archiveHome,
 html.view-msg #archiveHome,
-html.view-letter #archiveHome { display: none !important; }
+html.view-letter #archiveHome,
+html.view-gallery #archiveHome { display: none !important; }
 
 html.view-blog .layout,
 html.view-msg .layout,
-html.view-letter .layout { display: flex !important; }
+html.view-letter .layout,
+html.view-gallery .layout { display: flex !important; }
 @media (max-width: 900px) {
   html.view-blog .layout,
   html.view-msg .layout,
-  html.view-letter .layout { display: block !important; }
+  html.view-letter .layout,
+  html.view-gallery .layout { display: block !important; }
 }
 
 html.view-blog #tabBlog { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 html.view-msg #tabMsg { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
+html.view-gallery #tabGallery { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 html.view-letter #tabLetter { background: var(--card-solid) !important; color: var(--text-strong) !important; font-weight: 650 !important; box-shadow: var(--shadow-sm) !important; }
 
 html.view-blog .msg-toolbar,
 html.view-letter .msg-toolbar,
+html.view-gallery .msg-toolbar,
 html.view-home .msg-toolbar { display: none !important; }
-html.view-blog #timeline { display: none !important; }
+html.view-blog #timeline,
+html.view-letter #timeline,
+html.view-gallery #timeline { display: none !important; }
 html.view-blog #blogGrid { display: block !important; }
+html.view-gallery #galleryGrid { display: block !important; }
 
   #memberSelect { max-width: 200px; padding: 5px 8px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--field); color: var(--text);
@@ -2927,4 +2936,136 @@ html.view-blog #blogGrid { display: block !important; }
   border-color: rgba(245, 158, 11, 0.48) !important;
   font-weight: 650;
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   相册画廊 (Gallery Mode) 样式
+   ══════════════════════════════════════════════════════════════════ */
+.gallery-grid {
+  width: 100%;
+  max-width: var(--max-w, 1440px);
+  margin: 0 auto;
+  padding: 16px 20px 48px;
+}
+
+.gallery-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 16px;
+}
+
+.gallery-source-chips {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.gallery-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .gallery-grid { padding: 12px 12px 36px; }
+  .gallery-cards {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+  }
+}
+
+.gallery-card {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  aspect-ratio: 3 / 4;
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.gallery-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md, 0 10px 24px rgba(0, 0, 0, 0.35));
+  border-color: var(--accent);
+}
+
+.gallery-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.35s ease;
+}
+
+.gallery-card:hover img {
+  transform: scale(1.05);
+}
+
+.gallery-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.gallery-badge.blog {
+  background: rgba(14, 165, 233, 0.75);
+}
+
+.gallery-badge.msg {
+  background: rgba(168, 85, 247, 0.75);
+}
+
+.gallery-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 70%, transparent 100%);
+  color: #fff;
+  padding: 24px 10px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.gallery-card:hover .gallery-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.gallery-meta {
+  font-size: 10.5px;
+  opacity: 0.8;
+  margin-bottom: 2px;
+}
+
+.gallery-caption {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

@@ -12,11 +12,12 @@
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
     var h = location.hash || "", s = location.search || "";
-    var isBlog = h.includes("blog") || h.includes("id=") || s.includes("blog") || s.includes("id=");
-    var isMsg = h.includes("member=") || h.includes("msg") || s.includes("member=");
-    var isLetter = h.includes("letter") || s.includes("letter");
-    if (isBlog || isMsg || isLetter) {
-      document.documentElement.className += " view-" + (isBlog ? "blog" : isLetter ? "letter" : "msg");
+    var isGallery = h.includes("gallery") || s.includes("gallery");
+    var isBlog = !isGallery && (h.includes("blog") || h.includes("id=") || s.includes("blog") || s.includes("id="));
+    var isLetter = !isGallery && (h.includes("letter") || s.includes("letter"));
+    var isMsg = !isGallery && (h.includes("member=") || h.includes("msg") || s.includes("member="));
+    if (isGallery || isBlog || isLetter || isMsg) {
+      document.documentElement.className += " view-" + (isGallery ? "gallery" : isBlog ? "blog" : isLetter ? "letter" : "msg");
     }
   })();
 </script>
@@ -38,6 +39,7 @@
       <button class="nav-tab active" id="tabHome"><span class="tab-icon">🏠</span> 首页</button>
       <button class="nav-tab" id="tabMsg"><span class="tab-icon">💬</span> 消息</button>
       <button class="nav-tab" id="tabBlog"><span class="tab-icon">📄</span> 博客</button>
+      <button class="nav-tab" id="tabGallery"><span class="tab-icon">📷</span> 相册</button>
       <button class="nav-tab" id="tabLetter" hidden style="display:none;"><span class="tab-icon">✉️</span> 信件</button>
     </div>
 
@@ -252,6 +254,39 @@
       <span class="stats" id="letterStats" style="margin-left:auto;"></span>
     </div>
     <div id="letterCards" class="letter-cards"></div>
+  </div>
+  <div id="galleryGrid" class="gallery-grid" style="display:none;">
+    <div class="toolbar gallery-toolbar">
+      <div class="member-dropdown-wrap" id="galleryMemberDropdownWrap">
+        <button class="btn member-select-btn" id="btnGalleryMemberDropdown" type="button" title="点击切换成员画廊或查看全员聚合">
+          <span class="m-icon">📷</span>
+          <span class="m-cur-name" id="curGalleryMemberDisplay">全部成员 (聚合)</span>
+          <span class="m-cur-count" id="curGalleryMemberCount"></span>
+          <span class="arrow">▾</span>
+        </button>
+        <div class="member-popover" id="galleryMemberPopover" style="display:none;">
+          <div class="member-popover-header">
+            <div class="member-popover-search">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="galleryMemberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
+              <button class="clear-btn" id="btnGalleryMemberSearchClear" type="button" style="display:none;">✕</button>
+            </div>
+            <span class="member-count-badge" id="galleryMemberTotalBadge">全部成员</span>
+          </div>
+          <div class="member-popover-list" id="galleryMemberPopoverList"></div>
+        </div>
+      </div>
+
+      <div class="gallery-source-chips" id="gallerySourceChips">
+        <button class="chip active" data-source="all" type="button">全部来源</button>
+        <button class="chip" data-source="message" type="button">💬 消息配图</button>
+        <button class="chip" data-source="blog" type="button">📄 博客配图</button>
+      </div>
+
+      <span class="stats" id="galleryStats" style="margin-left:auto;"></span>
+    </div>
+    <div id="galleryCards" class="gallery-cards"></div>
+    <button class="nav" id="galleryLoadMore" style="display:none;margin:28px auto 16px;">加载更多图片 ↓</button>
   </div>
   <button class="nav" id="loadMore" hidden>加载更多 ↓</button>
   <div class="center" id="emptyHint" hidden></div>
