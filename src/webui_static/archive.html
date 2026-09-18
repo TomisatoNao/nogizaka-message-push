@@ -8,8 +8,8 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260906_1">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260919_1">
-<link rel="preload" href="/static/archive.js?v=20260919_1" as="script">
+<link rel="stylesheet" href="/static/archive.css?v=20260919_2">
+<link rel="preload" href="/static/archive.js?v=20260919_2" as="script">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -309,10 +309,6 @@
               <span>网格</span>
             </button>
           </div>
-          <div class="gallery-cols-toggle" id="galleryColsToggle" role="group" aria-label="排版列数选择" title="调节相册列数（4列/5列与一页20张严格整行对齐）">
-            <button class="layout-btn active" id="btnCols4" type="button" data-cols="4" title="4 列（推荐大图，5 行共 20 张）">4列</button>
-            <button class="layout-btn" id="btnCols5" type="button" data-cols="5" title="5 列（紧凑排版，4 行共 20 张）">5列</button>
-          </div>
         </div>
 
         <span class="stats" id="galleryStats"></span>
@@ -570,7 +566,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20260919_1"></script>
+<script src="/static/archive.js?v=20260919_2"></script>
 
 </body>
 </html>

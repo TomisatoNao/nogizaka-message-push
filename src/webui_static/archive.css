@@ -3196,28 +3196,54 @@ html.view-home #messageMonthFooter { display: none !important; }
 
 .gallery-cards {
   display: grid;
-  grid-template-columns: repeat(var(--gallery-cols, 4), minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   width: 100%;
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   瀑布流模式 (Masonry Layout - 原始比例无裁切)
+   瀑布流模式 (Masonry Layout - 原始比例无裁切，横屏跨两格)
    ══════════════════════════════════════════════════════════════════ */
 .gallery-cards.layout-masonry {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 14px;
+  display: block;
+  position: relative;
   width: 100%;
 }
 
-.gallery-cards.layout-masonry .masonry-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
+.gallery-cards.layout-masonry .gallery-card {
+  position: absolute;
+  margin: 0;
+  aspect-ratio: var(--photo-ratio, auto);
+  contain-intrinsic-size: unset;
+  min-height: 0;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, left 0.25s ease, top 0.25s ease;
+}
+
+.gallery-cards:not(.layout-masonry) .gallery-card {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 3 / 4 !important;
+}
+
+.gallery-cards.layout-masonry .gallery-card:not(.has-loaded) {
+  min-height: 60px;
+}
+
+.gallery-cards.layout-masonry .gallery-card.has-loaded {
+  min-height: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  animation: none !important;
+}
+
+.gallery-cards.layout-masonry .gallery-card img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 @media (max-width: 768px) {
@@ -3231,34 +3257,6 @@ html.view-home #messageMonthFooter { display: none !important; }
   .gallery-cards.layout-masonry {
     gap: 8px;
   }
-  .gallery-cards.layout-masonry .masonry-col {
-    gap: 8px;
-  }
-}
-
-.gallery-cards.layout-masonry .gallery-card {
-  width: 100%;
-  aspect-ratio: var(--photo-ratio, auto);
-  contain-intrinsic-size: unset;
-  min-height: 0;
-}
-
-.gallery-cards.layout-masonry .gallery-card:not(.has-loaded) {
-  min-height: 100px;
-}
-
-.gallery-cards.layout-masonry .gallery-card.has-loaded {
-  min-height: 0 !important;
-  background: transparent !important;
-  background-image: none !important;
-  animation: none !important;
-}
-
-.gallery-cards.layout-masonry .gallery-card img {
-  width: 100%;
-  height: auto;
-  display: block;
-  object-fit: unset;
 }
 
 @media (max-width: 768px) {
@@ -3275,7 +3273,7 @@ html.view-home #messageMonthFooter { display: none !important; }
     display: none;
   }
   .gallery-cards {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 }

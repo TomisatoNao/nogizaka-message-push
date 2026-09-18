@@ -1424,7 +1424,7 @@ def test_message_thumbnail_cache_privacy_contract(temp_archive_env, monkeypatch)
 
 
 def test_gallery_layout_toggle_assets():
-    """验证相册画廊瀑布流/网格切换在前端 HTML、CSS、JS 中完整集成。"""
+    """验证相册画廊瀑布流（横屏照片跨2格、固定4列）与网格切换在前端完整集成。"""
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
@@ -1433,29 +1433,22 @@ def test_gallery_layout_toggle_assets():
     assert 'id="galleryLayoutToggle"' in html_content
     assert 'id="btnLayoutMasonry"' in html_content
     assert 'id="btnLayoutGrid"' in html_content
-    assert 'id="galleryColsToggle"' in html_content
-    assert 'id="btnCols4"' in html_content
-    assert 'id="btnCols5"' in html_content
-    assert 'id="btnCols3"' not in html_content
+    # 按用户要求精简：取消 4 列/5 列设置，固定 4 列
+    assert 'id="galleryColsToggle"' not in html_content
 
     css_content = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
     assert ".gallery-layout-toggle" in css_content
-    assert ".gallery-cols-toggle" in css_content
     assert ".gallery-cards.layout-masonry" in css_content
-    assert ".masonry-col" in css_content
+    assert ".gallery-card" in css_content
     assert "--photo-ratio" in css_content
     assert ".has-loaded" in css_content
 
     js_content = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
     assert "curGalleryLayout" in js_content
     assert "switchGalleryLayout" in js_content
-    assert "rebalanceMasonry" in js_content
-    assert "btnLayoutMasonry" in js_content
-    assert "btnLayoutGrid" in js_content
-    assert "curMasonryColsPref" in js_content
-    assert "switchMasonryCols" in js_content
-    assert "btnCols" in js_content
-    assert "syncGalleryColsToggle" in js_content
+    assert "layoutMasonry" in js_content
+    assert "is-landscape" in js_content
+    assert "span = (isLand && cols >= 2) ? 2 : 1;" in js_content
 
 
 def test_gallery_lightbox_mobile_gesture_and_viewport_recovery_contract():
