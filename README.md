@@ -44,7 +44,7 @@
    ```yaml
    services:
      sakamichi-push:
-       image: ghcr.io/tomisatonao/nogizaka-message-push:latest
+       image: ghcr.io/tomisatonao/nogizaka-message-push:${APP_IMAGE_TAG:-latest}
        container_name: sakamichi-push
        restart: unless-stopped
        ports:
@@ -69,7 +69,9 @@
    ```
    控制台将高亮输出自动生成的初始管理员密码。在浏览器打开 **`http://<服务器IP>:46046/`** 即可进入系统。
 
-> 💡 **后续升级**：在同级目录下执行 `docker compose pull && docker compose up -d` 即可无感升级至最新版本。
+> 💡 **后续升级**：个人试用可继续使用 `latest`。生产环境建议在 `.env` 中把
+> `APP_IMAGE_TAG` 固定为 CI 发布的 `sha-xxxxxxx`，避免同一配置在不同时间拉到不同镜像。
+> 修改版本后执行 `docker compose pull && docker compose up -d` 即可升级。
 
 ---
 
@@ -155,6 +157,39 @@
 | `python tools/backfill_blogs.py --group nogizaka --download-images` | 批量回填指定团体的全量历史官方博客与配图 |
 | `python tools/archive_letters.py [成员名]` | 批量归档粉丝信件（Fan Letters）原图入库 |
 | `python tools/sync_archive_db.py` | 扫描磁盘静态归档并全量重构 SQLite 索引与全文检索库 |
+
+### 使用固定镜像版本部署到 NAS
+
+推送到 `main` 后，GitHub CI 会先完成 Python 3.10/3.12 全量测试。只有全部通过，才会发布
+`sha-<提交号前 7 位>` 镜像；`latest` 只是最新版指针，不建议作为生产版本依据。
+
+NAS 项目目录的 `.env` 应保留所有现有凭证，并增加一行：
+
+```dotenv
+APP_IMAGE_TAG=sha-1234abc
+```
+
+可以在 NAS 上手动执行 `docker compose pull && docker compose up -d`，也可以从开发机运行安全部署器：
+
+```powershell
+$env:NAS_HOST = "你的 NAS 地址"
+$env:NAS_USER = "仅拥有该项目部署权限的 SSH 用户"
+$env:NAS_SSH_KEY = "C:\path\to\deploy_key"
+$env:NAS_DOCKER_BIN = "/var/packages/ContainerManager/target/usr/bin/docker"
+python tools/deploy_release.py --tag sha-1234abc
+```
+
+部署器只支持不可变的 `sha-xxxxxxx` 或 `v1.2.3` 标签，不接受 `latest`/`main`。它会：
+
+1. 保存当前容器镜像作为本地回滚版本；
+2. 拉取并启动目标镜像，不重建 NapCat 等依赖服务；
+3. 校验容器状态、`/api/health/status` 和运行版本；
+4. 验证失败时自动恢复部署前镜像；
+5. 将结果写入 NAS 项目目录的 `.deploy-state`，其中不包含凭证。
+
+部署脚本不接受密码参数，也不会保存 SSH 密码。部署用户需要能够运行 Docker Compose；建议使用
+SSH Key，并仅授予该项目容器所需的最小权限。`config`、`data`、`logs` 和 `.env` 均继续通过卷挂载，
+容器替换不会删除归档或运行配置。
 
 ---
 

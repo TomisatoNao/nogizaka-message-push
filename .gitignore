@@ -1,5 +1,9 @@
 # 凭证和敏感数据 / 本地私有配置
 .env
+.env.*
+!.env.example
+.deploy-state
+.deploy-state.*
 data/web_credentials/
 config/config.json
 
@@ -43,3 +47,5 @@ htmlcov/
 # 本地私有部署脚本
 tools/deploy_*.py
 tools/deploy_to_nas.py
+# 通用的无密码、固定镜像版本部署器需要随仓库维护。
+!tools/deploy_release.py

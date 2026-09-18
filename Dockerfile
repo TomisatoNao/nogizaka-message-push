@@ -3,6 +3,10 @@
 # ============================================================
 FROM python:3.12-slim-bookworm
 
+ARG APP_VERSION=dev
+ARG APP_GIT_SHA=unknown
+ARG APP_BUILD_TIME=unknown
+
 LABEL maintainer="TomisatoNao" \
       description="乃木坂46 / 樱坂46 / 日向坂46 Message、官方博客与社交媒体动态监控推送机器人"
 
@@ -12,7 +16,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TZ=Asia/Tokyo \
     DEBIAN_FRONTEND=noninteractive \
-    WEB_ADMIN_HOST=0.0.0.0
+    WEB_ADMIN_HOST=0.0.0.0 \
+    APP_VERSION=${APP_VERSION} \
+    APP_GIT_SHA=${APP_GIT_SHA} \
+    APP_BUILD_TIME=${APP_BUILD_TIME}
 
 # 安装运行时系统依赖：ffmpeg (视频压制/转码/直播录制)、ca-certificates (HTTPS)、tzdata (时区)、curl (健康检查)、中日文字体 (博客长图渲染)
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 from src.audit import record_event
+from src.runtime_info import runtime_metadata
 
 from src.webui_modules.config_service import (
     _FORBIDDEN_ENV_KEYS,
@@ -154,6 +155,7 @@ _on_test_push_cb = None
 _on_openid_cb = None
 _mutation_lock = threading.Lock()
 _enforce_host_check = False
+_RUNTIME_METADATA = runtime_metadata()
 
 
 def _load_raw_config() -> dict:
@@ -295,6 +297,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "ready": True,
                     "monitor_healthy": True,
                     "monitor_reason": "standalone",
+                    **_RUNTIME_METADATA,
                 }, 200)
                 return
 
@@ -316,6 +319,7 @@ class _Handler(BaseHTTPRequestHandler):
                         "ready": False,
                         "monitor_healthy": False,
                         "monitor_reason": f"health_snapshot_error:{type(exc).__name__}",
+                        **_RUNTIME_METADATA,
                     }, 503)
                 else:
                     self._send_json({
@@ -325,6 +329,7 @@ class _Handler(BaseHTTPRequestHandler):
                         "ready": True,
                         "monitor_healthy": True,
                         "monitor_reason": "snapshot_unavailable",
+                        **_RUNTIME_METADATA,
                     }, 200)
                 return
 
@@ -344,6 +349,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "monitor_reason": monitor_reason,
                     "monitor": monitor,
                     "reasons": live_reasons,
+                    **_RUNTIME_METADATA,
                 }, 200 if live_ok else 503)
                 return
 
@@ -358,6 +364,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "monitor_reason": monitor_reason,
                     "monitor": monitor,
                     "reasons": reasons,
+                    **_RUNTIME_METADATA,
                 }, 503)
                 return
             if state == "DEGRADED":
@@ -370,6 +377,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "monitor_reason": monitor_reason,
                     "monitor": monitor,
                     "reasons": reasons,
+                    **_RUNTIME_METADATA,
                 }, 503)
                 return
             self._send_json({
@@ -381,6 +389,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "monitor_reason": monitor_reason,
                 "monitor": monitor,
                 "reasons": reasons,
+                **_RUNTIME_METADATA,
             }, 200 if is_ready else 503)
             return
 

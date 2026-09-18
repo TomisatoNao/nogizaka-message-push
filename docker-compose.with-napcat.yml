@@ -1,6 +1,6 @@
 services:
   sakamichi-push:
-    image: ghcr.io/tomisatonao/nogizaka-message-push:latest
+    image: ghcr.io/tomisatonao/nogizaka-message-push:${APP_IMAGE_TAG:-latest}
     container_name: sakamichi-push
     restart: unless-stopped
     ports:

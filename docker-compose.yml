@@ -1,6 +1,6 @@
 services:
   sakamichi-push:
-    image: ghcr.io/tomisatonao/nogizaka-message-push:latest
+    image: ghcr.io/tomisatonao/nogizaka-message-push:${APP_IMAGE_TAG:-latest}
     # 如需本地直接构建运行，可取消下一行注释：
     # build: .
     container_name: sakamichi-push

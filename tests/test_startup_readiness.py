@@ -244,6 +244,9 @@ def test_health_probe_distinguishes_starting_from_ready():
             assert body["ok"] is False
             assert body["ready"] is False
             assert body["status"] == "starting"
+            assert isinstance(body["version"], str) and body["version"]
+            assert isinstance(body["git_sha"], str) and body["git_sha"]
+            assert isinstance(body["build_time"], str) and body["build_time"]
 
         # 2. 状态为 DEGRADED 时，探针必须返回 503 且 ready=False，阻止部署脚本判定为就绪
         health.get_tracker().set_startup_state("DEGRADED", ["Telegram 连接超时"])
