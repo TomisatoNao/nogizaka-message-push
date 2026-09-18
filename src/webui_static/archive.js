@@ -6054,7 +6054,8 @@ async function loadGalleryPhotos(reset = true) {
     curGalleryPage = 1;
     curGalleryImages = [];
     curGalleryPerPage = getGalleryPerPage();
-    cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:50px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;">正在加载相册图片...</div></div>';
+    cardsBox.classList.remove("layout-masonry");
+    cardsBox.innerHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:50px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;">正在加载相册图片...</div></div>';
     if (statsBox) statsBox.textContent = "";
     if (loadMoreBtn) {
       loadMoreBtn.style.display = "none";
@@ -6083,7 +6084,8 @@ async function loadGalleryPhotos(reset = true) {
     if (myVersion !== galleryLoadVersion) return;
     if (!data.ok) {
       if (reset) {
-        cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载失败：' + esc((data.errors || []).join("; ")) + '</div>';
+        cardsBox.classList.remove("layout-masonry");
+        cardsBox.innerHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:40px;color:var(--muted);">加载失败：' + esc((data.errors || []).join("; ")) + '</div>';
       } else {
         curGalleryPage = Math.max(1, curGalleryPage - 1);
         if (loadMoreBtn) {
@@ -6108,7 +6110,7 @@ async function loadGalleryPhotos(reset = true) {
 
     if (reset && !list.length) {
       cardsBox.classList.remove("layout-masonry");
-      cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:16px;">' +
+      cardsBox.innerHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:60px 20px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:16px;">' +
         '<div style="font-size:38px;margin-bottom:12px;">📷</div>' +
         '<div style="font-size:15px;font-weight:600;color:var(--text-strong);">暂无匹配的图片</div>' +
         '<div style="font-size:13px;margin-top:6px;">未在当前筛选条件下找到本地图片，可尝试切换成员或来源。</div>' +
@@ -6245,7 +6247,8 @@ async function loadGalleryPhotos(reset = true) {
   } catch (err) {
     if (myVersion !== galleryLoadVersion) return;
     if (reset) {
-      cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
+      cardsBox.classList.remove("layout-masonry");
+      cardsBox.innerHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
     } else {
       curGalleryPage = Math.max(1, curGalleryPage - 1);
       if (loadMoreBtn) {

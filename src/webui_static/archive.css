@@ -3173,8 +3173,19 @@ html.view-home #messageMonthFooter { display: none !important; }
   display: flex;
   flex-direction: row;
   align-items: flex-start;
+  justify-content: center;
   gap: 14px;
   width: 100%;
+}
+
+.gallery-cards .gallery-status-msg,
+.gallery-cards.layout-masonry .gallery-status-msg,
+.gallery-cards.layout-masonry > div:not(.masonry-col) {
+  width: 100% !important;
+  flex: 1 1 100% !important;
+  grid-column: 1 / -1 !important;
+  text-align: center !important;
+  margin: 0 auto !important;
 }
 
 .gallery-cards.layout-masonry .masonry-col {

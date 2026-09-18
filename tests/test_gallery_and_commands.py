@@ -1443,12 +1443,14 @@ def test_gallery_layout_toggle_assets():
     assert ".gallery-card" in css_content
     assert "--photo-ratio" in css_content
     assert ".has-loaded" in css_content
+    assert ".gallery-status-msg" in css_content
 
     js_content = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
     assert "curGalleryLayout" in js_content
     assert "switchGalleryLayout" in js_content
     assert "rebalanceMasonry" in js_content
     assert "getMasonryColCount" in js_content
+    assert "gallery-status-msg" in js_content
 
 
 def test_gallery_lightbox_mobile_gesture_and_viewport_recovery_contract():
