@@ -325,8 +325,14 @@ def handle_members(handler, load_raw_config_fn) -> None:
                 sub_type = str(subscription.get("type") or "")
                 auto_renewing = bool(subscription.get("auto_renewing", False))
 
-            is_subscribed = sub_state == "active"
-            is_past_subscribed = sub_state == "expired" or (not is_subscribed and bool(sub_state))
+            from src.member_directory import is_subscription_active
+
+            is_subscribed = is_subscription_active({
+                "state": sub_state,
+                "end_at": sub_end,
+                "auto_renewing": auto_renewing,
+            })
+            is_past_subscribed = not is_subscribed and (sub_state in ("expired", "cancelled", "canceled") or bool(sub_state))
             slim.append({
                 "id": str(member.get("id", "")),
                 "name": member.get("name") or "(无名)",

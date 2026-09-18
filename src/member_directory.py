@@ -191,6 +191,31 @@ def save_account_subscriptions(account_id: str, groups: list[dict]) -> None:
             raise
 
 
+def is_subscription_active(sub: dict | None) -> bool:
+    """判断订阅对象是否处于有效抓取期内。
+
+    1. state == 'active': 活跃订阅，有效。
+    2. state in ('cancelled', 'canceled'): 用户取消了自动续订，但如果在 end_at 之前，
+       依然处于有效付费周期内，官方 API 依然允许拉取消息，故视为活跃有效！
+    3. state in ('expired', 'closed', 'unsubscribed') 或超出 end_at: 已失效。
+    """
+    if not isinstance(sub, dict) or not sub:
+        return False
+    state = str(sub.get("state") or "").lower()
+    if state == "active":
+        return True
+    if state in ("cancelled", "canceled"):
+        end_at_str = str(sub.get("end_at") or "").strip()
+        if end_at_str:
+            from datetime import datetime, timezone
+            from src.utils import _parse_utc
+
+            end_dt = _parse_utc(end_at_str)
+            if end_dt is not None:
+                return datetime.now(timezone.utc) < end_dt
+    return False
+
+
 def get_member_subscription(account_id: str, member_id: str) -> dict | None:
     """查询指定账号+成员ID的最新订阅缓存。"""
     if not account_id or not member_id:
@@ -206,7 +231,7 @@ def get_member_subscription(account_id: str, member_id: str) -> dict | None:
             """, (account_id, str(member_id)))
             row = cur.fetchone()
             if row:
-                return {
+                sub_data = {
                     "state": row[0],
                     "sub_type": row[1],
                     "start_at": row[2],
@@ -215,6 +240,8 @@ def get_member_subscription(account_id: str, member_id: str) -> dict | None:
                     "updated_at": row[5],
                     "member_name": row[6],
                 }
+                sub_data["is_active"] = is_subscription_active(sub_data)
+                return sub_data
         except sqlite3.Error as exc:
             log_all(f"⚠️ 查询成员订阅缓存失败: {type(exc).__name__}: {exc}", is_error=True)
             return None
@@ -240,7 +267,7 @@ def get_all_subscriptions(account_id: str = "") -> dict[str, dict]:
                 """)
             for row in cur.fetchall():
                 acc, mid, state, sub_type, start_at, end_at, auto_renew, upd, mname = row
-                result[f"{acc}:{mid}"] = {
+                sub_dict = {
                     "account_id": acc,
                     "member_id": mid,
                     "member_name": mname,
@@ -251,6 +278,8 @@ def get_all_subscriptions(account_id: str = "") -> dict[str, dict]:
                     "auto_renewing": bool(auto_renew),
                     "updated_at": upd,
                 }
+                sub_dict["is_active"] = is_subscription_active(sub_dict)
+                result[f"{acc}:{mid}"] = sub_dict
         except sqlite3.Error as exc:
             log_all(f"⚠️ 读取订阅缓存失败: {type(exc).__name__}: {exc}", is_error=True)
     return result
@@ -261,7 +290,7 @@ def is_member_active_subscription(account_id: str, member_id: str) -> bool | Non
     sub = get_member_subscription(account_id, member_id)
     if sub is None:
         return None
-    return sub.get("state") == "active"
+    return is_subscription_active(sub)
 
 
 async def sync_all_accounts_subscriptions(

@@ -383,6 +383,8 @@ async def _fetch_member_messages(
         else:
             sub_info = get_member_subscription(account_id, m_id) or {}
             sub_state_txt = sub_info.get("state", "未订阅")
+            if sub_state_txt in ("cancelled", "canceled"):
+                sub_state_txt = f"{sub_state_txt}(已到期)"
             log_all(f"⏸️ [成员ID: {m_id} | 名字: {m_name}] 订阅状态为【{sub_state_txt}】，跳过实时抓取 (保留社媒/博客/离线归档)", is_debug=True)
             return None
 

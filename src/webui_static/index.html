@@ -169,6 +169,7 @@
   .admin-member-sub-badge > span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; }
   .admin-member-sub-badge .is-neutral { color: var(--muted); background: color-mix(in srgb, var(--border) 28%, transparent); border: 1px solid var(--border-soft); }
   .admin-member-sub-badge .is-active { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 25%, transparent); font-weight: 600; }
+  .admin-member-sub-badge .is-cancelled-active { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent); font-weight: 600; }
   .admin-member-sub-badge .is-expired { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); font-weight: 600; }
   .admin-storage-summary { margin-bottom: 14px; }
   .admin-storage-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; font-size: 13px; }
@@ -666,6 +667,7 @@
   .member-pick-name { color: var(--text); font-size: 13.5px; font-weight: 600; line-height: 1.4; }
   .member-pick-status-badge { display: inline-flex; align-items: center; gap: 2px; padding: 1px 7px; border-radius: 9px; font-size: 11px; line-height: 1.35; white-space: nowrap; }
   .member-pick-status-badge.is-subscribed { color: #fff; background: linear-gradient(135deg, #8b5cf6, #ec4899); box-shadow: 0 1px 4px rgba(236, 72, 153, .3); font-weight: 600; }
+  .member-pick-status-badge.is-subscribed.is-cancelled-active { color: #fff; background: linear-gradient(135deg, #f59e0b, #ec4899); box-shadow: 0 1px 4px rgba(245, 158, 11, .3); }
   .member-pick-status-badge.is-past-subscribed { color: #f59e0b; background: rgba(245, 158, 11, .18); border: 1px solid rgba(245, 158, 11, .35); font-weight: 600; }
   .member-pick-status-badge.is-open { color: #10b981; background: rgba(16, 185, 129, .15); }
   .member-pick-status-badge.is-closed { color: var(--muted); background: rgba(255, 255, 255, .05); }
@@ -6152,21 +6154,37 @@ function renderMembers() {
       const s = (subscriptions || {})[accId + ":" + mid];
       if (!s) {
         subBadge.innerHTML = '<span class="is-neutral" title="未检测到活跃订阅，抓取引擎将跳过日常轮询">⚪ 未订阅</span>';
-      } else if (s.state === "active") {
-        let renewTxt = "";
+      } else {
+        const isCancelled = s.state === "cancelled" || s.state === "canceled";
+        const isExpired = s.state === "expired";
+        let endDt = null;
         if (s.end_at) {
           try {
             const d = new Date(s.end_at);
-            if (!isNaN(d.getTime())) renewTxt = " · 至 " + (d.getMonth() + 1) + "/" + d.getDate();
+            if (!isNaN(d.getTime())) endDt = d;
           } catch(_) {}
         }
-        subBadge.innerHTML = '<span class="is-active">🌟 已订阅' + renewTxt + '</span>';
-      } else if (s.state === "expired") {
-        subBadge.innerHTML = '<span class="is-expired" title="离线模式：跳过日常实时轮询，保留历史归档与社媒监控">⏳ 曾订阅 (离线)</span>';
-      } else if (s.state === "closed") {
-        subBadge.innerHTML = '<span class="is-neutral" title="已毕业/关闭">⚫ 离线/已关闭</span>';
-      } else {
-        subBadge.innerHTML = '<span class="is-neutral" title="未订阅，跳过日常抓取">⚪ ' + esc(s.state || "未订阅") + '</span>';
+        const now = new Date();
+        const isStillValid = isCancelled && endDt && now < endDt;
+        const isActive = s.is_active !== undefined ? s.is_active : (s.state === "active" || isStillValid);
+
+        if (isActive) {
+          let renewTxt = "";
+          if (endDt) {
+            renewTxt = " · 至 " + (endDt.getMonth() + 1) + "/" + endDt.getDate();
+          }
+          if (isCancelled || s.auto_renewing === false) {
+            subBadge.innerHTML = '<span class="is-cancelled-active" title="已取消自动续订，但在到期前仍处于付费有效期内，抓取引擎将正常抓取实时消息">⏳ 已订阅(不续订)' + renewTxt + '</span>';
+          } else {
+            subBadge.innerHTML = '<span class="is-active">🌟 已订阅' + renewTxt + '</span>';
+          }
+        } else if (isExpired || (isCancelled && endDt && now >= endDt)) {
+          subBadge.innerHTML = '<span class="is-expired" title="离线模式：跳过日常实时轮询，保留历史归档与社媒监控">⏳ 曾订阅 (离线)</span>';
+        } else if (s.state === "closed") {
+          subBadge.innerHTML = '<span class="is-neutral" title="已毕业/关闭">⚫ 离线/已关闭</span>';
+        } else {
+          subBadge.innerHTML = '<span class="is-neutral" title="未订阅，跳过日常抓取">⚪ ' + esc(s.state || "未订阅") + '</span>';
+        }
       }
     }
     updateSubBadge();
@@ -6312,8 +6330,16 @@ function renderMemberPickItems() {
     // 状态 Badge 标签
     if (isSub) {
       const subBadge = document.createElement("span");
-      subBadge.className = "member-pick-status-badge is-subscribed";
-      subBadge.textContent = "🌟 当前订阅";
+      const isAutoRenewing = m.auto_renewing !== false;
+      const isCancelled = m.sub_state === "cancelled" || m.sub_state === "canceled";
+      if (isCancelled || !isAutoRenewing) {
+        subBadge.className = "member-pick-status-badge is-subscribed is-cancelled-active";
+        subBadge.textContent = "⏳ 已订阅(不续订)";
+        subBadge.title = "已取消自动续订，但在到期前仍处于有效订阅期";
+      } else {
+        subBadge.className = "member-pick-status-badge is-subscribed";
+        subBadge.textContent = "🌟 当前订阅";
+      }
       nameRow.appendChild(subBadge);
     } else if (isPastSub) {
       const expBadge = document.createElement("span");
@@ -6347,7 +6373,8 @@ function renderMemberPickItems() {
         if (!isNaN(d.getTime())) {
           const endSpan = document.createElement("span");
           endSpan.className = "member-pick-date--active";
-          endSpan.textContent = "📅 续费期至 " + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+          const isCancelled = m.sub_state === "cancelled" || m.sub_state === "canceled" || m.auto_renewing === false;
+          endSpan.textContent = (isCancelled ? "📅 有效期至 " : "📅 续费期至 ") + (d.getMonth() + 1) + "月" + d.getDate() + "日";
           metaRow.appendChild(endSpan);
         }
       } catch(_) {}
@@ -6498,8 +6525,24 @@ $("btnFetchMembers").addEventListener("click", async () => {
   }
 
   _currentFetchedMembers = (data.members || []).map((m) => {
-    const isSub = !!(m.is_subscribed || m.sub_state === "active" || (m.subscription && m.subscription.state === "active"));
-    const isPastSub = !!(m.is_past_subscribed || m.sub_state === "expired" || (!isSub && m.sub_state));
+    let isSub = !!m.is_subscribed;
+    if (!isSub) {
+      if (m.sub_state === "active" || (m.subscription && m.subscription.state === "active")) {
+        isSub = true;
+      } else {
+        const subState = m.sub_state || (m.subscription && m.subscription.state);
+        const subEnd = m.sub_end || (m.subscription && m.subscription.end_at);
+        if ((subState === "cancelled" || subState === "canceled") && subEnd) {
+          try {
+            const d = new Date(subEnd);
+            if (!isNaN(d.getTime()) && Date.now() < d.getTime()) {
+              isSub = true;
+            }
+          } catch(_) {}
+        }
+      }
+    }
+    const isPastSub = !isSub && !!(m.is_past_subscribed || m.sub_state === "expired" || m.sub_state);
     return Object.assign({}, m, { is_subscribed: isSub, is_past_subscribed: isPastSub });
   });
   _currentFetchedAccount = account;
