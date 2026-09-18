@@ -841,8 +841,8 @@ def test_gallery_toolbar_three_rows_layout_contract():
     assert "galleryYearChips" in r2_content
 
     # Row 3: 时间排序按钮在左，统计数量在右
-    r3_end = html.find("</div>", r3_idx)
-    r3_content = html[r3_idx:r3_end + 300]
+    cards_idx = html.find('id="galleryCards"')
+    r3_content = html[r3_idx:cards_idx]
     assert "btnGallerySortOrder" in r3_content
     assert "galleryStats" in r3_content
 
@@ -1423,14 +1423,75 @@ def test_message_thumbnail_cache_privacy_contract(temp_archive_env, monkeypatch)
     assert "public" in cc_public
 
 
+def test_gallery_layout_toggle_assets():
+    """验证相册画廊瀑布流/网格切换在前端 HTML、CSS、JS 中完整集成。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+
+    html_content = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    assert 'id="galleryLayoutToggle"' in html_content
+    assert 'id="btnLayoutMasonry"' in html_content
+    assert 'id="btnLayoutGrid"' in html_content
+    assert 'id="galleryColsToggle"' in html_content
+    assert 'id="btnCols4"' in html_content
+    assert 'id="btnCols5"' in html_content
+    assert 'id="btnCols3"' not in html_content
+
+    css_content = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    assert ".gallery-layout-toggle" in css_content
+    assert ".gallery-cols-toggle" in css_content
+    assert ".gallery-cards.layout-masonry" in css_content
+    assert ".masonry-col" in css_content
+    assert "--photo-ratio" in css_content
+    assert ".has-loaded" in css_content
+
+    js_content = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+    assert "curGalleryLayout" in js_content
+    assert "switchGalleryLayout" in js_content
+    assert "rebalanceMasonry" in js_content
+    assert "btnLayoutMasonry" in js_content
+    assert "btnLayoutGrid" in js_content
+    assert "curMasonryColsPref" in js_content
+    assert "switchMasonryCols" in js_content
+    assert "btnCols" in js_content
+    assert "syncGalleryColsToggle" in js_content
 
 
+def test_gallery_lightbox_mobile_gesture_and_viewport_recovery_contract():
+    """验证手机端灯箱触摸手势隔离、双指捏合缩放、双击缩放及视口自愈契约。"""
+    from pathlib import Path
 
+    root = Path(__file__).resolve().parent.parent
+    css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
 
+    # 1. CSS 触摸隔离契约：touch-action: none 阻断浏览器默认视口拖拽缩放
+    assert "touch-action: none;" in css
+    assert "will-change: transform;" in css
+    assert "overscroll-behavior: contain;" in css
 
+    # 2. JS 手势引擎与视口自愈函数契约
+    assert "function applyLightboxTransform" in js
+    assert "function resetLightboxTransform" in js
+    assert "function clampLightboxPan" in js
+    assert "function zoomLightboxAtPoint" in js
+    assert "function resetMobileViewport" in js
 
+    # 3. 视口自愈保险机制契约：强制重置 visual viewport 比例为 1.0
+    assert 'meta.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no");' in js
 
+    # 4. 手势交互与缩放保护契约
+    assert "e.touches.length === 2" in js
+    assert "lbIsPinching" in js
+    assert "lbIsDragging" in js
+    assert "e.preventDefault();" in js
+    assert "gesturestart" in js
 
-
+    # 5. 退出自愈与滚动锁闭环契约
+    assert 'document.body.style.overflow = "hidden";' in js
+    assert 'document.documentElement.classList.add("lightbox-open");' in js
+    assert "resetLightboxTransform(false);" in js
+    assert "resetMobileViewport();" in js
 
 

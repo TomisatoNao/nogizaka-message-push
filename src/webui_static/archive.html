@@ -8,8 +8,8 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260906_1">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260911_2">
-<link rel="preload" href="/static/archive.js?v=20260918_1" as="script">
+<link rel="stylesheet" href="/static/archive.css?v=20260919_1">
+<link rel="preload" href="/static/archive.js?v=20260919_1" as="script">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -294,10 +294,26 @@
       </div>
 
       <div class="gallery-toolbar-row gallery-toolbar-row3">
-        <button class="btn gallery-sort-btn" id="btnGallerySortOrder" type="button" title="切换时间排序：最新优先 ⇄ 最早优先">
-          <span class="sort-icon" id="gallerySortIcon">↓</span>
-          <span id="gallerySortOrderText">最新优先</span>
-        </button>
+        <div class="gallery-row3-actions">
+          <button class="btn gallery-sort-btn" id="btnGallerySortOrder" type="button" title="切换时间排序：最新优先 ⇄ 最早优先">
+            <span class="sort-icon" id="gallerySortIcon">↓</span>
+            <span id="gallerySortOrderText">最新优先</span>
+          </button>
+          <div class="gallery-layout-toggle" id="galleryLayoutToggle" role="group" aria-label="相册排列模式">
+            <button class="layout-btn active" id="btnLayoutMasonry" type="button" data-layout="masonry" title="原图比例瀑布流（保留完整照片构图，无裁切）">
+              <span class="btn-icon">🧱</span>
+              <span>瀑布流</span>
+            </button>
+            <button class="layout-btn" id="btnLayoutGrid" type="button" data-layout="grid" title="统一规整网格（3:4 方正对齐）">
+              <span class="btn-icon">🔲</span>
+              <span>网格</span>
+            </button>
+          </div>
+          <div class="gallery-cols-toggle" id="galleryColsToggle" role="group" aria-label="排版列数选择" title="调节相册列数（4列/5列与一页20张严格整行对齐）">
+            <button class="layout-btn active" id="btnCols4" type="button" data-cols="4" title="4 列（推荐大图，5 行共 20 张）">4列</button>
+            <button class="layout-btn" id="btnCols5" type="button" data-cols="5" title="5 列（紧凑排版，4 行共 20 张）">5列</button>
+          </div>
+        </div>
 
         <span class="stats" id="galleryStats"></span>
       </div>
@@ -554,7 +570,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20260918_1"></script>
+<script src="/static/archive.js?v=20260919_1"></script>
 
 </body>
 </html>

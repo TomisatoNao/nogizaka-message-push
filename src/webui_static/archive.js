@@ -3137,14 +3137,122 @@ function renderBubble(msg) {
 // toast notifications unified in showToast(msg, type)
 
 
-// ── 灯箱 ─────────────────────────────────────────
+// ── 灯箱手势与缩放交互控制 ─────────────────────────
 let lbIndex = 0;
 let lbImageLoadVersion = 0;
+let lbScale = 1;
+let lbPanX = 0;
+let lbPanY = 0;
+let lbIsPinching = false;
+let lbIsDragging = false;
+let lbStartDist = 0;
+let lbStartScale = 1;
+let lbStartPanX = 0;
+let lbStartPanY = 0;
+let lbStartX = 0;
+let lbStartY = 0;
+let lbTouchStartTime = 0;
+let lbMoved = false;
+let lbLastTapTime = 0;
+let lbSingleTapTimer = null;
+let lbLastTouchEndTime = 0;
+
+function applyLightboxTransform(animate = false) {
+  const img = $("lbImg");
+  if (!img) return;
+  if (animate) {
+    img.style.transition = "transform 0.24s cubic-bezier(0.2, 0, 0.2, 1)";
+  } else {
+    img.style.transition = "none";
+  }
+  if (lbScale === 1 && lbPanX === 0 && lbPanY === 0) {
+    img.style.transform = "";
+  } else {
+    img.style.transform = `translate3d(${lbPanX}px, ${lbPanY}px, 0) scale(${lbScale})`;
+  }
+}
+
+function resetLightboxTransform(animate = false) {
+  lbScale = 1;
+  lbPanX = 0;
+  lbPanY = 0;
+  lbIsPinching = false;
+  lbIsDragging = false;
+  lbMoved = false;
+  if (lbSingleTapTimer) {
+    clearTimeout(lbSingleTapTimer);
+    lbSingleTapTimer = null;
+  }
+  applyLightboxTransform(animate);
+}
+
+function clampLightboxPan(animate = true) {
+  const img = $("lbImg");
+  if (!img) return;
+  if (lbScale <= 1.02) {
+    lbScale = 1;
+    lbPanX = 0;
+    lbPanY = 0;
+    applyLightboxTransform(animate);
+    return;
+  }
+  const rect = img.getBoundingClientRect();
+  const unscaledW = img.offsetWidth || (rect.width / lbScale);
+  const unscaledH = img.offsetHeight || (rect.height / lbScale);
+  const scaledW = unscaledW * lbScale;
+  const scaledH = unscaledH * lbScale;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  const maxPanX = Math.max(0, (scaledW - vw) / 2 + 30);
+  const maxPanY = Math.max(0, (scaledH - vh) / 2 + 30);
+
+  lbPanX = Math.min(Math.max(lbPanX, -maxPanX), maxPanX);
+  lbPanY = Math.min(Math.max(lbPanY, -maxPanY), maxPanY);
+  applyLightboxTransform(animate);
+}
+
+function zoomLightboxAtPoint(clientX, clientY, targetScale) {
+  const img = $("lbImg");
+  if (!img) return;
+  if (targetScale <= 1.02) {
+    resetLightboxTransform(true);
+    return;
+  }
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2;
+  const x = (typeof clientX === "number") ? clientX : cx;
+  const y = (typeof clientY === "number") ? clientY : cy;
+  const dx = cx - x;
+  const dy = cy - y;
+
+  lbScale = targetScale;
+  lbPanX = dx * (targetScale - 1) * 0.5;
+  lbPanY = dy * (targetScale - 1) * 0.5;
+  clampLightboxPan(true);
+}
+
+function resetMobileViewport() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  const original = meta.getAttribute("content") || "width=device-width, initial-scale=1";
+  // 临时注入 maximum-scale=1 强制移动端 Safari / Chrome 视口平滑复位至 1.0
+  meta.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no");
+  if (window.visualViewport && window.visualViewport.scale > 1.01) {
+    if (window.scrollX !== 0) window.scrollTo(0, window.scrollY);
+  }
+  setTimeout(() => {
+    meta.setAttribute("content", original);
+  }, 250);
+}
 
 function openLightbox(i, opener, caption, placeholderUrl) {
   const currentVersion = ++lbImageLoadVersion;
   if (typeof i === "string") {
     if (opener) lightboxOpener = opener;
+    resetLightboxTransform(false);
+    document.body.style.overflow = "hidden";
+    document.documentElement.classList.add("lightbox-open");
     $("lbImg").src = i;
     $("lbImg").alt = caption || "图片预览";
     $("lbImg").classList.remove("lb-preview");
@@ -3166,6 +3274,9 @@ function openLightbox(i, opener, caption, placeholderUrl) {
   const idx = Number(i);
   if (isNaN(idx) || idx < 0 || idx >= images.length) return;
   if (opener) lightboxOpener = opener;
+  resetLightboxTransform(false);
+  document.body.style.overflow = "hidden";
+  document.documentElement.classList.add("lightbox-open");
   lbIndex = idx;
   const item = images[idx];
   const targetUrl = item.url;
@@ -3263,6 +3374,14 @@ function closeLightbox() {
   if (!box.classList.contains("open")) return;
   box.classList.remove("open");
   box.setAttribute("aria-hidden", "true");
+  if ($("blogReader") && $("blogReader").style.display !== "none") {
+    document.body.style.overflow = "hidden";
+  } else {
+    document.body.style.overflow = "";
+  }
+  document.documentElement.classList.remove("lightbox-open");
+  resetLightboxTransform(false);
+  resetMobileViewport();
   ++lbImageLoadVersion;
   if ($("lbImg")) {
     $("lbImg").removeAttribute("src");
@@ -3275,11 +3394,192 @@ function closeLightbox() {
 function lbMove(delta) {
   const next = lbIndex + delta;
   if (next < 0 || next >= images.length) return;
+  resetLightboxTransform(false);
   openLightbox(next);
 }
+
+const lbBox = $("lightbox");
+if (lbBox) {
+  lbBox.addEventListener("touchstart", (e) => {
+    if (!lbBox.classList.contains("open")) return;
+    if (e.target.closest("#lbActions, #lbPrev, #lbNext")) return;
+
+    if (e.touches.length === 2) {
+      lbIsPinching = true;
+      lbIsDragging = false;
+      lbMoved = true;
+      lbStartDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      lbStartScale = lbScale;
+      lbStartPanX = lbPanX;
+      lbStartPanY = lbPanY;
+      if (lbSingleTapTimer) {
+        clearTimeout(lbSingleTapTimer);
+        lbSingleTapTimer = null;
+      }
+    } else if (e.touches.length === 1) {
+      lbIsPinching = false;
+      lbStartX = e.touches[0].clientX;
+      lbStartY = e.touches[0].clientY;
+      lbStartPanX = lbPanX;
+      lbStartPanY = lbPanY;
+      lbTouchStartTime = Date.now();
+      lbMoved = false;
+      lbIsDragging = (lbScale > 1.05);
+    }
+  }, { passive: false });
+
+  lbBox.addEventListener("touchmove", (e) => {
+    if (!lbBox.classList.contains("open")) return;
+    if (e.target.closest("#lbActions, #lbPrev, #lbNext")) return;
+
+    // 关键：杜绝移动端浏览器对底层页面的全局视口缩放与滚动
+    e.preventDefault();
+
+    if (lbIsPinching && e.touches.length === 2) {
+      const curDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (lbStartDist > 0) {
+        const factor = curDist / lbStartDist;
+        lbScale = Math.min(Math.max(lbStartScale * factor, 0.85), 4.5);
+        applyLightboxTransform(false);
+      }
+    } else if (e.touches.length === 1) {
+      const dx = e.touches[0].clientX - lbStartX;
+      const dy = e.touches[0].clientY - lbStartY;
+      if (Math.hypot(dx, dy) > 8) {
+        lbMoved = true;
+      }
+      if (lbIsDragging) {
+        lbPanX = lbStartPanX + dx;
+        lbPanY = lbStartPanY + dy;
+        applyLightboxTransform(false);
+      }
+    }
+  }, { passive: false });
+
+  lbBox.addEventListener("touchend", (e) => {
+    if (!lbBox.classList.contains("open")) return;
+    if (e.target.closest("#lbActions, #lbPrev, #lbNext")) return;
+    lbLastTouchEndTime = Date.now();
+
+    if (lbIsPinching) {
+      if (e.touches.length === 0) {
+        lbIsPinching = false;
+        if (lbScale < 1.05) {
+          resetLightboxTransform(true);
+        } else if (lbScale > 4.0) {
+          lbScale = 4.0;
+          clampLightboxPan(true);
+        } else {
+          clampLightboxPan(true);
+        }
+      }
+      return;
+    }
+
+    if (e.touches.length === 0) {
+      if (!lbMoved) {
+        // 轻触点击识别
+        const touch = e.changedTouches[0];
+        const isBackdrop = (e.target === lbBox);
+        if (isBackdrop) {
+          if (lbSingleTapTimer) {
+            clearTimeout(lbSingleTapTimer);
+            lbSingleTapTimer = null;
+          }
+          closeLightbox();
+          return;
+        }
+
+        const now = Date.now();
+        if (now - lbLastTapTime < 300) {
+          // 双击快速缩放 / 复位
+          if (lbSingleTapTimer) {
+            clearTimeout(lbSingleTapTimer);
+            lbSingleTapTimer = null;
+          }
+          lbLastTapTime = 0;
+          if (lbScale > 1.2) {
+            resetLightboxTransform(true);
+          } else {
+            zoomLightboxAtPoint(touch ? touch.clientX : 0, touch ? touch.clientY : 0, 2.5);
+          }
+        } else {
+          // 单击图片：延迟 240ms，若无后续点击则关闭灯箱回到相册
+          lbLastTapTime = now;
+          lbSingleTapTimer = setTimeout(() => {
+            lbSingleTapTimer = null;
+            closeLightbox();
+          }, 240);
+        }
+      } else if (lbIsDragging) {
+        lbIsDragging = false;
+        clampLightboxPan(true);
+      } else if (lbScale <= 1.05) {
+        // 1x 状态下单指滑动切图与下拉关闭
+        const dx = e.changedTouches[0].clientX - lbStartX;
+        const dy = e.changedTouches[0].clientY - lbStartY;
+        const dt = Date.now() - lbTouchStartTime;
+        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 400) {
+          if (dx < 0) lbMove(1);
+          else lbMove(-1);
+        } else if (dy > 120 && Math.abs(dy) > Math.abs(dx) * 1.5 && dt < 400) {
+          closeLightbox();
+        }
+      }
+    }
+  }, { passive: false });
+
+  lbBox.addEventListener("touchcancel", () => {
+    if (lbScale < 1.05) resetLightboxTransform(true);
+    else clampLightboxPan(true);
+  });
+
+  lbBox.addEventListener("gesturestart", (e) => e.preventDefault());
+  lbBox.addEventListener("gesturechange", (e) => e.preventDefault());
+  lbBox.addEventListener("gestureend", (e) => e.preventDefault());
+}
+
+window.addEventListener("resize", () => {
+  if ($("lightbox") && $("lightbox").classList.contains("open")) {
+    clampLightboxPan(false);
+  }
+});
+
 $("lightbox").addEventListener("click", (e) => {
+  if (Date.now() - lbLastTouchEndTime < 500) return;
   if (e.target === $("lightbox") || e.target === $("lbImg")) closeLightbox();
 });
+
+if ($("lbImg")) {
+  $("lbImg").addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    if (lbScale > 1.2) {
+      resetLightboxTransform(true);
+    } else {
+      zoomLightboxAtPoint(e.clientX, e.clientY, 2.5);
+    }
+  });
+}
+
+$("lightbox").addEventListener("wheel", (e) => {
+  if (!$("lightbox").classList.contains("open")) return;
+  if (e.target.closest("#lbActions")) return;
+  e.preventDefault();
+  const delta = e.deltaY < 0 ? 0.25 : -0.25;
+  const nextScale = Math.min(Math.max(lbScale + delta, 1), 4.5);
+  if (nextScale <= 1.02) {
+    resetLightboxTransform(true);
+  } else {
+    lbScale = nextScale;
+    clampLightboxPan(true);
+  }
+}, { passive: false });
 if ($("lbActions")) {
   $("lbActions").addEventListener("click", (e) => e.stopPropagation());
 }
@@ -5385,6 +5685,124 @@ function syncGallerySourceChips() {
   });
 }
 
+let curGalleryLayout = (function() {
+  try { return localStorage.getItem("archive_gallery_layout") || "masonry"; }
+  catch (_) { return "masonry"; }
+})();
+
+let curMasonryColsPref = (function() {
+  try {
+    const saved = localStorage.getItem("archive_gallery_masonry_cols");
+    return (saved === "5") ? "5" : "4";
+  }
+  catch (_) { return "4"; }
+})();
+
+function getMasonryColCount() {
+  const w = window.innerWidth;
+  if (w <= 768) return 2;
+  return (curMasonryColsPref === "5") ? 5 : 4; // 桌面端仅保留 4 列与 5 列，默认统一为 4 列
+}
+
+function syncGalleryColsToggle() {
+  const wrap = $("galleryColsToggle");
+  if (!wrap) return;
+  wrap.style.display = "inline-flex";
+
+  const effectiveCols = String(getMasonryColCount());
+  ["4", "5"].forEach(c => {
+    const btn = $("btnCols" + c);
+    if (btn) {
+      btn.classList.toggle("active", effectiveCols === c);
+    }
+  });
+
+  const cardsBox = $("galleryCards");
+  if (cardsBox) {
+    cardsBox.style.setProperty("--gallery-cols", effectiveCols);
+  }
+}
+
+function switchMasonryCols(cols) {
+  if (cols !== "4" && cols !== "5") return;
+  curMasonryColsPref = cols;
+  try { localStorage.setItem("archive_gallery_masonry_cols", cols); } catch (_) {}
+  syncGalleryColsToggle();
+  const cardsBox = $("galleryCards");
+  if (cardsBox) {
+    cardsBox.style.setProperty("--gallery-cols", getMasonryColCount());
+  }
+  if (curGalleryLayout === "masonry") {
+    rebalanceMasonry();
+  }
+}
+
+function syncGalleryLayoutToggle() {
+  const btnMasonry = $("btnLayoutMasonry");
+  const btnGrid = $("btnLayoutGrid");
+  const isMasonry = curGalleryLayout === "masonry";
+  if (btnMasonry) btnMasonry.classList.toggle("active", isMasonry);
+  if (btnGrid) btnGrid.classList.toggle("active", !isMasonry);
+  const cardsBox = $("galleryCards");
+  if (cardsBox) {
+    cardsBox.classList.toggle("layout-masonry", isMasonry);
+    cardsBox.style.setProperty("--gallery-cols", getMasonryColCount());
+  }
+  syncGalleryColsToggle();
+}
+
+function rebalanceMasonry(cardsBox) {
+  if (!cardsBox) cardsBox = $("galleryCards");
+  if (!cardsBox) return;
+  const cards = Array.from(cardsBox.querySelectorAll(".gallery-card"));
+  if (!cards.length) return;
+
+  cardsBox.innerHTML = "";
+  cardsBox.classList.add("layout-masonry");
+  const colCount = getMasonryColCount();
+  const cols = [];
+  for (let i = 0; i < colCount; i++) {
+    const c = document.createElement("div");
+    c.className = "masonry-col";
+    cardsBox.appendChild(c);
+    cols.push(c);
+  }
+  const colHeights = new Array(colCount).fill(0);
+  cards.forEach(card => {
+    let minIdx = 0;
+    for (let i = 1; i < colCount; i++) {
+      if (colHeights[i] < colHeights[minIdx]) minIdx = i;
+    }
+    cols[minIdx].appendChild(card);
+    colHeights[minIdx] += (card.offsetHeight || 250) + 14;
+  });
+}
+
+function switchGalleryLayout(newLayout) {
+  if (newLayout !== "masonry" && newLayout !== "grid") return;
+  if (curGalleryLayout === newLayout) return;
+  curGalleryLayout = newLayout;
+  try { localStorage.setItem("archive_gallery_layout", curGalleryLayout); } catch (_) {}
+  syncGalleryLayoutToggle();
+
+  const cardsBox = $("galleryCards");
+  if (!cardsBox) return;
+
+  const cards = Array.from(cardsBox.querySelectorAll(".gallery-card"));
+  if (!cards.length) return;
+
+  if (curGalleryLayout === "masonry") {
+    rebalanceMasonry(cardsBox);
+  } else {
+    cardsBox.innerHTML = "";
+    cardsBox.classList.remove("layout-masonry");
+    cardsBox.style.setProperty("--gallery-cols", getMasonryColCount());
+    const frag = document.createDocumentFragment();
+    cards.forEach(card => frag.appendChild(card));
+    cardsBox.appendChild(frag);
+  }
+}
+
 function syncGallerySortButton() {
   const btn = $("btnGallerySortOrder");
   const txt = $("gallerySortOrderText");
@@ -5556,6 +5974,7 @@ async function selectGalleryMember(mName, updateHash = true) {
   updateGalleryMemberButtonDisplay();
   syncGallerySourceChips();
   syncGallerySortButton();
+  syncGalleryLayoutToggle();
 
   syncNavTabs("gallery");
 
@@ -5587,32 +6006,20 @@ async function selectGalleryMember(mName, updateHash = true) {
 }
 
 function getGalleryGridCols() {
-  const cardsBox = $("galleryCards");
-  if (!cardsBox) return 5;
-  try {
-    const comp = window.getComputedStyle(cardsBox);
-    const gridTemplate = comp.getPropertyValue("grid-template-columns");
-    if (gridTemplate && gridTemplate !== "none") {
-      const cols = gridTemplate.trim().split(/\s+/).filter(Boolean).length;
-      if (cols > 0) return cols;
-    }
-  } catch (_) {}
-  const width = cardsBox.clientWidth || window.innerWidth;
-  const isMobile = window.innerWidth <= 768;
-  const minWidth = isMobile ? 130 : 180;
-  const gap = isMobile ? 8 : 14;
-  return Math.max(1, Math.floor((width + gap) / (minWidth + gap)));
+  const w = window.innerWidth;
+  if (w <= 768) return 2;
+  return getMasonryColCount();
 }
 
 function getGalleryPerPage() {
-  const cols = getGalleryGridCols();
+  const cols = getMasonryColCount();
   const isMobile = window.innerWidth <= 768;
-  // 优化单页图片数量，优先保证性能与秒开：
-  // 移动端单页加载 16 张（2 列时 8 行）；
-  // 桌面端以 20 张为基准（5 列时为 4 行整整 20 张，6 列时为 3 行共 18 张，严格按整行填充消除末尾残缺）
   const targetCards = isMobile ? 16 : 20;
-  const rows = Math.max(2, Math.round(targetCards / cols));
-  return Math.min(60, Math.max(cols, rows * cols));
+  if (isMobile) return 16;
+  if (cols === 5) return 20; // 4 行整整 20 张
+  if (cols === 4) return 20; // 5 行整整 20 张
+  if (cols === 3) return 21; // 7 行整整 21 张
+  return targetCards;
 }
 
 let curGalleryPerPage = 20;
@@ -5724,6 +6131,7 @@ async function loadGalleryPhotos(reset = true) {
     }
 
     if (reset && !list.length) {
+      cardsBox.classList.remove("layout-masonry");
       cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:16px;">' +
         '<div style="font-size:38px;margin-bottom:12px;">📷</div>' +
         '<div style="font-size:15px;font-weight:600;color:var(--text-strong);">暂无匹配的图片</div>' +
@@ -5736,6 +6144,28 @@ async function loadGalleryPhotos(reset = true) {
 
     if (reset) {
       cardsBox.innerHTML = "";
+    }
+
+    const isMasonry = curGalleryLayout === "masonry";
+    let masonryCols = [];
+    let colHeights = [];
+    if (isMasonry) {
+      cardsBox.classList.add("layout-masonry");
+      masonryCols = Array.from(cardsBox.querySelectorAll(".masonry-col"));
+      const colCount = getMasonryColCount();
+      if (masonryCols.length !== colCount) {
+        cardsBox.innerHTML = "";
+        masonryCols = [];
+        for (let i = 0; i < colCount; i++) {
+          const c = document.createElement("div");
+          c.className = "masonry-col";
+          cardsBox.appendChild(c);
+          masonryCols.push(c);
+        }
+      }
+      colHeights = masonryCols.map(c => c.offsetHeight);
+    } else {
+      cardsBox.classList.remove("layout-masonry");
     }
 
     const fragment = document.createDocumentFragment();
@@ -5772,17 +6202,30 @@ async function loadGalleryPhotos(reset = true) {
       card.setAttribute("tabindex", "0");
       card.setAttribute("title", (photo.member_name ? "【" + photo.member_name + "】" : "") + (photo.text || "点击查看大图"));
 
+      if (photo.w && photo.h) {
+        card.style.setProperty("--photo-ratio", photo.w + " / " + photo.h);
+      }
+
       const isBlog = photo.source === "blog";
       const badgeText = isBlog ? "📄 博客" : "💬 消息";
       const badgeClass = isBlog ? "gallery-badge blog" : "gallery-badge msg";
 
       card.innerHTML =
         '<div class="' + badgeClass + '">' + badgeText + '</div>' +
-        '<img src="' + esc(thumbUrl) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
+        '<img src="' + esc(thumbUrl) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');this.parentElement.classList.add(\'has-loaded\');if(!this.parentElement.style.getPropertyValue(\'--photo-ratio\')&&this.naturalWidth&&this.naturalHeight){this.parentElement.style.setProperty(\'--photo-ratio\',this.naturalWidth+\' / \'+this.naturalHeight);}" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
         '<div class="gallery-overlay">' +
           '<div class="gallery-meta">' + esc(photo.member_name || "") + ' · ' + esc(dateStr) + '</div>' +
           (photo.text ? '<div class="gallery-caption">' + esc(photo.text) + '</div>' : '') +
         '</div>';
+
+      const imgEl = card.querySelector("img");
+      if (imgEl && imgEl.complete && imgEl.naturalWidth) {
+        imgEl.classList.add("loaded");
+        card.classList.add("has-loaded");
+        if (!card.style.getPropertyValue("--photo-ratio")) {
+          card.style.setProperty("--photo-ratio", imgEl.naturalWidth + " / " + imgEl.naturalHeight);
+        }
+      }
 
       card.addEventListener("click", () => openGalleryLightbox(globalIdx, thumbUrl));
       card.addEventListener("keydown", (e) => {
@@ -5792,9 +6235,23 @@ async function loadGalleryPhotos(reset = true) {
         }
       });
 
-      fragment.appendChild(card);
+      if (isMasonry) {
+        let minIdx = 0;
+        for (let i = 1; i < masonryCols.length; i++) {
+          if (colHeights[i] < colHeights[minIdx]) minIdx = i;
+        }
+        masonryCols[minIdx].appendChild(card);
+        const colW = masonryCols[minIdx].clientWidth || 220;
+        const estH = (photo.w && photo.h) ? ((photo.h / photo.w) * colW) : (colW * 1.33);
+        colHeights[minIdx] += estH + 14;
+      } else {
+        fragment.appendChild(card);
+      }
     });
-    cardsBox.appendChild(fragment);
+
+    if (!isMasonry) {
+      cardsBox.appendChild(fragment);
+    }
 
     if (loadMoreBtn) {
       if (curGalleryHasMore) {
@@ -6022,3 +6479,32 @@ if ($("galleryLoadMore")) {
   });
   initGalleryObserver();
 }
+
+if ($("btnLayoutMasonry")) {
+  $("btnLayoutMasonry").addEventListener("click", () => switchGalleryLayout("masonry"));
+}
+if ($("btnLayoutGrid")) {
+  $("btnLayoutGrid").addEventListener("click", () => switchGalleryLayout("grid"));
+}
+
+["4", "5"].forEach(c => {
+  const btn = $("btnCols" + c);
+  if (btn) {
+    btn.addEventListener("click", () => switchMasonryCols(c));
+  }
+});
+syncGalleryColsToggle();
+
+let lastMasonryCols = getMasonryColCount();
+let galleryResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (curGalleryLayout !== "masonry") return;
+  clearTimeout(galleryResizeTimer);
+  galleryResizeTimer = setTimeout(() => {
+    const newCols = getMasonryColCount();
+    if (newCols !== lastMasonryCols) {
+      lastMasonryCols = newCols;
+      rebalanceMasonry();
+    }
+  }, 150);
+});
