@@ -1129,8 +1129,8 @@ def test_blog_images_optimization_and_fallback_contract():
     assert "openLightbox(idx, img, null, img.src);" in js
 
 
-def test_gallery_lightbox_original_image_and_actions_contract():
-    """验证灯箱查看高清原图加载保障、查看/下载原图入口及竞态消除契约。"""
+def test_gallery_lightbox_source_navigation_and_actions_contract():
+    """验证灯箱原图加载、来源深链接、下载入口及竞态消除契约。"""
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
@@ -1138,9 +1138,14 @@ def test_gallery_lightbox_original_image_and_actions_contract():
     css = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
     js = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
 
-    # 1. 验证 HTML 动作栏、原图直达链接与下载按钮契约
+    # 1. 来源入口在新标签页打开；不再提供与灯箱重复的“查看原图”按钮。
     assert 'id="lbActions"' in html
-    assert 'id="lbOriginalBtn"' in html
+    assert 'id="lbSourceBtn"' in html
+    assert 'id="lbOriginalBtn"' not in html
+    assert "lbOriginalBtn" not in js
+    assert "查看原图" not in html
+    assert 'target="_blank"' in html
+    assert 'rel="noopener noreferrer"' in html
     assert 'id="lbDownloadBtn"' in html
     assert 'id="lbStatus"' in html
 
@@ -1156,7 +1161,16 @@ def test_gallery_lightbox_original_image_and_actions_contract():
     assert "preloader.onerror =" in js
     assert "preloader.src = targetUrl;" in js
     assert "if (preloader.complete && preloader.naturalWidth > 0)" in js
-    assert '$("lbOriginalBtn").href = targetUrl' in js
+    assert "function buildLightboxSourceAction(item)" in js
+    assert 'params.set("id", String(item.blogId));' in js
+    assert 'params.set("msg_id", String(item.messageId));' in js
+    assert 'if (targetMsgId) p.set("msg_id", targetMsgId);' in js
+    assert 'label = "📄 前往对应博客";' in js
+    assert 'label = "💬 前往对应消息";' in js
+    assert "syncLightboxSourceAction(item);" in js
+    assert 'source: photo.source' in js
+    assert 'blogId: photo.blog_id' in js
+    assert 'messageId: photo.source === "message" ? photo.id : ""' in js
     assert '$("lbDownloadBtn")' in js
     assert 'a.download = filename;' in js
 

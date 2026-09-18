@@ -1866,7 +1866,13 @@ function renderCurrentBlogContent() {
 
   // 博客正文图片支持点击灯箱放大预览、加载失败自动重试与兜底
   const brImgs = $("brContent").querySelectorAll("img");
-  const blogImages = Array.from(brImgs).map(img => ({ url: img.src, caption: currentBlogReaderPost.title || "" }));
+  const blogImages = Array.from(brImgs).map(img => ({
+    url: img.src,
+    caption: currentBlogReaderPost.title || "",
+    source: "blog",
+    blogId: currentBlogReaderPost.id,
+    groupKey: currentBlogReaderPost.group_key || curBlogGroup || "nogizaka",
+  }));
   brImgs.forEach((img, idx) => {
     img.style.cursor = "zoom-in";
     img.onerror = () => handleImgError(img);
@@ -2486,6 +2492,8 @@ let selfHashUpdate = false;   // 区分"自己写的 hash"和"用户粘贴/前�
 function syncHash() {
   if (!curYM) return;
   const p = new URLSearchParams({ member: curMember, y: curYM.year, m: curYM.month });
+  // 深链接打开时保留目标消息 ID，确保新标签页加载和刷新后仍可精确定位。
+  if (targetMsgId) p.set("msg_id", targetMsgId);
   if (curType) p.set("t", curType);
   if (isFavFilter) p.set("fav", "1");
   if (searchQuery) p.set("q", searchQuery);
@@ -2907,7 +2915,15 @@ function renderBubble(msg) {
     } else if (msg.type === "voice") {
       html += '<audio controls preload="metadata" src="' + esc(url) + '"></audio>';
     } else {
-      images.push({ url: url, caption: (msg.text || "").slice(0, 80) });
+      images.push({
+        url: url,
+        caption: (msg.text || "").slice(0, 80),
+        source: "message",
+        messageId: msg.id,
+        memberName: msg.member_name || curMember,
+        year: msg.year || (curYM && curYM.year),
+        month: msg.month || (curYM && curYM.month),
+      });
       html += '<img loading="lazy"' + dim + ' data-lb="' + (images.length - 1) + '" src="' + esc(url) + '" alt="">';
     }
   } else if (msg.download_failed) {
@@ -2961,7 +2977,15 @@ function renderBubble(msg) {
               mediaEl.preload = "metadata";
               mediaEl.src = url;
             } else {
-              images.push({ url: url, caption: (msg.text || "").slice(0, 80) });
+              images.push({
+                url: url,
+                caption: (msg.text || "").slice(0, 80),
+                source: "message",
+                messageId: msg.id,
+                memberName: msg.member_name || curMember,
+                year: msg.year || (curYM && curYM.year),
+                month: msg.month || (curYM && curYM.month),
+              });
               mediaEl = document.createElement("img");
               mediaEl.loading = "lazy";
               mediaEl.dataset.lb = String(images.length - 1);
@@ -3246,6 +3270,53 @@ function resetMobileViewport() {
   }, 250);
 }
 
+function buildLightboxSourceAction(item) {
+  if (!item || !item.source) return null;
+  const params = new URLSearchParams();
+  let label = "";
+  let title = "";
+
+  if (item.source === "blog" && item.blogId) {
+    params.set("blog", item.groupKey || "nogizaka");
+    params.set("id", String(item.blogId));
+    label = "📄 前往对应博客";
+    title = "在新标签页打开对应博客";
+  } else if (
+    item.source === "message" && item.messageId && item.memberName &&
+    Number(item.year) > 0 && Number(item.month) > 0
+  ) {
+    params.set("member", item.memberName);
+    params.set("y", String(item.year));
+    params.set("m", String(item.month));
+    params.set("msg_id", String(item.messageId));
+    label = "💬 前往对应消息";
+    title = "在新标签页打开并定位到对应消息";
+  } else {
+    return null;
+  }
+
+  const url = new URL(window.location.href);
+  url.hash = params.toString();
+  return { href: url.toString(), label, title };
+}
+
+function syncLightboxSourceAction(item) {
+  const btn = $("lbSourceBtn");
+  if (!btn) return;
+  const action = buildLightboxSourceAction(item);
+  if (!action) {
+    btn.removeAttribute("href");
+    btn.removeAttribute("title");
+    btn.textContent = "";
+    btn.style.display = "none";
+    return;
+  }
+  btn.href = action.href;
+  btn.textContent = action.label;
+  btn.title = action.title;
+  btn.style.display = "inline-flex";
+}
+
 function openLightbox(i, opener, caption, placeholderUrl) {
   const currentVersion = ++lbImageLoadVersion;
   if (typeof i === "string") {
@@ -3260,10 +3331,7 @@ function openLightbox(i, opener, caption, placeholderUrl) {
     $("lbCounter").style.display = "none";
     $("lbPrev").style.display = "none";
     $("lbNext").style.display = "none";
-    if ($("lbOriginalBtn")) {
-      $("lbOriginalBtn").href = i;
-      $("lbOriginalBtn").style.display = "inline-flex";
-    }
+    syncLightboxSourceAction(null);
     if ($("lbDownloadBtn")) $("lbDownloadBtn").style.display = "inline-flex";
     if ($("lbStatus")) $("lbStatus").style.display = "none";
     $("lightbox").classList.add("open");
@@ -3282,11 +3350,8 @@ function openLightbox(i, opener, caption, placeholderUrl) {
   const targetUrl = item.url;
   const targetPlaceholder = placeholderUrl || item.thumbUrl || "";
 
-  // 1. 设置“查看原图”链接与下载入口
-  if ($("lbOriginalBtn")) {
-    $("lbOriginalBtn").href = targetUrl || targetPlaceholder || "#";
-    $("lbOriginalBtn").style.display = targetUrl ? "inline-flex" : "none";
-  }
+  // 1. 设置来源跳转与原图下载入口。来源在新标签页打开，当前相册浏览状态保持不变。
+  syncLightboxSourceAction(item);
   if ($("lbDownloadBtn")) {
     $("lbDownloadBtn").style.display = targetUrl ? "inline-flex" : "none";
   }
@@ -3614,7 +3679,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") lbMove(-1);
     if (e.key === "ArrowRight") lbMove(1);
     if (e.key === "Tab") {
-      const focusable = [$("lbOriginalBtn"), $("lbDownloadBtn"), $("lbClose"), $("lbPrev"), $("lbNext")].filter(el => el && el.style.display !== "none" && !el.disabled);
+      const focusable = [$("lbSourceBtn"), $("lbDownloadBtn"), $("lbClose"), $("lbPrev"), $("lbNext")].filter(el => el && el.style.display !== "none" && !el.disabled);
       if (focusable.length) {
         const index = focusable.indexOf(document.activeElement);
         e.preventDefault();
@@ -6172,6 +6237,13 @@ async function loadGalleryPhotos(reset = true) {
         url: photo.url,
         thumbUrl: thumbUrl,
         caption: "【" + (photo.member_name || "") + "】" + dateStr + (photo.text ? " · " + photo.text.slice(0, 60) : ""),
+        source: photo.source,
+        blogId: photo.blog_id,
+        groupKey: photo.group_key,
+        messageId: photo.source === "message" ? photo.id : "",
+        memberName: photo.member_name,
+        year: photo.year,
+        month: photo.month,
       });
 
       const card = document.createElement("div");
