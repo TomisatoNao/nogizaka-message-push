@@ -741,9 +741,17 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                     if module["actionsWidth"]:
                         assert module["headingWidth"] >= module["actionsWidth"]
 
-                baseline = BASELINE_ROOT / f"{tab}-{viewport_name}.png"
-                actual = tmp_path / f"{tab}-{viewport_name}.png"
-                page.screenshot(path=str(actual), full_page=False)
+                    baseline = BASELINE_ROOT / f"{tab}-{viewport_name}.png"
+                    actual = tmp_path / f"{tab}-{viewport_name}.png"
+                    page.evaluate(
+                        """() => {
+                            const savebar = document.querySelector('footer.savebar');
+                            if (savebar) savebar.classList.add('show');
+                            if (window.saveMsgTimer) clearTimeout(window.saveMsgTimer);
+                            window.saveMsgTimer = null;
+                        }"""
+                    )
+                    page.screenshot(path=str(actual), full_page=False)
                 if os.environ.get("UPDATE_ADMIN_SNAPSHOTS") == "1":
                     baseline.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(actual, baseline)
@@ -913,6 +921,316 @@ def test_admin_mobile_openid_cards_keep_information_and_actions_separate(admin_s
             assert layout["actionsBox"]["top"] >= layout["codeBox"]["bottom"]
             assert layout["actionsBox"]["right"] <= layout["viewportWidth"] + 1
             assert all(button["width"] > 0 and button["height"] >= 40 for button in layout["buttons"])
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def _open_admin_page(playwright, admin_static_server, route_handler, *, tab: str, init_script: str | None = None):
+    browser = playwright.chromium.launch(headless=True)
+    context = browser.new_context(
+        viewport=VIEWPORTS["desktop"],
+        color_scheme="dark",
+        locale="zh-CN",
+        device_scale_factor=1,
+    )
+    context.add_init_script("localStorage.setItem('sakamichiTheme', 'dark');")
+    if init_script:
+        context.add_init_script(init_script)
+    page = context.new_page()
+    page.route("**/api/**", route_handler)
+    page.goto(f"{admin_static_server}/#tab={tab}", wait_until="domcontentloaded")
+    return browser, context, page
+
+
+def _hold_fetch_init_script(path: str, method: str) -> str:
+    script = r"""(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.__heldApiWrites = [];
+      window.fetch = async (input, init = {}) => {
+        const url = new URL(typeof input === "string" ? input : input.url, location.href);
+        const requestMethod = String(init.method || "GET").toUpperCase();
+        if (url.pathname === "__PATH__" && requestMethod === "__METHOD__") {
+          let release;
+          const pending = new Promise((resolve) => {
+            release = (body) => resolve(new Response(JSON.stringify(body), {
+              status: 200,
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+            }));
+          });
+          window.__heldApiWrites.push({ body: init.body || null, release });
+          return pending;
+        }
+        return originalFetch(input, init);
+      };
+    })();"""
+    return script.replace("__PATH__", path).replace("__METHOD__", method)
+
+
+def test_admin_config_save_keeps_edits_made_while_request_is_pending(admin_static_server):
+    """配置提交以请求快照为基线；请求期间的新编辑继续保持未保存状态。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(
+                p,
+                admin_static_server,
+                handle_api,
+                tab="social",
+                init_script=_hold_fetch_init_script("/api/config", "PUT"),
+            )
+            page.locator('[data-monitor-dialog-target="monitorXDialog"]').first.click()
+            interval = page.locator("#socialXInterval")
+            interval.wait_for(state="visible", timeout=10000)
+            interval.fill("61")
+            page.locator("#monitorXDialog [data-monitor-dialog-close]").last.click()
+            page.locator("footer.savebar.show").wait_for(state="visible", timeout=5000)
+
+            save_button = page.locator("#btnSave")
+            save_button.click()
+            page.wait_for_function("window.__heldApiWrites?.length === 1", timeout=5000)
+            assert save_button.is_disabled()
+            page.locator('[data-monitor-dialog-target="monitorXDialog"]').first.click()
+            interval.fill("62")
+            page.locator("#monitorXDialog [data-monitor-dialog-close]").last.click()
+            page.evaluate("document.getElementById('btnSave').click()")
+            assert page.evaluate("window.__heldApiWrites.length") == 1
+
+            saved_payload = page.evaluate("JSON.parse(window.__heldApiWrites[0].body)")
+            assert saved_payload["platforms"]["x"]["interval_seconds"] == 61
+            page.evaluate("window.__heldApiWrites[0].release({ok: true, reloaded: true, cred_status: {}})")
+            page.wait_for_function("!document.getElementById('btnSave').disabled", timeout=5000)
+            page.locator("footer.savebar.show").wait_for(state="visible", timeout=5000)
+            assert "新修改尚未保存" in page.locator("#saveMsg").inner_text()
+            assert interval.input_value() == "62"
+
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def test_admin_secret_dialog_locks_context_during_save(admin_static_server):
+    """密钥请求未完成时不能关闭或替换弹窗上下文。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(
+                p,
+                admin_static_server,
+                handle_api,
+                tab="system",
+                init_script=_hold_fetch_init_script("/api/secrets", "POST"),
+            )
+            page.locator('.nav-tab[data-tab="system"]').click()
+            page.locator("#btnFillGeminiKey").wait_for(state="visible", timeout=10000)
+            page.locator("#btnFillGeminiKey").click()
+            secret_input = page.locator("#secretFields input").first
+            secret_input.fill("fixture-cpa-key")
+            assert "无需点击页面底部保存栏" in page.locator("#secretPersistenceHint").inner_text()
+            page.locator("#secretSave").click()
+            page.wait_for_function("window.__heldApiWrites?.length === 1", timeout=5000)
+
+            assert page.locator("#secretSave").is_disabled()
+            assert page.locator("#secretCancel").is_disabled()
+            page.keyboard.press("Escape")
+            page.evaluate("openSecretDialog('替代凭证', '', [{env: 'OTHER_KEY', label: '其他密钥'}], null)")
+            assert page.locator("#secretDialog").is_visible()
+            assert page.locator("#secretDialogTitle").inner_text() == "填写 Gemini API Key"
+
+            request_body = page.evaluate("JSON.parse(window.__heldApiWrites[0].body)")
+            assert request_body["values"] == {"GEMINI_API_KEY": "fixture-cpa-key"}
+            page.evaluate(
+                "window.__heldApiWrites[0].release({ok: true, updated: ['GEMINI_API_KEY'], "
+                "env_status: {GEMINI_API_KEY: true}, reloaded: true})"
+            )
+            page.wait_for_selector("#secretDialog", state="hidden", timeout=5000)
+
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def test_admin_status_marks_last_data_stale_on_refresh_failure(admin_static_server):
+    """状态轮询失败时保留上次有效数据显示，并提示更新时间与恢复状态。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            status_mode = {"fail_next": False}
+
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                if path == "/api/status" and status_mode["fail_next"]:
+                    status_mode["fail_next"] = False
+                    payload = {"ok": False, "errors": ["fixture status failure"]}
+                else:
+                    payload = _api_payload(path)
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(payload, ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(
+                p, admin_static_server, handle_api, tab="status"
+            )
+            page.wait_for_function(
+                "document.getElementById('stStartup')?.textContent.includes('READY') && "
+                "typeof statusFetchInFlight !== 'undefined' && !statusFetchInFlight",
+                timeout=10000,
+            )
+            page.evaluate("stopStatusPolling()")
+            previous_cycle = page.locator("#stCycle").inner_text()
+            assert page.locator("#stHint").get_attribute("data-stale") == "false"
+
+            status_mode["fail_next"] = True
+            page.evaluate("fetchStatus()")
+            page.wait_for_function(
+                "document.getElementById('stHint')?.dataset.stale === 'true'",
+                timeout=5000,
+            )
+            assert "最近成功更新：" in page.locator("#stHint").inner_text()
+            assert page.locator("#stCycle").inner_text() == previous_cycle
+
+            page.evaluate("fetchStatus()")
+            page.wait_for_function(
+                "document.getElementById('stHint')?.dataset.stale === 'false'",
+                timeout=5000,
+            )
+            assert "状态刷新失败" not in page.locator("#stHint").inner_text()
+
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def test_admin_dynamic_table_input_updates_dirty_state_once(admin_static_server):
+    """动态表格输入通过文档委托只计算一次脏状态。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(
+                p, admin_static_server, handle_api, tab="channels"
+            )
+            page.locator('.nav-tab[data-tab="channels"]').click()
+            field = page.locator("#napcatRows input.admin-table-input--napcat-id").first
+            field.wait_for(state="visible", timeout=10000)
+            calls = page.evaluate(
+                """() => {
+                    const original = window.markDirty;
+                    window.__markDirtyCalls = 0;
+                    window.markDirty = (...args) => {
+                      window.__markDirtyCalls += 1;
+                      return original(...args);
+                    };
+                    const input = document.querySelector('#napcatRows input.admin-table-input--napcat-id');
+                    input.value = '12345679';
+                    input.dispatchEvent(new Event('input', {bubbles: true}));
+                    return window.__markDirtyCalls;
+                }"""
+            )
+            assert calls == 1
+            page.locator("footer.savebar.show").wait_for(state="visible", timeout=5000)
+
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def test_admin_config_controls_update_dirty_state_once(admin_static_server):
+    """全局与 NapCat 高级设置控件均只通过文档委托更新一次脏状态。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(
+                p, admin_static_server, handle_api, tab="channels"
+            )
+            page.locator('.nav-tab[data-tab="channels"]').click()
+            page.locator("#btnNapcatAdvanced").click()
+            page.locator("#btnSubtabAiChat").click()
+            page.locator(".ai-chat-group-chk").first.wait_for(state="visible", timeout=5000)
+            page.evaluate(
+                """() => {
+                    const original = window.markDirty;
+                    window.__markDirtyCalls = 0;
+                    window.markDirty = (...args) => {
+                      window.__markDirtyCalls += 1;
+                      return original(...args);
+                    };
+                }"""
+            )
+
+            cases = [
+                ("#channelSwitches input[type=checkbox]", "change", "checked"),
+                ("#aiChatOn", "change", "checked"),
+                ("#aiChatModel", "input", "value"),
+                (".ai-chat-group-chk", "change", "checked"),
+                ("#inboundOn", "change", "checked"),
+                ("#inboundTransport", "change", "value"),
+                ("#cmdMode", "change", "value"),
+            ]
+            for expected, (selector, event_name, property_name) in enumerate(cases, start=1):
+                calls = page.evaluate(
+                    """({ selector, eventName, propertyName }) => {
+                        const target = document.querySelector(selector);
+                        if (!target) throw new Error(`missing test control: ${selector}`);
+                        if (propertyName === "checked") target.checked = !target.checked;
+                        else if (target instanceof HTMLSelectElement && target.options.length > 1) {
+                          target.selectedIndex = (target.selectedIndex + 1) % target.options.length;
+                        } else target.value = target.value + "-updated";
+                        target.dispatchEvent(new Event(eventName, { bubbles: true }));
+                        return window.__markDirtyCalls;
+                    }""",
+                    {"selector": selector, "eventName": event_name, "propertyName": property_name},
+                )
+                assert calls == expected, f"{selector} triggered markDirty {calls - expected + 1} times"
+
             context.close()
             browser.close()
     except Exception as exc:

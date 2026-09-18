@@ -534,6 +534,7 @@
   .btn-secret-status.configured .secret-dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .btn-secret-status.unconfigured .secret-dot { background: var(--err); box-shadow: 0 0 6px var(--err); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+  #stHint[data-stale="true"] { color: var(--warn); }
   .hint code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
   footer.savebar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px);
     background: color-mix(in srgb, var(--card-solid) 92%, transparent);
@@ -2409,6 +2410,7 @@
 <dialog id="secretDialog">
 <h3 id="secretDialogTitle">填写凭证</h3>
 <div class="dialog-note" id="secretDialogHint"></div>
+<p class="hint" id="secretPersistenceHint">提交后立即写入凭证并尝试生效；无需点击页面底部保存栏。</p>
 <details class="help-box" id="secretSmartBox" style="margin-bottom: 14px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--card-soft);">
   <summary style="font-size: 13px; color: var(--accent); cursor: pointer; user-select: none; font-weight: 500;">
     📋 智能一键解析（从 DevTools `signin` cURL 提取）
@@ -2439,6 +2441,7 @@
   <div class="dialog-note">
     用于拉取账号 Feed、24h 快拍 (Story) 及私密/受限内容；公开单帖通常可匿名解析。
   </div>
+  <p class="hint">点击保存后会立即验证并更新 Cookies；无需再点击页面底部保存栏。</p>
   <div style="margin-top: 10px;">
     <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 8px; line-height: 1.55;">
       💡 <b>推荐方式</b>：在浏览器打开并登录 Instagram，使用插件 <code>Get cookies.txt LOCALLY</code> 或 <code>EditThisCookie</code> 导出完整 Cookies 粘贴于此（自带设备指纹，最抗风控）。也支持粘贴 cURL 或裸 <code>sessionid</code>。
@@ -2538,6 +2541,8 @@ let qqBotStatus = [];     // QQ 官方 Bot 凭证状态
 let envStatus = {};       // 常用凭证与每个 Telegram Bot 专属 Token 的配置状态
 let igSessionConfigured = null; // Instagram Cookies 状态：null 表示尚未完成探测
 let dirty = false;
+let configSaveInFlight = false;
+let secretSaveInFlight = false;
 // 清理旧版保存在 localStorage 中的静态 Token；Token 模式改用 HttpOnly 会话 Cookie。
 try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 
@@ -3217,43 +3222,56 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
-  collectGeneral();
-  collectChannels();
-  collectSocial();
-  const errors = validateAdminConfig();
-  if (errors.length > 0) {
-    msg("保存失败，请修正以下配置：\n" + errors.join("\n"), "err");
-    focusAdminValidationError();
-    return;
-  }
-  // 区间、调度时间和端口均已由 validateAdminConfig 统一处理。
-
-  // 高级页有没点「应用到表单」的 JSON 修改时，保存会忽略它们——先确认
-  if (document.getElementById("tab-advanced").classList.contains("active")) {
-    let rawParsed = null;
-    try { rawParsed = JSON.stringify(JSON.parse($("rawJson").value)); } catch (e) { /* 解析失败也视为有改动 */ }
-    if (rawParsed !== JSON.stringify(config) &&
-        !(await uiConfirm("高级页的 JSON 有未「应用到表单」的修改，保存将忽略这些修改。继续？"))) return;
-  }
+  if (configSaveInFlight) return;
+  configSaveInFlight = true;
+  const lockedControls = [$("btnSave"), $("btnReloadFile"), $("btnRestart"), $("rawJson")].filter(Boolean);
+  const previousDisabled = lockedControls.map((control) => control.disabled);
+  lockedControls.forEach((control) => { control.disabled = true; });
   try {
+    collectGeneral();
+    collectChannels();
+    collectSocial();
+    const errors = validateAdminConfig();
+    if (errors.length > 0) {
+      msg("保存失败，请修正以下配置：\n" + errors.join("\n"), "err");
+      focusAdminValidationError();
+      return;
+    }
+    // 区间、调度时间和端口均已由 validateAdminConfig 统一处理。
+
+    // 高级页有没点「应用到表单」的 JSON 修改时，保存会忽略它们——先确认
+    if (document.getElementById("tab-advanced").classList.contains("active")) {
+      let rawParsed = null;
+      try { rawParsed = JSON.stringify(JSON.parse($("rawJson").value)); } catch (e) { /* 解析失败也视为有改动 */ }
+      if (rawParsed !== JSON.stringify(config) &&
+          !(await uiConfirm("高级页的 JSON 有未「应用到表单」的修改，保存将忽略这些修改。继续？"))) return;
+    }
+
+    // 请求期间允许继续编辑表单，但成功后只能把本次提交的快照设为已保存基线。
+    const submittedConfig = JSON.parse(JSON.stringify(config));
+    const submittedJson = JSON.stringify(submittedConfig);
     msg("保存中…", "");
     const data = await api("/api/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
+      body: submittedJson,
     });
     if (!data.ok) {
       msg("❌ 校验失败：\n" + (data.errors || []).join("\n"), "err");
       return;
     }
     credStatus = data.cred_status || credStatus;
-    baseline = JSON.stringify(config);
-    setDirty(false);
+    baseline = submittedJson;
     renderAccounts(); renderMembers(); renderSocial(); refreshRawJson();
-    msg(data.reloaded ? "✅ 已保存并热重载" : "⚠️ 已保存，但热重载失败（详见主程序日志）",
+    markDirty();
+    const saveText = data.reloaded ? "✅ 已保存并热重载" : "⚠️ 已保存，但热重载失败（详见主程序日志）";
+    msg(dirty ? saveText + "；请求期间有新修改尚未保存" : saveText,
         data.reloaded ? "ok" : "err");
   } catch (e) {
     msg("保存失败：" + e.message, "err");
+  } finally {
+    configSaveInFlight = false;
+    lockedControls.forEach((control, index) => { control.disabled = previousDisabled[index]; });
   }
 }
 
@@ -3331,6 +3349,8 @@ window.addEventListener("hashchange", () => {
 let statusTimer = null, countdownTimer = null;
 let stNextCycle = null, stClockDelta = 0, stCycleCount = 0;
 let latestStatusData = null;
+let statusFetchInFlight = false;
+let statusLastSuccessAt = null;
 
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
@@ -3345,9 +3365,33 @@ async function fetchStatus() {
     $("stHint").textContent = "⏸ 页面在后台，已暂停刷新（回到前台自动恢复）";
     return;
   }
+  if (statusFetchInFlight) return;
+  statusFetchInFlight = true;
   let data;
-  try { data = await api("/api/status"); } catch (e) { return; }
-  if (!data.ok) return;
+  try { data = await api("/api/status"); } catch (e) {
+    const lastUpdated = statusLastSuccessAt
+      ? new Date(statusLastSuccessAt).toLocaleTimeString()
+      : "尚无成功更新";
+    const hint = $("stHint");
+    hint.dataset.stale = "true";
+    hint.textContent = "⚠️ 状态刷新失败，当前数据可能已过期" +
+      (e && e.message ? "（" + String(e.message).slice(0, 100) + "）" : "") +
+      " · 最近成功更新：" + lastUpdated;
+    statusFetchInFlight = false;
+    return;
+  }
+  if (!data || !data.ok) {
+    const lastUpdated = statusLastSuccessAt
+      ? new Date(statusLastSuccessAt).toLocaleTimeString()
+      : "尚无成功更新";
+    const hint = $("stHint");
+    hint.dataset.stale = "true";
+    hint.textContent = "⚠️ 状态接口未返回有效数据，当前数据可能已过期 · 最近成功更新：" + lastUpdated;
+    statusFetchInFlight = false;
+    return;
+  }
+  statusFetchInFlight = false;
+  statusLastSuccessAt = Date.now();
   latestStatusData = data;
   stClockDelta = data.now_epoch - Date.now() / 1000;
   stNextCycle = data.next_cycle;
@@ -3368,7 +3412,9 @@ async function fetchStatus() {
     startupBox.title = (startup.reasons || []).join("；");
   }
   $("stCycle").textContent = "第 " + data.cycle_count + " 轮 · 运行 " + fmtDur(data.uptime_seconds);
-  $("stHint").textContent = data.embedded ? "" :
+  const statusHint = $("stHint");
+  statusHint.dataset.stale = "false";
+  statusHint.textContent = data.embedded ? "" :
     "独立模式：主程序未在本进程运行，以下仅为可见信息；Token 剩余时间不可用。";
   updateCountdown();
 
@@ -3902,7 +3948,6 @@ function renderGeneral() {
     input.addEventListener("change", () => {
       config.channels = config.channels || {};
       config.channels[key] = input.checked;
-      markDirty();
       if (key === "qq_official") renderQqBots();
     });
     const track = document.createElement("span"); track.className = "track";
@@ -4105,7 +4150,6 @@ function renderAiChatAllowedGroups() {
     chk.value = gid;
     chk.className = "ai-chat-group-chk";
     chk.checked = selected.has(gid);
-    chk.addEventListener("change", markDirty);
     const labelText = document.createElement("span");
     labelText.textContent = r.remark ? `${r.remark} (${gid})` : gid;
     label.append(chk, labelText);
@@ -4149,7 +4193,6 @@ function renderQqBots() {
       tdRemark.appendChild(mkTableInput(bot.remark || "", (v) => {
         const t = v.trim();
         if (t) bot.remark = t; else delete bot.remark;
-        markDirty();
         renderSocialPushTargets();
       }, "例如：5期生群", "admin-table-input--remark"));
       const tdApp = document.createElement("td");
@@ -4630,7 +4673,21 @@ $("btnTestProxy")?.addEventListener("click", async () => {
 
 // ── 凭证填写（值只上行，服务端写入 .env，绝不回显）──
 let secretCtx = null;
+function setSecretDialogBusy(busy) {
+  secretSaveInFlight = busy;
+  ["secretSave", "secretCancel", "secretDelete", "btnSecretSmartParse"].forEach((id) => {
+    const control = $(id);
+    if (control) control.disabled = busy;
+  });
+  $("secretFields")?.querySelectorAll("input, textarea, button").forEach((control) => {
+    control.disabled = busy;
+  });
+  const smartInput = $("secretSmartInput");
+  if (smartInput) smartInput.disabled = busy;
+}
+
 function openSecretDialog(title, hint, fields, account, opts) {
+  if (secretSaveInFlight) return;
   const showSmartParse = Boolean((opts || {}).showSmartParse);
   secretCtx = { fields, account, userAction: (opts || {}).userAction || null,
                 onDone: (opts || {}).onDone || null };
@@ -4720,12 +4777,16 @@ function openSecretDialog(title, hint, fields, account, opts) {
   if ($("secretDelete")) {
     $("secretDelete").style.display = canDelete ? "inline-block" : "none";
     $("secretDelete").textContent = "🗑️ 清空此凭证";
+    const deleteCtx = secretCtx;
     $("secretDelete").onclick = async () => {
       $("secretDialog").close();
       await clearEnvSecret(singleField.env, singleField.label);
-      if (secretCtx && secretCtx.onDone) { try { secretCtx.onDone(); } catch (e) {} }
+      if (deleteCtx && deleteCtx.onDone) { try { deleteCtx.onDone(); } catch (e) {} }
     };
   }
+  $("secretPersistenceHint").textContent = secretCtx.userAction
+    ? "此操作提交后立即生效，不走页面底部配置保存。"
+    : "提交后立即写入凭证并尝试热重载；无需点击页面底部保存栏。";
   $("secretDialog").showModal();
   const first = box.querySelector("input");
   if (first) first.focus();
@@ -4845,12 +4906,17 @@ if ($("btnSecretSmartParse")) {
 }
 
 $("secretCancel").addEventListener("click", () => $("secretDialog").close());
+$("secretDialog").addEventListener("cancel", (event) => {
+  if (secretSaveInFlight) event.preventDefault();
+});
 $("secretSave").addEventListener("click", async () => {
+  if (secretSaveInFlight || !secretCtx) return;
+  const submitCtx = secretCtx;
   const values = {};
   let missing = null;
   let invalid = null;
   for (const input of $("secretFields").querySelectorAll("input")) {
-    const f = secretCtx.fields.find((x) => x.env === input.dataset.env);
+    const f = submitCtx.fields.find((x) => x.env === input.dataset.env);
     const v = input.value.trim();
     clearAdminFieldValidation(input);
     if (v && (/\r|\n/.test(v) || v.length > 16384) && !invalid) {
@@ -4866,7 +4932,7 @@ $("secretSave").addEventListener("click", async () => {
   }
   if (missing) {
     const missingInput = Array.from($("secretFields").querySelectorAll("input")).find((input) => {
-      const f = secretCtx.fields.find((x) => x.env === input.dataset.env);
+      const f = submitCtx.fields.find((x) => x.env === input.dataset.env);
       return f && f.required && !input.value.trim();
     });
     markAdminFieldInvalid(missingInput, "请填写：" + missing);
@@ -4876,7 +4942,7 @@ $("secretSave").addEventListener("click", async () => {
   if (!Object.keys(values).length) { uiAlert("没有填写任何值"); return; }
 
   // 账号密码走用户管理接口（不写 .env）
-  if (secretCtx.userAction) {
+  if (submitCtx.userAction) {
     const pw = values["__password__"] || "";
     if (pw.length < minPwLen) { uiAlert("密码至少 " + minPwLen + " 位"); return; }
     if (pw.length > 256 || /[\r\n]/.test(pw)) {
@@ -4885,13 +4951,18 @@ $("secretSave").addEventListener("click", async () => {
       uiAlert("密码不能换行且最多 256 位");
       return;
     }
-    const ok = await userAction({ ...secretCtx.userAction, password: pw });
-    if (ok) $("secretDialog").close();
+    setSecretDialogBusy(true);
+    try {
+      const ok = await userAction({ ...submitCtx.userAction, password: pw });
+      if (ok) $("secretDialog").close();
+    } finally {
+      setSecretDialogBusy(false);
+    }
     return;
   }
 
   const saveBtn = $("secretSave");
-  saveBtn.disabled = true;
+  setSecretDialogBusy(true);
   const origText = saveBtn.textContent;
   saveBtn.textContent = "写入并握手中…";
   try {
@@ -4899,14 +4970,14 @@ $("secretSave").addEventListener("click", async () => {
     const data = await api("/api/secrets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values: values, account: secretCtx.account || undefined }),
+      body: JSON.stringify({ values: values, account: submitCtx.account || undefined }),
     });
     if (!data.ok) { msg("❌ " + (data.errors || []).join("\n"), "err"); return; }
     if (data.cred_status) credStatus = data.cred_status;
     if (data.qq_bot_status) qqBotStatus = data.qq_bot_status;
     if (data.env_status) envStatus = data.env_status;
     $("secretDialog").close();
-    if (secretCtx.onDone) { try { secretCtx.onDone(); } catch (e) { /* 忽略 */ } }
+    if (submitCtx.onDone) { try { submitCtx.onDone(); } catch (e) { /* 忽略 */ } }
     renderGeneral(); renderAccounts();
 
     if (data.handshake) {
@@ -4921,13 +4992,13 @@ $("secretSave").addEventListener("click", async () => {
     }
 
     msg("✅ 已写入 .env（" + (data.updated || []).join(", ") + "）" +
-        (secretCtx.account ? "，账号已就绪" : "") +
+        (submitCtx.account ? "，账号已就绪" : "") +
         (data.reloaded ? "" : "；⚠️ 热重载失败，详见主程序日志"),
         data.reloaded ? "ok" : "err");
   } catch (e) {
     msg("写入失败：" + e.message, "err");
   } finally {
-    saveBtn.disabled = false;
+    setSecretDialogBusy(false);
     saveBtn.textContent = origText;
   }
 });
@@ -5941,7 +6012,6 @@ function renderNapcat() {
     tdRemark.appendChild(mkTableInput(r.remark || "", (v) => {
       const t = v.trim();
       if (t) r.remark = t; else delete r.remark;
-      markDirty();
       renderSocialPushTargets();
     }, "例如：乃木坂主群", "admin-table-input--napcat-remark"));
     
@@ -5981,22 +6051,19 @@ function renderTGBots() {
     
     const tdName = document.createElement("td");
     tdName.appendChild(mkTableInput(b.name || "", (v) => {
-      b.name = v.trim().toLowerCase(); 
-      markDirty();
+      b.name = v.trim().toLowerCase();
     }, "tg_main", "admin-table-input--tg-name"));
 
     const tdRemark = document.createElement("td");
     tdRemark.appendChild(mkTableInput(b.remark || "", (v) => {
       const t = v.trim();
       if (t) b.remark = t; else delete b.remark;
-      markDirty();
       renderSocialPushTargets();
     }, "例如：频道A", "admin-table-input--tg-remark"));
     
     const tdChat = document.createElement("td");
     tdChat.appendChild(mkTableInput(b.target_chat || "", (v) => {
-      b.target_chat = v.trim(); 
-      markDirty();
+      b.target_chat = v.trim();
     }, "-10012345678", "admin-table-input--tg-chat"));
     
     const secretVar = tgTokenEnvKey(b.name);
@@ -7217,7 +7284,6 @@ function openCmdOpenidDialog(idx = -1) {
 
 function initCmdOpenidEvents() {
   $("cmdMode")?.addEventListener("change", () => {
-    markDirty();
     renderCmdOpenids();
   });
 
@@ -7572,7 +7638,8 @@ function mkInput(value, onChange, placeholder, style) {
   input.value = value;
   if (placeholder) input.placeholder = placeholder;
   if (style) input.style.cssText = style;
-  input.addEventListener("input", () => { onChange(input.value, input); markDirty(); });
+  // 脏状态由文档级 input/change 委托统一更新，避免控件事件重复收集配置。
+  input.addEventListener("input", () => { onChange(input.value, input); });
   return input;
 }
 function mkTableInput(value, onChange, placeholder, className) {
@@ -8042,10 +8109,10 @@ function bindNapcatAdvancedEvents() {
   $("napcatInboundPill")?.addEventListener("click", () => openNapcatAdvancedDialog("inbound"));
   $("napcatAiChatPill")?.addEventListener("click", () => openNapcatAdvancedDialog("aichat"));
 
-  $("inboundOn")?.addEventListener("change", () => { markDirty(); updateNapcatAdvancedStatus(); });
-  $("inboundTransport")?.addEventListener("change", () => { markDirty(); updateNapcatAdvancedStatus(); });
-  $("aiChatOn")?.addEventListener("change", () => { markDirty(); updateNapcatAdvancedStatus(); });
-  $("aiChatModel")?.addEventListener("input", () => { markDirty(); updateNapcatAdvancedStatus(); });
+  $("inboundOn")?.addEventListener("change", updateNapcatAdvancedStatus);
+  $("inboundTransport")?.addEventListener("change", updateNapcatAdvancedStatus);
+  $("aiChatOn")?.addEventListener("change", updateNapcatAdvancedStatus);
+  $("aiChatModel")?.addEventListener("input", updateNapcatAdvancedStatus);
 
   document.querySelectorAll("[data-napcat-dialog-close]").forEach((btn) => {
     btn.addEventListener("click", () => {
