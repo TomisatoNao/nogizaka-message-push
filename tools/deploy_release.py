@@ -45,6 +45,10 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 22
 fi
 
+if grep -q 'nogizaka-message-push:latest' "$COMPOSE_FILE" 2>/dev/null; then
+  sed -i.bak 's|nogizaka-message-push:latest|nogizaka-message-push:${APP_IMAGE_TAG:-latest}|g' "$COMPOSE_FILE" 2>/dev/null || true
+fi
+
 umask 077
 BACKUP_FILE=".env.release-backup.$$"
 cp "$ENV_FILE" "$BACKUP_FILE" || exit 23
@@ -279,7 +283,8 @@ def main(argv: list[str] | None = None) -> int:
         print("Dry run complete; no SSH connection was made.")
         return 0
 
-    result = subprocess.run(command, input=REMOTE_DEPLOY_SCRIPT, text=True)
+    script_bytes = REMOTE_DEPLOY_SCRIPT.replace("\r\n", "\n").encode("utf-8")
+    result = subprocess.run(command, input=script_bytes)
     return result.returncode
 
 

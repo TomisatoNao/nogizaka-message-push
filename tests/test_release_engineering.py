@@ -45,6 +45,7 @@ def test_release_deployer_contains_health_check_and_rollback_without_passwords()
     source = (ROOT / "tools" / "deploy_release.py").read_text(encoding="utf-8")
     assert "rollback" in deploy_release.REMOTE_DEPLOY_SCRIPT
     assert "${DOCKER_BIN}-compose" in deploy_release.REMOTE_DEPLOY_SCRIPT
+    assert "nogizaka-message-push:latest" in deploy_release.REMOTE_DEPLOY_SCRIPT
     assert "/api/health/status" in source
     assert "NAS_PASS" not in source
     assert "password=" not in source
