@@ -754,7 +754,33 @@ function syncNavTabs(activeTabName) {
   });
 }
 
-function switchMainTab(mode, keepHash) {
+let _membersLoadPromise = null;
+function ensureMembersLoaded(skipSelect = true) {
+  if (members && members.length) return Promise.resolve();
+  if (!_membersLoadPromise) {
+    _membersLoadPromise = loadMembers(skipSelect).finally(() => {
+      _membersLoadPromise = null;
+    });
+  }
+  return _membersLoadPromise;
+}
+
+let _auxiliaryPreloadStarted = false;
+function scheduleAuxiliaryPreload() {
+  if (_auxiliaryPreloadStarted) return;
+  _auxiliaryPreloadStarted = true;
+  const run = () => {
+    loadBlogGroupChips();
+    loadGalleryMembers();
+  };
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(run, { timeout: 3500 });
+  } else {
+    setTimeout(run, 1200);
+  }
+}
+
+async function switchMainTab(mode, keepHash) {
   curMode = mode;
   setHtmlViewClass(mode);
   try { localStorage.setItem("archive_last_main_tab", mode); } catch (_) {}
@@ -768,6 +794,9 @@ function switchMainTab(mode, keepHash) {
     if (!keepHash) goHome();
   } else if (mode === "msg") {
     _enterMemberMode();
+    if (!members.length) {
+      await ensureMembersLoaded(true);
+    }
     if (!keepHash) {
       let saved = null;
       try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
@@ -779,6 +808,9 @@ function switchMainTab(mode, keepHash) {
       selectMember(wanted);
     }
   } else if (mode === "gallery") {
+    if (!galleryMembers.length) {
+      loadGalleryMembers();
+    }
     let saved = null;
     try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
     const activeList = galleryMembers.length ? galleryMembers : members;
@@ -787,6 +819,9 @@ function switchMainTab(mode, keepHash) {
       : (curGalleryMember || "");
     selectGalleryMember(wanted);
   } else if (mode === "blog") {
+    if (!blogGroups.length) {
+      loadBlogGroupChips();
+    }
     let savedGroup = null;
     let savedAuthor = "";
     try {
@@ -800,6 +835,9 @@ function switchMainTab(mode, keepHash) {
       switchMainTab("msg", keepHash);
       return;
     }
+    if (!members.length) {
+      await ensureMembersLoaded(true);
+    }
     let saved = null;
     try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
     const wanted = (saved && members.some(m => m.name === saved))
@@ -812,9 +850,18 @@ function switchMainTab(mode, keepHash) {
 }
 
 if ($("tabHome")) $("tabHome").addEventListener("click", () => goHome());
-if ($("tabMsg")) $("tabMsg").addEventListener("click", () => switchMainTab("msg"));
-if ($("tabBlog")) $("tabBlog").addEventListener("click", () => switchMainTab("blog"));
-if ($("tabGallery")) $("tabGallery").addEventListener("click", () => switchMainTab("gallery"));
+if ($("tabMsg")) {
+  $("tabMsg").addEventListener("mouseenter", () => ensureMembersLoaded(true), { once: true });
+  $("tabMsg").addEventListener("click", () => switchMainTab("msg"));
+}
+if ($("tabBlog")) {
+  $("tabBlog").addEventListener("mouseenter", () => loadBlogGroupChips(), { once: true });
+  $("tabBlog").addEventListener("click", () => switchMainTab("blog"));
+}
+if ($("tabGallery")) {
+  $("tabGallery").addEventListener("mouseenter", () => loadGalleryMembers(), { once: true });
+  $("tabGallery").addEventListener("click", () => switchMainTab("gallery"));
+}
 if ($("tabLetter")) $("tabLetter").addEventListener("click", () => switchMainTab("letter"));
 
 // ── 数据加载 ─────────────────────────────────────
@@ -834,9 +881,8 @@ async function loadMembers(skipSelect = false) {
   renderMemberChips();
   renderMemberPopover("");
   
-  loadBlogGroupChips();
-  // 异步预热相册成员全量名册（含仅博客配图的成员）
-  loadGalleryMembers();
+  // 闲时或按需异步预热相册成员与博客分组，避免开屏堵塞 HTTP 管道
+  scheduleAuxiliaryPreload();
 
   // skipSelect=true 或非消息模式时只渲染 chips，不自动跳转
   if (skipSelect || curMode !== "msg") return;
@@ -2306,6 +2352,9 @@ async function selectMember(name, keepHash) {
   try { localStorage.setItem("archive_last_msg_member", name); } catch (_) {}
   curBlogGroup = "";     // 切换到成员模式，清空博客分组
   hideMessageMonthFooter();
+  if (!members.length) {
+    await ensureMembersLoaded(true);
+  }
   syncChipHighlight();  // 同步 chip 高亮
   if (!keepHash) {
     searchQuery = "";
@@ -3742,14 +3791,15 @@ async function showHome() {
   $('backTop').classList.remove('show'); $('backTop').classList.add('force-hide');
   $('archiveHome').classList.add('active');
   
-  // 1. 如果已有内存或 sessionStorage 缓存，优先秒出（0ms 首屏响应）
+  // 1. 如果已有内存或本地持久缓存，优先秒出（0ms 首屏响应，SWR 策略）
   let hasRenderedCache = false;
   if (!_portalHomeCached) {
     try {
-      const raw = sessionStorage.getItem("archive_portal_home_cache");
+      const raw = localStorage.getItem("archive_portal_home_cache") || sessionStorage.getItem("archive_portal_home_cache");
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && (Date.now() - parsed._ts < 60000)) {
+        // SWR 策略：只要本地有缓存（7 天内），立即秒出静态看板与最近动态，再静默刷新
+        if (parsed && parsed.data && (Date.now() - (parsed._ts || 0) < 7 * 86400000)) {
           _portalHomeCached = parsed.data;
         }
       }
@@ -3772,16 +3822,20 @@ async function showHome() {
     // 首页请求可能在用户切换到其它路由后才返回，避免旧响应覆盖当前视图。
     if (requestVersion !== _homeRequestVersion || curMode !== "home" || location.hash !== routeAtStart) return;
     if (!data.ok || (!data.members.length && !data.blog_groups.length)) {
-      $('homeSkeleton').classList.remove('active');
-      $('archiveHome').innerHTML =
-        '<div class="home-empty active"><div class="ee-icon">📭</div>' +
-        '<div class="ee-title">还没有归档数据</div>' +
-        '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
+      if (!hasRenderedCache) {
+        $('homeSkeleton').classList.remove('active');
+        $('archiveHome').innerHTML =
+          '<div class="home-empty active"><div class="ee-icon">📭</div>' +
+          '<div class="ee-title">还没有归档数据</div>' +
+          '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
+      }
       return;
     }
     _portalHomeCached = data;
     try {
-      sessionStorage.setItem("archive_portal_home_cache", JSON.stringify({ _ts: Date.now(), data }));
+      const serialized = JSON.stringify({ _ts: Date.now(), data });
+      localStorage.setItem("archive_portal_home_cache", serialized);
+      sessionStorage.setItem("archive_portal_home_cache", serialized);
     } catch(e) {}
     renderHome(data);
     $('homeSkeleton').classList.remove('active');
@@ -3880,7 +3934,7 @@ function renderHome(data) {
     strip.innerHTML = recentPics.map(p =>
       '<div class="photo-card" data-type="' + p.type + '" data-member="' + esc(p.member || '') + '" data-group="' + esc(p.group_key || '') + '" data-id="' + p.id + '" data-year="' + (p.year || '') + '" data-month="' + (p.month || '') + '">' +
         '<span class="pc-member">' + esc(p.member_display) + '</span>' +
-        '<img src="' + mediaUrl(p.url) + '" loading="lazy" decoding="async" data-src="' + esc(p.url) + '" alt="" onerror="handleImgError(this)" onload="this.classList.add(\'loaded\')">' +
+        '<img src="' + mediaUrl(p.thumb_url || p.url) + '" loading="lazy" decoding="async" data-src="' + esc(p.url) + '" alt="" onerror="handleImgError(this)" onload="this.classList.add(\'loaded\')">' +
         (p.text ? '<div class="pc-overlay"><div class="pc-cap">' + formatMessageText(p.text) + '</div></div>' : '') +
       '</div>'
     ).join('');
@@ -4456,13 +4510,22 @@ async function boot() {
   initInteractionChips();
   initMessageOrder();
 
-  // 首页数据不依赖成员选择器，直接与认证/成员列表并行，避免首屏串行等待。
+  // 首页数据不依赖成员选择器，避免首屏多接口并发抢占 HTTP 连接。
   const initialHome = !location.hash || location.hash === "#home";
   const authPromise = initAuth();
-  const membersPromise = loadMembers(true);
+  const membersPromise = initialHome ? null : ensureMembersLoaded(true);
   const homePromise = initialHome ? showHome() : null;
   await Promise.all([authPromise, membersPromise, homePromise].filter(Boolean));
-  if (!initialHome) await handleRoute(true);
+  if (initialHome) {
+    // 首页首屏极速呈现后，在空闲时段调度成员名册与周边预加载
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(() => ensureMembersLoaded(true), { timeout: 2000 });
+    } else {
+      setTimeout(() => ensureMembersLoaded(true), 400);
+    }
+  } else {
+    await handleRoute(true);
+  }
 }
 
 boot();

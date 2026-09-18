@@ -54,10 +54,52 @@ def _home_cache_key_for_request() -> tuple[float, float, str]:
     return db_mtime, blog_mtime, datetime.now().strftime("%Y-%m-%d")
 
 
-def _acquire_home_cache(cache_key: tuple[float, float, str]) -> dict | None:
-    """命中缓存则直接返回，否则确保只有一个请求执行昂贵的首页聚合。"""
+def _trigger_async_rebuild(cache_key: tuple[float, float, str]) -> None:
+    """若当前没有后台任务正在构建，启动后台守护线程异步刷新首页缓存。"""
     global _home_cache_building
     with _home_cache_condition:
+        if _home_cache_building:
+            return
+        _home_cache_building = True
+
+    def _worker():
+        try:
+            class _DummyHandler:
+                def __init__(self):
+                    self.payload = None
+
+                def _send_json(self, payload, _code=200):
+                    self.payload = payload
+
+            h = _DummyHandler()
+            handle_home(h, "home", lambda **_: True, lambda: {})
+        except Exception as exc:
+            from src.logger import log_all
+            log_all(f"⚠️ 后台异步刷新首页聚合缓存失败: {exc}", is_debug=True)
+        finally:
+            _release_home_cache()
+
+    t = threading.Thread(target=_worker, name="ArchiveHomeRebuild", daemon=True)
+    t.start()
+
+
+def _acquire_home_cache(cache_key: tuple[float, float, str]) -> dict | None:
+    """命中缓存则直接返回，否则确保只有一个请求执行昂贵的首页聚合。
+    支持 Stale-While-Revalidate：命中旧缓存时立即秒级返回并在后台异步刷新。
+    """
+    global _home_cache_building
+    with _home_cache_condition:
+        # 1. 命中最新缓存直接返回
+        if _home_cache is not None and _home_cache_key == cache_key:
+            return _home_cache
+
+        # 2. SWR：命中旧缓存，直接返回并异步触发重构
+        if _home_cache is not None:
+            stale_data = _home_cache
+            _trigger_async_rebuild(cache_key)
+            return stale_data
+
+        # 3. 完全无缓存：等待或单飞执行构建
         while True:
             if _home_cache is not None and _home_cache_key == cache_key:
                 return _home_cache
@@ -295,9 +337,11 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                     "title": bp["title"], "date": bp["date"], "cover": cover, "has_images": len(imgs) > 0,
                 })
                 if cover:
+                    thumb_url = f"{cover}?thumb=1" if "?" not in cover else f"{cover}&thumb=1"
                     blog_pics.append({
                         "type": "blog", "id": bp["id"], "group_key": bp["group_key"], "member": bp["author"],
                         "member_display": f"{gicon} {gname} · {bp['author']}", "text": bp["title"], "url": cover,
+                        "thumb_url": thumb_url,
                         "published_at": bp["date"],
                         "year": int(bp["date"][:4]) if len(bp["date"]) >= 4 and bp["date"][:4].isdigit() else 2026,
                         "month": int(bp["date"][5:7]) if len(bp["date"]) >= 7 and bp["date"][5:7].isdigit() else 8,
@@ -329,10 +373,12 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
                 norm_m = row[1].replace(" ", "").replace("　", "").replace("_", "")
                 disp = monitor_names.get(norm_m) or row[1].replace("_", " ")
                 canonical_m = _archive.member_dir_name(row[1])
+                msg_url = f"/api/archive/media/{canonical_m}/{row[3]}"
                 msg_pics.append({
                     "type": "msg", "member": canonical_m, "member_display": disp,
                     "id": row[0], "text": row[2] or "",
-                    "url": f"/api/archive/media/{canonical_m}/{row[3]}",
+                    "url": msg_url,
+                    "thumb_url": f"{msg_url}?thumb=1",
                     "w": rj.get("thumbnail_width"), "h": rj.get("thumbnail_height"),
                     "published_at": pub, "year": _ym(pub)[0], "month": _ym(pub)[1],
                 })

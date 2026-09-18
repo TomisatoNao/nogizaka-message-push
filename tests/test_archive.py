@@ -161,6 +161,14 @@ def main() -> None:
             assert code in (403, 404), f"路径穿越应被拒: {code}"
             code, body, _ = _http("GET", base + "/api/archive/months?member=ghost")
             assert code == 404, "未知成员应 404"
+
+            # 首页聚合与 thumb_url
+            code, body, _ = _http("GET", base + "/api/archive/home")
+            assert code == 200, f"首页接口应 200: {code}"
+            j_home = json.loads(body)
+            assert j_home.get("ok") is True and "summary" in j_home and "members" in j_home
+            for pic in j_home.get("recent_pics", []):
+                assert "thumb_url" in pic, f"写真卡片应提供 thumb_url: {pic}"
         finally:
             server.shutdown()
             server.server_close()
