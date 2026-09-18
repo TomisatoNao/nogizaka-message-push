@@ -5693,7 +5693,7 @@ let curGalleryLayout = (function() {
 function getMasonryColCount() {
   const w = window.innerWidth;
   if (w <= 768) return 2;
-  return 4; // 桌面端固定 4 列
+  return 4; // 桌面端固定 4 列，保证 100% 严密无空档
 }
 
 function syncGalleryLayoutToggle() {
@@ -5709,140 +5709,42 @@ function syncGalleryLayoutToggle() {
   }
 }
 
-let masonryLayoutRaf = null;
-function scheduleMasonryLayout() {
-  if (curGalleryLayout !== "masonry") return;
-  if (masonryLayoutRaf) cancelAnimationFrame(masonryLayoutRaf);
-  masonryLayoutRaf = requestAnimationFrame(() => {
-    masonryLayoutRaf = null;
-    layoutMasonry();
-  });
-}
-window.__scheduleMasonryLayout = scheduleMasonryLayout;
-
-function layoutMasonry(cardsBox) {
+function rebalanceMasonry(cardsBox) {
   if (!cardsBox) cardsBox = $("galleryCards");
   if (!cardsBox) return;
-  if (curGalleryLayout !== "masonry") return;
-
   const cards = Array.from(cardsBox.querySelectorAll(".gallery-card"));
-  if (!cards.length) {
-    cardsBox.style.height = "0px";
-    return;
-  }
+  if (!cards.length) return;
 
+  cardsBox.innerHTML = "";
   cardsBox.classList.add("layout-masonry");
-
-  const isMobile = window.innerWidth <= 768;
-  const cols = isMobile ? 2 : 4;
-  const gap = isMobile ? 8 : 14;
-  const containerW = cardsBox.clientWidth || cardsBox.offsetWidth;
-  if (!containerW) return;
-
-  const colW = (containerW - (cols - 1) * gap) / cols;
-  const span2W = colW * 2 + gap;
-  const colHeights = new Array(cols).fill(0);
-
-  function getCardInfo(card) {
-    const isLand = card.classList.contains("is-landscape") || card.dataset.isLandscape === "true";
-    const span = (isLand && cols >= 2) ? 2 : 1;
-    const w = (span === 2) ? span2W : colW;
-    let h = 0;
-
-    const ratioStr = card.style.getPropertyValue("--photo-ratio");
-    if (ratioStr && ratioStr.includes("/")) {
-      const parts = ratioStr.split("/").map(Number);
-      if (parts[0] > 0 && parts[1] > 0) {
-        h = w / (parts[0] / parts[1]);
-      }
-    }
-    if (!h && card.dataset.w && card.dataset.h) {
-      const pw = Number(card.dataset.w);
-      const ph = Number(card.dataset.h);
-      if (pw > 0 && ph > 0) {
-        h = w / (pw / ph);
-      }
-    }
-    if (!h) {
-      const img = card.querySelector("img");
-      if (img && img.naturalWidth && img.naturalHeight) {
-        h = w / (img.naturalWidth / img.naturalHeight);
-      }
-    }
-    if (!h) {
-      h = span === 2 ? Math.round(colW * 1.1) : Math.round(colW * 1.33);
-    }
-    return { card, span, w, h: Math.round(h) };
+  const colCount = getMasonryColCount();
+  const cols = [];
+  for (let i = 0; i < colCount; i++) {
+    const c = document.createElement("div");
+    c.className = "masonry-col";
+    cardsBox.appendChild(c);
+    cols.push(c);
   }
-
-  const items = cards.map(getCardInfo);
-  const queue = [...items];
-
-  while (queue.length > 0) {
-    const item = queue.shift();
-
-    if (item.span === 1 || cols < 2) {
-      let minCol = 0;
-      for (let i = 1; i < cols; i++) {
-        if (colHeights[i] < colHeights[minCol]) minCol = i;
-      }
-      const left = minCol * (colW + gap);
-      const top = colHeights[minCol];
-      colHeights[minCol] = top + item.h + gap;
-
-      item.card.style.position = "absolute";
-      item.card.style.left = Math.round(left) + "px";
-      item.card.style.top = Math.round(top) + "px";
-      item.card.style.width = Math.round(item.w) + "px";
-      item.card.style.height = Math.round(item.h) + "px";
-    } else {
-      // 跨两格：在 (i, i+1) 候选对中寻找让顶部起始高度最小的位置
-      let bestPair = 0;
-      let minPairTop = Math.max(colHeights[0], colHeights[1]);
-      for (let i = 1; i <= cols - 2; i++) {
-        const pairTop = Math.max(colHeights[i], colHeights[i+1]);
-        if (pairTop < minPairTop) {
-          minPairTop = pairTop;
-          bestPair = i;
+  const colHeights = new Array(colCount).fill(0);
+  const colW = cols[0].clientWidth || 220;
+  cards.forEach(card => {
+    let minIdx = 0;
+    for (let i = 1; i < colCount; i++) {
+      if (colHeights[i] < colHeights[minIdx]) minIdx = i;
+    }
+    cols[minIdx].appendChild(card);
+    let h = card.offsetHeight;
+    if (!h || h <= 100) {
+      const ratioStr = card.style.getPropertyValue("--photo-ratio");
+      if (ratioStr && ratioStr.includes("/")) {
+        const parts = ratioStr.split("/").map(Number);
+        if (parts[0] && parts[1]) {
+          h = (parts[1] / parts[0]) * colW;
         }
       }
-
-      // 防留白空洞：检查是否有列严重落后（落后 > 80px）且后续队列有单列卡片
-      let lowestCol = 0;
-      for (let i = 1; i < cols; i++) {
-        if (colHeights[i] < colHeights[lowestCol]) lowestCol = i;
-      }
-
-      if (colHeights[lowestCol] < minPairTop - 80) {
-        const nextSingleIdx = queue.findIndex(q => q.span === 1);
-        if (nextSingleIdx !== -1 && nextSingleIdx <= 3) {
-          const singleItem = queue.splice(nextSingleIdx, 1)[0];
-          queue.unshift(item);
-          queue.unshift(singleItem);
-          continue;
-        }
-      }
-
-      const left = bestPair * (colW + gap);
-      const top = minPairTop;
-      const newHeight = top + item.h + gap;
-      colHeights[bestPair] = newHeight;
-      colHeights[bestPair + 1] = newHeight;
-
-      item.card.style.position = "absolute";
-      item.card.style.left = Math.round(left) + "px";
-      item.card.style.top = Math.round(top) + "px";
-      item.card.style.width = Math.round(item.w) + "px";
-      item.card.style.height = Math.round(item.h) + "px";
     }
-  }
-
-  const totalHeight = Math.max(...colHeights);
-  cardsBox.style.height = Math.round(totalHeight) + "px";
-}
-
-function rebalanceMasonry(cardsBox) {
-  layoutMasonry(cardsBox);
+    colHeights[minIdx] += (h || 250) + 14;
+  });
 }
 
 function switchGalleryLayout(newLayout) {
@@ -5855,19 +5757,25 @@ function switchGalleryLayout(newLayout) {
   const cardsBox = $("galleryCards");
   if (!cardsBox) return;
 
+  const cards = Array.from(cardsBox.querySelectorAll(".gallery-card"));
+  if (!cards.length) return;
+
   if (curGalleryLayout === "masonry") {
-    layoutMasonry(cardsBox);
+    rebalanceMasonry(cardsBox);
   } else {
+    cardsBox.innerHTML = "";
     cardsBox.classList.remove("layout-masonry");
-    cardsBox.style.height = "";
-    const cards = cardsBox.querySelectorAll(".gallery-card");
+    cardsBox.style.setProperty("--gallery-cols", 4);
+    const frag = document.createDocumentFragment();
     cards.forEach(card => {
       card.style.position = "";
       card.style.left = "";
       card.style.top = "";
       card.style.width = "";
       card.style.height = "";
+      frag.appendChild(card);
     });
+    cardsBox.appendChild(frag);
   }
 }
 
@@ -6217,6 +6125,25 @@ async function loadGalleryPhotos(reset = true) {
     const isMasonry = curGalleryLayout === "masonry";
     let masonryCols = [];
     let colHeights = [];
+    if (isMasonry) {
+      cardsBox.classList.add("layout-masonry");
+      masonryCols = Array.from(cardsBox.querySelectorAll(".masonry-col"));
+      const colCount = getMasonryColCount();
+      if (masonryCols.length !== colCount) {
+        cardsBox.innerHTML = "";
+        masonryCols = [];
+        for (let i = 0; i < colCount; i++) {
+          const c = document.createElement("div");
+          c.className = "masonry-col";
+          cardsBox.appendChild(c);
+          masonryCols.push(c);
+        }
+      }
+      colHeights = masonryCols.map(c => c.offsetHeight);
+    } else {
+      cardsBox.classList.remove("layout-masonry");
+    }
+
     const fragment = document.createDocumentFragment();
     const existingUrls = new Set(curGalleryImages.map(img => img.url));
 
@@ -6251,16 +6178,7 @@ async function loadGalleryPhotos(reset = true) {
       card.setAttribute("tabindex", "0");
       card.setAttribute("title", (photo.member_name ? "【" + photo.member_name + "】" : "") + (photo.text || "点击查看大图"));
 
-      // 判定横屏照片：只要横向大于纵向就视为横屏照片，在瀑布流模式下跨 2 格
-      const hasDim = !!(photo.w && photo.h);
-      const isLand = hasDim ? (photo.w > photo.h) : false;
-      if (isLand) {
-        card.classList.add("is-landscape");
-        card.dataset.isLandscape = "true";
-      }
-      if (hasDim) {
-        card.dataset.w = photo.w;
-        card.dataset.h = photo.h;
+      if (photo.w && photo.h) {
         card.style.setProperty("--photo-ratio", photo.w + " / " + photo.h);
       }
 
@@ -6270,7 +6188,7 @@ async function loadGalleryPhotos(reset = true) {
 
       card.innerHTML =
         '<div class="' + badgeClass + '">' + badgeText + '</div>' +
-        '<img src="' + esc(thumbUrl) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');this.parentElement.classList.add(\'has-loaded\');const nw=this.naturalWidth,nh=this.naturalHeight;if(nw&&nh){const p=this.parentElement;const wasLand=p.classList.contains(\'is-landscape\');const isLand=(nw>nh);p.dataset.w=nw;p.dataset.h=nh;p.dataset.isLandscape=isLand?\'true\':\'false\';if(!p.style.getPropertyValue(\'--photo-ratio\')){p.style.setProperty(\'--photo-ratio\',nw+\' / \'+nh);}if(isLand){p.classList.add(\'is-landscape\');}else{p.classList.remove(\'is-landscape\');}if(wasLand!==isLand&&window.__scheduleMasonryLayout){window.__scheduleMasonryLayout();}}" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
+        '<img src="' + esc(thumbUrl) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="图片" onload="this.classList.add(\'loaded\');this.parentElement.classList.add(\'has-loaded\');if(!this.parentElement.style.getPropertyValue(\'--photo-ratio\')&&this.naturalWidth&&this.naturalHeight){this.parentElement.style.setProperty(\'--photo-ratio\',this.naturalWidth+\' / \'+this.naturalHeight);}" onerror="this.classList.add(\'img-broken\');this.parentElement.classList.add(\'is-broken\');this.onerror=null;" />' +
         '<div class="gallery-overlay">' +
           '<div class="gallery-meta">' + esc(photo.member_name || "") + ' · ' + esc(dateStr) + '</div>' +
           (photo.text ? '<div class="gallery-caption">' + esc(photo.text) + '</div>' : '') +
@@ -6280,14 +6198,8 @@ async function loadGalleryPhotos(reset = true) {
       if (imgEl && imgEl.complete && imgEl.naturalWidth) {
         imgEl.classList.add("loaded");
         card.classList.add("has-loaded");
-        const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
-        card.dataset.w = nw;
-        card.dataset.h = nh;
-        const imgLand = (nw > nh);
-        card.dataset.isLandscape = imgLand ? "true" : "false";
-        if (imgLand) card.classList.add("is-landscape");
         if (!card.style.getPropertyValue("--photo-ratio")) {
-          card.style.setProperty("--photo-ratio", nw + " / " + nh);
+          card.style.setProperty("--photo-ratio", imgEl.naturalWidth + " / " + imgEl.naturalHeight);
         }
       }
 
@@ -6299,16 +6211,22 @@ async function loadGalleryPhotos(reset = true) {
         }
       });
 
-      fragment.appendChild(card);
+      if (isMasonry) {
+        let minIdx = 0;
+        for (let i = 1; i < masonryCols.length; i++) {
+          if (colHeights[i] < colHeights[minIdx]) minIdx = i;
+        }
+        masonryCols[minIdx].appendChild(card);
+        const colW = masonryCols[minIdx].clientWidth || 220;
+        const estH = (photo.w && photo.h) ? ((photo.h / photo.w) * colW) : (colW * 1.33);
+        colHeights[minIdx] += estH + 14;
+      } else {
+        fragment.appendChild(card);
+      }
     });
 
-    cardsBox.appendChild(fragment);
-
-    if (curGalleryLayout === "masonry") {
-      layoutMasonry(cardsBox);
-    } else {
-      cardsBox.classList.remove("layout-masonry");
-      cardsBox.style.height = "";
+    if (!isMasonry) {
+      cardsBox.appendChild(fragment);
     }
 
     if (loadMoreBtn) {
@@ -6545,11 +6463,16 @@ if ($("btnLayoutGrid")) {
   $("btnLayoutGrid").addEventListener("click", () => switchGalleryLayout("grid"));
 }
 
+let lastMasonryCols = getMasonryColCount();
 let galleryResizeTimer = null;
 window.addEventListener("resize", () => {
   if (curGalleryLayout !== "masonry") return;
   clearTimeout(galleryResizeTimer);
   galleryResizeTimer = setTimeout(() => {
-    scheduleMasonryLayout();
-  }, 100);
+    const newCols = getMasonryColCount();
+    if (newCols !== lastMasonryCols) {
+      lastMasonryCols = newCols;
+      rebalanceMasonry();
+    }
+  }, 150);
 });

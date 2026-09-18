@@ -1424,7 +1424,7 @@ def test_message_thumbnail_cache_privacy_contract(temp_archive_env, monkeypatch)
 
 
 def test_gallery_layout_toggle_assets():
-    """验证相册画廊瀑布流（横屏照片跨2格、固定4列）与网格切换在前端完整集成。"""
+    """验证相册画廊瀑布流（严密无空档、固定4列）与网格切换在前端完整集成。"""
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
@@ -1439,6 +1439,7 @@ def test_gallery_layout_toggle_assets():
     css_content = (root / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
     assert ".gallery-layout-toggle" in css_content
     assert ".gallery-cards.layout-masonry" in css_content
+    assert ".masonry-col" in css_content
     assert ".gallery-card" in css_content
     assert "--photo-ratio" in css_content
     assert ".has-loaded" in css_content
@@ -1446,9 +1447,8 @@ def test_gallery_layout_toggle_assets():
     js_content = (root / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
     assert "curGalleryLayout" in js_content
     assert "switchGalleryLayout" in js_content
-    assert "layoutMasonry" in js_content
-    assert "is-landscape" in js_content
-    assert "span = (isLand && cols >= 2) ? 2 : 1;" in js_content
+    assert "rebalanceMasonry" in js_content
+    assert "getMasonryColCount" in js_content
 
 
 def test_gallery_lightbox_mobile_gesture_and_viewport_recovery_contract():
