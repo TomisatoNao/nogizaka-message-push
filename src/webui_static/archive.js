@@ -45,6 +45,13 @@ let targetMsgId = "";    // 首页跳转目标消息 ID（避免被 syncHash 冲
 let curMode = "msg";     // "msg" 或 "blog"
 let curBlogAuthor = "";  // 当前选中的博客作者
 let curBlogDate = "";    // 当前选中的博客日期 (YYYY-MM-DD)
+
+// 前端毫秒级 SWR 瞬时缓存
+const memberMonthsCache = new Map();   // `${member}:${type}:${fav}` -> months array
+const msgCalendarCache = new Map();    // `${member}:${type}:${fav}:${q}` -> dayCounts
+const blogAuthorsCache = new Map();    // groupKey -> authors array
+const blogCalendarCache = new Map();   // `${group}:${author}:${q}` -> dayCounts
+
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function sanitizeHtml(htmlStr) {
   if (!htmlStr) return "";
@@ -518,6 +525,14 @@ async function loadCalendar() {
   const version = ++calendarVersion;
   if (calendarAbort) calendarAbort.abort();
   calendarAbort = new AbortController();
+
+  const calCacheKey = `${curMember}:${curType}:${isFavFilter ? 1 : 0}:${searchQuery || ""}`;
+  if (msgCalendarCache.has(calCacheKey)) {
+    dayCounts = msgCalendarCache.get(calCacheKey) || {};
+    if (searchQuery) syncSearchCalendarMonth();
+    renderCalendar();
+  }
+
   try {
     let calUrl = "/api/archive/calendar?member=" + encodeURIComponent(curMember) + "&type=" + curType;
     if (isFavFilter) calUrl += "&favorite=1";
@@ -525,9 +540,12 @@ async function loadCalendar() {
     const data = await api(calUrl, { signal: calendarAbort.signal });
     if (version !== calendarVersion) return;
     dayCounts = data.ok ? data.days : {};
+    msgCalendarCache.set(calCacheKey, dayCounts);
   } catch (e) {
     if (e.name === "AbortError" || version !== calendarVersion) return;
-    dayCounts = {};
+    if (!msgCalendarCache.has(calCacheKey)) {
+      dayCounts = {};
+    }
   }
   if (version !== calendarVersion) return;
   if (searchQuery) syncSearchCalendarMonth();
@@ -557,6 +575,24 @@ async function loadBlogCalendar() {
   const version = ++calendarVersion;
   if (calendarAbort) calendarAbort.abort();
   calendarAbort = new AbortController();
+
+  const cacheKey = `${curBlogGroup}:${curBlogAuthor || ""}:${searchQuery || ""}`;
+  if (blogCalendarCache.has(cacheKey)) {
+    dayCounts = blogCalendarCache.get(cacheKey) || {};
+    blogCalendarError = "";
+    if (searchQuery) {
+      syncSearchCalendarMonth();
+    } else if (!curBlogDate && (!calYM || Object.keys(dayCounts).length > 0)) {
+      const keys = Object.keys(dayCounts).sort();
+      if (keys.length > 0) {
+        const latest = keys[keys.length - 1];
+        const [y, m] = latest.split("-").map(Number);
+        calYM = { year: y, month: m };
+      }
+    }
+    renderCalendar();
+  }
+
   try {
     let url = "/api/archive/blog_calendar?group=" + encodeURIComponent(curBlogGroup) +
               "&author=" + encodeURIComponent(curBlogAuthor || "");
@@ -566,10 +602,13 @@ async function loadBlogCalendar() {
     if (!data.ok || typeof data.days !== "object") throw new Error("博客日历接口返回无效数据");
     blogCalendarError = "";
     dayCounts = data.days || {};
+    blogCalendarCache.set(cacheKey, dayCounts);
   } catch (e) {
     if (e.name === "AbortError" || version !== calendarVersion) return;
-    dayCounts = {};
-    blogCalendarError = "日历暂时不可用，请稍后重试";
+    if (!blogCalendarCache.has(cacheKey)) {
+      dayCounts = {};
+      blogCalendarError = "日历暂时不可用，请稍后重试";
+    }
   }
   if (version !== calendarVersion) return;
   
@@ -1171,28 +1210,39 @@ async function selectBlogGroup(key, author = "", updateHash = true, routeState =
   if (searchTb) searchTb.style.display = "";
   $("tagToggle").parentElement.style.display = "none";
   
-  await loadBlogAuthors(key, selectionVersion);
-  if (selectionVersion !== blogSelectionVersion) return;
-  await loadBlogCalendar();
-  if (selectionVersion !== blogSelectionVersion) return;
-  await loadBlogPage(requestedPage, updateHash);
+  // 三路完全并行并发：作者列表、日历分布、文章卡片首屏并发，彻底消除瀑布流白屏
+  await Promise.all([
+    loadBlogAuthors(key, selectionVersion),
+    loadBlogCalendar(),
+    loadBlogPage(requestedPage, updateHash),
+  ]);
 }
 
 async function loadBlogAuthors(key, selectionVersion = blogSelectionVersion) {
+  // SWR: 命中内存缓存时立即同步渲染，消除切换等待
+  if (blogAuthorsCache.has(key)) {
+    curGroupAuthors = blogAuthorsCache.get(key) || [];
+    renderBlogAuthorChips();
+    renderBlogAuthorPopover("");
+    updateBlogAuthorDisplay();
+  }
   try {
     const data = await api("/api/archive/blog_authors?group=" + encodeURIComponent(key));
     if (selectionVersion !== blogSelectionVersion || curMode !== "blog" || curBlogGroup !== key) return;
     if (!data.ok || !Array.isArray(data.authors)) throw new Error("博客作者接口返回无效数据");
     curGroupAuthors = data.authors.filter(a => a && a.name && a.name.trim());
+    blogAuthorsCache.set(key, curGroupAuthors);
     renderBlogAuthorChips();
     renderBlogAuthorPopover("");
     updateBlogAuthorDisplay();
   } catch (e) {
     if (e.name === "AbortError" || selectionVersion !== blogSelectionVersion) return;
-    curGroupAuthors = [];
-    renderBlogAuthorChips();
-    renderBlogAuthorPopover("");
-    updateBlogAuthorDisplay();
+    if (!blogAuthorsCache.has(key)) {
+      curGroupAuthors = [];
+      renderBlogAuthorChips();
+      renderBlogAuthorPopover("");
+      updateBlogAuthorDisplay();
+    }
   }
 }
 
@@ -2311,6 +2361,29 @@ function _replaceImgUrls(html, images, paths) {
 async function loadMonths(preserveSelected = true) {
   if (!curMember) return [];
   const version = memberVersion;
+  const cacheKey = `${curMember}:${curType}:${isFavFilter ? 1 : 0}`;
+
+  if (memberMonthsCache.has(cacheKey)) {
+    months = memberMonthsCache.get(cacheKey) || [];
+    syncMessageMonthFooter();
+    const sel = $("monthSelect");
+    const prevVal = sel ? sel.value : "";
+    if (sel) {
+      sel.innerHTML = "";
+      for (const m of months) {
+        const opt = document.createElement("option");
+        opt.value = m.year + "-" + m.month;
+        opt.textContent = m.year + " 年 " + m.month + " 月（" + m.count + "）";
+        sel.appendChild(opt);
+      }
+      if (preserveSelected && prevVal && months.some(m => (m.year + "-" + m.month) === prevVal)) {
+        sel.value = prevVal;
+      } else if (curYM && months.some(m => (m.year + "-" + m.month) === (curYM.year + "-" + curYM.month))) {
+        sel.value = curYM.year + "-" + curYM.month;
+      }
+    }
+  }
+
   try {
     let mUrl = "/api/archive/months?member=" + encodeURIComponent(curMember);
     if (curType) mUrl += "&type=" + encodeURIComponent(curType);
@@ -2318,6 +2391,7 @@ async function loadMonths(preserveSelected = true) {
     const data = await api(mUrl);
     if (version !== memberVersion) return [];
     months = data.ok ? data.months : [];
+    memberMonthsCache.set(cacheKey, months);
     syncMessageMonthFooter();
     const sel = $("monthSelect");
     const prevVal = sel ? sel.value : "";
@@ -2338,7 +2412,7 @@ async function loadMonths(preserveSelected = true) {
     return months;
   } catch (e) {
     if (e.name === "AbortError" || version !== memberVersion) return [];
-    return [];
+    return memberMonthsCache.get(cacheKey) || [];
   }
 }
 
@@ -2360,20 +2434,44 @@ async function selectMember(name, keepHash) {
     searchQuery = "";
   }
   syncSearchInput();
-  const loadedMonths = await loadMonths(false);
-  if (version !== memberVersion) return;
-  if (!loadedMonths.length) {
-    hideMessageMonthFooter();
-    resetContent();
-    $("stats").textContent = "";
-    $("emptyHint").textContent = "成员「" + name + "」还没有归档内容。请从成员列表重新选择。";
-    $("emptyHint").hidden = false;
-    return;
-  }
-  loadCalendar();   // 后台拉全档按天计数，不阻塞时间线
+
+  const cacheKey = `${name}:${curType}:${isFavFilter ? 1 : 0}`;
+  const cachedMonths = memberMonthsCache.get(cacheKey);
   const wanted = keepHash ? readHashYM() : null;
-  const pick = (wanted && loadedMonths.find((m) => m.year === wanted.year && m.month === wanted.month)) || loadedMonths[0];
-  await selectMonth(pick.year, pick.month);
+  const initialPick = (wanted && cachedMonths ? cachedMonths.find((m) => m.year === wanted.year && m.month === wanted.month) : null) || wanted || (cachedMonths && cachedMonths.length ? cachedMonths[0] : null);
+
+  loadCalendar();   // 后台拉全档按天计数（SQLite 极速原生聚合返回，不阻塞时间线）
+
+  if (initialPick) {
+    // 命中预判/缓存/URL Hash：并行发起月份列表校验与第一页消息加载，节省一次网络 RTT 串行等待
+    const monthsPromise = loadMonths(false);
+    await selectMonth(initialPick.year, initialPick.month);
+    if (version !== memberVersion) return;
+    const loadedMonths = await monthsPromise;
+    if (version !== memberVersion) return;
+    if (!loadedMonths.length) {
+      hideMessageMonthFooter();
+      resetContent();
+      $("stats").textContent = "";
+      $("emptyHint").textContent = "成员「" + name + "」还没有归档内容。请从成员列表重新选择。";
+      $("emptyHint").hidden = false;
+      return;
+    }
+  } else {
+    // 首次冷访问该成员且无 Hash：串行加载月份列表后再选定最新月
+    const loadedMonths = await loadMonths(false);
+    if (version !== memberVersion) return;
+    if (!loadedMonths.length) {
+      hideMessageMonthFooter();
+      resetContent();
+      $("stats").textContent = "";
+      $("emptyHint").textContent = "成员「" + name + "」还没有归档内容。请从成员列表重新选择。";
+      $("emptyHint").hidden = false;
+      return;
+    }
+    const pick = loadedMonths[0];
+    await selectMonth(pick.year, pick.month);
+  }
   if (searchQuery) startSearch(searchQuery, false);
 }
 
@@ -3293,7 +3391,9 @@ async function toggleMessageFavorite(msg, btn) {
     if (res && res.ok) {
       msg.is_favorite = Boolean(res.is_favorite);
       showToast(newVal ? "⭐ 已加入收藏" : "已取消收藏", "ok");
-      // 实时同步更新月份选择器条数与日历标记
+      // 实时同步更新月份选择器条数与日历标记，清空旧缓存
+      msgCalendarCache.clear();
+      memberMonthsCache.clear();
       loadMonths(true);
       loadCalendar();
     } else {

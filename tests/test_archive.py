@@ -414,7 +414,19 @@ def main() -> None:
         assert archive.day_counts(cdir, {"picture", "image"})["2026-07-05"] == 1, "picture 过滤应 1 条"
         assert "2026-07-06" not in archive.day_counts(cdir, {"picture", "image"}), \
             "过滤后无该类型的日期不应出现"
-        print("✅ Test 7.8 通过\n")
+
+        # 验证 SQLite 毫秒级聚合与降级扫描 JSON 的结果完全一致
+        from unittest.mock import patch
+        with patch("src.archive_query._get_init_db", return_value=None):
+            days_fallback = archive.day_counts(cdir)
+            assert days_fallback.get("2026-07-05") == 3, f"降级全量计数应为 3: {days_fallback}"
+            assert days_fallback.get("2026-07-06") == 1, f"降级 7/6 计数应为 1: {days_fallback}"
+            assert days_fallback.get("2026-08-01") == 1, f"降级 8/1 计数应为 1: {days_fallback}"
+        with patch("src.archive_query._get_init_db", return_value=None):
+            days_fallback_pic = archive.day_counts(cdir, {"picture", "image"})
+            assert days_fallback_pic.get("2026-07-05") == 1
+            assert "2026-07-06" not in days_fallback_pic
+        print("✅ Test 7.8 通过（含 SQLite 原生聚合与降级双路径校验）\n")
 
         # ── Test 8: 查看器 API 边界 ──────────────────────
         print("=== Test 8: API 边界 ===")

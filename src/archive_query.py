@@ -330,7 +330,36 @@ def day_counts(
                     out[d] = out.get(d, 0) + 1
         return out
 
-    # id_filter is None: 常规统计模式（逐月 mtime 缓存）
+    # id_filter is None: 常规统计模式（优先走 SQLite 原生毫秒级聚合，无 DB 或未建表时降级扫描 JSON）
+    conn = _get_init_db()
+    if conn:
+        try:
+            sql = (
+                "SELECT date(COALESCE(published_at, updated_at), '+9 hours') AS d, COUNT(*) "
+                "FROM messages WHERE member_dir = ? AND COALESCE(published_at, updated_at) IS NOT NULL"
+            )
+            params: list[any] = [member_dir]
+            if type_filter:
+                t_placeholders = ",".join("?" for _ in type_filter)
+                sql += f" AND type IN ({t_placeholders})"
+                params.extend(list(type_filter))
+            sql += " GROUP BY d"
+            rows = conn.execute(sql, params).fetchall()
+            if rows:
+                for r in rows:
+                    if r[0]:
+                        out[r[0]] = r[1]
+                return out
+            # 若 rows 为空，判断该成员在 messages 表中是否已有记录；若确实存在则说明该成员该筛选下为 0，否则降级
+            has_member = conn.execute(
+                "SELECT 1 FROM messages WHERE member_dir = ? LIMIT 1",
+                (member_dir,),
+            ).fetchone()
+            if has_member:
+                return out
+        except Exception as e:
+            log_all(f"⚠️ SQLite 常规日历统计失败，降级扫描 JSON: {e}", is_debug=True)
+
     root = _get_archive_root() / member_dir
     if not root.is_dir():
         return out
