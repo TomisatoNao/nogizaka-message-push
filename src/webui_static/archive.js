@@ -2915,8 +2915,16 @@ function renderBubble(msg) {
       (window._isArchiveAdmin ? '<button type="button" class="btn small retry-dl-btn" style="margin-left:8px; padding:2px 8px; font-size:12px; vertical-align:middle;">🔄 重试下载</button>' : '（可用回填工具重试）') +
       '</div>';
   }
-  if (msg.text) html += '<div class="text">' + formatMessageText(msg.text, searchQuery) + "</div>";
-  if (msg.translation) html += '<div class="trans">' + formatMessageText(msg.translation, searchQuery) + "</div>";
+  const isCanceled = msg.state === "canceled" || (!msg.text && !msg.translation && !msg.media_url && !msg.download_failed);
+  if (isCanceled) {
+    b.classList.add("is-canceled");
+    html += '<div class="canceled-msg-hint" style="padding:10px 14px; font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; font-style:italic;">' +
+      '<span style="font-size:15px; opacity:0.8;">🚫</span><span>该消息已被发送者撤回</span>' +
+      '</div>';
+  } else {
+    if (msg.text) html += '<div class="text">' + formatMessageText(msg.text, searchQuery) + "</div>";
+    if (msg.translation) html += '<div class="trans">' + formatMessageText(msg.translation, searchQuery) + "</div>";
+  }
   b.innerHTML = html;
 
   const retryBtn = b.querySelector(".retry-dl-btn");

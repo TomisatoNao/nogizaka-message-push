@@ -172,6 +172,19 @@ async def _handle_message(member: dict, msg: dict,
             lane_context.unresolved.pop(msg_id, None)
         return True
 
+    # 官方撤回消息处理：若消息已在上游被撤回且无任何媒体或正文，仅归档并更新去重集合，跳过外部通道推送
+    if msg.get("state") == "canceled" and not original_text.strip() and not msg.get("file"):
+        await archive.archive_message(member, msg, "")
+        save_sent_id(group_type, m_id, msg_id, id_list, id_set)
+        l_time_ref[0] = updated
+        log_all(
+            f"🚫 [成员ID: {m_id} | 名字: {m_name}] 消息已在上游被撤回 (ID: {msg_id})，仅归档记录，跳过通道推送",
+            is_debug=True,
+        )
+        if lane_context is not None:
+            lane_context.handled_count += 1
+        return True
+
     # 翻译
     translated = ""
     trans_model = ""

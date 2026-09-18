@@ -35,6 +35,7 @@ def main() -> None:
     orig_enabled = cfg.ARCHIVE_ENABLED
     orig_media = cfg.ARCHIVE_MEDIA
     orig_auth = cfg.AUTH_ENABLED
+    archive.close_db()
     cfg.ARCHIVE_DIR = str(tmpdir)
     cfg.ARCHIVE_ENABLED = True
     cfg.ARCHIVE_MEDIA = False   # 单测不碰网络
@@ -512,6 +513,7 @@ def main() -> None:
         print("✅ Test 8 通过\n")
 
     finally:
+        archive.close_db()
         cfg.ARCHIVE_DIR = orig_dir
         cfg.ARCHIVE_ENABLED = orig_enabled
         cfg.ARCHIVE_MEDIA = orig_media

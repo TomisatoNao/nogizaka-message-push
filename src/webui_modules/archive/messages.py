@@ -232,6 +232,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
         slim = [{
             "id": m.get("id"),
+            "state": m.get("state", "published"),
             "type": m.get("type"),
             "text": m.get("text", ""),
             "translation": m.get("_translation", ""),
@@ -526,6 +527,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
         slim = [{
             "id": m.get("id"),
+            "state": m.get("state", "published"),
             "type": m.get("type"),
             "text": m.get("text", ""),
             "translation": m.get("_translation", ""),
