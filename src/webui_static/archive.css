@@ -406,9 +406,12 @@ html.view-home #messageMonthFooter { display: none !important; }
               backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
               touch-action: none; overscroll-behavior: contain; user-select: none; -webkit-user-select: none; }
   #lightbox.open { display: flex; }
+  #lightbox .lb-stage { display: flex; align-items: center; justify-content: center;
+                        max-width: 90vw; max-height: 86vh; pointer-events: none; }
   #lightbox img { max-width: 90vw; max-height: 86vh; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.6);
                   transition: filter 0.2s ease; touch-action: none; -webkit-user-drag: none;
-                  user-select: none; -webkit-user-select: none; transform-origin: center center; will-change: transform; }
+                  user-select: none; -webkit-user-select: none; transform-origin: center center; will-change: transform;
+                  pointer-events: auto; }
   #lightbox img.lb-preview { filter: blur(2px); }
   #lightbox img.lb-full { filter: none; }
   #lightbox .nav-btn { position: absolute; top: 50%; transform: translateY(-50%);

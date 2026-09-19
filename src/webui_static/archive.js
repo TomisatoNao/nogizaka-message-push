@@ -3188,7 +3188,23 @@ let lbMoved = false;
 let lbLastTapTime = 0;
 let lbSingleTapTimer = null;
 let lbLastTouchEndTime = 0;
+let lbSuppressClickUntil = 0;
 let lbTouchOnImage = false;
+// 导航只允许发生在当前图片已完成加载后；加载中的预览/空白区域不能触发切图。
+let lbImageReady = false;
+let lbTouchCanNavigate = false;
+
+function setLightboxNavigationReady(ready) {
+  lbImageReady = Boolean(ready);
+  const canShowNav = lbImageReady && images.length > 1;
+  ["lbPrev", "lbNext"].forEach((id) => {
+    const btn = $(id);
+    if (!btn) return;
+    btn.style.display = canShowNav ? "" : "none";
+    btn.disabled = !canShowNav;
+    btn.setAttribute("aria-disabled", String(!canShowNav));
+  });
+}
 
 function applyLightboxTransform(animate = false) {
   const img = $("lbImg");
@@ -3334,6 +3350,9 @@ function openLightbox(i, opener, caption, placeholderUrl) {
   if (typeof i === "string") {
     if (opener) lightboxOpener = opener;
     resetLightboxTransform(false);
+    setLightboxNavigationReady(false);
+    lbTouchOnImage = false;
+    lbTouchCanNavigate = false;
     document.body.style.overflow = "hidden";
     document.documentElement.classList.add("lightbox-open");
     $("lbImg").src = i;
@@ -3355,6 +3374,9 @@ function openLightbox(i, opener, caption, placeholderUrl) {
   if (isNaN(idx) || idx < 0 || idx >= images.length) return;
   if (opener) lightboxOpener = opener;
   resetLightboxTransform(false);
+  setLightboxNavigationReady(false);
+  lbTouchOnImage = false;
+  lbTouchCanNavigate = false;
   document.body.style.overflow = "hidden";
   document.documentElement.classList.add("lightbox-open");
   lbIndex = idx;
@@ -3382,65 +3404,60 @@ function openLightbox(i, opener, caption, placeholderUrl) {
 
   // 3. 后台加载原图并平滑替换，确保 100% 触发且无事件竞态遗漏
   if (targetUrl) {
-    if (targetUrl === targetPlaceholder) {
-      // 已经是原图链接
+    if (targetUrl !== targetPlaceholder && $("lbStatus")) {
+      $("lbStatus").innerHTML = '<span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;">🔄</span> 正在加载高清原图...';
+      $("lbStatus").style.display = "inline-flex";
+    }
+
+    const preloader = new Image();
+    const onDone = () => {
+      if (currentVersion !== lbImageLoadVersion) return;
+      $("lbImg").src = targetUrl;
       $("lbImg").classList.remove("lb-preview");
       $("lbImg").classList.add("lb-full");
-      if ($("lbStatus")) $("lbStatus").style.display = "none";
-    } else {
+      setLightboxNavigationReady(true);
+      if ($("lbStatus") && targetUrl !== targetPlaceholder) {
+        $("lbStatus").innerHTML = '✓ 已加载高清原图';
+        setTimeout(() => {
+          if (currentVersion === lbImageLoadVersion && $("lbStatus")) {
+            $("lbStatus").style.display = "none";
+          }
+        }, 1200);
+      } else if ($("lbStatus")) {
+        $("lbStatus").style.display = "none";
+      }
+    };
+
+    preloader.onload = onDone;
+    preloader.onerror = () => {
+      if (currentVersion !== lbImageLoadVersion) return;
+      // 原图失败时仍保留当前缩略图，但不再把失败的加载状态当成切图竞态。
+      setLightboxNavigationReady(true);
       if ($("lbStatus")) {
-        $("lbStatus").innerHTML = '<span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;">🔄</span> 正在加载高清原图...';
-        $("lbStatus").style.display = "inline-flex";
-      }
-
-      const preloader = new Image();
-      const onDone = () => {
-        if (currentVersion === lbImageLoadVersion && $("lightbox").classList.contains("open")) {
-          $("lbImg").src = targetUrl;
-          $("lbImg").classList.remove("lb-preview");
-          $("lbImg").classList.add("lb-full");
-          if ($("lbStatus")) {
-            $("lbStatus").innerHTML = '✓ 已加载高清原图';
-            setTimeout(() => {
-              if (currentVersion === lbImageLoadVersion && $("lbStatus")) {
-                $("lbStatus").style.display = "none";
-              }
-            }, 1200);
+        $("lbStatus").innerHTML = '⚠️ 原图加载受阻，当前显示预览图';
+        setTimeout(() => {
+          if (currentVersion === lbImageLoadVersion && $("lbStatus")) {
+            $("lbStatus").style.display = "none";
           }
-        }
-      };
-
-      preloader.onload = onDone;
-      preloader.onerror = () => {
-        if (currentVersion === lbImageLoadVersion && $("lightbox").classList.contains("open")) {
-          if ($("lbStatus")) {
-            $("lbStatus").innerHTML = '⚠️ 原图加载受阻，当前显示预览图';
-            setTimeout(() => {
-              if (currentVersion === lbImageLoadVersion && $("lbStatus")) {
-                $("lbStatus").style.display = "none";
-              }
-            }, 2500);
-          }
-        }
-      };
-
-      // 先绑定事件回调再赋值 src，杜绝内存缓存同步完成导致事件丢失
-      preloader.src = targetUrl;
-      if (preloader.complete && preloader.naturalWidth > 0) {
-        onDone();
+        }, 2500);
       }
+    };
+
+    // 先绑定事件回调再赋值 src，杜绝内存缓存同步完成导致事件丢失。
+    preloader.src = targetUrl;
+    if (preloader.complete && preloader.naturalWidth > 0) {
+      onDone();
     }
+  } else {
+    // 没有独立原图地址时，当前缩略图就是唯一可用图片；仍允许正常切图。
+    setLightboxNavigationReady(true);
   }
 
   if (images.length > 1) {
     $("lbCounter").style.display = "";
     $("lbCounter").textContent = (idx + 1) + " / " + images.length;
-    $("lbPrev").style.display = "";
-    $("lbNext").style.display = "";
   } else {
     $("lbCounter").style.display = "none";
-    $("lbPrev").style.display = "none";
-    $("lbNext").style.display = "none";
   }
   $("lightbox").classList.add("open");
   $("lightbox").setAttribute("aria-hidden", "false");
@@ -3449,6 +3466,12 @@ function openLightbox(i, opener, caption, placeholderUrl) {
 function closeLightbox() {
   const box = $("lightbox");
   if (!box.classList.contains("open")) return;
+  // Android Chrome 会在 touchend 后补发一次 click；灯箱若已关闭，该 click
+  // 会落到下面的相册卡片，造成“点击背景却打开另一张图”。仅在触摸关闭窗口
+  // 的短时间内拦截下一次合成 click，不影响键盘或正常鼠标操作。
+  if (Date.now() - lbLastTouchEndTime < 700) {
+    lbSuppressClickUntil = Date.now() + 700;
+  }
   box.classList.remove("open");
   box.setAttribute("aria-hidden", "true");
   if ($("blogReader") && $("blogReader").style.display !== "none") {
@@ -3458,6 +3481,9 @@ function closeLightbox() {
   }
   document.documentElement.classList.remove("lightbox-open");
   resetLightboxTransform(false);
+  setLightboxNavigationReady(false);
+  lbTouchOnImage = false;
+  lbTouchCanNavigate = false;
   resetMobileViewport();
   ++lbImageLoadVersion;
   if ($("lbImg")) {
@@ -3469,6 +3495,7 @@ function closeLightbox() {
   lightboxOpener = null;
 }
 function lbMove(delta) {
+  if (!lbImageReady) return;
   const next = lbIndex + delta;
   if (next < 0 || next >= images.length) return;
   resetLightboxTransform(false);
@@ -3481,16 +3508,22 @@ if (lbBox) {
     if (!lbBox.classList.contains("open")) return;
     if (e.target.closest("#lbActions, #lbPrev, #lbNext")) {
       lbTouchOnImage = false;
+      lbTouchCanNavigate = false;
       return;
     }
-    // 只有从图片本身开始的触摸才允许缩放、拖拽或左右切图；
-    // 灯箱其它空白区域始终是“返回相册”的安全点击区。
-    lbTouchOnImage = e.target === $("lbImg") || Boolean(e.target.closest("#lbImg"));
+    // 只有命中真实 <img> 元素且当前图片已加载完成，才允许缩放、拖拽或左右切图；
+    // 灯箱其它空白区域始终是“返回相册”的安全点击区。lbStage 本身不接收指针事件，
+    // 这样 Chrome Android 桌面站点在图片加载期间也不会把空白误判为图片。
+    const image = $("lbImg");
+    const firstTouch = e.touches[0];
+    const pointTarget = firstTouch ? document.elementFromPoint(firstTouch.clientX, firstTouch.clientY) : null;
+    lbTouchOnImage = e.target === image && pointTarget === image;
+    lbTouchCanNavigate = lbTouchOnImage && lbImageReady;
 
     if (e.touches.length === 2) {
-      lbIsPinching = true;
+      lbIsPinching = lbTouchCanNavigate;
       lbIsDragging = false;
-      lbMoved = true;
+      lbMoved = lbTouchCanNavigate;
       lbStartDist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
@@ -3510,7 +3543,7 @@ if (lbBox) {
       lbStartPanY = lbPanY;
       lbTouchStartTime = Date.now();
       lbMoved = false;
-      lbIsDragging = (lbScale > 1.05);
+      lbIsDragging = lbTouchCanNavigate && (lbScale > 1.05);
     }
   }, { passive: false });
 
@@ -3520,6 +3553,8 @@ if (lbBox) {
 
     // 关键：杜绝移动端浏览器对底层页面的全局视口缩放与滚动
     e.preventDefault();
+
+    if (!lbTouchCanNavigate) return;
 
     if (lbIsPinching && e.touches.length === 2) {
       const curDist = Math.hypot(
@@ -3573,6 +3608,13 @@ if (lbBox) {
         lbTouchOnImage = false;
         return;
       }
+      if (!lbTouchCanNavigate) {
+        // 图片仍在加载时，点击图片本身不关闭、不切换，等待当前图完成即可。
+        lbIsDragging = false;
+        lbTouchOnImage = false;
+        lbTouchCanNavigate = false;
+        return;
+      }
       if (!lbMoved) {
         // 轻触点击识别
         const touch = e.changedTouches[0];
@@ -3623,11 +3665,13 @@ if (lbBox) {
         }
       }
       lbTouchOnImage = false;
+      lbTouchCanNavigate = false;
     }
   }, { passive: false });
 
   lbBox.addEventListener("touchcancel", () => {
     lbTouchOnImage = false;
+    lbTouchCanNavigate = false;
     if (lbScale < 1.05) resetLightboxTransform(true);
     else clampLightboxPan(true);
   });
@@ -3636,6 +3680,15 @@ if (lbBox) {
   lbBox.addEventListener("gesturechange", (e) => e.preventDefault());
   lbBox.addEventListener("gestureend", (e) => e.preventDefault());
 }
+
+// 必须使用捕获阶段：合成 click 的目标已经是灯箱下面的相册卡片，事件不会再经过
+// #lightbox 自身，所以仅在灯箱上的 click 监听器里无法阻止穿透。
+document.addEventListener("click", (e) => {
+  if (Date.now() > lbSuppressClickUntil) return;
+  lbSuppressClickUntil = 0;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
 
 window.addEventListener("resize", () => {
   if ($("lightbox") && $("lightbox").classList.contains("open")) {
@@ -3647,7 +3700,8 @@ $("lightbox").addEventListener("click", (e) => {
   if (Date.now() - lbLastTouchEndTime < 500) return;
   // 操作栏与左右箭头是交互控件，其余非图片区域统一视为返回相册。
   const interactive = e.target.closest("#lbActions, #lbPrev, #lbNext");
-  if (!interactive || e.target.closest("#lbImg")) closeLightbox();
+  const onImage = e.target === $("lbImg");
+  if (!interactive || onImage) closeLightbox();
 });
 
 if ($("lbImg")) {

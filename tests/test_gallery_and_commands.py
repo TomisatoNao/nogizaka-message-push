@@ -1534,11 +1534,23 @@ def test_gallery_lightbox_mobile_gesture_and_viewport_recovery_contract():
     assert "lbIsPinching" in js
     assert "lbIsDragging" in js
     assert "lbTouchOnImage" in js
+    assert "lbImageReady" in js
+    assert "lbTouchCanNavigate" in js
+    assert "lbSuppressClickUntil" in js
+    assert "document.addEventListener(\"click\", (e) =>" in js
+    assert "e.stopPropagation();" in js
+    assert "pointTarget === image" in js
+    assert "if (!lbImageReady) return;" in js
     assert "if (!lbTouchOnImage)" in js
     assert "e.preventDefault();" in js
     assert "gesturestart" in js
 
-    # 5. 退出自愈与滚动锁闭环契约
+    # 5. 图片舞台只让实际 <img> 命中，加载中的原图不能把空白点击误判为切图。
+    html = (root / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
+    assert 'id="lbStage"' in html
+    assert "pointer-events: none;" in css
+
+    # 6. 退出自愈与滚动锁闭环契约
     assert 'document.body.style.overflow = "hidden";' in js
     assert 'document.documentElement.classList.add("lightbox-open");' in js
     assert "resetLightboxTransform(false);" in js
