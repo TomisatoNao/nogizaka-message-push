@@ -817,7 +817,7 @@ def get_gallery_photos(
         SELECT id, member_name, member_dir, published_at, updated_at, text, translation, local_file, year, month, raw_json
         FROM messages
         WHERE {where_str}
-        ORDER BY published_at {order_dir}, id {order_dir}
+        ORDER BY COALESCE(published_at, updated_at) {order_dir}, id {order_dir}
         LIMIT ? OFFSET ?;
     """
 

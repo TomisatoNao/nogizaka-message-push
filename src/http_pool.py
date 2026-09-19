@@ -1,7 +1,7 @@
 """
 src/http_pool.py — 全局 HTTP Client 连接池与生命周期管理器
 
-统一管理核心 AsyncClient 实例（通用请求、QQ Bot API、博客抓取），
+统一管理核心 AsyncClient 实例（通用请求、Token 认证、QQ Bot API、博客抓取），
 提供 Loop 绑定自愈、状态探活、代理热重载以及优雅关闭。
 """
 
@@ -15,15 +15,18 @@ import src.config.config as cfg
 log = logging.getLogger("collink")
 
 _general_client: httpx.AsyncClient | None = None
+_auth_client: httpx.AsyncClient | None = None
 _qq_client: httpx.AsyncClient | None = None
 _blog_client: httpx.AsyncClient | None = None
 _general_loop: asyncio.AbstractEventLoop | None = None
+_auth_loop: asyncio.AbstractEventLoop | None = None
 _qq_loop: asyncio.AbstractEventLoop | None = None
 _blog_loop: asyncio.AbstractEventLoop | None = None
 
 _thread_lock = threading.Lock()
 _lifecycle_locks: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
 _general_rebind_callbacks: list[Callable[[httpx.AsyncClient], None]] = []
+_auth_rebind_callbacks: list[Callable[[httpx.AsyncClient], None]] = []
 
 # 连接池关闭属于恢复路径，不能因为坏掉的 transport 无限阻塞主循环。
 CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
@@ -78,19 +81,39 @@ def unregister_general_client_rebind(callback: Callable[[httpx.AsyncClient], Non
             pass
 
 
+def register_auth_client_rebind(callback: Callable[[httpx.AsyncClient], None]) -> None:
+    """注册认证 Client 替换后的同步注入回调（幂等）。"""
+    with _thread_lock:
+        if callback not in _auth_rebind_callbacks:
+            _auth_rebind_callbacks.append(callback)
+
+
+def unregister_auth_client_rebind(callback: Callable[[httpx.AsyncClient], None]) -> None:
+    """移除认证 Client 替换回调；测试和进程重载可安全调用。"""
+    with _thread_lock:
+        try:
+            _auth_rebind_callbacks.remove(callback)
+        except ValueError:
+            pass
+
+
 def bind_runtime_clients(
     general_client: httpx.AsyncClient,
     *,
+    auth_client: httpx.AsyncClient | None = None,
     qq_client: httpx.AsyncClient | None = None,
     blog_client: httpx.AsyncClient | None = None,
 ) -> None:
     """绑定主程序创建的 Client，使恢复路径与实际运行时状态一致。"""
-    global _general_client, _qq_client, _blog_client
-    global _general_loop, _qq_loop, _blog_loop
+    global _general_client, _auth_client, _qq_client, _blog_client
+    global _general_loop, _auth_loop, _qq_loop, _blog_loop
     loop = asyncio.get_running_loop()
     with _thread_lock:
         _general_client = general_client
         _general_loop = loop
+        if auth_client is not None:
+            _auth_client = auth_client
+            _auth_loop = loop
         if qq_client is not None:
             _qq_client = qq_client
             _qq_loop = loop
@@ -107,6 +130,33 @@ def _notify_general_rebind(client: httpx.AsyncClient) -> None:
             callback(client)
         except Exception as exc:  # nosec B110 - 单个模块重绑定不能阻断恢复
             log.warning("general HTTP client rebind failed: %s", type(exc).__name__)
+
+
+def _notify_auth_rebind(client: httpx.AsyncClient) -> None:
+    with _thread_lock:
+        callbacks = tuple(_auth_rebind_callbacks)
+    for callback in callbacks:
+        try:
+            callback(client)
+        except Exception as exc:  # nosec B110 - 单个模块重绑定不能阻断恢复
+            log.warning("auth HTTP client rebind failed: %s", type(exc).__name__)
+
+
+def _new_auth_client() -> httpx.AsyncClient:
+    """按当前热配置创建 Token 续期专用 Client。"""
+    try:
+        concurrency = max(1, int(getattr(cfg, "TOKEN_REFRESH_CONCURRENCY", 2)))
+    except (TypeError, ValueError):
+        concurrency = 2
+    return httpx.AsyncClient(
+        timeout=15,
+        proxy=getattr(cfg, "PROXY", "") or None,
+        follow_redirects=True,
+        limits=httpx.Limits(
+            max_connections=max(2, concurrency * 2),
+            max_keepalive_connections=concurrency,
+        ),
+    )
 
 
 def _is_client_alive(client: httpx.AsyncClient | None) -> bool:
@@ -187,6 +237,23 @@ async def get_general_client() -> httpx.AsyncClient:
         return current
 
 
+async def get_auth_client() -> httpx.AsyncClient:
+    """获取或自愈重建 Token 续期专用 HTTP 客户端。"""
+    global _auth_client, _auth_loop
+    loop = asyncio.get_running_loop()
+    async with _get_lifecycle_lock():
+        with _thread_lock:
+            if _is_current_loop_client(_auth_client, _auth_loop):
+                return _auth_client  # type: ignore[return-value]
+            stale = _auth_client
+            _auth_client = _new_auth_client()
+            _auth_loop = loop
+            current = _auth_client
+        _notify_auth_rebind(current)
+        await _close_quietly(stale)
+        return current
+
+
 async def get_qq_client() -> httpx.AsyncClient:
     """获取或自愈重建 QQ 专属 HTTP 异步客户端（强制直连）。"""
     global _qq_client, _qq_loop
@@ -252,16 +319,52 @@ async def reset_general_client() -> httpx.AsyncClient:
         return current
 
 
-async def close_all() -> None:
-    """优雅关闭所有活跃的 HTTP 客户端连接池。"""
-    global _general_client, _qq_client, _blog_client, _general_loop, _qq_loop, _blog_loop
+async def reset_auth_client(
+    *,
+    expected_client: httpx.AsyncClient | None = None,
+) -> httpx.AsyncClient:
+    """重建 Token 认证池；并发故障只允许旧池的首个请求执行替换。
+
+    ``expected_client`` 是发现故障的 Client。若另一个协程已先完成替换，
+    当前调用直接复用新池，避免多个账号同时超时时反复关闭彼此的新连接。
+    """
+    global _auth_client, _auth_loop
+    loop = asyncio.get_running_loop()
     async with _get_lifecycle_lock():
         with _thread_lock:
-            clients = (_general_client, _qq_client, _blog_client)
+            if expected_client is not None and _auth_client is not expected_client:
+                # 调用方持有的不是当前由本模块托管的认证池：要么其他协程已经
+                # 完成替换，要么是独立工具自行注入的 Client。前者直接复用新池，
+                # 后者不擅自接管其生命周期。
+                if _is_current_loop_client(_auth_client, _auth_loop):
+                    return _auth_client  # type: ignore[return-value]
+                return expected_client
+            stale = _auth_client
+            _auth_client = _new_auth_client()
+            _auth_loop = loop
+            current = _auth_client
+        _notify_auth_rebind(current)
+        closed = await _close_quietly(stale)
+        log.info(
+            "auth HTTP client reset complete (old_client_closed=%s)",
+            closed,
+        )
+        return current
+
+
+async def close_all() -> None:
+    """优雅关闭所有活跃的 HTTP 客户端连接池。"""
+    global _general_client, _auth_client, _qq_client, _blog_client
+    global _general_loop, _auth_loop, _qq_loop, _blog_loop
+    async with _get_lifecycle_lock():
+        with _thread_lock:
+            clients = (_general_client, _auth_client, _qq_client, _blog_client)
             _general_client = None
+            _auth_client = None
             _qq_client = None
             _blog_client = None
             _general_loop = None
+            _auth_loop = None
             _qq_loop = None
             _blog_loop = None
         for client in clients:
@@ -273,10 +376,14 @@ __all__ = [
     "bind_runtime_clients",
     "clear_loop_state",
     "close_all",
+    "get_auth_client",
     "get_blog_client",
     "get_general_client",
     "get_qq_client",
+    "register_auth_client_rebind",
     "register_general_client_rebind",
+    "reset_auth_client",
     "reset_general_client",
+    "unregister_auth_client_rebind",
     "unregister_general_client_rebind",
 ]

@@ -1118,10 +1118,16 @@ function _enterMemberMode() {
 // 根据 curMember / curBlogGroup 同步状态与主选择器显示
 function syncChipHighlight() {
   if (curMode === "msg" && curMember) {
-    const curObj = members.find(m => m.name === curMember);
-    if (curObj) {
-      if ($("curMemberDisplay")) $("curMemberDisplay").textContent = curObj.display;
-      if ($("curMemberCount")) $("curMemberCount").textContent = "（" + (curObj.total || 0).toLocaleString() + "）";
+    const normalizeMemberKey = (value) => String(value || "").replace(/[\s_　]/g, "");
+    const curKey = normalizeMemberKey(curMember);
+    const curObj = members.find(m =>
+      m.name === curMember ||
+      normalizeMemberKey(m.name) === curKey ||
+      normalizeMemberKey(m.display) === curKey
+    );
+    if ($("curMemberDisplay")) $("curMemberDisplay").textContent = curObj ? curObj.display : curMember;
+    if ($("curMemberCount")) {
+      $("curMemberCount").textContent = curObj ? "（" + (curObj.total || 0).toLocaleString() + "）" : "";
     }
   }
   // 同步博客分组 Segmented Control
@@ -2921,6 +2927,7 @@ function renderBubble(msg) {
         source: "message",
         messageId: msg.id,
         memberName: msg.member_name || curMember,
+        memberDir: msg.member_dir || curMember,
         year: msg.year || (curYM && curYM.year),
         month: msg.month || (curYM && curYM.month),
       });
@@ -2983,6 +2990,7 @@ function renderBubble(msg) {
                 source: "message",
                 messageId: msg.id,
                 memberName: msg.member_name || curMember,
+                memberDir: msg.member_dir || curMember,
                 year: msg.year || (curYM && curYM.year),
                 month: msg.month || (curYM && curYM.month),
               });
@@ -3180,6 +3188,7 @@ let lbMoved = false;
 let lbLastTapTime = 0;
 let lbSingleTapTimer = null;
 let lbLastTouchEndTime = 0;
+let lbTouchOnImage = false;
 
 function applyLightboxTransform(animate = false) {
   const img = $("lbImg");
@@ -3282,10 +3291,13 @@ function buildLightboxSourceAction(item) {
     label = "📄 前往对应博客";
     title = "在新标签页打开对应博客";
   } else if (
-    item.source === "message" && item.messageId && item.memberName &&
+    item.source === "message" && item.messageId &&
+    (item.memberDir || item.memberName) &&
     Number(item.year) > 0 && Number(item.month) > 0
   ) {
-    params.set("member", item.memberName);
+    // message_name 可能是带空格/展示用的名称，成员路由必须优先使用
+    // messages.member_dir，才能让新标签页稳定命中同一个成员。
+    params.set("member", item.memberDir || item.memberName);
     params.set("y", String(item.year));
     params.set("m", String(item.month));
     params.set("msg_id", String(item.messageId));
@@ -3467,7 +3479,13 @@ const lbBox = $("lightbox");
 if (lbBox) {
   lbBox.addEventListener("touchstart", (e) => {
     if (!lbBox.classList.contains("open")) return;
-    if (e.target.closest("#lbActions, #lbPrev, #lbNext")) return;
+    if (e.target.closest("#lbActions, #lbPrev, #lbNext")) {
+      lbTouchOnImage = false;
+      return;
+    }
+    // 只有从图片本身开始的触摸才允许缩放、拖拽或左右切图；
+    // 灯箱其它空白区域始终是“返回相册”的安全点击区。
+    lbTouchOnImage = e.target === $("lbImg") || Boolean(e.target.closest("#lbImg"));
 
     if (e.touches.length === 2) {
       lbIsPinching = true;
@@ -3548,6 +3566,13 @@ if (lbBox) {
     }
 
     if (e.touches.length === 0) {
+      if (!lbTouchOnImage) {
+        // 空白区域的轻微横向位移不能被误判为上一张/下一张。
+        lbIsDragging = false;
+        closeLightbox();
+        lbTouchOnImage = false;
+        return;
+      }
       if (!lbMoved) {
         // 轻触点击识别
         const touch = e.changedTouches[0];
@@ -3597,10 +3622,12 @@ if (lbBox) {
           closeLightbox();
         }
       }
+      lbTouchOnImage = false;
     }
   }, { passive: false });
 
   lbBox.addEventListener("touchcancel", () => {
+    lbTouchOnImage = false;
     if (lbScale < 1.05) resetLightboxTransform(true);
     else clampLightboxPan(true);
   });
@@ -3618,7 +3645,9 @@ window.addEventListener("resize", () => {
 
 $("lightbox").addEventListener("click", (e) => {
   if (Date.now() - lbLastTouchEndTime < 500) return;
-  if (e.target === $("lightbox") || e.target === $("lbImg")) closeLightbox();
+  // 操作栏与左右箭头是交互控件，其余非图片区域统一视为返回相册。
+  const interactive = e.target.closest("#lbActions, #lbPrev, #lbNext");
+  if (!interactive || e.target.closest("#lbImg")) closeLightbox();
 });
 
 if ($("lbImg")) {
@@ -6242,6 +6271,7 @@ async function loadGalleryPhotos(reset = true) {
         groupKey: photo.group_key,
         messageId: photo.source === "message" ? photo.id : "",
         memberName: photo.member_name,
+        memberDir: photo.member_dir || "",
         year: photo.year,
         month: photo.month,
       });

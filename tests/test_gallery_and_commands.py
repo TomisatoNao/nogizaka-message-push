@@ -1171,6 +1171,8 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert 'source: photo.source' in js
     assert 'blogId: photo.blog_id' in js
     assert 'messageId: photo.source === "message" ? photo.id : ""' in js
+    assert 'memberDir: photo.member_dir || ""' in js
+    assert 'params.set("member", item.memberDir || item.memberName);' in js
     assert '$("lbDownloadBtn")' in js
     assert 'a.download = filename;' in js
 
@@ -1386,6 +1388,43 @@ def test_gallery_combined_pagination_no_photo_loss(temp_archive_env, tmp_path, m
     assert has_mores == [True, True, False, False]
 
 
+def test_gallery_combined_order_normalizes_timezone_and_preserves_post_media_order(monkeypatch):
+    """聚合画廊按真实发布时间排序，且同一博客多图不因倒序被反转。"""
+    import src.webui_modules.archive.gallery as gallery_module
+
+    monkeypatch.setattr(
+        "src.webui_modules.archive_handlers.get_blog_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        gallery_module,
+        "_fetch_message_gallery_photos",
+        lambda **_: [
+            {"id": "msg_late", "source": "message", "published_at": "2026-09-18T15:30:00Z"},
+            {"id": "msg_early", "source": "message", "published_at": "2026-09-18T15:00:00Z"},
+        ],
+    )
+    monkeypatch.setattr(
+        gallery_module,
+        "_fetch_blog_gallery_photos",
+        lambda **_: [
+            {"id": "blog_1_0", "blog_id": "1", "source": "blog", "published_at": "2026-09-19 00:15"},
+            {"id": "blog_1_1", "blog_id": "1", "source": "blog", "published_at": "2026-09-19 00:15"},
+        ],
+    )
+    monkeypatch.setattr(gallery_module, "_get_gallery_total_count", lambda **_: 4)
+
+    desc = gallery_module._get_combined_gallery(page=1, per_page=10, order="desc")
+    assert [photo["id"] for photo in desc["photos"]] == [
+        "msg_late", "blog_1_0", "blog_1_1", "msg_early",
+    ]
+
+    asc = gallery_module._get_combined_gallery(page=1, per_page=10, order="asc")
+    assert [photo["id"] for photo in asc["photos"]] == [
+        "msg_early", "blog_1_0", "blog_1_1", "msg_late",
+    ]
+
+
 def test_message_thumbnail_cache_privacy_contract(temp_archive_env, monkeypatch):
     """验证私密消息缩略图缓存头安全对齐：私密模式下必须为 private，杜绝公开缓存泄露。"""
     from types import SimpleNamespace
@@ -1494,6 +1533,8 @@ def test_gallery_lightbox_mobile_gesture_and_viewport_recovery_contract():
     assert "e.touches.length === 2" in js
     assert "lbIsPinching" in js
     assert "lbIsDragging" in js
+    assert "lbTouchOnImage" in js
+    assert "if (!lbTouchOnImage)" in js
     assert "e.preventDefault();" in js
     assert "gesturestart" in js
 

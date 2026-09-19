@@ -6,10 +6,58 @@ from __future__ import annotations
 
 import json
 import time as _time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs
 
 from src import archive as _archive
 from src.webui_modules.archive.common import _blog_media_url, _send_json_resp
+
+
+_GALLERY_JST = timezone(timedelta(hours=9))
+
+
+def _gallery_timestamp_value(value: object, source: str = "") -> float:
+    """将博客/消息的发布时间统一转换成可比较的时间值。
+
+    博客归档使用不带时区的 JST 字符串，Message 归档通常使用带 ``Z`` 的
+    UTC 字符串。直接按字符串排序会在格式混用或带偏移量时产生错序，因而
+    先解析成同一时间轴；无法解析的旧数据统一排在有效时间之后/之前由
+    ``order`` 决定，但仍会通过稳定 tie-break 保持确定顺序。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return float("-inf")
+
+    normalized = text.replace("/", "-").replace("T", " ", 1)
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except (TypeError, ValueError):
+        return float("-inf")
+
+    if parsed.tzinfo is None:
+        # blog_posts.date 是站点本地（JST）时间；旧 Message 时间沿用
+        # archive.parse_jst_datetime 的兼容约定解释为 UTC。
+        parsed = parsed.replace(tzinfo=timezone.utc if source == "message" else _GALLERY_JST)
+    try:
+        return parsed.astimezone(timezone.utc).timestamp()
+    except (OverflowError, ValueError, OSError):
+        return float("-inf")
+
+
+def _gallery_tie_key(item: dict) -> tuple[str, str, int]:
+    """为相同发布时间提供稳定顺序，并保持博客多图的原始顺序。"""
+    source = str(item.get("source") or "")
+    identity = str(item.get("blog_id") or item.get("id") or "")
+    media_index = 0
+    if source == "blog":
+        raw_id = str(item.get("id") or "")
+        suffix = raw_id.rsplit("_", 1)[-1]
+        if suffix.isdigit():
+            media_index = int(suffix)
+    return source, identity, media_index
 
 
 def handle_gallery(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
@@ -522,7 +570,7 @@ def _fetch_message_gallery_photos(
         SELECT id, member_name, member_dir, published_at, updated_at, text, translation, local_file, year, month, raw_json
         FROM messages
         WHERE {where_str}
-        ORDER BY published_at {order_dir}, id {order_dir}
+        ORDER BY COALESCE(published_at, updated_at) {order_dir}, id {order_dir}
         LIMIT ? OFFSET ?;
     """
 
@@ -830,9 +878,15 @@ def _get_combined_gallery(
         member=member, limit=target_total, year=year, month=month, order=order
     )
 
-    combined = sorted(
-        msg_photos + blog_photos,
-        key=lambda x: str(x.get("published_at") or "").replace("T", " "),
+    # 先按来源/记录/媒体序号建立确定的 tie-break，再按统一后的时间值做
+    # 稳定排序。Python 的稳定排序会保留相同时间的 tie-break 顺序，因而
+    # 无论 desc 还是 asc，博客同一篇文章中的图片都不会被反转。
+    combined = msg_photos + blog_photos
+    combined.sort(key=_gallery_tie_key)
+    combined.sort(
+        key=lambda item: _gallery_timestamp_value(
+            item.get("published_at"), str(item.get("source") or "")
+        ),
         reverse=(str(order).lower() == "desc"),
     )
 

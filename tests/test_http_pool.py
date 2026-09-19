@@ -14,6 +14,10 @@ async def test_http_pool_lifecycle():
     assert client_gen is not None
     assert not client_gen.is_closed
 
+    client_auth = await http_pool.get_auth_client()
+    assert client_auth is not None
+    assert not client_auth.is_closed
+
     client_qq = await http_pool.get_qq_client()
     assert client_qq is not None
     assert not client_qq.is_closed
@@ -30,6 +34,7 @@ async def test_http_pool_lifecycle():
     # Close all
     await http_pool.close_all()
     assert client_gen.is_closed or client_new.is_closed
+    assert client_auth.is_closed
 
 
 @pytest.mark.asyncio
@@ -53,6 +58,30 @@ async def test_http_pool_reset_is_serialized_and_rebinds_modules():
         assert rebound[-2:] == [first, second]
     finally:
         http_pool.unregister_general_client_rebind(on_rebind)
+        await http_pool.close_all()
+
+
+@pytest.mark.asyncio
+async def test_auth_pool_concurrent_failure_only_replaces_expected_client_once():
+    rebound = []
+
+    def on_rebind(client):
+        rebound.append(client)
+
+    http_pool.register_auth_client_rebind(on_rebind)
+    try:
+        original = await http_pool.get_auth_client()
+        first, second = await asyncio.gather(
+            http_pool.reset_auth_client(expected_client=original),
+            http_pool.reset_auth_client(expected_client=original),
+        )
+        assert first is second
+        assert first is not original
+        assert original.is_closed
+        assert not first.is_closed
+        assert rebound[-1:] == [first]
+    finally:
+        http_pool.unregister_auth_client_rebind(on_rebind)
         await http_pool.close_all()
 
 

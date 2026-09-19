@@ -3,6 +3,7 @@
 import asyncio
 
 import httpx
+import pytest
 
 from src.config import credentials
 
@@ -151,6 +152,134 @@ def test_post_closed_loop_self_heal(monkeypatch):
         res = loop.run_until_complete(credentials._post("https://example.com/test", headers={}))
         assert res.status_code == 200
         assert len(fallback_called) == 1
+    finally:
+        credentials.clear_loop_state(loop)
+        loop.close()
+
+
+def test_post_pool_timeout_rebuilds_managed_auth_pool_and_retries_once(monkeypatch):
+    """认证池耗尽时应替换旧池，并在新池上安全重试一次。"""
+    calls = []
+
+    class BrokenClient:
+        is_closed = False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append("broken")
+            raise httpx.PoolTimeout("pool exhausted")
+
+    class HealthyClient:
+        is_closed = False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append("healthy")
+            return httpx.Response(200, json={"access_token": "renewed"})
+
+    broken = BrokenClient()
+    healthy = HealthyClient()
+
+    async def fake_reset_auth_client(*, expected_client=None):
+        assert expected_client is broken
+        credentials.initialize(auth_client=healthy)
+        return healthy
+
+    from src import http_pool
+
+    monkeypatch.setattr(http_pool, "reset_auth_client", fake_reset_auth_client)
+    loop = asyncio.new_event_loop()
+    try:
+        credentials._auth_http_client = broken
+        credentials._client_loop = loop
+        response = loop.run_until_complete(
+            credentials._post("https://example.com/v2/update_token", headers={})
+        )
+        assert response.status_code == 200
+        assert calls == ["broken", "healthy"]
+    finally:
+        credentials.clear_loop_state(loop)
+        loop.close()
+
+
+def test_concurrent_pool_timeouts_share_rebuilt_auth_pool(monkeypatch):
+    """并发失败的旧池请求都应转移到首个协程建立的新池。"""
+    calls = []
+    reset_calls = []
+    both_started = asyncio.Event()
+
+    class BrokenClient:
+        is_closed = False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append("broken")
+            if calls.count("broken") == 2:
+                both_started.set()
+            await both_started.wait()
+            raise httpx.PoolTimeout("pool exhausted")
+
+    class HealthyClient:
+        is_closed = False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append("healthy")
+            return httpx.Response(200, json={"access_token": "renewed"})
+
+    broken = BrokenClient()
+    healthy = HealthyClient()
+
+    async def fake_reset_auth_client(*, expected_client=None):
+        reset_calls.append(expected_client)
+        credentials.initialize(auth_client=healthy)
+        return healthy
+
+    from src import http_pool
+
+    monkeypatch.setattr(http_pool, "reset_auth_client", fake_reset_auth_client)
+
+    async def run_two_posts():
+        loop = asyncio.get_running_loop()
+        credentials._auth_http_client = broken
+        credentials._client_loop = loop
+        try:
+            return await asyncio.gather(
+                credentials._post("https://example.com/v2/update_token", headers={}),
+                credentials._post("https://example.com/v2/update_token", headers={}),
+            )
+        finally:
+            credentials.clear_loop_state(loop)
+
+    responses = asyncio.run(run_two_posts())
+    assert [response.status_code for response in responses] == [200, 200]
+    assert calls.count("broken") == 2
+    assert calls.count("healthy") == 2
+    assert reset_calls == [broken, broken]
+
+
+def test_post_read_timeout_does_not_retry_refresh_request(monkeypatch):
+    """可能已抵达上游的请求不可自动重放，避免 refresh_token 被重复消费。"""
+    calls = []
+
+    class ReadTimeoutClient:
+        is_closed = False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append(1)
+            raise httpx.ReadTimeout("response lost")
+
+    async def fail_if_reset(*_args, **_kwargs):
+        raise AssertionError("ReadTimeout 不应重建并重试认证请求")
+
+    from src import http_pool
+
+    monkeypatch.setattr(http_pool, "reset_auth_client", fail_if_reset)
+    loop = asyncio.new_event_loop()
+    try:
+        credentials._auth_http_client = ReadTimeoutClient()
+        credentials._client_loop = loop
+        with pytest.raises(httpx.ReadTimeout):
+            loop.run_until_complete(
+                credentials._post("https://example.com/v2/update_token", headers={})
+            )
+        assert calls == [1]
     finally:
         credentials.clear_loop_state(loop)
         loop.close()

@@ -705,6 +705,7 @@ async def main() -> None:
     blog_task: asyncio.Task | None = None
     napcat_monitor: NapCatSessionMonitor | None = None
     general_rebind_callback = None
+    auth_rebind_callback = None
     restart_requested = False
 
     try:
@@ -804,6 +805,7 @@ async def main() -> None:
         # fetcher 会让归档/翻译/标签仍握着已经损坏的旧 transport。
         http_pool.bind_runtime_clients(
             http_client,
+            auth_client=auth_http_client,
             qq_client=qq_client,
             blog_client=_blog_client,
         )
@@ -820,6 +822,15 @@ async def main() -> None:
 
         general_rebind_callback = _rebind_general_client
         http_pool.register_general_client_rebind(general_rebind_callback)
+
+        def _rebind_auth_client(new_client: httpx.AsyncClient) -> None:
+            nonlocal auth_http_client
+            auth_http_client = new_client
+            init_credentials(auth_client=new_client)
+            log_all("♻️ Token 认证 HTTP 连接池已自动重建", is_debug=True)
+
+        auth_rebind_callback = _rebind_auth_client
+        http_pool.register_auth_client_rebind(auth_rebind_callback)
 
         # 博客长图渲染引擎检测
         try:
@@ -986,6 +997,11 @@ async def main() -> None:
         if general_rebind_callback is not None:
             try:
                 http_pool.unregister_general_client_rebind(general_rebind_callback)
+            except Exception:  # nosec B110
+                pass
+        if auth_rebind_callback is not None:
+            try:
+                http_pool.unregister_auth_client_rebind(auth_rebind_callback)
             except Exception:  # nosec B110
                 pass
         if summary_task is not None:

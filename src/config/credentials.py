@@ -287,6 +287,7 @@ async def _post(url: str, *, headers: dict,
                 json_body: dict | None = None,
                 content: bytes | None = None) -> httpx.Response:
     client_to_use = None
+    using_auth_client = False
     try:
         curr_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -305,6 +306,7 @@ async def _post(url: str, *, headers: dict,
         for candidate in (_auth_http_client, _http_client):
             if candidate is not None and not candidate.is_closed:
                 client_to_use = candidate
+                using_auth_client = candidate is _auth_http_client
                 break
 
     if client_to_use is not None:
@@ -312,6 +314,41 @@ async def _post(url: str, *, headers: dict,
             return await client_to_use.post(
                 url, headers=headers, json=json_body, content=content, timeout=15,
             )
+        except (httpx.PoolTimeout, httpx.ConnectError) as exc:
+            # 代理短暂中断后，httpcore 连接池可能继续持有不可用连接/槽位。
+            # 认证池由主程序托管时原子替换它，并仅对「尚未获得连接」或
+            # 「连接建立失败」执行一次安全重试；不会对可能已到达服务端的
+            # ReadTimeout 重试，避免 refresh_token 被重复消费。
+            if using_auth_client:
+                replacement = client_to_use
+                try:
+                    from src import http_pool
+
+                    replacement = await http_pool.reset_auth_client(
+                        expected_client=client_to_use,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as reset_exc:  # nosec B110 - 保留原始网络异常
+                    log_all(
+                        f"⚠️ Token 认证连接池自动重建失败: "
+                        f"{type(reset_exc).__name__}: {reset_exc}",
+                        is_warning=True,
+                    )
+                if replacement is not client_to_use:
+                    log_all(
+                        f"♻️ Token 认证连接池异常，已自动重建并重试 | "
+                        f"error={type(exc).__name__}",
+                        is_warning=True,
+                    )
+                    return await replacement.post(
+                        url,
+                        headers=headers,
+                        json=json_body,
+                        content=content,
+                        timeout=15,
+                    )
+            raise
         except RuntimeError as e:
             if "closed" in str(e).lower():
                 log_all(f"⚠️ 复用 HTTP 客户端检测到底层事件循环已关闭 ({e})，自愈回退到独立临时客户端重试", is_warning=True)
@@ -1256,5 +1293,4 @@ def rename_account(old_id: str, new_id: str) -> None:
 
 
 _sys.modules.setdefault("config.credentials", _sys.modules[__name__])
-
 
