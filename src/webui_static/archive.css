@@ -72,7 +72,7 @@ html.view-home #messageMonthFooter { display: none !important; }
     border-radius: 6px; background: var(--field); color: var(--text);
     font-size: 13px; font-family: inherit; }
   .layout { display: flex; gap: 18px; max-width: 1060px; margin: 0 auto; padding: 16px 16px 60px; }
-  aside.side { width: 258px; flex: none; position: sticky; top: 64px; align-self: flex-start; }
+  aside.side { width: 258px; flex: none; position: sticky; top: 76px; align-self: flex-start; }
   main { flex: 1; min-width: 0; margin: 0; padding: 0; }
   .calendar-toggle { display: none; }
   @media (max-width: 900px) {
@@ -104,8 +104,8 @@ html.view-home #messageMonthFooter { display: none !important; }
   .cal-day.today { outline: 1px dashed var(--muted); }
   .cal-day.active-day { outline: 2px solid var(--accent); outline-offset: 1px; font-weight: bold; }
   .cal-foot { margin-top: 8px; font-size: 11px; color: var(--muted); text-align: center; }
-  /* scroll-margin-top = fixed header高度(~64px) + 顶部预留间距(16px) */
-  .day-sep { scroll-margin-top: 88px; }
+  /* 日历 sticky 顶部为 60px 导航栏 + 16px 呼吸间距；日期跳转保持相同安全区。 */
+  .day-sep { scroll-margin-top: 92px; }
   .day-sep.flash span { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   /* 今日跳转后的高亮脉冲动画 */
   @keyframes today-highlight {
