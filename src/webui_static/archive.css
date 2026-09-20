@@ -3443,10 +3443,6 @@ button.nav,
   box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.bubble {
-  border-left: 3px solid color-mix(in srgb, var(--accent) 68%, var(--border));
-}
-
 /* 三坂品牌色：乃木坂紫、日向坂蓝、樱坂白/银灰。 */
 .portal-pill-brand.nogi,
 .mbc-pill.nogi {

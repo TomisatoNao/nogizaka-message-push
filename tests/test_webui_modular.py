@@ -1134,9 +1134,9 @@ def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
     assert "/static/archive.js?v=20260919_6" in html
-    assert "/static/archive.css?v=20260920_1" in html
+    assert "/static/archive.css?v=20260920_2" in html
     assert "/static/archive.js?v=20260919_6" in perf
-    assert "/static/archive.css?v=20260920_1" in perf
+    assert "/static/archive.css?v=20260920_2" in perf
 
 
 def test_archive_favorite_filter_has_single_entry_point():
