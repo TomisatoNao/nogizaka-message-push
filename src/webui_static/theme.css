@@ -32,6 +32,7 @@
   --brand-hinata-soft: rgba(75, 155, 209, 0.12);
   --brand-sakurazaka: #9aa4b2;
   --brand-sakurazaka-soft: rgba(154, 164, 178, 0.14);
+  --geo-green: #65b98a;
 
   --ok:          #0e995a;
   --ok-soft:     #e3f6ed;
@@ -79,6 +80,7 @@
     --brand-hinata-soft: rgba(118, 198, 240, 0.18);
     --brand-sakurazaka: #f1f4f8;
     --brand-sakurazaka-soft: rgba(241, 244, 248, 0.16);
+    --geo-green: #72d09a;
 
     --ok:          #49d899;
     --ok-soft:     #173b2e;
@@ -118,6 +120,7 @@
   --brand-hinata-soft: rgba(118, 198, 240, 0.18);
   --brand-sakurazaka: #f1f4f8;
   --brand-sakurazaka-soft: rgba(241, 244, 248, 0.16);
+  --geo-green: #72d09a;
 
   --ok:          #49d899;
   --ok-soft:     #173b2e;
@@ -640,11 +643,41 @@ dialog h3 { margin: 0 0 14px; font-size: 16px; color: var(--text-strong); }
    只调整现有组件的视觉层级，不新增 DOM 结构或改变交互行为。
    三坂品牌色由页面/来源上下文使用；普通控件保持中性紫灰。 */
 body {
+  position: relative;
+  isolation: isolate;
   background:
+    linear-gradient(46deg, transparent 0 53%, color-mix(in srgb, var(--brand-sakurazaka) 9%, transparent) 53% 60%, transparent 60%),
     radial-gradient(1200px 650px at 8% -12%, color-mix(in srgb, var(--bg-grad-1) 82%, transparent), transparent 72%),
     radial-gradient(980px 620px at 94% 4%, color-mix(in srgb, var(--bg-grad-2) 62%, transparent), transparent 68%),
     radial-gradient(1100px 760px at 50% 112%, color-mix(in srgb, var(--bg-grad-3) 72%, transparent), transparent 72%),
     var(--bg);
+}
+
+/* ── 20260921 贯穿式几何背景 ────────────────────────────────
+   以蓝、白/银、绿色的长斜切面增加线条感；装饰层不参与布局与交互。 */
+body::before,
+body::after {
+  content: "";
+  position: absolute;
+  top: 60px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .72;
+}
+body::before {
+  background:
+    linear-gradient(46deg, transparent 0 49.2%, color-mix(in srgb, var(--brand-hinata) 20%, transparent) 49.2% 49.45%, transparent 49.45%),
+    color-mix(in srgb, var(--brand-hinata) 8%, transparent);
+  clip-path: polygon(32% 0, 100% 0, 100% 100%, 66% 100%);
+}
+body::after {
+  background:
+    linear-gradient(46deg, transparent 0 52.3%, color-mix(in srgb, var(--geo-green) 18%, transparent) 52.3% 52.55%, transparent 52.55%),
+    color-mix(in srgb, var(--geo-green) 8%, transparent);
+  clip-path: polygon(0 0, 35% 0, 13% 100%, 0 100%);
 }
 
 header.app-header {
