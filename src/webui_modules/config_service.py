@@ -387,6 +387,163 @@ def update_env_file(values: dict[str, str], path: Path | None = None,
         pass
 
 
+def _restore_file_bytes(path: Path, content: bytes | None) -> None:
+    """恢复组合配置提交前的文件状态（仅供同一 mutation lock 使用）。"""
+    if content is None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+    tmp = path.with_suffix(path.suffix + ".rollback.tmp")
+    try:
+        tmp.write_bytes(content)
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _read_env_assignments(path: Path) -> dict[str, str]:
+    """读取 .env 中可迁移的键值；无 python-dotenv 时使用轻量回退解析。"""
+    try:
+        from dotenv import dotenv_values
+        parsed = dotenv_values(path) if path.exists() else {}
+        return {str(k): str(v) for k, v in parsed.items() if v is not None}
+    except Exception:
+        parsed: dict[str, str] = {}
+        if path.exists():
+            try:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    text = line.strip()
+                    if not text or text.startswith("#"):
+                        continue
+                    if text.startswith("export "):
+                        text = text[7:].lstrip()
+                    match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", text)
+                    if not match:
+                        continue
+                    key, value = match.groups()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                        value = value[1:-1]
+                        if text.endswith('"'):
+                            value = value.replace("\\\"", '"').replace("\\\\", "\\")
+                    parsed[key] = value
+            except OSError:
+                pass
+        if parsed:
+            return parsed
+        return {
+            key: value for key, value in os.environ.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+
+
+def commit_config_and_secrets(
+    raw: dict,
+    *,
+    secret_updates: dict[str, str] | None = None,
+    secret_removes: list[str] | None = None,
+    secret_renames: list[dict[str, str]] | None = None,
+    config_path: Path | None = None,
+    env_path: Path | None = None,
+) -> dict:
+    """在调用方 mutation lock 内提交 config 与 Bot 凭证变更。
+
+    配置和 .env 都使用现有的原子写入函数；如果后续写入失败，则恢复
+    本次请求前的两个文件。函数不触发 reload，也不把密钥值返回给调用方。
+    """
+    target_config = _get_config_path(config_path)
+    target_env = _get_env_path(env_path)
+    updates = dict(secret_updates or {})
+    removes = list(secret_removes or [])
+    renames = list(secret_renames or [])
+
+    before_config = target_config.read_bytes() if target_config.exists() else None
+    before_env = target_env.read_bytes() if target_env.exists() else None
+    history_dir = _history_dir(target_config)
+    history_before = {
+        path: path.read_bytes()
+        for path in history_dir.glob("config-*.json")
+    } if history_dir.exists() else {}
+    history_dir_existed = history_dir.exists()
+    env_values = _read_env_assignments(target_env)
+    touched_env_keys = {
+        key for key in (set(updates) | set(removes))
+        if isinstance(key, str)
+    }
+    for item in renames:
+        touched_env_keys.update({str(item.get("from", "")).strip(), str(item.get("to", "")).strip()})
+    env_before_process = {
+        key: os.environ.get(key)
+        for key in touched_env_keys
+        if key
+    }
+    resolved_updates = dict(updates)
+    resolved_removes = set(removes)
+    resolved_renames: list[dict[str, str]] = []
+
+    for item in renames:
+        old = str(item.get("from", "")).strip()
+        new = str(item.get("to", "")).strip()
+        if not old or not new or old == new:
+            continue
+        old_exists = old in env_values or old in os.environ
+        new_exists = new in env_values or new in os.environ
+        if old_exists and new_exists:
+            raise ValueError(f"凭证迁移冲突：{old} 与 {new} 同时存在")
+        if old_exists:
+            value = env_values.get(old, os.environ.get(old, ""))
+            resolved_updates[new] = value
+            resolved_removes.add(old)
+            resolved_renames.append({"from": old, "to": new})
+
+    # 显式更新优先于同名删除；调用方应在校验阶段阻止冲突，这里再次防御。
+    overlap = set(resolved_updates) & resolved_removes
+    if overlap:
+        raise ValueError("凭证更新与删除不能使用相同变量: " + ", ".join(sorted(overlap)))
+
+    try:
+        save_config(raw, path=target_config)
+        if resolved_updates or resolved_removes:
+            update_env_file(resolved_updates, path=target_env, remove=sorted(resolved_removes))
+        for key, value in resolved_updates.items():
+            os.environ[key] = value
+        for key in resolved_removes:
+            os.environ.pop(key, None)
+    except Exception:
+        _restore_file_bytes(target_config, before_config)
+        _restore_file_bytes(target_env, before_env)
+        for key, value in env_before_process.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        # save_config 会先写入历史快照；组合提交失败时也恢复快照目录，
+        # 避免“失败请求”在回滚后留下看似成功的历史版本。
+        try:
+            if history_dir.exists():
+                for path in history_dir.glob("config-*.json"):
+                    path.unlink(missing_ok=True)
+            if history_before:
+                history_dir.mkdir(parents=True, exist_ok=True)
+                for path, content in history_before.items():
+                    path.write_bytes(content)
+            elif not history_dir_existed:
+                history_dir.rmdir()
+        except OSError:
+            pass
+        raise
+
+    return {
+        "updated": sorted(resolved_updates),
+        "removed": sorted(resolved_removes),
+        "renamed": resolved_renames,
+    }
+
+
 def _rotate_account_creds(account_id: str) -> None:
     """轮换账号凭证：删除数据库与磁盘持久化凭证 + 清除内存态。"""
     try:

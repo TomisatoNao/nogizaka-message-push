@@ -338,6 +338,88 @@ def test_admin_frontend_validation_contract():
     assert "用户名只能使用字母、数字、下划线和连字符" in html
 
 
+def test_admin_reliability_commit_and_health_contracts():
+    """管理端可靠性改造的关键入口和状态反馈必须保持可发现。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+
+    # 普通表单保存必须保留 schema 中未展示的高级字段，并以组合接口提交 Bot 凭证。
+    assert "...(config.napcat_inbound || {})" in html
+    assert "...(config.web_admin || {})" in html
+    assert "...(config.archive || {})" in html
+    assert "...(config.message_monitor || {})" in html
+    assert "...(config.daily_summary || {})" in html
+    assert '"/api/config/commit"' in html
+    assert "pendingBotSecretUpdates" in html
+    assert "pendingBotSecretRenames" in html
+    assert "clearSubmittedBotSecrets" in html
+    assert "secret_renames" in html
+    assert "普通配置和 Bot 凭证统一点页面底部保存" in html
+    assert "专家模式" in html
+    assert 'id="rawJsonSyncStatus"' in html
+    assert "function updateRawJsonSyncStatus()" in html
+    assert "查看说明" in html
+
+    # 成员健康卡使用既有状态数据，失败时自动展开并通过统一转义渲染。
+    for element_id in ("stMemberHealthCard", "stMembersSummary", "stMembersDetails", "stMembers"):
+        assert html.count(f'id="{element_id}"') == 1
+    assert "const fetchFailures = memberData.filter" in html
+    assert "memberDetails.open = true" in html
+    assert 'esc(String(m.last_error || "—").slice(0, 120))' in html
+
+    # rAF 合并输入事件；首屏路由早于配置加载时不得访问 null。
+    assert "function flushDirtyState()" in html
+    assert "if (!config) return;" in html
+    assert "requestAnimationFrame(run)" in html
+    assert "flushDirtyStateNow();" in html
+    assert "function validAdminPath(" in html
+    assert "不能包含空白或控制字符" in html
+
+    # 每个弹窗有标题语义，页面只在末尾闭合一组 body/html。
+    assert 'aria-labelledby="confirmTitle"' in html
+    assert 'aria-labelledby="napcatAdvancedDialogTitle"' in html
+    assert html.count("</body>") == 1
+    assert html.count("</html>") == 1
+
+
+def test_config_commit_service_rolls_back_both_files_on_env_failure(monkeypatch, tmp_path):
+    """组合提交写 .env 失败时，config 与 .env 都恢复到请求前内容。"""
+    import src.webui_modules.config_service as service
+
+    config_path = tmp_path / "config.json"
+    env_path = tmp_path / ".env"
+    original = {"accounts": {}, "monitor": []}
+    config_path.write_text(service.serialize_config(original), encoding="utf-8")
+    env_path.write_text("ROLLBACK_TOKEN='before'\n", encoding="utf-8")
+    history_dir = config_path.parent / "history"
+    history_dir.mkdir()
+    history_file = history_dir / "config-previous.json"
+    history_file.write_text("{\"previous\":true}\n", encoding="utf-8")
+    before_config = config_path.read_bytes()
+    before_env = env_path.read_bytes()
+    before_history = history_file.read_bytes()
+
+    def fail_env(*_args, **_kwargs):
+        raise OSError("fixture env write failure")
+
+    monkeypatch.setattr(service, "update_env_file", fail_env)
+    try:
+        service.commit_config_and_secrets(
+            {"accounts": {}, "monitor": [], "translate": True},
+            secret_updates={"ROLLBACK_TOKEN": "after"},
+            config_path=config_path,
+            env_path=env_path,
+        )
+    except OSError as exc:
+        assert "fixture env write failure" in str(exc)
+    else:
+        raise AssertionError(".env 写入失败时组合提交应抛出异常")
+
+    assert config_path.read_bytes() == before_config
+    assert env_path.read_bytes() == before_env
+    assert history_file.read_bytes() == before_history
+    assert list(history_dir.glob("config-*.json")) == [history_file]
+
+
 def test_admin_modules_share_grouped_responsive_layout_contract():
     """状态、账号/成员和推送通道统一使用模块/控制/数据/操作层级。"""
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")

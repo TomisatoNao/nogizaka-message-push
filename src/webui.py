@@ -31,6 +31,7 @@ from src.webui_modules.config_service import (
     _quote_env,
     _rotate_account_creds,
     _snapshot_config,
+    commit_config_and_secrets,
     _trigger_reload,
     list_config_history,
     save_config,
@@ -127,6 +128,7 @@ __all__ = [
     "_quote_env",
     "_rotate_account_creds",
     "_snapshot_config",
+    "commit_config_and_secrets",
     "_trigger_reload",
     "list_config_history",
     "save_config",
@@ -163,6 +165,72 @@ def _load_raw_config() -> dict:
     import json5
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json5.load(f)
+
+
+def _validate_secret_commit_operations(body: dict) -> tuple[dict, dict, list[str], list[dict], list[str]]:
+    """校验组合配置提交中的凭证操作，不返回任何凭证值到日志之外。"""
+    config = body.get("config")
+    updates = body.get("secret_updates") or {}
+    removes = body.get("secret_removes") or []
+    renames = body.get("secret_renames") or []
+    errors: list[str] = []
+    if not isinstance(config, dict):
+        errors.append("缺少 config 对象")
+        config = {}
+    if not isinstance(updates, dict):
+        errors.append("secret_updates 必须是对象")
+        updates = {}
+    if not isinstance(removes, list):
+        errors.append("secret_removes 必须是数组")
+        removes = []
+    if not isinstance(renames, list):
+        errors.append("secret_renames 必须是数组")
+        renames = []
+
+    errors.extend(validate_secret_values(updates) if updates else [])
+    clean_removes: list[str] = []
+    for key in removes:
+        if not isinstance(key, str) or key in _FORBIDDEN_ENV_KEYS or not _SECRET_KEY_RE.match(key):
+            errors.append(f"不允许删除的变量: {key!r}")
+        else:
+            clean_removes.append(key)
+
+    clean_renames: list[dict[str, str]] = []
+    for item in renames:
+        if not isinstance(item, dict):
+            errors.append("secret_renames 中每项必须是对象")
+            continue
+        old = str(item.get("from", "")).strip()
+        new = str(item.get("to", "")).strip()
+        keys = {old, new}
+        if (not old or not new or old == new or
+                any(k in _FORBIDDEN_ENV_KEYS or not _SECRET_KEY_RE.match(k) for k in keys)):
+            errors.append(f"凭证迁移变量名无效: {old!r} -> {new!r}")
+            continue
+        clean_renames.append({"from": old, "to": new})
+
+    update_keys = set(updates)
+    remove_keys = set(clean_removes)
+    rename_keys = {k for item in clean_renames for k in (item["from"], item["to"])}
+    if update_keys & remove_keys:
+        errors.append("secret_updates 与 secret_removes 不能包含相同变量")
+    if (update_keys | remove_keys) & rename_keys:
+        errors.append("secret_updates/secret_removes 不能与 secret_renames 交叉")
+    if len(clean_renames) != len({(x["from"], x["to"]) for x in clean_renames}):
+        errors.append("secret_renames 不能重复")
+    if len(clean_removes) != len(removes):
+        errors.append("secret_removes 中存在无效项")
+    if len(clean_removes) != len(set(clean_removes)):
+        errors.append("secret_removes 不能重复")
+    rename_sources = [item["from"] for item in clean_renames]
+    rename_targets = [item["to"] for item in clean_renames]
+    if len(rename_sources) != len(set(rename_sources)):
+        errors.append("secret_renames 的来源变量不能重复")
+    if len(rename_targets) != len(set(rename_targets)):
+        errors.append("secret_renames 的目标变量不能重复")
+    if set(rename_sources) & set(rename_targets):
+        errors.append("secret_renames 不能形成交叉迁移")
+    return config, updates, clean_removes, clean_renames, errors
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -836,6 +904,61 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_origin():
             return
         path = self.path.split("?", 1)[0]
+
+        if path == "/api/config/commit":
+            if not self._check_auth():
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            raw, updates, removes, renames, op_errors = _validate_secret_commit_operations(body)
+            errors = list(op_errors) + validate_config(raw, schema_path=SCHEMA_PATH)
+            if errors:
+                self._send_json({"ok": False, "errors": errors}, 400)
+                return
+            with _mutation_lock:
+                try:
+                    result = commit_config_and_secrets(
+                        raw,
+                        secret_updates=updates,
+                        secret_removes=removes,
+                        secret_renames=renames,
+                        config_path=CONFIG_PATH,
+                        env_path=ENV_PATH,
+                    )
+                except ValueError as e:
+                    self._send_json({"ok": False, "errors": [str(e)]}, 400)
+                    return
+                except Exception as e:
+                    self._send_json({"ok": False, "errors": [f"组合提交失败: {e}"]}, 500)
+                    return
+                reloaded = _trigger_reload()
+                from src.logger import log_all
+                log_all("⚙️ 网页端组合更新 config.json 与 Bot 凭证并成功触发热重载")
+            self._audit(
+                "config.commit",
+                details={
+                    "reloaded": reloaded,
+                    "updated": ",".join(result["updated"]),
+                    "removed": ",".join(result["removed"]),
+                    "renamed": len(result["renamed"]),
+                },
+            )
+            try:
+                latest = _load_raw_config()
+            except Exception:
+                latest = raw
+            self._send_json({
+                "ok": True,
+                "reloaded": reloaded,
+                "updated": result["updated"],
+                "removed": result["removed"],
+                "renamed": result["renamed"],
+                "cred_status": _cred_status(latest),
+                "qq_bot_status": _qq_bot_status(latest),
+                "env_status": _env_status(latest),
+            })
+            return
 
         if path == "/api/config":
             if not self._check_auth():

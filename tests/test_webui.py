@@ -291,12 +291,56 @@ def main() -> None:
         assert reload_calls, "保存后应触发热重载"
         assert json5.loads(tmp_config.read_text(encoding="utf-8")) == new_cfg, "文件应已写入新配置"
 
+        # PUT /api/config/commit：配置与 Bot 密钥改名在一个请求内提交，旧变量自动迁移。
+        commit_cfg = json.loads(json.dumps(new_cfg))
+        commit_cfg["qq_official_bots"] = [{
+            "name": "commit_bot", "app_id": "102000003", "target_openid": "COMMIT_OPENID",
+        }]
+        webui.ENV_PATH.write_text("COMMIT_OLD_TOKEN='legacy'\nKEEP_TOKEN='keep'\n", encoding="utf-8")
+        code, data = _http("PUT", base + "/api/config/commit", body={
+            "config": commit_cfg,
+            "secret_renames": [{"from": "COMMIT_OLD_TOKEN", "to": "COMMIT_NEW_TOKEN"}],
+        })
+        assert code == 200 and data["ok"] and data["renamed"] == [
+            {"from": "COMMIT_OLD_TOKEN", "to": "COMMIT_NEW_TOKEN"}
+        ], f"组合提交应自动迁移凭证: {data}"
+        committed_env = webui.ENV_PATH.read_text(encoding="utf-8")
+        assert "COMMIT_NEW_TOKEN='legacy'" in committed_env
+        assert "COMMIT_OLD_TOKEN" not in committed_env
+        assert "KEEP_TOKEN='keep'" in committed_env
+        assert json5.loads(tmp_config.read_text(encoding="utf-8")) == commit_cfg
+
+        # 新旧变量同时存在时必须拒绝迁移，且不能修改任一文件。
+        webui.ENV_PATH.write_text(
+            "COMMIT_OLD_TOKEN='legacy'\nCOMMIT_NEW_TOKEN='current'\nKEEP_TOKEN='keep'\n",
+            encoding="utf-8",
+        )
+        conflict_config = tmp_config.read_bytes()
+        conflict_env = webui.ENV_PATH.read_bytes()
+        code, data = _http("PUT", base + "/api/config/commit", body={
+            "config": commit_cfg,
+            "secret_renames": [{"from": "COMMIT_OLD_TOKEN", "to": "COMMIT_NEW_TOKEN"}],
+        })
+        assert code == 400 and not data["ok"] and "同时存在" in "".join(data["errors"])
+        assert tmp_config.read_bytes() == conflict_config
+        assert webui.ENV_PATH.read_bytes() == conflict_env
+
+        # 校验失败必须在任何文件写入前返回，不能留下部分 config/.env 变更。
+        before_config = tmp_config.read_bytes()
+        before_env = webui.ENV_PATH.read_bytes()
+        code, data = _http("PUT", base + "/api/config/commit", body={
+            "config": commit_cfg,
+            "secret_updates": {"NOT_ALLOWED": "should-not-write"},
+        })
+        assert code == 400 and not data["ok"] and tmp_config.read_bytes() == before_config
+        assert webui.ENV_PATH.read_bytes() == before_env
+
         # PUT 非法配置：引用未定义账号 → 400 且文件不变
         bad = json.loads(json.dumps(new_cfg))
         bad["monitor"][0]["account"] = "ghost"
         code, data = _http("PUT", base + "/api/config", body=bad)
         assert code == 400 and not data["ok"], f"非法配置应 400: {code} {data}"
-        assert json5.loads(tmp_config.read_text(encoding="utf-8")) == new_cfg, "校验失败不应写文件"
+        assert json5.loads(tmp_config.read_text(encoding="utf-8")) == commit_cfg, "校验失败不应写文件"
 
         # POST /api/reload
         code, data = _http("POST", base + "/api/reload")
@@ -465,14 +509,14 @@ def main() -> None:
         assert code == 200 and len(data["history"]) >= 2, f"两次成功 PUT 应产生 ≥2 份快照: {data}"
         newest = data["history"][0]["name"]
         code, data = _http("GET", base + "/api/config/history?name=" + newest)
-        assert code == 200 and data["ok"] and json5.loads(data["content"]) == cfg_bots, \
+        assert code == 200 and data["ok"] and json5.loads(data["content"]) == new_cfg, \
             "查看快照应返回可解析的原始内容"
         code, data = _http("GET", base + "/api/config/history?name=../evil.json")
         assert code == 400, "查看接口也应拒绝路径穿越名"
         code, data = _http("POST", base + "/api/config/restore", body={"name": newest})
         assert code == 200 and data["ok"] and data["restored"] == newest, f"恢复应成功: {data}"
         restored = json5.loads(tmp_config.read_text(encoding="utf-8"))
-        assert restored == cfg_bots, "最新快照应是 cfg_bots 版本（第二次 PUT 前的状态）"
+        assert restored == new_cfg, "最新快照应是组合提交前的 new_cfg 版本"
         code, data = _http("POST", base + "/api/config/restore", body={"name": "../evil.json"})
         assert code == 400, "路径穿越名应被拒"
         code, data = _http("POST", base + "/api/config/restore", body={"name": "config-19700101-000000-000.json"})

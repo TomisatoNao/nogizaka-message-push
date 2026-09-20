@@ -45,11 +45,10 @@
   .napcat-endpoint-grid input[type=password] { font-family: var(--mono); letter-spacing: .03em; }
   .napcat-endpoint-note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; }
   .napcat-forward-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 18px; margin-top: 10px; min-width: 0; }
-  /* NapCat 高级与扩展功能状态条：状态可快捷打开详情，但只保留表头一个主入口。 */
+  /* NapCat 高级与扩展功能状态条：状态只读，详情统一从表头入口打开。 */
   .napcat-advanced-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--card-soft) 72%, transparent); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
   .napcat-advanced-status { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-  .napcat-status-pill { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border-soft); background: var(--field); color: var(--muted); transition: border-color var(--tr), color var(--tr), background-color var(--tr); user-select: none; }
-  .napcat-status-pill:hover { border-color: var(--accent); color: var(--accent); }
+  .napcat-status-pill { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-soft); background: var(--field); color: var(--muted); user-select: none; }
   .napcat-status-pill.active { border-color: color-mix(in srgb, var(--ok) 42%, var(--border-soft)); background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
   .napcat-status-pill em { overflow: hidden; font-style: normal; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -128,6 +127,10 @@
   .admin-status-badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
   .admin-status-badge.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
   .admin-status-badge.muted { color: var(--muted); background: color-mix(in srgb, var(--border) 40%, transparent); }
+  .admin-status-details { margin-top: 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 42%, transparent); overflow: hidden; }
+  .admin-status-details > summary { padding: 9px 12px; color: var(--muted); cursor: pointer; font-size: 12px; user-select: none; }
+  .admin-status-details[open] > summary { border-bottom: 1px solid var(--border-soft); color: var(--text); }
+  .admin-status-details > .admin-data-group { margin: 0; border: 0; border-radius: 0; }
   .admin-legacy-slot { color: var(--muted); font-size: 11px; }
   .admin-table-actions { margin-top: 12px; }
   .admin-row-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; width: max-content; max-width: 100%; }
@@ -1017,6 +1020,25 @@
     </p>
   </div>
 
+  <!-- Card 2.5: 成员级抓取与推送健康 -->
+  <div class="card admin-module" id="stMemberHealthCard" hidden>
+    <div class="admin-module-heading">
+      <h2>👥 成员健康</h2>
+      <span id="stMembersSummary" class="admin-status-badge muted" role="status" aria-live="polite">等待探测结果…</span>
+    </div>
+    <details id="stMembersDetails" class="admin-status-details">
+      <summary>查看成员抓取与推送明细</summary>
+      <div class="admin-data-group">
+        <div class="table-wrap">
+          <table class="status-table">
+            <thead><tr><th>成员</th><th>抓取</th><th>推送</th><th>最近错误</th></tr></thead>
+            <tbody id="stMembers"></tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  </div>
+
   <!-- Card 3: 推送通道概览 -->
   <div class="card admin-module">
     <h2>📢 推送通道统计（自上次摘要）</h2>
@@ -1134,6 +1156,14 @@
   <div class="card admin-module">
     <h2>🌐 全局推送通道总开关</h2>
     <div class="admin-control-group admin-channel-switches" id="channelSwitches" role="group" aria-label="全局推送通道"></div>
+    <p class="hint admin-note">普通配置和 Bot 凭证统一点页面底部保存；账号、CPA、NapCat 事件 Token 等独立凭证在弹窗提交后立即写入。</p>
+    <details class="admin-status-details push-channel-help">
+      <summary>查看说明</summary>
+      <div class="admin-note">
+        <p>全局开关只控制通道是否参与自动推送；每个 Bot 或群组的订阅与过滤规则在对应行单独设置。</p>
+        <p>普通配置和 Bot 凭证会一次性提交；账号、CPA、Cookies 与 NapCat 事件 Token 等独立凭证在各自弹窗提交后立即写入。</p>
+      </div>
+    </details>
   </div>
 
   <!-- Block 2: QQ 官方 Bot 模块 -->
@@ -1163,7 +1193,7 @@
       </div>
     </div>
     <p class="hint admin-note" id="qqBotHint">
-      Client Secret 由对应行「填写」保存到 <code>.env</code>；多个私聊或群聊目标请添加多行并分别设置 OpenID 与订阅规则。新建 Bot 默认不订阅任何内容，请按需增量勾选。
+      Client Secret 由对应行「填写」暂存，点击底部保存后写入 <code>.env</code>；多个私聊或群聊目标请添加多行并分别设置 OpenID 与订阅规则。新建 Bot 默认不订阅任何内容，请按需增量勾选。
     </p>
 
     <div class="admin-submodule">
@@ -1242,9 +1272,9 @@
       <p class="hint admin-note">多媒体合并转发卡片支持全局自定义展示昵称与 QQ 头像（各群亦可单独覆盖）。</p>
       <div class="napcat-advanced-bar">
         <div class="napcat-advanced-status">
-          <button class="napcat-status-pill" id="napcatInboundPill" type="button" title="点击快捷配置入站群消息解析">📥 入站解析: <em>未启用</em></button>
-          <button class="napcat-status-pill" id="napcatPhotoPill" type="button" title="点击快捷配置群内美图指令">🎲 美图指令: <em>未启用</em></button>
-          <button class="napcat-status-pill" id="napcatAiChatPill" type="button" title="点击快捷配置 AI 拟人群聊">💬 AI 拟人群聊: <em>未启用</em></button>
+          <span class="napcat-status-pill" id="napcatInboundPill" role="status">📥 入站解析: <em>未启用</em></span>
+          <span class="napcat-status-pill" id="napcatPhotoPill" role="status">🎲 美图指令: <em>未启用</em></span>
+          <span class="napcat-status-pill" id="napcatAiChatPill" role="status">💬 AI 拟人群聊: <em>未启用</em></span>
         </div>
       </div>
     </div>
@@ -1857,7 +1887,7 @@
   </div>
 
   <div class="card admin-module">
-    <div class="admin-module-heading"><h2>📝 完整配置（JSON 在线编辑器）</h2></div>
+    <div class="admin-module-heading"><h2>📝 完整配置（JSON 在线编辑器）</h2><span class="admin-status-badge muted">专家模式</span><span id="rawJsonSyncStatus" class="admin-status-badge muted" role="status" aria-live="polite">与表单一致</span></div>
     <div class="admin-editor-group">
       <textarea id="rawJson" spellcheck="false"></textarea>
       <div class="admin-actions admin-editor-actions">
@@ -1866,7 +1896,7 @@
       </div>
     </div>
     <p class="hint admin-note">
-      保存时服务端会按 Schema 校验，并按标准分区重写 <code>config.json</code>。
+      保存时服务端会按 Schema 校验，并按标准分区重写 <code>config.json</code>；普通表单保存会保留未显示的高级字段。JSON 修改请先点「应用到表单」，否则保存时会被忽略。
     </p>
   </div>
 
@@ -1895,7 +1925,7 @@
 <span class="msg" id="saveMsg"></span>
 </footer>
 <!-- 通用确认 / 提示对话框（替代原生 confirm/alert） -->
-<dialog id="confirmDialog">
+<dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
 <h3 id="confirmTitle">确认操作</h3>
 <div id="confirmBody" style="white-space:pre-wrap; font-size:13.5px; line-height:1.75;
        max-width:min(440px, 88vw); color:var(--text)"></div>
@@ -1905,7 +1935,7 @@
 </div>
 </dialog>
 <!-- 历史快照查看对话框 -->
-<dialog id="historyViewDialog">
+<dialog id="historyViewDialog" aria-labelledby="historyViewTitle" aria-describedby="historyViewContent">
 <h3 id="historyViewTitle">历史快照</h3>
 <pre id="historyViewContent" style="max-height:60vh; overflow:auto; background:var(--bg);
     border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12.5px;
@@ -1916,9 +1946,9 @@
 </div>
 </dialog>
 <!-- 测试推送对话框 -->
-<dialog id="testPushDialog">
-<h3>测试推送</h3>
-<div class="dialog-note">往指定目标发一条测试消息，验证通道配置是否正确。测试推送直达目标，不读取该目标的订阅过滤规则，也不影响正常巡查。</div>
+<dialog id="testPushDialog" aria-labelledby="testPushDialogTitle" aria-describedby="testPushDialogNote">
+<h3 id="testPushDialogTitle">测试推送</h3>
+<div class="dialog-note" id="testPushDialogNote">往指定目标发一条测试消息，验证通道配置是否正确。测试推送直达目标，不读取该目标的订阅过滤规则，也不影响正常巡查。</div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">通道</span></div>
 <div class="chips" id="testPushChannel"></div>
@@ -1935,11 +1965,11 @@
 </div>
 </dialog>
 <!-- 添加 QQ 官方 Bot 对话框（一次填齐，不必先建后改） -->
-<dialog id="qqBotDialog">
-<h3>添加 QQ 官方 Bot</h3>
-<div class="dialog-note">
+<dialog id="qqBotDialog" aria-labelledby="qqBotDialogTitle" aria-describedby="qqBotDialogNote">
+<h3 id="qqBotDialogTitle">添加 QQ 官方 Bot</h3>
+<div class="dialog-note" id="qqBotDialogNote">
     App ID 和 Secret 来自 <b>QQ 开放平台 → 应用管理 → 开发设置</b>。
-    Secret 会存入 <code>.env</code>，其余存入 <code>config.json</code>。
+    Secret 会在点击底部保存时写入 <code>.env</code>，其余存入 <code>config.json</code>。
   </div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">Bot 名称（ID）<span class="req">*</span></span>
@@ -1962,7 +1992,7 @@
 <span class="fenv" id="qqBotSecretEnv">.env · —</span></div>
 <div class="input-group">
 <input autocomplete="off" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="qqBotSecret" type="text"/>
-<button class="eye" id="qqBotSecretEye" type="button">👁</button>
+<button aria-label="显示或隐藏 Client Secret" class="eye" id="qqBotSecretEye" type="button">👁</button>
 </div>
 </div>
 <div class="secret-field">
@@ -1983,8 +2013,8 @@
 </div>
 </dialog>
 <!-- QQ openid 捕获对话框 -->
-<dialog id="openidDialog">
-<h3>自动获取目标 OpenID</h3>
+<dialog id="openidDialog" aria-labelledby="openidDialogTitle" aria-describedby="openidNote">
+<h3 id="openidDialogTitle">自动获取目标 OpenID</h3>
 <div class="dialog-note" id="openidNote">
     官方 Bot 只能从「用户主动私聊 Bot」的事件里拿到 OpenID。点开始后，
     <b>让目标用户给 Bot 发一条私聊消息</b>，捕获成功会自动填回表格。
@@ -2003,7 +2033,7 @@
 <span class="fenv">仅本次连接使用，不落盘</span></div>
 <div class="input-group">
 <input autocomplete="off" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="openidSecret" type="text"/>
-<button class="eye" id="openidSecretEye" type="button">👁</button>
+<button aria-label="显示或隐藏 Client Secret" class="eye" id="openidSecretEye" type="button">👁</button>
 </div>
 </div>
 <div id="openidStatus" style="margin:14px 0; font-size:13.5px; line-height:1.7; min-height:44px"></div>
@@ -2014,28 +2044,28 @@
 </div>
 </dialog>
 <!-- 修改个人密码对话框 -->
-<dialog id="changePwDialog" style="max-width: 440px; width: 92%;">
-<h3>🔑 修改登录密码</h3>
-<div class="dialog-note">密码修改成功后将自动续期当前浏览器会话，其他设备上的历史登录将全部失效。</div>
+<dialog id="changePwDialog" style="max-width: 440px; width: 92%;" aria-labelledby="changePwDialogTitle" aria-describedby="changePwDialogNote">
+<h3 id="changePwDialogTitle">🔑 修改登录密码</h3>
+<div class="dialog-note" id="changePwDialogNote">密码修改成功后将自动续期当前浏览器会话，其他设备上的历史登录将全部失效。</div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">当前原密码<span class="req">*</span></span></div>
 <div class="input-group">
 <input autocomplete="current-password" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="cpOldPw" placeholder="请输入当前密码" type="text"/>
-<button class="eye" id="cpOldPwEye" type="button">👁</button>
+<button aria-label="显示或隐藏当前密码" class="eye" id="cpOldPwEye" type="button">👁</button>
 </div>
 </div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">新密码<span class="req">*</span></span><span class="fenv">至少 8 位</span></div>
 <div class="input-group">
 <input autocomplete="new-password" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="cpNewPw" placeholder="请输入新密码" type="text"/>
-<button class="eye" id="cpNewPwEye" type="button">👁</button>
+<button aria-label="显示或隐藏新密码" class="eye" id="cpNewPwEye" type="button">👁</button>
 </div>
 </div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">确认新密码<span class="req">*</span></span></div>
 <div class="input-group">
 <input autocomplete="new-password" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="cpConfirmPw" placeholder="请再次输入新密码" type="text"/>
-<button class="eye" id="cpConfirmPwEye" type="button">👁</button>
+<button aria-label="显示或隐藏确认密码" class="eye" id="cpConfirmPwEye" type="button">👁</button>
 </div>
 </div>
 <div id="cpError" style="color:var(--err); font-size:12.5px; margin-top:6px; display:none;"></div>
@@ -2045,9 +2075,9 @@
 </div>
 </dialog>
 <!-- 添加用户对话框 -->
-<dialog id="userDialog">
-<h3>添加用户</h3>
-<div class="dialog-note">密码仅上传、不回显；创建后可随时改密或改角色。</div>
+<dialog id="userDialog" aria-labelledby="userDialogTitle" aria-describedby="userDialogNote">
+<h3 id="userDialogTitle">添加用户</h3>
+<div class="dialog-note" id="userDialogNote">密码仅上传、不回显；创建后可随时改密或改角色。</div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">用户名<span class="req">*</span></span>
 <span class="fenv">字母 / 数字 / _ / -</span></div>
@@ -2065,7 +2095,7 @@
 <!-- autocomplete=off 而非 new-password：后者会触发密码管理器的
            「生成密码」悬浮层，它会盖住输入框导致无法输入 -->
 <input autocomplete="off" class="masked" data-1p-ignore="true" data-bwignore="true" data-form-type="other" data-lpignore="true" id="newUserPw" type="text"/>
-<button class="eye" id="newUserPwEye" type="button">👁</button>
+<button aria-label="显示或隐藏用户密码" class="eye" id="newUserPwEye" type="button">👁</button>
 </div>
 <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap">
 <button class="btn small" id="btnGenPw" type="button">🎲 生成随机密码</button>
@@ -2079,18 +2109,18 @@
 </div>
 </dialog>
 <!-- 官方 Bot 订阅对话框 -->
-<dialog id="botSubscribeDialog">
+<dialog id="botSubscribeDialog" aria-labelledby="botSubTitle" aria-describedby="botSubNote">
 <h3 id="botSubTitle">配置 Bot 推送</h3>
-<div class="dialog-note">选择哪些官方 Bot 应该推送该成员的消息。勾选后会自动更新 Bot 的 <code>member_filter</code>。</div>
+<div class="dialog-note" id="botSubNote">选择哪些官方 Bot 应该推送该成员的消息。勾选后会自动更新 Bot 的 <code>member_filter</code>。</div>
 <div id="botSubList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;"></div>
 <div class="actions">
 <button class="btn primary" id="botSubClose">完成</button>
 </div>
 </dialog>
 <!-- 授权 OpenID 添加/编辑对话框 -->
-<dialog id="cmdOpenidDialog" style="max-width: 500px; width: 95%;">
+<dialog id="cmdOpenidDialog" style="max-width: 500px; width: 95%;" aria-labelledby="cmdOpenidDlgTitle" aria-describedby="cmdOpenidDlgNote">
   <h3 id="cmdOpenidDlgTitle">添加授权 OpenID</h3>
-  <div class="dialog-note">
+  <div class="dialog-note" id="cmdOpenidDlgNote">
     用于 QQ 官方 Bot 的私聊指令与群聊 @机器人 授权。
   </div>
   <div class="secret-field">
@@ -2126,10 +2156,10 @@
   </div>
 </dialog>
 <!-- 成员选择对话框 -->
-<dialog id="memberPickDialog" class="member-pick-dialog" aria-labelledby="memberPickTitle">
+<dialog id="memberPickDialog" class="member-pick-dialog" aria-labelledby="memberPickTitle" aria-describedby="memberPickIntro">
   <div class="member-pick-header">
     <h3 id="memberPickTitle">从 Message 账号拉取成员</h3>
-    <p class="member-pick-intro">成员姓名与编号来自官方目录，只需选择团体和对应账号即可。</p>
+    <p class="member-pick-intro" id="memberPickIntro">成员姓名与编号来自官方目录，只需选择团体和对应账号即可。</p>
   </div>
   <div class="member-pick-steps">
     <section class="member-pick-step" aria-labelledby="memberPickGroupLabel">
@@ -2411,9 +2441,9 @@
 </dialog>
 
 <!-- 通道订阅与过滤规则配置对话框 -->
-<dialog id="channelSubscriptionDialog" style="max-width: 540px; width: 95%;">
+<dialog id="channelSubscriptionDialog" style="max-width: 540px; width: 95%;" aria-labelledby="channelSubTitle" aria-describedby="channelSubNote">
   <h3 id="channelSubTitle">📢 订阅与过滤规则</h3>
-  <div class="dialog-note">自由配置该通道订阅接收的内容类型及白名单过滤（解耦架构，各通道独立配置）。</div>
+  <div class="dialog-note" id="channelSubNote">自由配置该通道订阅接收的内容类型及白名单过滤（解耦架构，各通道独立配置）。</div>
   <div id="channelSubStatus" class="dialog-note" style="margin-top:8px; color:var(--muted);"></div>
   
   <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 12px;">
@@ -2483,7 +2513,7 @@
   </div>
 </dialog>
 <!-- 凭证填写对话框 -->
-<dialog id="secretDialog">
+<dialog id="secretDialog" aria-labelledby="secretDialogTitle" aria-describedby="secretDialogHint">
 <h3 id="secretDialogTitle">填写凭证</h3>
 <div class="dialog-note" id="secretDialogHint"></div>
 <p class="hint" id="secretPersistenceHint">提交后立即写入凭证并尝试生效；无需点击页面底部保存栏。</p>
@@ -2512,9 +2542,9 @@
 </div>
 </dialog>
 <!-- Instagram Cookies 专属配置对话框 -->
-<dialog id="igCookieDialog" style="max-width: 580px; width: 95%;">
-  <h3>🍪 配置 Instagram 会话凭证 (Cookies)</h3>
-  <div class="dialog-note">
+<dialog id="igCookieDialog" style="max-width: 580px; width: 95%;" aria-labelledby="igCookieDialogTitle" aria-describedby="igCookieDialogNote">
+  <h3 id="igCookieDialogTitle">🍪 配置 Instagram 会话凭证 (Cookies)</h3>
+  <div class="dialog-note" id="igCookieDialogNote">
     用于拉取账号 Feed、24h 快拍 (Story) 及私密/受限内容；公开单帖通常可匿名解析。
   </div>
   <p class="hint">点击保存后会立即验证并更新 Cookies；无需再点击页面底部保存栏。</p>
@@ -2534,8 +2564,9 @@
   </div>
 </dialog>
 <!-- 账号编辑对话框 -->
-<dialog id="accountDialog">
+<dialog id="accountDialog" aria-labelledby="accountDialogTitle" aria-describedby="accountDialogNote">
 <h3 id="accountDialogTitle">添加账号</h3>
+<p class="hint" id="accountDialogNote">账号信息保存到配置后，再填写对应的登录凭证。</p>
 <div class="grid">
 <label class="field">账号 ID（小写下划线）<input id="accId" placeholder="nogizaka_main" type="text"/></label>
 <label class="field">团体
@@ -2553,9 +2584,9 @@
 <button class="btn primary" id="accSave">确定</button>
 </div>
 </dialog>
-<dialog class="dialog" id="dialog-tgbot">
+<dialog class="dialog" id="dialog-tgbot" aria-labelledby="tgBotDialogTitle">
 <div class="dialog-content">
-<h3 style="margin-top:0">配置 Telegram Bot</h3>
+<h3 id="tgBotDialogTitle" style="margin-top:0">配置 Telegram Bot</h3>
 <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 16px;">
 <label class="field">Bot Name (作 .env 前缀)
           <input id="tgbName" placeholder="例如: tg_main" type="text"/>
@@ -2577,9 +2608,9 @@
 </div>
 </div>
 </dialog>
-<dialog class="dialog" id="dialog-napcat">
+<dialog class="dialog" id="dialog-napcat" aria-labelledby="napcatDialogTitle">
 <div class="dialog-content">
-<h3 style="margin-top:0">配置 NapCat 路由</h3>
+<h3 id="napcatDialogTitle" style="margin-top:0">配置 NapCat 路由</h3>
 <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 16px;">
 <label class="field">QQ 群号
           <input id="ncGroup" placeholder="12345678" type="number"/>
@@ -2595,9 +2626,9 @@
 </div>
 </dialog>
 
-<dialog class="dialog" id="dialog-member-select">
+<dialog class="dialog" id="dialog-member-select" aria-labelledby="memberSelectDialogTitle">
 <div class="dialog-content" style="max-width: 500px">
-<h3 style="margin-top:0">选择订阅成员</h3>
+<h3 id="memberSelectDialogTitle" style="margin-top:0">选择订阅成员</h3>
 <p class="hint">勾选要订阅的成员，不选代表【全收】。</p>
 <div class="grid" id="memberSelectGrid" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); max-height: 400px; overflow-y: auto; gap: 8px; margin-bottom: 16px;">
 <!-- Checkboxes injected by JS -->
@@ -2608,7 +2639,7 @@
 </div>
 </div>
 </dialog>
-</body></html><script>
+<script>
 "use strict";
 // ── 状态 ─────────────────────────────────────────
 let config = null;        // 当前编辑中的配置对象（新格式）
@@ -2619,6 +2650,11 @@ let igSessionConfigured = null; // Instagram Cookies 状态：null 表示尚未�
 let dirty = false;
 let configSaveInFlight = false;
 let secretSaveInFlight = false;
+// Bot 凭证与配置一起提交；值只保留在当前页面内存，不进入 config/raw JSON/localStorage。
+let pendingBotSecretUpdates = Object.create(null);
+let pendingBotSecretRemoves = new Set();
+let pendingBotSecretRenames = [];
+const secretsWritten = new Set();
 // 清理旧版保存在 localStorage 中的静态 Token；Token 模式改用 HttpOnly 会话 Cookie。
 try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 
@@ -2626,6 +2662,100 @@ const $ = (id) => document.getElementById(id);
 const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
 
 let baseline = "";   // 最近一次加载/保存时的配置快照（JSON 串）
+
+function hasPendingBotSecrets() {
+  return Object.keys(pendingBotSecretUpdates).length > 0
+    || pendingBotSecretRemoves.size > 0
+    || pendingBotSecretRenames.length > 0;
+}
+
+function queueBotSecretUpdate(env, value) {
+  if (!env || !value) return;
+  const migrated = pendingBotSecretRenames.find((item) => item.to === env);
+  if (migrated) {
+    // 用户在改名后又填写了新密钥：转成“写新变量 + 删除旧变量”，
+    // 避免组合请求同时携带 rename 与 update 而被后端拒绝。
+    pendingBotSecretRenames = pendingBotSecretRenames.filter((item) => item !== migrated);
+    pendingBotSecretRemoves.add(migrated.from);
+  }
+  pendingBotSecretUpdates[env] = value;
+  pendingBotSecretRemoves.delete(env);
+  pendingBotSecretRenames = pendingBotSecretRenames.filter((item) => item.to !== env);
+}
+
+function queueBotSecretRemove(env) {
+  if (!env) return;
+  const related = pendingBotSecretRenames.filter((item) => item.from === env || item.to === env);
+  for (const item of related) {
+    pendingBotSecretRemoves.add(item.from);
+    pendingBotSecretRemoves.add(item.to);
+  }
+  delete pendingBotSecretUpdates[env];
+  pendingBotSecretRemoves.add(env);
+  pendingBotSecretRenames = pendingBotSecretRenames.filter((item) => item.from !== env && item.to !== env);
+}
+
+function queueBotSecretRename(from, to) {
+  rebaseBotSecretRename(from, from, to);
+}
+
+function rebaseBotSecretRename(from, previousTo, to) {
+  // 名称输入可能连续变化多次；把尚未提交的值和迁移目标一起重定位，
+  // 避免 old→new1→new2 后仍携带 new1 的密钥操作。
+  if (!from) return;
+  const carried = previousTo && Object.prototype.hasOwnProperty.call(pendingBotSecretUpdates, previousTo)
+    ? pendingBotSecretUpdates[previousTo] : undefined;
+  if (!to || !/^[A-Z][A-Z0-9_]*_(?:TOKEN|CLIENT_SECRET)$/.test(to)) return;
+  if (carried !== undefined) delete pendingBotSecretUpdates[previousTo];
+  pendingBotSecretRenames = pendingBotSecretRenames.filter((item) =>
+    item.from !== from && item.to !== previousTo && item.to !== to);
+  if (to === from) {
+    if (carried !== undefined && previousTo && previousTo !== from) {
+      pendingBotSecretUpdates[from] = carried;
+      pendingBotSecretRemoves.add(previousTo);
+    }
+    pendingBotSecretRemoves.delete(from);
+    return;
+  }
+  if (carried !== undefined) {
+    pendingBotSecretUpdates[to] = carried;
+    pendingBotSecretRemoves.add(from);
+    pendingBotSecretRemoves.delete(to);
+    return;
+  }
+  pendingBotSecretRenames.push({ from, to });
+}
+
+function botSecretIsConfigured(env) {
+  return Object.prototype.hasOwnProperty.call(pendingBotSecretUpdates, env)
+    || pendingBotSecretRenames.some((item) => item.to === env);
+}
+
+function pendingBotSecretPayload() {
+  return {
+    secret_updates: { ...pendingBotSecretUpdates },
+    secret_removes: Array.from(pendingBotSecretRemoves),
+    secret_renames: pendingBotSecretRenames.map((item) => ({ ...item })),
+  };
+}
+
+function clearPendingBotSecrets() {
+  pendingBotSecretUpdates = Object.create(null);
+  pendingBotSecretRemoves.clear();
+  pendingBotSecretRenames = [];
+  secretsWritten.clear();
+}
+
+function clearSubmittedBotSecrets(submitted) {
+  for (const [key, value] of Object.entries(submitted.secret_updates || {})) {
+    if (pendingBotSecretUpdates[key] === value) delete pendingBotSecretUpdates[key];
+  }
+  for (const key of submitted.secret_removes || []) pendingBotSecretRemoves.delete(key);
+  for (const item of submitted.secret_renames || []) {
+    pendingBotSecretRenames = pendingBotSecretRenames.filter((current) =>
+      current.from !== item.from || current.to !== item.to);
+  }
+}
 
 // 动态监控摘要卡 → 平台独立详情弹窗；关闭时把焦点还给触发按钮。
 function bindMonitorSettingsDialogs() {
@@ -2673,6 +2803,36 @@ function bindMonitorSettingsDialogs() {
 }
 bindMonitorSettingsDialogs();
 
+// 统一管理普通设置弹窗的焦点：打开后进入第一个可操作控件，关闭后回到触发按钮。
+// 监控弹窗已有专用绑定，这里只补齐其余 dialog，避免重复注册关闭逻辑。
+function bindAdminDialogAccessibility() {
+  const returnFocus = new WeakMap();
+  const dialogs = Array.from(document.querySelectorAll("dialog:not(.monitor-settings-dialog)"));
+  dialogs.forEach((dialog) => {
+    dialog.addEventListener("close", () => {
+      const trigger = returnFocus.get(dialog);
+      if (trigger && document.contains(trigger)) trigger.focus();
+      returnFocus.delete(dialog);
+    });
+    dialog.addEventListener("cancel", (event) => {
+      if (dialog.dataset.busy === "true") event.preventDefault();
+    });
+  });
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest?.("button, [role=button], a");
+    if (!trigger || trigger.closest("dialog")) return;
+    requestAnimationFrame(() => {
+      const dialog = dialogs.find((candidate) => candidate.open);
+      if (!dialog) return;
+      returnFocus.set(dialog, trigger);
+      const target = dialog.querySelector("[autofocus], input:not([type=hidden]), textarea, select, button:not([disabled])") || dialog;
+      if (target === dialog && !dialog.hasAttribute("tabindex")) dialog.tabIndex = -1;
+      if (!dialog.contains(document.activeElement)) target.focus();
+    });
+  }, true);
+}
+bindAdminDialogAccessibility();
+
 function setDirty(v) {
   dirty = v;
   document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
@@ -2704,15 +2864,39 @@ function deepEqual(a, b) {
   return true;
 }
 
-// 基于内容对比的脏标记：加了又删、改了又改回去，会自动恢复"无修改"状态
-function markDirty() {
+// 基于内容对比的脏标记：加了又删、改了又改回去，会自动恢复"无修改"状态。
+// 输入事件只安排一帧刷新，避免大配置在每个按键上重复收集与深比较。
+let dirtyFrameHandle = null;
+function flushDirtyState() {
+  dirtyFrameHandle = null;
+  // 初始路由解析可能早于配置请求完成；没有配置快照时不要收集表单。
+  if (!config) return;
   collectGeneral();
   collectChannels();
   collectSocial();
   let baseObj = {};
   try { baseObj = JSON.parse(baseline); } catch(e){}
-  setDirty(!deepEqual(config, baseObj));
+  setDirty(!deepEqual(config, baseObj) || hasPendingBotSecrets());
   if (config) renderMonitorSummaries();
+}
+
+function flushDirtyStateNow() {
+  if (dirtyFrameHandle !== null) {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(dirtyFrameHandle);
+    else clearTimeout(dirtyFrameHandle);
+    dirtyFrameHandle = null;
+  }
+  flushDirtyState();
+}
+
+function markDirty() {
+  // 先显示保护性脏状态，防止用户在下一帧前关闭页面丢失输入。
+  setDirty(true);
+  if (dirtyFrameHandle !== null) return;
+  const run = () => flushDirtyState();
+  dirtyFrameHandle = typeof requestAnimationFrame === "function"
+    ? requestAnimationFrame(run)
+    : setTimeout(run, 0);
 }
 
 // ── 页面内确认 / 提示（替代原生 confirm/alert）────
@@ -2937,6 +3121,24 @@ function validAdminUrl(raw, { protocols = ["http:", "https:"], allowRelative = f
   }
 }
 
+function validAdminPath(raw, maxLength = 128) {
+  const value = String(raw ?? "").trim();
+  return value.length > 0 && value.length <= maxLength
+    && /^\/[^\s\u0000-\u001f\u007f]*$/.test(value);
+}
+
+function validateAdminSingleLineElement(element, label, maxLength, errors) {
+  if (!element) return;
+  const value = String(element.value || "");
+  if (value.length > maxLength || /[\r\n\u0000-\u001f\u007f]/.test(value)) {
+    adminValidationError(errors, element, label + "不能换行或包含控制字符，且最多 " + maxLength + " 个字符");
+  }
+}
+
+function validateAdminSingleLine(id, label, maxLength, errors) {
+  validateAdminSingleLineElement($(id), label, maxLength, errors);
+}
+
 // NapCat 旧版配置曾把动作路径和 access_token 一起写进一个 URL。管理端
 // 读取时做一次无损拆分，保存时只写入基地址与独立 Token。
 function splitNapcatApiValue(raw) {
@@ -3069,16 +3271,25 @@ function validateAdminConfig() {
     addTextError("inboundHost", "入站监听地址只能填写有效的主机名、IP 或 0.0.0.0");
   }
   const inboundPath = $("inboundEventPath")?.value.trim() || "";
-  if (inboundPath && !inboundPath.startsWith("/")) {
-    addTextError("inboundEventPath", "入站事件路径必须以 / 开头");
+  if (!validAdminPath(inboundPath, 128)) {
+    addTextError("inboundEventPath", "入站事件路径必须以 / 开头，最多 128 个字符且不能包含空白或控制字符");
   }
   const aiBase = $("aiChatBaseUrl")?.value.trim() || "";
   if (aiBase && !validAdminUrl(aiBase, { protocols: ["http:", "https:"] })) {
     addTextError("aiChatBaseUrl", "CPA 网关基地址必须是有效的 http(s) 链接");
   }
   const aiEndpoint = $("aiChatEndpoint")?.value.trim() || "";
-  if (aiEndpoint && !aiEndpoint.startsWith("/")) {
-    addTextError("aiChatEndpoint", "CPA 接口路径必须以 / 开头（例如 /v1/chat/completions）");
+  if (!validAdminPath(aiEndpoint, 128)) {
+    addTextError("aiChatEndpoint", "CPA 接口路径必须以 / 开头，最多 128 个字符且不能包含空白或控制字符");
+  }
+
+  for (const [selector, label] of [
+    ["#qqBotRows input.admin-table-input--remark", "QQ Bot 备注"],
+    ["#tgBotRows input.admin-table-input--tg-remark", "TG Bot 备注"],
+    ["#napcatRows input.admin-table-input--napcat-remark", "NapCat 群备注"],
+  ]) {
+    document.querySelectorAll(selector).forEach((element) =>
+      validateAdminSingleLineElement(element, label, 128, errors));
   }
 
   const accounts = config && config.accounts;
@@ -3127,6 +3338,9 @@ function validateAdminConfig() {
     if (!/^[a-z0-9_]{1,64}$/.test(name)) adminValidationError(errors, row, "QQ Bot 名称只能使用小写字母、数字和下划线（最多 64 位）");
     if (name && qqNames.has(name)) adminValidationError(errors, row, "QQ Bot 名称不能重复：" + name);
     if (name) qqNames.add(name);
+    if (bot?.remark && (String(bot.remark).length > 128 || /[\r\n\u0000-\u001f\u007f]/.test(String(bot.remark)))) {
+      adminValidationError(errors, document.querySelectorAll("#qqBotRows .admin-table-input--remark")[index], "QQ Bot 备注不能换行或包含控制字符，且最多 128 个字符");
+    }
     if (bot?.app_id && !/^\d{1,20}$/.test(String(bot.app_id).trim())) {
       const app = document.querySelectorAll("#qqBotRows .admin-table-input--app")[index];
       adminValidationError(errors, app, "App ID 只能是 1–20 位数字");
@@ -3148,6 +3362,9 @@ function validateAdminConfig() {
       const input = document.querySelectorAll("#napcatRows .admin-table-input--napcat-id")[index];
       adminValidationError(errors, input, "NapCat 群号必须是正整数");
     }
+    if (route?.remark && (String(route.remark).length > 128 || /[\r\n\u0000-\u001f\u007f]/.test(String(route.remark)))) {
+      adminValidationError(errors, document.querySelectorAll("#napcatRows .admin-table-input--napcat-remark")[index], "NapCat 群备注不能换行或包含控制字符，且最多 128 个字符");
+    }
   });
   const tgBots = config?.tg_bots;
   if (tgBots !== undefined && !Array.isArray(tgBots)) errors.push("Telegram Bot 列表必须是数组");
@@ -3159,6 +3376,9 @@ function validateAdminConfig() {
     if (chat && (/[\s]/.test(chat) || chat.length > 128)) {
       const chatInput = document.querySelectorAll("#tgBotRows .admin-table-input--tg-chat")[index];
       adminValidationError(errors, chatInput, "Target Chat ID 不能包含空格且最多 128 位");
+    }
+    if (bot?.remark && (String(bot.remark).length > 128 || /[\r\n\u0000-\u001f\u007f]/.test(String(bot.remark)))) {
+      adminValidationError(errors, document.querySelectorAll("#tgBotRows .admin-table-input--tg-remark")[index], "TG Bot 备注不能换行或包含控制字符，且最多 128 个字符");
     }
   });
 
@@ -3271,6 +3491,7 @@ async function loadConfig() {
   try {
     const data = await api("/api/config");
     config = data.config;
+    clearPendingBotSecrets();
     credStatus = data.cred_status || {};
     qqBotStatus = data.qq_bot_status || [];
     envStatus = data.env_status || {};
@@ -3299,6 +3520,7 @@ async function loadConfig() {
 
 async function saveConfig() {
   if (configSaveInFlight) return;
+  flushDirtyStateNow();
   configSaveInFlight = true;
   const lockedControls = [$("btnSave"), $("btnReloadFile"), $("btnRestart"), $("rawJson")].filter(Boolean);
   const previousDisabled = lockedControls.map((control) => control.disabled);
@@ -3326,20 +3548,32 @@ async function saveConfig() {
     // 请求期间允许继续编辑表单，但成功后只能把本次提交的快照设为已保存基线。
     const submittedConfig = JSON.parse(JSON.stringify(config));
     const submittedJson = JSON.stringify(submittedConfig);
+    const submittedBotSecrets = pendingBotSecretPayload();
+    const hasSubmittedBotSecrets = submittedBotSecrets.secret_renames.length > 0
+      || submittedBotSecrets.secret_removes.length > 0
+      || Object.keys(submittedBotSecrets.secret_updates).length > 0;
+    const requestBody = hasSubmittedBotSecrets
+      ? JSON.stringify({ config: submittedConfig, ...submittedBotSecrets })
+      : submittedJson;
     msg("保存中…", "");
-    const data = await api("/api/config", {
+    const data = await api(hasSubmittedBotSecrets ? "/api/config/commit" : "/api/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: submittedJson,
+      body: requestBody,
     });
     if (!data.ok) {
       msg("❌ 校验失败：\n" + (data.errors || []).join("\n"), "err");
       return;
     }
     credStatus = data.cred_status || credStatus;
+    if (data.qq_bot_status) qqBotStatus = data.qq_bot_status;
+    if (data.env_status) envStatus = data.env_status;
+    if (hasSubmittedBotSecrets) clearSubmittedBotSecrets(submittedBotSecrets);
     baseline = submittedJson;
-    renderAccounts(); renderMembers(); renderSocial(); refreshRawJson();
-    markDirty();
+    renderAccounts(); renderMembers(); renderChannels(); renderSocial(); refreshRawJson();
+    // 立即按提交快照重新计算脏状态；不要让保护性 markDirty() 造成
+    // “请求期间有新修改”的误报（无新编辑时应恢复为干净状态）。
+    flushDirtyStateNow();
     const saveText = data.reloaded ? "✅ 已保存并热重载" : "⚠️ 已保存，但热重载失败（详见主程序日志）";
     msg(dirty ? saveText + "；请求期间有新修改尚未保存" : saveText,
         data.reloaded ? "ok" : "err");
@@ -3356,6 +3590,7 @@ let selfAdminHashUpdate = false;
 
 function switchAdminTab(targetTab, updateHash = true) {
   if (!targetTab) return;
+  flushDirtyStateNow();
   const btn = document.querySelector(`.header-nav .nav-tab[data-tab="${targetTab}"], nav.tabs button[data-tab="${targetTab}"]`);
   if (!btn) return;
 
@@ -3601,13 +3836,32 @@ async function fetchStatus() {
 
   const members = $("stMembers");
   if (members) {
+    const memberData = (Array.isArray(data.members) ? data.members : [])
+      .filter((member) => member && typeof member === "object");
+    const memberHealthCard = $("stMemberHealthCard");
+    // Older status payloads (and the startup window before the first member
+    // cycle) do not contain member-level data. Keep the card out of the
+    // layout until it can display meaningful health information.
+    if (memberHealthCard) memberHealthCard.hidden = !memberData.length;
+    const fetchFailures = memberData.filter((m) => !m.fetch_ok);
+    const pushFailures = memberData.filter((m) => !m.push_ok);
+    const memberSummary = $("stMembersSummary");
+    const memberDetails = $("stMembersDetails");
+    if (memberSummary) {
+      const failureCount = new Set(fetchFailures.concat(pushFailures).map((m) => m.name)).size;
+      memberSummary.textContent = memberData.length
+        ? (failureCount ? `⚠️ ${failureCount}/${memberData.length} 位需关注` : `✓ ${memberData.length} 位正常`)
+        : "暂无成员数据";
+      memberSummary.className = "admin-status-badge " + (failureCount ? "warn" : (memberData.length ? "ok" : "muted"));
+    }
+    if (memberDetails && fetchFailures.length + pushFailures.length > 0) memberDetails.open = true;
     members.innerHTML = "";
-    if (!(data.members || []).length) members.innerHTML = '<tr><td colspan="4" class="empty">（无数据）</td></tr>';
-    for (const m of data.members || []) {
+    if (!memberData.length) members.innerHTML = '<tr><td colspan="4" class="empty">（无数据）</td></tr>';
+    for (const m of memberData) {
       members.innerHTML += "<tr><td><b>" + esc(m.name) + "</b></td>" +
         "<td>" + okBadge(m.fetch_ok, "✓", "✗") + "</td>" +
         "<td>" + okBadge(m.push_ok, "✓", "✗") + "</td>" +
-        "<td>" + esc((m.last_error || "—").slice(0, 120)) + "</td></tr>";
+        "<td>" + esc(String(m.last_error || "—").slice(0, 120)) + "</td></tr>";
     }
   }
 
@@ -4319,13 +4573,18 @@ function renderQqBots() {
       const tdName = document.createElement("td");
       // 改名会改变密钥在 .env 里的变量名，提醒一次避免"改完密钥就丢了"
       const originalName = bot.name;
+      let previousName = originalName;
       tdName.appendChild(mkTableInput(bot.name || "", (v) => {
         bot.name = v.trim().toLowerCase();
-        if (bot.name && bot.name !== originalName && st && st.client_secret) {
-          $("qqBotHint").innerHTML = "⚠️ 改名后密钥变量名变为 <code>" +
-            esc(bot.name.toUpperCase()) + "_CLIENT_SECRET</code>，" +
-            "保存后需要重新填一次 Client Secret。";
+        if (originalName) {
+          const oldEnv = (originalName || "").toUpperCase() + "_CLIENT_SECRET";
+          const newEnv = bot.name.toUpperCase() + "_CLIENT_SECRET";
+          rebaseBotSecretRename(oldEnv, (previousName || "").toUpperCase() + "_CLIENT_SECRET", newEnv);
+          if (bot.name && bot.name !== originalName) {
+            msg("已暂存 Bot 凭证迁移，保存时会自动从旧名称迁移到新名称。", "");
+          }
         }
+        if (/^[a-z0-9_]{1,64}$/.test(bot.name)) previousName = bot.name;
       }, "official_bot1", "admin-table-input--id"));
       const tdRemark = document.createElement("td");
       tdRemark.appendChild(mkTableInput(bot.remark || "", (v) => {
@@ -4359,8 +4618,10 @@ function renderQqBots() {
       const secretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
       const tdSecret = document.createElement("td");
       tdSecret.className = "admin-nowrap";
-      const secretSet = (st && st.secret_env === secretVar && st.client_secret)
-        || secretsWritten.has(bot.name);
+      const secretSet = !pendingBotSecretRemoves.has(secretVar) && ((st && st.secret_env === secretVar && st.client_secret)
+        || secretsWritten.has(bot.name)
+        || Object.prototype.hasOwnProperty.call(pendingBotSecretUpdates, secretVar)
+        || pendingBotSecretRenames.some((item) => item.to === secretVar));
       tdSecret.title = secretVar;
 
       const secBtn = document.createElement("button");
@@ -4371,12 +4632,21 @@ function renderQqBots() {
         : '<span class="secret-dot"></span><span>✗ 未配置</span><span class="secret-action">填写</span>';
       secBtn.onclick = (e) => {
         e.preventDefault();
+        // 名称输入框允许在未重绘行的情况下直接点击密钥按钮，
+        // 此处必须以当前名称重新计算变量名，不能使用初次渲染的闭包值。
+        const currentSecretVar = (bot.name || "").toUpperCase() + "_CLIENT_SECRET";
+        const currentStatus = statusByName[bot.name] || {};
+        const currentSet = !pendingBotSecretRemoves.has(currentSecretVar) &&
+          ((currentStatus.secret_env === currentSecretVar && currentStatus.client_secret) ||
+           secretsWritten.has(bot.name) ||
+           Object.prototype.hasOwnProperty.call(pendingBotSecretUpdates, currentSecretVar) ||
+           pendingBotSecretRenames.some((item) => item.to === currentSecretVar));
         openSecretDialog(
-          (secretSet ? "修改" : "填写") + "官方 Bot 密钥：" + (bot.name || ""),
-          "写入 <code>" + esc(secretVar) + "</code>，保存并热重载后生效。",
-          [{ env: secretVar, label: "Client Secret", required: true,
+          (currentSet ? "修改" : "填写") + "官方 Bot 密钥：" + (bot.name || ""),
+          "写入 <code>" + esc(currentSecretVar) + "</code>，保存并热重载后生效。",
+          [{ env: currentSecretVar, label: "Client Secret", required: true,
              help: "QQ 开放平台（q.qq.com）→ 应用管理 → 你的机器人 → 开发设置 → AppSecret。" }],
-          null, { onDone: () => { secretsWritten.add(bot.name); renderQqBots(); } });
+          null, { deferCommit: true, onDone: () => { secretsWritten.add(bot.name); renderQqBots(); } });
       };
       tdSecret.appendChild(secBtn);
 
@@ -4398,19 +4668,11 @@ function renderQqBots() {
           "删除官方 Bot " + (bot.name || "#" + idx) + "？\n" +
           "同时会清除 .env 里该 Bot 的密钥，不留残余。",
           { title: "删除官方 Bot", yesText: "删除", danger: true }))) return;
-        // 无条件清理 .env：新建但尚未保存的 Bot 在服务端状态里查不到，
-        // 早先据此跳过清理，结果删完还剩一个 .env 遗留槽位
+        // 删除配置与 .env 凭证进入同一个组合提交，避免只删一半。
         if (upper) {
-          try {
-            const res = await api("/api/secrets", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ remove: [
-                upper + "_CLIENT_SECRET", upper + "_APP_ID", upper + "_TARGET_OPENID",
-              ] }),
-            });
-            if (res.ok && res.qq_bot_status) qqBotStatus = res.qq_bot_status;
-          } catch (e) { /* 密钥清理失败不阻断配置删除 */ }
+          queueBotSecretRemove(upper + "_CLIENT_SECRET");
+          queueBotSecretRemove(upper + "_APP_ID");
+          queueBotSecretRemove(upper + "_TARGET_OPENID");
           secretsWritten.delete(bot.name);
         }
         const curIdx = (config.qq_official_bots || []).indexOf(bot);
@@ -4561,15 +4823,9 @@ $("qqBotSave").addEventListener("click", async () => {
   const btn = $("qqBotSave");
   btn.disabled = true; btn.textContent = "添加中…";
   try {
-    // Secret 立即写入 .env（密钥不进 config.json）
-    const res = await api("/api/secrets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values: { [name.toUpperCase() + "_CLIENT_SECRET"]: secret } }),
-    });
-    if (!res.ok) { msg("❌ 密钥写入失败：" + (res.errors || []).join("；"), "err"); return; }
-    if (res.qq_bot_status) qqBotStatus = res.qq_bot_status;
-    secretsWritten.add(name);   // 保存前 status 里查不到，前端自己记住
+    // 新 Bot 的密钥只暂存于当前页面，随 config 一起组合提交。
+    queueBotSecretUpdate(name.toUpperCase() + "_CLIENT_SECRET", secret);
+    secretsWritten.add(name);
 
     const bot = { ...createIncrementalSubscriptionDefaults(), name: name, app_id: appId };
     if (remark) bot.remark = remark;
@@ -4582,8 +4838,8 @@ $("qqBotSave").addEventListener("click", async () => {
     config.qq_official_bots.push(bot);
     markDirty(); renderQqBots();
     $("qqBotDialog").close();
-    msg(openid ? "✅ 已添加 Bot，点「保存并热重载」生效"
-               : "✅ 已添加 Bot（密钥已存入 .env）。还需要目标 OpenID —— 点该行「🎯 自动获取」，或手动填后保存", "ok");
+    msg(openid ? "✅ 已添加 Bot，配置与密钥将在点击「保存并热重载」时一起生效"
+               : "✅ 已添加 Bot（密钥已暂存）。还需要目标 OpenID —— 点该行「🎯 自动获取」，或手动填写后保存", "ok");
   } catch (e) {
     msg("添加失败：" + e.message, "err");
   } finally {
@@ -4634,6 +4890,7 @@ function collectGeneral() {
     const inboundGroups = [];
     document.querySelectorAll(".inbound-group-chk:checked").forEach(el => inboundGroups.push(el.value));
     config.napcat_inbound = {
+      ...(config.napcat_inbound || {}),
       enabled: $("inboundOn").checked,
       transport: $("inboundTransport")?.value || "http_post",
       listen_host: $("inboundHost")?.value.trim() || "0.0.0.0",
@@ -4653,6 +4910,7 @@ function collectGeneral() {
     const photoGroups = [];
     document.querySelectorAll(".photo-group-chk:checked").forEach(el => photoGroups.push(el.value));
     config.napcat_photo = {
+      ...(config.napcat_photo || {}),
       enabled: $("photoCommandOn").checked,
       group_scope: $("photoGroupScope")?.value || "routes",
       allowed_groups: photoGroups,
@@ -4674,6 +4932,7 @@ function collectGeneral() {
     const sysPrompt = $("aiChatSystemPrompt")?.value.trim() || "";
 
     config.napcat_ai_chat = {
+      ...(config.napcat_ai_chat || {}),
       enabled: $("aiChatOn").checked,
       cpa_base_url: $("aiChatBaseUrl")?.value.trim() || "",
       cpa_model: $("aiChatModel")?.value.trim() || "gpt-5.6-luna",
@@ -4707,6 +4966,7 @@ function collectGeneral() {
   // monitor_schedule 中的新值。
   config.sleep_hours = scheduleSleepHours;
   config.message_monitor = {
+    ...(config.message_monitor || {}),
     enabled: $("msgMonitorOn") ? $("msgMonitorOn").checked : true
   };
   config.blog_monitor = {
@@ -4725,11 +4985,13 @@ function collectGeneral() {
   config.gemini_min_interval = num("geminiMinInterval", true) ?? 7.0;
   config.translate_timeout = num("translateTimeout") ?? 30;
   config.web_admin = {
+    ...(config.web_admin || {}),
     enabled: $("webAdminOn").checked,
     host: $("webAdminHost").value.trim() || "127.0.0.1",
     port: num("webAdminPort") ?? 46046,
   };
   config.archive = {
+    ...(config.archive || {}),
     enabled: $("archiveOn").checked,
     dir: (config.archive || {}).dir || "data/archive",
     media: $("archiveMedia").checked,
@@ -4742,10 +5004,12 @@ function collectGeneral() {
   config.auth.session_hours = config.auth.session_hours || 12;
 
   config.daily_summary = {
+    ...(config.daily_summary || {}),
     enabled: $("summaryOn").checked,
     hour: num("summaryHour") ?? 23,
   };
   config.qq_commands = {
+    ...(config.qq_commands || {}),
     enabled: $("cmdOn").checked,
     mode: $("cmdMode") ? $("cmdMode").value : "configured",
     allow_openids: (window._cmdOpenids || []).map(item => ({
@@ -4844,7 +5108,8 @@ function openSecretDialog(title, hint, fields, account, opts) {
   if (secretSaveInFlight) return;
   const showSmartParse = Boolean((opts || {}).showSmartParse);
   secretCtx = { fields, account, userAction: (opts || {}).userAction || null,
-                onDone: (opts || {}).onDone || null };
+                onDone: (opts || {}).onDone || null,
+                deferCommit: Boolean((opts || {}).deferCommit) };
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
   $("secretDialogHint").hidden = !hint;
@@ -4904,6 +5169,7 @@ function openSecretDialog(title, hint, fields, account, opts) {
     const eye = document.createElement("button");
     eye.type = "button";
     eye.className = "eye";
+    eye.setAttribute("aria-label", "显示或隐藏 " + String(f.label || "凭证"));
     eye.textContent = "👁";
     eye.title = "显示 / 隐藏";
     eye.addEventListener("click", () => {
@@ -4927,18 +5193,29 @@ function openSecretDialog(title, hint, fields, account, opts) {
     box.appendChild(wrap);
   }
   const singleField = fields.length === 1 ? fields[0] : null;
-  const canDelete = singleField && singleField.env !== "__password__" && envStatus[singleField.env];
+  const canDelete = singleField && singleField.env !== "__password__" &&
+    (envStatus[singleField.env] || Object.prototype.hasOwnProperty.call(pendingBotSecretUpdates, singleField.env));
   if ($("secretDelete")) {
     $("secretDelete").style.display = canDelete ? "inline-block" : "none";
     $("secretDelete").textContent = "🗑️ 清空此凭证";
     const deleteCtx = secretCtx;
     $("secretDelete").onclick = async () => {
-      $("secretDialog").close();
-      await clearEnvSecret(singleField.env, singleField.label);
-      if (deleteCtx && deleteCtx.onDone) { try { deleteCtx.onDone(); } catch (e) {} }
+      if (deleteCtx && deleteCtx.deferCommit) {
+        queueBotSecretRemove(singleField.env);
+        markDirty();
+        $("secretDialog").close();
+        msg("已暂存清空凭证，点击页面底部保存后生效。", "");
+        if (deleteCtx.onDone) { try { deleteCtx.onDone(); } catch (e) {} }
+      } else {
+        $("secretDialog").close();
+        await clearEnvSecret(singleField.env, singleField.label);
+        if (deleteCtx && deleteCtx.onDone) { try { deleteCtx.onDone(); } catch (e) {} }
+      }
     };
   }
-  $("secretPersistenceHint").textContent = secretCtx.userAction
+  $("secretPersistenceHint").textContent = secretCtx.deferCommit
+    ? "Bot 凭证只暂存于当前页面，点击底部保存后与 Bot 配置一起写入。"
+    : secretCtx.userAction
     ? "此操作提交后立即生效，不走页面底部配置保存。"
     : "提交后立即写入凭证并尝试热重载；无需点击页面底部保存栏。";
   $("secretDialog").showModal();
@@ -5112,6 +5389,15 @@ $("secretSave").addEventListener("click", async () => {
     } finally {
       setSecretDialogBusy(false);
     }
+    return;
+  }
+
+  if (submitCtx.deferCommit) {
+    for (const [env, value] of Object.entries(values)) queueBotSecretUpdate(env, value);
+    markDirty();
+    $("secretDialog").close();
+    if (submitCtx.onDone) { try { submitCtx.onDone(); } catch (e) {} }
+    msg("✅ Bot 凭证已暂存，点击底部「保存并热重载」后生效", "ok");
     return;
   }
 
@@ -6202,10 +6488,18 @@ function renderTGBots() {
 
   bots.forEach((b, idx) => {
     const tr = document.createElement("tr");
-    
     const tdName = document.createElement("td");
+    const originalName = b.name;
+    let previousName = originalName;
     tdName.appendChild(mkTableInput(b.name || "", (v) => {
       b.name = v.trim().toLowerCase();
+      if (originalName) {
+        rebaseBotSecretRename(tgTokenEnvKey(originalName), tgTokenEnvKey(previousName), tgTokenEnvKey(b.name));
+        if (b.name && b.name !== originalName) {
+          msg("已暂存 TG Bot Token 迁移，保存时会自动从旧名称迁移到新名称。", "");
+        }
+      }
+      if (tgTokenEnvKey(b.name)) previousName = b.name;
     }, "tg_main", "admin-table-input--tg-name"));
 
     const tdRemark = document.createElement("td");
@@ -6224,7 +6518,8 @@ function renderTGBots() {
     const tdSecret = document.createElement("td");
     tdSecret.className = "admin-nowrap";
     const tokenState = statusByName[b.name] || {};
-    const isConfigured = !!tokenState.configured;
+    const isConfigured = !pendingBotSecretRemoves.has(secretVar)
+      && (!!tokenState.configured || botSecretIsConfigured(secretVar));
     tdSecret.title = secretVar ? ("写入 .env: " + secretVar) : "先填写有效 Bot 名称";
 
     const secBtn = document.createElement("button");
@@ -6239,13 +6534,14 @@ function renderTGBots() {
     }
     secBtn.onclick = (e) => {
       e.preventDefault();
-      if (!secretVar) return;
+      const currentSecretVar = tgTokenEnvKey(b.name);
+      if (!currentSecretVar) return;
       openSecretDialog(
         "填写 TG Bot Token：" + (b.name || "未命名"),
-        "写入 <code>" + esc(secretVar) + "</code>（该 Bot 的唯一凭证），保存后重启生效。",
-        [{ env: secretVar, label: "专属 Bot Token", required: true, placeholder: "123456:ABC-DEF...",
+        "写入 <code>" + esc(currentSecretVar) + "</code>（该 Bot 的唯一凭证），保存后重启生效。",
+        [{ env: currentSecretVar, label: "专属 Bot Token", required: true, placeholder: "123456:ABC-DEF...",
            help: "Telegram 找 @BotFather → /newbot 创建后获得。每个 Bot 必须填写自己的 Token，不会继承其他 Bot 的凭证。" }],
-        null, { onDone: () => { renderTGBots(); } });
+        null, { deferCommit: true, onDone: () => { renderTGBots(); } });
     };
     tdSecret.appendChild(secBtn);
     if (isConfigured) {
@@ -6256,7 +6552,9 @@ function renderTGBots() {
       clearBtn.textContent = "清空";
       clearBtn.onclick = async (e) => {
         e.preventDefault();
-        await clearEnvSecret(secretVar, "TG Bot " + (b.name || "Token"));
+        queueBotSecretRemove(secretVar);
+        markDirty();
+        msg("已暂存清空 TG Bot 凭证，保存配置后生效。", "");
         renderTGBots();
       };
       tdSecret.appendChild(clearBtn);
@@ -6273,6 +6571,7 @@ function renderTGBots() {
     const actWrap = document.createElement("div");
     actWrap.className = "admin-row-actions";
     const btnDel = mkDelBtn(() => {
+      queueBotSecretRemove(tgTokenEnvKey(b.name));
       const curIdx = (config.tg_bots || []).indexOf(b);
       if (curIdx >= 0) config.tg_bots.splice(curIdx, 1);
       else config.tg_bots.splice(idx, 1);
@@ -7187,9 +7486,8 @@ function stopLogPolling() {
 // ── QQ openid 自动捕获 ───────────────────────────
 let openidCtx = null;      // {bot, input}
 let openidTimer = null;
-// 本次会话里已写入 .env 的 Bot 密钥。新加的 Bot 还没保存进 config.json，
+// 本次会话里已暂存 Bot 密钥。新加的 Bot 还没保存进 config.json，
 // 服务端返回的 qq_bot_status 里查不到它，只能前端自己记着。
-const secretsWritten = new Set();
 
 async function openOpenidDialog(bot, personalInput, groupInput) {
   openidCtx = { bot: bot, personalInput: personalInput, groupInput: groupInput || personalInput, mode: "user" };
@@ -7747,7 +8045,22 @@ async function refreshHistory() {
 }
 
 // ── 高级 JSON ────────────────────────────────────
-function refreshRawJson() { $("rawJson").value = JSON.stringify(config, null, 2); }
+function updateRawJsonSyncStatus() {
+  const status = $("rawJsonSyncStatus");
+  const raw = $("rawJson");
+  if (!status || !raw) return;
+  let same = false;
+  try {
+    const parsed = JSON.parse(raw.value);
+    same = deepEqual(parsed, config);
+  } catch (_) {}
+  status.textContent = same ? "与表单一致" : "有未应用修改";
+  status.className = "admin-status-badge " + (same ? "muted" : "warn");
+}
+function refreshRawJson() {
+  $("rawJson").value = JSON.stringify(config, null, 2);
+  updateRawJsonSyncStatus();
+}
 $("btnResetJson").addEventListener("click", () => {
   collectGeneral();
   collectChannels();
@@ -7765,6 +8078,7 @@ $("btnApplyJson").addEventListener("click", () => {
     msg("JSON 解析失败：" + e.message, "err");
   }
 });
+$("rawJson").addEventListener("input", updateRawJsonSyncStatus);
 
 // ── 小工具 ───────────────────────────────────────
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
@@ -7813,11 +8127,13 @@ function renderAll() { renderGeneral(); renderChannels(); renderSocial(); render
 // ── 入口 ─────────────────────────────────────────
 $("btnSave").addEventListener("click", saveConfig);
 $("btnReloadFile").addEventListener("click", async () => {
+  flushDirtyStateNow();
   if (dirty && !(await uiConfirm("有未保存的修改，确定放弃并重新读取？",
                                  { yesText: "放弃修改", danger: true }))) return;
   loadConfig();
 });
 $("btnRestart").addEventListener("click", async () => {
+  flushDirtyStateNow();
   if (dirty && !(await uiConfirm(
     "有未保存的修改，重启将放弃它们。\n要先保存的话请点「取消」回去保存。",
     { title: "重启主程序", yesText: "放弃修改并继续", danger: true }))) return;
@@ -8282,9 +8598,6 @@ function bindNapcatAdvancedEvents() {
   $("btnSubtabPhoto")?.addEventListener("click", () => switchNapcatSubtab("photo"));
   $("btnSubtabAiChat")?.addEventListener("click", () => switchNapcatSubtab("aichat"));
   $("btnNapcatAdvanced")?.addEventListener("click", () => openNapcatAdvancedDialog());
-  $("napcatInboundPill")?.addEventListener("click", () => openNapcatAdvancedDialog("inbound"));
-  $("napcatPhotoPill")?.addEventListener("click", () => openNapcatAdvancedDialog("photo"));
-  $("napcatAiChatPill")?.addEventListener("click", () => openNapcatAdvancedDialog("aichat"));
 
   $("inboundOn")?.addEventListener("change", updateNapcatAdvancedStatus);
   $("inboundTransport")?.addEventListener("change", updateNapcatAdvancedStatus);
