@@ -39,6 +39,11 @@ backups/
 # 设计、审计与过程文档（仅保留在本地，不推送到版本库）
 docs/
 scratch/
+# 长期有效的前端设计规范例外纳入版本库，供后续 agent 读取
+!docs/
+docs/*
+!docs/frontend-design-guidelines.md
+!docs/frontend-design-optimization-plan.md
 
 # 测试与覆盖率
 .coverage
