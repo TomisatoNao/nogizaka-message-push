@@ -2228,6 +2228,56 @@ function showToast(msg, type = "info") {
   }, 2500);
 }
 
+function legacyCopyText(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+
+  const selection = document.getSelection ? document.getSelection() : null;
+  const ranges = [];
+  if (selection) {
+    for (let i = 0; i < selection.rangeCount; i += 1) {
+      ranges.push(selection.getRangeAt(i));
+    }
+    selection.removeAllRanges();
+  }
+
+  textarea.focus({ preventScroll: true });
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    copied = typeof document.execCommand === "function" && document.execCommand("copy");
+  } catch (_) {
+    copied = false;
+  } finally {
+    textarea.remove();
+    if (selection) {
+      selection.removeAllRanges();
+      ranges.forEach((range) => selection.addRange(range));
+    }
+  }
+  return copied;
+}
+
+async function copyTextToClipboard(text) {
+  if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      // Permission-denied or unavailable Clipboard API: try the user-gesture fallback below.
+    }
+  }
+  return legacyCopyText(text);
+}
+
 const brDeleteTranslateBtn = $("brDeleteTranslate");
 if (brDeleteTranslateBtn) {
   brDeleteTranslateBtn.addEventListener("click", async () => {
@@ -3123,7 +3173,7 @@ function renderBubble(msg) {
 
   const copyBtn = b.querySelector(".copy-btn");
   if (copyBtn) {
-    copyBtn.addEventListener("click", () => {
+    copyBtn.addEventListener("click", async () => {
       let parts = [];
       const mObj = members.find(x => x.name === curMember);
       const mName = (mObj ? mObj.display : curMember) || "成员";
@@ -3144,11 +3194,16 @@ function renderBubble(msg) {
       }
 
       const textToCopy = parts.join("\n\n");
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        showToast("📋 已复制整条消息与译文");
-      }).catch(err => {
-        showToast("⚠️ 复制失败：" + err.message);
-      });
+      try {
+        const copied = await copyTextToClipboard(textToCopy);
+        if (copied) {
+          showToast("📋 已复制整条消息与译文", "success");
+        } else {
+          showToast("⚠️ 当前浏览器禁止复制，请手动选择文本复制", "error");
+        }
+      } catch (err) {
+        showToast("⚠️ 复制失败：" + (err && err.message ? err.message : "未知错误"), "error");
+      }
     });
   }
 

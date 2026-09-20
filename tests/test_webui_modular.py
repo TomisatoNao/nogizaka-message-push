@@ -1133,10 +1133,21 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260919_6" in html
+    assert "/static/archive.js?v=20260921_1" in html
     assert "/static/archive.css?v=20260920_3" in html
-    assert "/static/archive.js?v=20260919_6" in perf
+    assert "/static/archive.js?v=20260921_1" in perf
     assert "/static/archive.css?v=20260920_3" in perf
+
+
+def test_archive_message_copy_supports_insecure_context_fallback():
+    """桌面端 HTTP 页面没有 Clipboard API 时，消息复制仍应走兼容回退。"""
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    assert "async function copyTextToClipboard(text)" in script
+    assert 'navigator.clipboard && typeof navigator.clipboard.writeText === "function"' in script
+    assert 'document.execCommand("copy")' in script
+    assert "const copied = await copyTextToClipboard(textToCopy);" in script
+    assert "当前浏览器禁止复制，请手动选择文本复制" in script
 
 
 def test_archive_favorite_filter_has_single_entry_point():
