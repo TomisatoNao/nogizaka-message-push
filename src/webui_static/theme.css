@@ -7,24 +7,31 @@
 
 /* ── 设计 token：浅色（默认） ───────────────────────── */
 :root {
-  --bg:          #f4f6fa;
-  --bg-grad-1:   #e8ebf8;
-  --bg-grad-2:   #f6eff5;
-  --bg-grad-3:   #e4eaf8;
-  --card:        rgba(255, 255, 255, 0.85);
+  --bg:          #f4f6f8;
+  --bg-grad-1:   #e9eef8;
+  --bg-grad-2:   #f3eef9;
+  --bg-grad-3:   #edf4f4;
+  --card:        rgba(255, 255, 255, 0.92);
   --card-solid:  #ffffff;
-  --card-soft:   rgba(250, 251, 253, 0.7);
-  --text:        #1e2532;
-  --text-strong: #0f1624;
-  --muted:       #717a8a;
-  --border:      rgba(226, 230, 238, 0.8);
-  --border-soft: rgba(238, 240, 245, 0.6);
-  --field:       rgba(245, 247, 251, 0.7);
+  --card-soft:   rgba(248, 250, 252, 0.82);
+  --text:        #242a34;
+  --text-strong: #151b26;
+  --muted:       #707a88;
+  --border:      rgba(214, 220, 229, 0.88);
+  --border-soft: rgba(229, 233, 239, 0.82);
+  --field:       rgba(248, 250, 252, 0.86);
 
-  --accent:      #6355df;
-  --accent-2:    #a36be5;
-  --accent-soft: rgba(99, 85, 223, 0.08);
-  --accent-ring: rgba(99, 85, 223, 0.25);
+  /* 普通界面使用克制的中性紫；三坂颜色只在来源上下文中出现。 */
+  --accent:      #6e67a4;
+  --accent-2:    #9c8ed0;
+  --accent-soft: rgba(110, 103, 164, 0.10);
+  --accent-ring: rgba(110, 103, 164, 0.22);
+  --brand-nogizaka: #8c76d7;
+  --brand-nogizaka-soft: rgba(140, 118, 215, 0.12);
+  --brand-hinata: #4b9bd1;
+  --brand-hinata-soft: rgba(75, 155, 209, 0.12);
+  --brand-sakurazaka: #9aa4b2;
+  --brand-sakurazaka-soft: rgba(154, 164, 178, 0.14);
 
   --ok:          #0e995a;
   --ok-soft:     #e3f6ed;
@@ -33,12 +40,12 @@
   --err:         #db3c3c;
   --err-soft:    #fdecfe;
 
-  --shadow-sm:   0 2px 6px rgba(18, 22, 38, 0.04);
-  --shadow-md:   0 8px 24px rgba(18, 22, 38, 0.08);
-  --shadow-lg:   0 24px 48px rgba(65, 55, 120, 0.12);
+  --shadow-sm:   0 4px 14px rgba(30, 38, 55, 0.05);
+  --shadow-md:   0 12px 30px rgba(30, 38, 55, 0.08);
+  --shadow-lg:   0 24px 48px rgba(44, 50, 70, 0.12);
 
-  --radius:      16px;
-  --radius-sm:   10px;
+  --radius:      15px;
+  --radius-sm:   9px;
   --font: "Inter", "Segoe UI", "Hiragino Sans", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "JetBrains Mono", Consolas, Menlo, monospace;
   --tr: .25s cubic-bezier(.2, .8, .2, 1);
@@ -48,24 +55,30 @@
 /* ── 设计 token：深色 ─────────────────────────────── */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg:          #0d0e12;
-    --bg-grad-1:   #151724;
-    --bg-grad-2:   #191524;
-    --bg-grad-3:   #121822;
-    --card:        rgba(22, 24, 32, 0.7);
-    --card-solid:  #161820;
-    --card-soft:   rgba(28, 30, 42, 0.5);
-    --text:        #e9ecf2;
-    --text-strong: #f6f8fb;
-    --muted:       #9199a8;
-    --border:      rgba(48, 54, 68, 0.6);
-    --border-soft: rgba(40, 46, 58, 0.4);
-    --field:       rgba(32, 36, 48, 0.5);
+    --bg:          #111318;
+    --bg-grad-1:   #1b2030;
+    --bg-grad-2:   #211d2c;
+    --bg-grad-3:   #182327;
+    --card:        rgba(25, 28, 36, 0.88);
+    --card-solid:  #1b1e27;
+    --card-soft:   rgba(30, 34, 43, 0.74);
+    --text:        #eef1f7;
+    --text-strong: #f8faff;
+    --muted:       #9aa3b3;
+    --border:      rgba(61, 68, 82, 0.78);
+    --border-soft: rgba(48, 55, 68, 0.62);
+    --field:       rgba(31, 35, 45, 0.9);
 
-    --accent:      #a294f5;
-    --accent-2:    #d0a6f5;
-    --accent-soft: rgba(162, 148, 245, 0.12);
-    --accent-ring: rgba(162, 148, 245, 0.3);
+    --accent:      #b2a9e8;
+    --accent-2:    #d6c6f0;
+    --accent-soft: rgba(178, 169, 232, 0.15);
+    --accent-ring: rgba(178, 169, 232, 0.30);
+    --brand-nogizaka: #b29cf4;
+    --brand-nogizaka-soft: rgba(178, 156, 244, 0.18);
+    --brand-hinata: #76c6f0;
+    --brand-hinata-soft: rgba(118, 198, 240, 0.18);
+    --brand-sakurazaka: #f1f4f8;
+    --brand-sakurazaka-soft: rgba(241, 244, 248, 0.16);
 
     --ok:          #49d899;
     --ok-soft:     #173b2e;
@@ -81,24 +94,30 @@
 }
 
 :root[data-theme="dark"] {
-  --bg:          #0d0e12;
-  --bg-grad-1:   #151724;
-  --bg-grad-2:   #191524;
-  --bg-grad-3:   #121822;
-  --card:        rgba(22, 24, 32, 0.7);
-  --card-solid:  #161820;
-  --card-soft:   rgba(28, 30, 42, 0.5);
-  --text:        #e9ecf2;
-  --text-strong: #f6f8fb;
-  --muted:       #9199a8;
-  --border:      rgba(48, 54, 68, 0.6);
-  --border-soft: rgba(40, 46, 58, 0.4);
-  --field:       rgba(32, 36, 48, 0.5);
+  --bg:          #111318;
+  --bg-grad-1:   #1b2030;
+  --bg-grad-2:   #211d2c;
+  --bg-grad-3:   #182327;
+  --card:        rgba(25, 28, 36, 0.88);
+  --card-solid:  #1b1e27;
+  --card-soft:   rgba(30, 34, 43, 0.74);
+  --text:        #eef1f7;
+  --text-strong: #f8faff;
+  --muted:       #9aa3b3;
+  --border:      rgba(61, 68, 82, 0.78);
+  --border-soft: rgba(48, 55, 68, 0.62);
+  --field:       rgba(31, 35, 45, 0.9);
 
-  --accent:      #a294f5;
-  --accent-2:    #d0a6f5;
-  --accent-soft: rgba(162, 148, 245, 0.12);
-  --accent-ring: rgba(162, 148, 245, 0.3);
+  --accent:      #b2a9e8;
+  --accent-2:    #d6c6f0;
+  --accent-soft: rgba(178, 169, 232, 0.15);
+  --accent-ring: rgba(178, 169, 232, 0.30);
+  --brand-nogizaka: #b29cf4;
+  --brand-nogizaka-soft: rgba(178, 156, 244, 0.18);
+  --brand-hinata: #76c6f0;
+  --brand-hinata-soft: rgba(118, 198, 240, 0.18);
+  --brand-sakurazaka: #f1f4f8;
+  --brand-sakurazaka-soft: rgba(241, 244, 248, 0.16);
 
   --ok:          #49d899;
   --ok-soft:     #173b2e;
@@ -616,3 +635,66 @@ dialog h3 { margin: 0 0 14px; font-size: 16px; color: var(--text-strong); }
 }
 .input-group .eye:hover { color: var(--accent); border-color: var(--accent); }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+/* ── 20260920 编辑式视觉刷新 ────────────────────────────────
+   只调整现有组件的视觉层级，不新增 DOM 结构或改变交互行为。
+   三坂品牌色由页面/来源上下文使用；普通控件保持中性紫灰。 */
+body {
+  background:
+    radial-gradient(1200px 650px at 8% -12%, color-mix(in srgb, var(--bg-grad-1) 82%, transparent), transparent 72%),
+    radial-gradient(980px 620px at 94% 4%, color-mix(in srgb, var(--bg-grad-2) 62%, transparent), transparent 68%),
+    radial-gradient(1100px 760px at 50% 112%, color-mix(in srgb, var(--bg-grad-3) 72%, transparent), transparent 72%),
+    var(--bg);
+}
+
+header.app-header {
+  background: color-mix(in srgb, var(--card-solid) 90%, transparent);
+  border-bottom-color: var(--border);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 55%, transparent);
+}
+.header-nav .nav-tabs {
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--card) 72%, var(--bg) 28%);
+  border-color: var(--border);
+}
+.header-nav .nav-tab {
+  position: relative;
+  border-radius: 8px;
+}
+.header-nav .nav-tab.active {
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+.header-nav .nav-tab.active::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  bottom: 1px;
+  left: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.app-switch-btn {
+  background: var(--accent) !important;
+  border-color: color-mix(in srgb, var(--accent) 68%, white 20%) !important;
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+.app-switch-btn:hover {
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 30%, transparent) !important;
+}
+.theme-toggle,
+.header-actions .user-badge {
+  border-color: var(--border);
+  box-shadow: none;
+}
+dialog {
+  border-color: var(--border-strong, var(--border));
+  box-shadow: 0 22px 58px color-mix(in srgb, #111827 25%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card:hover,
+  .theme-ready .card:hover { transform: translateY(-1px); }
+}

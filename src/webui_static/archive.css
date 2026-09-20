@@ -3399,6 +3399,115 @@ html.view-home #messageMonthFooter { display: none !important; }
   opacity: 0.7;
 }
 
+/* ── 20260920 编辑式归档视觉刷新 ────────────────────────────
+   保留现有归档结构与交互，仅降低卡片噪音并让三坂来源色承担上下文提示。 */
+.cal,
+.bubble,
+.blog-hero,
+.blog-card,
+.gallery-card,
+.portal-hero,
+.member-bento-card {
+  border-radius: var(--radius);
+}
+
+.cal,
+.bubble,
+.blog-hero,
+.blog-card,
+.gallery-card,
+.member-bento-card {
+  box-shadow: var(--shadow-sm);
+}
+
+.cal-head button,
+button.nav,
+.btn,
+.bp-btn,
+.gallery-sort-btn,
+.gallery-layout-toggle,
+.segmented-control {
+  border-radius: var(--radius-sm);
+}
+
+.chip,
+.tag-chip,
+.gallery-badge,
+.portal-pill-brand,
+.mbc-pill {
+  border-radius: 8px;
+}
+
+.chip.active,
+.order-btn.active {
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.bubble {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 68%, var(--border));
+}
+
+/* 三坂品牌色：乃木坂紫、日向坂蓝、樱坂白/银灰。 */
+.portal-pill-brand.nogi,
+.mbc-pill.nogi {
+  background: var(--brand-nogizaka-soft);
+  color: var(--brand-nogizaka);
+  border-color: color-mix(in srgb, var(--brand-nogizaka) 34%, var(--border));
+}
+.portal-pill-brand.hinata,
+.mbc-pill.hinata {
+  background: var(--brand-hinata-soft);
+  color: var(--brand-hinata);
+  border-color: color-mix(in srgb, var(--brand-hinata) 34%, var(--border));
+}
+.portal-pill-brand.sakura,
+.mbc-pill.sakura {
+  background: var(--brand-sakurazaka-soft);
+  color: color-mix(in srgb, var(--brand-sakurazaka) 72%, var(--text-strong));
+  border-color: color-mix(in srgb, var(--brand-sakurazaka) 56%, var(--border));
+}
+.mbc-avatar.nogi,
+.mpi-avatar.nogi {
+  background: var(--brand-nogizaka-soft);
+  color: var(--brand-nogizaka);
+  border: 1px solid color-mix(in srgb, var(--brand-nogizaka) 32%, var(--border));
+}
+.mbc-avatar.hinata,
+.mpi-avatar.hinata {
+  background: var(--brand-hinata-soft);
+  color: var(--brand-hinata);
+  border: 1px solid color-mix(in srgb, var(--brand-hinata) 32%, var(--border));
+}
+.mbc-avatar.sakura,
+.mpi-avatar.sakura {
+  background: var(--brand-sakurazaka-soft);
+  color: color-mix(in srgb, var(--brand-sakurazaka) 72%, var(--text-strong));
+  border: 1px solid color-mix(in srgb, var(--brand-sakurazaka) 56%, var(--border));
+}
+.popover-group-header.nogi { color: var(--brand-nogizaka); }
+.popover-group-header.hinata { color: var(--brand-hinata); }
+.popover-group-header.sakura { color: color-mix(in srgb, var(--brand-sakurazaka) 72%, var(--text-strong)); }
+
+.seg-btn[data-key="nogizaka"] { --seg-accent: var(--brand-nogizaka); --seg-soft: var(--brand-nogizaka-soft); }
+.seg-btn[data-key="hinatazaka"] { --seg-accent: var(--brand-hinata); --seg-soft: var(--brand-hinata-soft); }
+.seg-btn[data-key="sakurazaka"] { --seg-accent: var(--brand-sakurazaka); --seg-soft: var(--brand-sakurazaka-soft); }
+.seg-btn.active[data-key="nogizaka"],
+.seg-btn.active[data-key="hinatazaka"],
+.seg-btn.active[data-key="sakurazaka"] {
+  background: var(--seg-accent);
+  color: #fff !important;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--seg-accent) 28%, transparent);
+}
+.seg-btn.active[data-key="sakurazaka"] {
+  color: var(--text-strong) !important;
+  border: 1px solid color-mix(in srgb, var(--brand-sakurazaka) 58%, var(--border));
+}
+
+.gallery-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+}
+
 #galleryLoadMore {
   transition: all 0.2s ease;
 }
