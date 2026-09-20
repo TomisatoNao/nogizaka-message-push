@@ -1363,8 +1363,22 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260921_1" in archive
-    assert "/static/theme.css?v=20260921_1" in admin
+    assert "/static/theme.css?v=20260921_3" in archive
+    assert "/static/theme.css?v=20260921_3" in admin
+
+
+def test_shared_background_scrolls_without_reflowing_on_infinite_pages():
+    theme = (_ROOT / "src" / "webui_static" / "theme.css").read_text(encoding="utf-8")
+
+    # 装饰层必须随文档滚动上移，但用绝对定位和固定像素周期，避免相册追加内容时
+    # 按 body 高度重新计算斜线位置，造成背景跳动或逐渐变形。
+    geometry = theme.split("/* ── 20260921 贯穿式几何背景", 1)[1].split("header.app-header", 1)[0]
+    assert "background-attachment: scroll;" in theme
+    assert "position: absolute;" in geometry
+    assert "position: fixed;" not in geometry
+    assert "repeating-linear-gradient" in geometry
+    assert "clip-path: polygon" not in geometry
+    assert "body::before" in geometry and "body::after" in geometry
 
 
 def test_mobile_header_2row_layout_and_actions_guard():

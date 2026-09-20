@@ -646,38 +646,49 @@ body {
   position: relative;
   isolation: isolate;
   background:
-    linear-gradient(46deg, transparent 0 53%, color-mix(in srgb, var(--brand-sakurazaka) 9%, transparent) 53% 60%, transparent 60%),
     radial-gradient(1200px 650px at 8% -12%, color-mix(in srgb, var(--bg-grad-1) 82%, transparent), transparent 72%),
     radial-gradient(980px 620px at 94% 4%, color-mix(in srgb, var(--bg-grad-2) 62%, transparent), transparent 68%),
     radial-gradient(1100px 760px at 50% 112%, color-mix(in srgb, var(--bg-grad-3) 72%, transparent), transparent 72%),
     var(--bg);
+  background-attachment: scroll;
+  background-repeat: no-repeat;
 }
 
 /* ── 20260921 贯穿式几何背景 ────────────────────────────────
-   以蓝、白/银、绿色的长斜切面增加线条感；装饰层不参与布局与交互。 */
+   使用固定像素周期的绝对定位图层：随页面滚动上移，但不会因无限滚动追加内容而重排。 */
 body::before,
 body::after {
   content: "";
   position: absolute;
-  top: 60px;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: .72;
 }
 body::before {
   background:
-    linear-gradient(46deg, transparent 0 49.2%, color-mix(in srgb, var(--brand-hinata) 20%, transparent) 49.2% 49.45%, transparent 49.45%),
-    color-mix(in srgb, var(--brand-hinata) 8%, transparent);
-  clip-path: polygon(32% 0, 100% 0, 100% 100%, 66% 100%);
+    repeating-linear-gradient(
+      46deg,
+      transparent 0 520px,
+      color-mix(in srgb, var(--brand-sakurazaka) 5%, transparent) 520px 900px,
+      transparent 900px 2000px
+    ),
+    repeating-linear-gradient(
+      46deg,
+      transparent 0 360px,
+      color-mix(in srgb, var(--brand-hinata) 30%, transparent) 360px 362px,
+      transparent 362px 1200px
+    );
+  opacity: .62;
 }
 body::after {
   background:
-    linear-gradient(46deg, transparent 0 52.3%, color-mix(in srgb, var(--geo-green) 18%, transparent) 52.3% 52.55%, transparent 52.55%),
-    color-mix(in srgb, var(--geo-green) 8%, transparent);
-  clip-path: polygon(0 0, 35% 0, 13% 100%, 0 100%);
+    repeating-linear-gradient(
+      46deg,
+      transparent 0 760px,
+      color-mix(in srgb, var(--geo-green) 36%, transparent) 760px 762px,
+      transparent 762px 1500px
+    );
+  opacity: .56;
 }
 
 header.app-header {
