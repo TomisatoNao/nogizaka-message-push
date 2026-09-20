@@ -3495,7 +3495,8 @@ button.nav,
   box-shadow: 0 3px 10px color-mix(in srgb, var(--seg-accent) 28%, transparent);
 }
 .seg-btn.active[data-key="sakurazaka"] {
-  color: var(--text-strong) !important;
+  /* 樱坂选中态使用浅色背景，暗色主题下也固定使用深色文字保证对比度。 */
+  color: #253047 !important;
   border: 1px solid color-mix(in srgb, var(--brand-sakurazaka) 58%, var(--border));
 }
 

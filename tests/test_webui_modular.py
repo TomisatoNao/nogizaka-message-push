@@ -1134,9 +1134,9 @@ def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
     assert "/static/archive.js?v=20260919_6" in html
-    assert "/static/archive.css?v=20260920_2" in html
+    assert "/static/archive.css?v=20260920_3" in html
     assert "/static/archive.js?v=20260919_6" in perf
-    assert "/static/archive.css?v=20260920_2" in perf
+    assert "/static/archive.css?v=20260920_3" in perf
 
 
 def test_archive_favorite_filter_has_single_entry_point():
@@ -1209,6 +1209,15 @@ def test_archive_backfill_member_picker_and_blog_url_validation_contract():
     assert "请输入三坂官方成员博客列表页链接" in script
     assert ".bm-member-options" in styles
     assert ".bm-member-option" in styles
+
+
+def test_archive_sakurazaka_active_filter_keeps_dark_theme_contrast():
+    """樱坂筛选按钮的浅色选中背景上必须使用深色文字。"""
+    styles = (_ROOT / "src" / "webui_static" / "archive.css").read_text(encoding="utf-8")
+    selector = '.seg-btn.active[data-key="sakurazaka"]'
+    rule = styles.rsplit(selector + " {", 1)[1].split("}", 1)[0]
+    assert "background: var(--seg-accent);" in styles
+    assert "color: #253047 !important;" in rule
 
 
 def test_archive_backfill_picker_uses_current_monitor_members_only():
