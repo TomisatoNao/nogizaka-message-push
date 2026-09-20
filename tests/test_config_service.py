@@ -153,11 +153,20 @@ def test_napcat_ai_and_inbound_config_and_secrets(tmp_path: Path):
         "listen_host": "0.0.0.0",
         "listen_port": 46047,
         "event_path": "/api/napcat/events",
+        "group_scope": "selected",
+        "allowed_groups": ["12345"],
         "translate": True,
         "archive": False,
         "max_links_per_message": 2,
         "workers": 2,
         "cooldown_seconds": 10,
+    }
+    cfg["napcat_photo"] = {
+        "enabled": True,
+        "group_scope": "selected",
+        "allowed_groups": ["12345"],
+        "cooldown_user_seconds": 8,
+        "cooldown_group_seconds": 4,
     }
     cfg["napcat_ai_chat"] = {
         "enabled": True,
@@ -184,12 +193,15 @@ def test_napcat_ai_and_inbound_config_and_secrets(tmp_path: Path):
     serialized = config_service.serialize_config(cfg)
     assert "// ── 推送通道 ──" in serialized
     assert '"napcat_inbound":' in serialized
+    assert '"napcat_photo":' in serialized
     assert '"napcat_ai_chat":' in serialized
     assert '"napcat_forward_nickname": "坂道动态速递"' in serialized
     reparsed = json5.loads(serialized)
     assert reparsed["napcat_forward_nickname"] == "坂道动态速递"
     assert reparsed["napcat_forward_user_id"] == 10001
     assert reparsed["napcat_inbound"]["listen_port"] == 46047
+    assert reparsed["napcat_inbound"]["allowed_groups"] == ["12345"]
+    assert reparsed["napcat_photo"]["cooldown_group_seconds"] == 4
     assert reparsed["napcat_ai_chat"]["cpa_model"] == "gpt-5.6-luna"
     assert reparsed["napcat_routes"][0]["forward_nickname"] == "奈央酱"
 

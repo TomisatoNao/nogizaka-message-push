@@ -14,6 +14,8 @@ from src.platforms.napcat_listener import (
     NapCatInboundListener,
     configured_group_ids,
     event_message_text,
+    group_scope_allowed,
+    normalized_group_list,
 )
 from src.social.url_utils import extract_social_urls
 
@@ -50,6 +52,19 @@ def test_group_routes_are_the_only_inbound_whitelist():
         {"group_id": "00123456"},
         {"group_id": "not-a-group"},
     ]) == frozenset({"123456"})
+
+
+def test_feature_group_scope_normalizes_ids_and_preserves_route_default():
+    routes = frozenset({"123456", "999999"})
+    assert normalized_group_list([123456, "00123456", "bad", 123456]) == ("123456",)
+    assert group_scope_allowed("123456", {"group_scope": "routes"}, routes) is True
+    assert group_scope_allowed("999999", {"group_scope": "selected", "allowed_groups": [123456]}, routes) is False
+    assert group_scope_allowed("123456", {"group_scope": "selected", "allowed_groups": [123456]}, routes) is True
+    assert group_scope_allowed("123456", {"group_scope": "none"}, routes) is False
+    # 未声明 group_scope 的手工旧配置：非空白名单按 selected 处理，空白名单保持 routes。
+    assert group_scope_allowed("123456", {"allowed_groups": [123456]}, routes) is True
+    assert group_scope_allowed("999999", {"allowed_groups": [123456]}, routes) is False
+    assert group_scope_allowed("999999", {"allowed_groups": []}, routes) is True
 
 
 def test_event_text_supports_onebot_segments_and_raw_message():
@@ -105,6 +120,41 @@ def test_listener_deduplicates_events_and_enforces_message_url_allowlist():
     assert job.group_id == "123456"
     assert job.url == "https://x.com/example/status/1"
     assert job.self_id == "111222"
+
+
+def test_listener_applies_independent_inbound_group_scope():
+    config = _config(group_scope="selected", allowed_groups=[123456])
+    config["napcat_routes"].append({"group_id": 999999})
+    listener = NapCatInboundListener(
+        config_provider=lambda: config,
+        event_token="event-secret",
+    )
+
+    assert listener.accept_event(_event(group_id=123456, message_id=30)) == "queued"
+    assert listener.accept_event(_event(group_id=999999, message_id=31)) == "inbound_group_not_allowed"
+    assert listener._queue.qsize() == 1
+
+
+def test_listener_applies_independent_photo_group_scope():
+    config = _config()
+    config["napcat_routes"].append({"group_id": 999999})
+    config["napcat_photo"] = {
+        "enabled": True,
+        "group_scope": "selected",
+        "allowed_groups": [123456],
+    }
+    listener = NapCatInboundListener(
+        config_provider=lambda: config,
+        event_token="event-secret",
+    )
+    event = _event(group_id=999999, message_id=32, url="")
+    event["message"] = [{"type": "text", "data": {"text": "/美图"}}]
+    event["raw_message"] = "/美图"
+    assert listener.accept_event(event) == "photo_group_not_allowed"
+
+    config["napcat_photo"]["enabled"] = False
+    event["message_id"] = 33
+    assert listener.accept_event(event) == "photo_disabled"
 
 
 @pytest.mark.asyncio

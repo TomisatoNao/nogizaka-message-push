@@ -25,13 +25,15 @@
   "napcat_routes": [],
 
   // ── NapCat 入站群消息解析（默认关闭；Token 放在 .env）──
-  // 只有 napcat_routes 中列出的群号会触发解析和回帖。
+  // 只有 napcat_routes 中列出的群号，并且符合下方群范围设置的群，才会触发解析和回帖。
   "napcat_inbound": {
     "enabled": false,
     "transport": "http_post",
     "listen_host": "0.0.0.0",
     "listen_port": 46047,
     "event_path": "/api/napcat/events",
+    "group_scope": "routes",
+    "allowed_groups": [],
     "translate": false,
     "archive": false,
     "max_links_per_message": 1,
@@ -41,6 +43,16 @@
     "dedupe_ttl_seconds": 900,
     "request_timeout_seconds": 180,
     "max_message_bytes": 65536
+  },
+
+  // ── NapCat 群内美图指令（与入站监听共享事件入口，独立群范围）──
+  // 支持 /抽张美图、/抽美图、/随机美图、/美图、/pic、/photo。
+  "napcat_photo": {
+    "enabled": true,
+    "group_scope": "routes",
+    "allowed_groups": [],
+    "cooldown_user_seconds": 8,
+    "cooldown_group_seconds": 4
   },
 
   // ── NapCat AI 拟人群聊（模拟乃木坂46 冨里奈央，基于 CPA 反代 Codex Luna）──

@@ -49,6 +49,15 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "max_message_bytes": 65536,
 }
 
+DEFAULT_PHOTO_SETTINGS: dict[str, object] = {
+    # 美图指令在旧版本中只要入站监听运行就可用；默认保持这一行为。
+    "enabled": True,
+    "group_scope": "routes",
+    "allowed_groups": [],
+    "cooldown_user_seconds": 8.0,
+    "cooldown_group_seconds": 4.0,
+}
+
 _MAX_PORT = 65535
 _MIN_PORT = 1
 _MAX_WORKERS = 8
@@ -151,6 +160,47 @@ def configured_group_ids(routes: object) -> frozenset[str]:
         if group_id:
             groups.add(group_id)
     return frozenset(groups)
+
+
+def normalized_group_list(value: object) -> tuple[str, ...]:
+    """规范化配置中的群号列表，去重并丢弃非法值。"""
+
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return ()
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        group_id = normalize_group_id(item)
+        if group_id and group_id not in seen:
+            seen.add(group_id)
+            result.append(group_id)
+    return tuple(result)
+
+
+def group_scope_allowed(
+    group_id: str,
+    settings: Mapping[str, object] | None,
+    configured_groups: frozenset[str],
+) -> bool:
+    """判断功能级群范围。
+
+    ``routes`` 是兼容旧配置的默认范围；``selected`` 只允许白名单；
+    ``none`` 显式关闭该功能。未设置 ``group_scope`` 时，非空白名单仍按
+    selected 处理，便于手工编辑配置时得到符合直觉的结果。
+    """
+
+    if group_id not in configured_groups:
+        return False
+    values = settings if isinstance(settings, Mapping) else {}
+    scope = str(values.get("group_scope") or "").strip().lower()
+    allowed = set(normalized_group_list(values.get("allowed_groups")))
+    if scope in {"none", "disabled", "off"}:
+        return False
+    if scope in {"selected", "allowlist", "custom"}:
+        return group_id in allowed
+    if not scope and allowed:
+        return group_id in allowed
+    return True
 
 
 def event_message_text(message: object, raw_message: object = "") -> str:
@@ -343,6 +393,11 @@ class NapCatInboundListener:
         values["event_path"] = path
         values["translate"] = _as_bool(values.get("translate", False))
         values["archive"] = _as_bool(values.get("archive", False))
+        scope = str(values.get("group_scope") or "routes").strip().lower()
+        if scope not in {"routes", "selected", "allowlist", "custom", "none", "disabled", "off"}:
+            scope = "routes"
+        values["group_scope"] = scope
+        values["allowed_groups"] = list(normalized_group_list(values.get("allowed_groups")))
         values["max_links_per_message"] = _safe_int(
             values.get("max_links_per_message"), 1, 1, _MAX_URLS_PER_MESSAGE
         )
@@ -392,6 +447,41 @@ class NapCatInboundListener:
         if configured is None:
             configured = []
         return configured_group_ids(configured)
+
+    def _photo_settings(self) -> dict[str, object]:
+        """读取并限制美图指令配置；缺少配置时保持旧版默认行为。"""
+
+        raw = self._raw_config().get("napcat_photo")
+        values = dict(DEFAULT_PHOTO_SETTINGS)
+        if isinstance(raw, Mapping):
+            values.update(raw)
+        values["enabled"] = _as_bool(values.get("enabled"), True)
+        scope = str(values.get("group_scope") or "routes").strip().lower()
+        if scope not in {"routes", "selected", "allowlist", "custom", "none", "disabled", "off"}:
+            scope = "routes"
+        values["group_scope"] = scope
+        values["allowed_groups"] = list(normalized_group_list(values.get("allowed_groups")))
+        values["cooldown_user_seconds"] = _safe_float(
+            values.get("cooldown_user_seconds"), 8.0, 1.0, 3600.0
+        )
+        values["cooldown_group_seconds"] = _safe_float(
+            values.get("cooldown_group_seconds"), 4.0, 1.0, 3600.0
+        )
+        return values
+
+    def _feature_group_allowed(self, feature: str, group_id: str) -> bool:
+        configured = self._allowed_groups()
+        if feature == "photo":
+            settings = self._photo_settings()
+        else:
+            settings = self._settings_snapshot
+        return group_scope_allowed(group_id, settings, configured)
+
+    def _log_feature_skip(self, feature: str, group_id: str, reason: str) -> None:
+        self._emit(
+            f"⏭️ NapCat {feature} 已跳过 | 群{_safe_log_fragment(group_id, limit=16)} | reason={reason}",
+            is_debug=True,
+        )
 
     def _emit_job_summary(
         self,
@@ -566,9 +656,28 @@ class NapCatInboundListener:
         max_links = int(settings.get("max_links_per_message", 1))
         text = event_message_text(event.get("message"), event.get("raw_message"))
         urls = extract_social_urls(text, max_urls=max_links)
-        if not urls:
-            # 优先处理本地指令（如 /抽张美图）
+        if urls:
+            if not self._feature_group_allowed("inbound", group_id):
+                self._mark("ignored")
+                self._log_feature_skip("入站解析", group_id, "group_not_allowed")
+                return "inbound_group_not_allowed"
+        else:
+            # 优先处理本地指令（如 /抽张美图）。美图有独立的开关和群范围，
+            # 但仍受 napcat_routes 的基础群号边界保护。
             if getattr(self, "_cmd_handler", None) and self._cmd_handler.is_command(text):
+                photo_settings = self._photo_settings()
+                if not _as_bool(photo_settings.get("enabled"), True):
+                    self._mark("ignored")
+                    self._log_feature_skip("美图指令", group_id, "feature_disabled")
+                    return "photo_disabled"
+                if not self._feature_group_allowed("photo", group_id):
+                    self._mark("ignored")
+                    self._log_feature_skip("美图指令", group_id, "group_not_allowed")
+                    return "photo_group_not_allowed"
+                self._cmd_handler.update_cooldowns(
+                    user_seconds=float(photo_settings.get("cooldown_user_seconds", 8.0)),
+                    group_seconds=float(photo_settings.get("cooldown_group_seconds", 4.0)),
+                )
                 cmd_handled, cmd_status = self._cmd_handler.try_handle_command(
                     group_id=group_id,
                     user_id=user_id,
@@ -993,9 +1102,12 @@ class NapCatInboundListener:
 
 __all__ = [
     "DEFAULT_SETTINGS",
+    "DEFAULT_PHOTO_SETTINGS",
     "NapCatInboundJob",
     "NapCatInboundListener",
     "configured_group_ids",
     "event_message_text",
+    "group_scope_allowed",
     "normalize_group_id",
+    "normalized_group_list",
 ]

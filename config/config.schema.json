@@ -74,6 +74,16 @@
           "pattern": "^/[^\\s]{0,127}$",
           "default": "/api/napcat/events"
         },
+        "group_scope": {
+          "type": "string",
+          "enum": ["routes", "selected", "none"],
+          "default": "routes"
+        },
+        "allowed_groups": {
+          "type": "array",
+          "items": { "type": ["string", "integer"] },
+          "default": []
+        },
         "translate": {
           "type": "boolean",
           "default": false
@@ -123,6 +133,38 @@
           "minimum": 1024,
           "maximum": 1048576,
           "default": 65536
+        }
+      }
+    },
+    "napcat_photo": {
+      "type": "object",
+      "description": "NapCat/OneBot 群内本地美图指令配置。",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "group_scope": {
+          "type": "string",
+          "enum": ["routes", "selected", "none"],
+          "default": "routes"
+        },
+        "allowed_groups": {
+          "type": "array",
+          "items": { "type": ["string", "integer"] },
+          "default": []
+        },
+        "cooldown_user_seconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 8
+        },
+        "cooldown_group_seconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 4
         }
       }
     },

@@ -48,6 +48,13 @@ class NapCatCommandHandler:
         clean = text.strip()
         return bool(_CMD_REGEX.match(clean))
 
+    def update_cooldowns(self, *, user_seconds: float, group_seconds: float) -> None:
+        """热更新配置中的冷却时间，不重置已有冷却记录。"""
+
+        with self._lock:
+            self._cd_user_sec = max(1.0, float(user_seconds))
+            self._cd_group_sec = max(1.0, float(group_seconds))
+
     def try_handle_command(
         self,
         group_id: str,

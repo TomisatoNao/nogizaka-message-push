@@ -419,8 +419,14 @@ def test_napcat_advanced_entry_and_dialog_layout_are_single_and_compact():
     assert ".napcat-dialog-scroll { flex: 1 1 auto; min-height: 0;" in html
     assert ".napcat-inbound-grid," in html and ".ai-chat-grid" in html
     assert ".ai-chat-group-item" in html and "labelText.textContent" in html
+    assert 'id="btnSubtabPhoto"' in html and 'id="subtabPanelPhoto"' in html
+    assert 'id="photoCommandOn"' in html
+    assert 'id="inboundGroupScope"' in html and 'id="photoGroupScope"' in html
+    assert 'id="inboundAllowedGroupsWrap"' in html and 'id="photoAllowedGroupsWrap"' in html
+    assert "function renderNapcatFeatureGroups(" in html
+    assert "config.napcat_photo" in html
     assert 'target.closest("main, #napcatAdvancedDialog")' in html
-    assert "配置入站监听与 AI 群聊；修改后由底部保存栏统一保存。" in html
+    assert "配置入站解析、美图指令与 AI 群聊；修改后由底部保存栏统一保存。" in html
 
 
 def test_secret_dialog_only_shows_smart_parse_for_account_credentials():
@@ -1677,6 +1683,13 @@ def test_napcat_ai_and_inbound_webui_contract():
         "inboundMaxLinks",
         "inboundWorkers",
         "inboundCooldown",
+        "inboundGroupScope",
+        "inboundAllowedGroupsWrap",
+        "photoCommandOn",
+        "photoGroupScope",
+        "photoAllowedGroupsWrap",
+        "photoCooldownUser",
+        "photoCooldownGroup",
         "aiChatOn",
         "aiChatBaseUrl",
         "aiChatModel",

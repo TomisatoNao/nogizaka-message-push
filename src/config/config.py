@@ -179,6 +179,8 @@ _DEFAULTS: dict = {
         "listen_host": "0.0.0.0",
         "listen_port": 46047,
         "event_path": "/api/napcat/events",
+        "group_scope": "routes",
+        "allowed_groups": [],
         "translate": False,
         "archive": False,
         "max_links_per_message": 1,
@@ -188,6 +190,14 @@ _DEFAULTS: dict = {
         "dedupe_ttl_seconds": 900,
         "request_timeout_seconds": 180,
         "max_message_bytes": 65536,
+    },
+    # NapCat/OneBot 群内本地美图指令（与入站解析共享事件监听，独立群范围）
+    "napcat_photo":             {
+        "enabled": True,
+        "group_scope": "routes",
+        "allowed_groups": [],
+        "cooldown_user_seconds": 8.0,
+        "cooldown_group_seconds": 4.0,
     },
     # NapCat/OneBot AI 拟人群聊（模拟乃木坂46 冨里奈央）
     "napcat_ai_chat":           {
@@ -1181,4 +1191,3 @@ def get(key: str):
 
 # 注册至 sys.modules 内存单例，无缝支持旧式 import config.config as cfg
 _sys.modules.setdefault("config.config", _sys.modules[__name__])
-

@@ -81,6 +81,14 @@
   .ai-chat-params-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; min-width: 0; }
   .ai-chat-trigger-grid > *,
   .ai-chat-params-grid > * { min-width: 0; }
+  .napcat-photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; min-width: 0; }
+  .napcat-photo-grid > * { min-width: 0; }
+  .napcat-group-policy-box { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 58%, transparent); }
+  .napcat-group-policy-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .napcat-group-policy-heading > .field { flex: 1 1 240px; min-width: 0; }
+  .napcat-group-policy-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .napcat-group-policy-actions .btn { min-height: 32px; padding: 5px 9px; font-size: 12px; }
+  .napcat-group-policy-hint { margin: 8px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
   .ai-chat-whitelist-box,
   .ai-chat-prompt-box { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 58%, transparent); }
   .ai-chat-groups-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-width: 0; }
@@ -770,7 +778,8 @@
     .napcat-inbound-grid,
     .ai-chat-grid,
     .ai-chat-trigger-grid,
-    .ai-chat-params-grid { grid-template-columns: 1fr; gap: 10px; }
+    .ai-chat-params-grid,
+    .napcat-photo-grid { grid-template-columns: 1fr; gap: 10px; }
     .napcat-advanced-bar { align-items: flex-start; padding: 8px 10px; }
     .napcat-advanced-status { width: 100%; }
     .napcat-status-pill { max-width: 100%; }
@@ -829,6 +838,8 @@
     .napcat-subtab-btn { min-height: 34px; padding: 8px 8px; font-size: 12px; }
     .napcat-dialog-scroll { padding: 14px 14px 16px; }
     .napcat-dialog-actions { padding: 10px 14px 14px; }
+    .napcat-group-policy-actions { width: 100%; }
+    .napcat-group-policy-actions .btn { flex: 1 1 auto; }
     .monitor-dialog-header { padding: 16px 14px 13px; }
     .monitor-dialog-header h3 { font-size: 15px; }
     .monitor-dialog-scroll { max-height: calc(100dvh - 132px); padding: 14px 14px 16px; }
@@ -1203,7 +1214,7 @@
     <div class="admin-module-heading">
       <h2>🐱 NapCat 群推送路由 (独立解耦)</h2>
       <div class="admin-actions">
-        <button class="btn" id="btnNapcatAdvanced" type="button" title="配置入站群消息解析与 AI 拟人群聊">⚙️ 高级与扩展功能</button>
+        <button class="btn" id="btnNapcatAdvanced" type="button" title="配置入站群消息解析、美图指令与 AI 拟人群聊">⚙️ 高级与扩展功能</button>
         <button class="btn" id="btnAddNapcat" type="button" title="新建路由默认不订阅任何内容，请按需增量勾选">➕ 添加 NapCat 路由</button>
       </div>
     </div>
@@ -1232,6 +1243,7 @@
       <div class="napcat-advanced-bar">
         <div class="napcat-advanced-status">
           <button class="napcat-status-pill" id="napcatInboundPill" type="button" title="点击快捷配置入站群消息解析">📥 入站解析: <em>未启用</em></button>
+          <button class="napcat-status-pill" id="napcatPhotoPill" type="button" title="点击快捷配置群内美图指令">🎲 美图指令: <em>未启用</em></button>
           <button class="napcat-status-pill" id="napcatAiChatPill" type="button" title="点击快捷配置 AI 拟人群聊">💬 AI 拟人群聊: <em>未启用</em></button>
         </div>
       </div>
@@ -2162,13 +2174,16 @@
   <div class="napcat-dialog-header">
     <div>
       <h3 id="napcatAdvancedDialogTitle">🐱 NapCat 高级与扩展功能</h3>
-      <p>配置入站监听与 AI 群聊；修改后由底部保存栏统一保存。</p>
+  <p>配置入站解析、美图指令与 AI 群聊；修改后由底部保存栏统一保存。</p>
     </div>
     <button class="btn small" type="button" data-napcat-dialog-close>关闭</button>
   </div>
   <div class="napcat-subtab-bar" role="tablist">
     <button class="napcat-subtab-btn active" id="btnSubtabInbound" type="button" role="tab" aria-selected="true" aria-controls="subtabPanelInbound">
       📥 入站解析
+    </button>
+    <button class="napcat-subtab-btn" id="btnSubtabPhoto" type="button" role="tab" aria-selected="false" aria-controls="subtabPanelPhoto">
+      🎲 美图指令
     </button>
     <button class="napcat-subtab-btn" id="btnSubtabAiChat" type="button" role="tab" aria-selected="false" aria-controls="subtabPanelAiChat">
       💬 AI 群聊
@@ -2214,6 +2229,24 @@
           </div>
         </div>
 
+        <div class="napcat-group-policy-box">
+          <div class="napcat-group-policy-heading">
+            <label class="field">入站解析生效群范围
+              <select id="inboundGroupScope">
+                <option value="routes">所有已配置的 NapCat 群</option>
+                <option value="selected">仅选中的群</option>
+                <option value="none">不处理任何群</option>
+              </select>
+            </label>
+            <div class="napcat-group-policy-actions">
+              <button class="btn small" id="btnSelectAllInboundGroups" type="button">全选</button>
+              <button class="btn small" id="btnClearInboundGroups" type="button">清空选择</button>
+            </div>
+          </div>
+          <div id="inboundAllowedGroupsWrap" class="ai-chat-groups-wrap" aria-label="入站解析生效群"></div>
+          <p class="napcat-group-policy-hint">仅对主界面「NapCat 群推送路由」中已配置的群生效；选择“仅选中的群”时，未勾选的群不会解析社媒链接，也不会产生回复。</p>
+        </div>
+
         <div class="napcat-inbound-switches">
           <label class="switch admin-compact-switch">
             <input id="inboundTranslate" type="checkbox"/>
@@ -2240,7 +2273,50 @@
       </div>
     </div>
 
-    <!-- Panel 2: AI Chat -->
+    <!-- Panel 2: Photo commands -->
+    <div class="napcat-subtab-panel" id="subtabPanelPhoto" role="tabpanel">
+      <div class="admin-module-heading">
+        <h4 style="margin: 0; font-size: 15px; font-weight: 700;">🎲 群内美图指令</h4>
+        <div class="admin-control-group">
+          <label class="switch admin-compact-switch">
+            <input id="photoCommandOn" type="checkbox"/>
+            <span class="track"></span> 启用美图指令
+          </label>
+        </div>
+      </div>
+      <div class="admin-account-group" style="margin-top: 10px;">
+        <div class="napcat-group-policy-box" style="margin-top: 0;">
+          <div class="napcat-group-policy-heading">
+            <label class="field">美图指令生效群范围
+              <select id="photoGroupScope">
+                <option value="routes">所有已配置的 NapCat 群</option>
+                <option value="selected">仅选中的群</option>
+                <option value="none">不响应任何群</option>
+              </select>
+            </label>
+            <div class="napcat-group-policy-actions">
+              <button class="btn small" id="btnSelectAllPhotoGroups" type="button">全选</button>
+              <button class="btn small" id="btnClearPhotoGroups" type="button">清空选择</button>
+            </div>
+          </div>
+          <div id="photoAllowedGroupsWrap" class="ai-chat-groups-wrap" aria-label="美图指令生效群"></div>
+          <p class="napcat-group-policy-hint">美图指令与入站链接解析使用独立群范围。被限制的群不会回复，也不会读取归档图片。</p>
+        </div>
+
+        <div class="napcat-photo-grid" style="margin-top: 10px;">
+          <label class="field">用户冷却时间（秒）
+            <input id="photoCooldownUser" type="number" min="1" max="3600" step="0.5" placeholder="8"/>
+          </label>
+          <label class="field">群冷却时间（秒）
+            <input id="photoCooldownGroup" type="number" min="1" max="3600" step="0.5" placeholder="4"/>
+          </label>
+        </div>
+
+        <p class="hint admin-note">支持 <code>/抽张美图</code>、<code>/抽美图</code>、<code>/随机美图</code>、<code>/美图</code>、<code>/pic</code> 和 <code>/photo</code>；未指定成员时沿用当前群路由的成员绑定规则。此功能依赖「入站解析」页的 NapCat 入站监听开关。</p>
+      </div>
+    </div>
+
+    <!-- Panel 3: AI Chat -->
     <div class="napcat-subtab-panel" id="subtabPanelAiChat" role="tabpanel">
       <div class="admin-module-heading">
         <h4 style="margin: 0; font-size: 15px; font-weight: 700;">🐾 AI 拟人群聊（CPA）</h4>
@@ -3972,11 +4048,19 @@ function renderGeneral() {
   if ($("inboundHost")) $("inboundHost").value = inbound.listen_host || "0.0.0.0";
   if ($("inboundPort")) $("inboundPort").value = inbound.listen_port ?? 46047;
   if ($("inboundEventPath")) $("inboundEventPath").value = inbound.event_path || "/api/napcat/events";
+  if ($("inboundGroupScope")) $("inboundGroupScope").value = inbound.group_scope || (Array.isArray(inbound.allowed_groups) && inbound.allowed_groups.length ? "selected" : "routes");
   if ($("inboundTranslate")) $("inboundTranslate").checked = !!inbound.translate;
   if ($("inboundArchive")) $("inboundArchive").checked = !!inbound.archive;
   if ($("inboundMaxLinks")) $("inboundMaxLinks").value = inbound.max_links_per_message ?? 1;
   if ($("inboundWorkers")) $("inboundWorkers").value = inbound.workers ?? 2;
   if ($("inboundCooldown")) $("inboundCooldown").value = inbound.cooldown_seconds ?? 10;
+
+  // NapCat Photo Commands
+  const photo = config.napcat_photo || {};
+  if ($("photoCommandOn")) $("photoCommandOn").checked = photo.enabled !== false;
+  if ($("photoGroupScope")) $("photoGroupScope").value = photo.group_scope || (Array.isArray(photo.allowed_groups) && photo.allowed_groups.length ? "selected" : "routes");
+  if ($("photoCooldownUser")) $("photoCooldownUser").value = photo.cooldown_user_seconds ?? 8;
+  if ($("photoCooldownGroup")) $("photoCooldownGroup").value = photo.cooldown_group_seconds ?? 4;
 
   // NapCat AI Chat
   const aiChat = config.napcat_ai_chat || {};
@@ -3996,6 +4080,8 @@ function renderGeneral() {
   if ($("aiChatMaxQueryLength")) $("aiChatMaxQueryLength").value = aiChat.max_query_length ?? 500;
   if ($("aiChatWorkers")) $("aiChatWorkers").value = aiChat.workers ?? 2;
   if ($("aiChatSystemPrompt")) $("aiChatSystemPrompt").value = aiChat.system_prompt || DEFAULT_TOMISATO_NAO_PROMPT;
+  renderNapcatFeatureGroups("inbound", inbound.allowed_groups || []);
+  renderNapcatFeatureGroups("photo", photo.allowed_groups || []);
   renderAiChatAllowedGroups();
   updateNapcatAdvancedStatus();
   const di = config.day_interval || [120, 180], ni = config.night_interval || [1500, 1800];
@@ -4127,6 +4213,58 @@ const DEFAULT_TOMISATO_NAO_PROMPT = `你现在扮演日本女子偶像团体「�
 群友：“今天咲月又欺负你了吗”
 奈央：“哼！今天さっちゃん又抢奈央的小饼干，奈央追了她好久！不过后来她分了奈央半个布丁，就勉强原谅她啦 いひひ(ˊᵕˋ˶ )”
 `;
+
+function getNapcatRouteGroups() {
+  const groups = [];
+  const seen = new Set();
+  (config?.napcat_routes || []).forEach((r) => {
+    const gid = String(r?.group_id || "").trim();
+    if (!gid || seen.has(gid)) return;
+    seen.add(gid);
+    groups.push({
+      id: gid,
+      label: r.remark ? `${r.remark} (${gid})` : gid,
+    });
+  });
+  return groups;
+}
+
+function renderNapcatFeatureGroups(feature, selectedGroups) {
+  const wrap = $(feature === "photo" ? "photoAllowedGroupsWrap" : "inboundAllowedGroupsWrap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const selected = new Set((Array.isArray(selectedGroups) ? selectedGroups : []).map(String));
+  const groups = getNapcatRouteGroups();
+  if (!groups.length) {
+    wrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">暂无 NapCat 群路由，请先在上方「NapCat 群推送路由」添加路由</span>';
+    return;
+  }
+  const inputClass = feature === "photo" ? "photo-group-chk" : "inbound-group-chk";
+  groups.forEach((group) => {
+    const label = document.createElement("label");
+    label.className = "ai-chat-group-item";
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.value = group.id;
+    chk.className = inputClass;
+    chk.checked = selected.has(group.id);
+    chk.addEventListener("change", updateNapcatAdvancedStatus);
+    const labelText = document.createElement("span");
+    labelText.textContent = group.label;
+    label.append(chk, labelText);
+    wrap.appendChild(label);
+  });
+}
+
+function setNapcatFeatureGroups(feature, checked) {
+  const inputClass = feature === "photo" ? ".photo-group-chk" : ".inbound-group-chk";
+  document.querySelectorAll(inputClass).forEach((el) => {
+    if (el.checked !== checked) {
+      el.checked = checked;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+}
 
 function renderAiChatAllowedGroups() {
   const allowedWrap = $("aiChatAllowedGroupsWrap");
@@ -4493,17 +4631,33 @@ function collectGeneral() {
   if (config.napcat_forward_user_id === undefined) delete config.napcat_forward_user_id;
 
   if ($("inboundOn")) {
+    const inboundGroups = [];
+    document.querySelectorAll(".inbound-group-chk:checked").forEach(el => inboundGroups.push(el.value));
     config.napcat_inbound = {
       enabled: $("inboundOn").checked,
       transport: $("inboundTransport")?.value || "http_post",
       listen_host: $("inboundHost")?.value.trim() || "0.0.0.0",
       listen_port: num("inboundPort") ?? 46047,
       event_path: $("inboundEventPath")?.value.trim() || "/api/napcat/events",
+      group_scope: $("inboundGroupScope")?.value || "routes",
+      allowed_groups: inboundGroups,
       translate: $("inboundTranslate")?.checked ?? false,
       archive: $("inboundArchive")?.checked ?? false,
       max_links_per_message: num("inboundMaxLinks") ?? 1,
       workers: num("inboundWorkers") ?? 2,
       cooldown_seconds: num("inboundCooldown") ?? 10,
+    };
+  }
+
+  if ($("photoCommandOn")) {
+    const photoGroups = [];
+    document.querySelectorAll(".photo-group-chk:checked").forEach(el => photoGroups.push(el.value));
+    config.napcat_photo = {
+      enabled: $("photoCommandOn").checked,
+      group_scope: $("photoGroupScope")?.value || "routes",
+      allowed_groups: photoGroups,
+      cooldown_user_seconds: num("photoCooldownUser", true) ?? 8,
+      cooldown_group_seconds: num("photoCooldownGroup", true) ?? 4,
     };
   }
 
@@ -8045,16 +8199,37 @@ $("botSubClose").addEventListener("click", () => {
 // ── NapCat 高级与扩展功能弹窗与状态交互 ──
 function updateNapcatAdvancedStatus() {
   const inPill = $("napcatInboundPill");
+  const photoPill = $("napcatPhotoPill");
   const aiPill = $("napcatAiChatPill");
   if (inPill) {
     const isOn = $("inboundOn") ? $("inboundOn").checked : false;
     const isWs = $("inboundTransport") ? $("inboundTransport").value === "reverse_ws" : false;
+    const scope = $("inboundGroupScope") ? $("inboundGroupScope").value : "routes";
+    const selected = document.querySelectorAll(".inbound-group-chk:checked").length;
+    const suffix = scope === "selected" ? " · " + selected + "群" : "";
     if (isOn) {
       inPill.className = "napcat-status-pill active";
-      inPill.innerHTML = "📥 入站解析: <em>已启用 (" + (isWs ? "反向WS" : "HTTP") + ")</em>";
+      inPill.innerHTML = "📥 入站解析: <em>已启用 (" + (isWs ? "反向WS" : "HTTP") + ")" + suffix + "</em>";
     } else {
       inPill.className = "napcat-status-pill";
       inPill.innerHTML = "📥 入站解析: <em>未启用</em>";
+    }
+  }
+  if (photoPill) {
+    const isOn = $("photoCommandOn") ? $("photoCommandOn").checked : false;
+    const listenerOn = $("inboundOn") ? $("inboundOn").checked : false;
+    const scope = $("photoGroupScope") ? $("photoGroupScope").value : "routes";
+    const selected = document.querySelectorAll(".photo-group-chk:checked").length;
+    const suffix = scope === "selected" ? ` · ${selected}群` : "";
+    if (isOn && listenerOn) {
+      photoPill.className = "napcat-status-pill active";
+      photoPill.innerHTML = "🎲 美图指令: <em>已启用" + suffix + "</em>";
+    } else if (isOn) {
+      photoPill.className = "napcat-status-pill";
+      photoPill.innerHTML = "🎲 美图指令: <em>待入站监听" + suffix + "</em>";
+    } else {
+      photoPill.className = "napcat-status-pill";
+      photoPill.innerHTML = "🎲 美图指令: <em>未启用</em>";
     }
   }
   if (aiPill) {
@@ -8072,47 +8247,57 @@ function updateNapcatAdvancedStatus() {
 
 function switchNapcatSubtab(tabName) {
   const btnInbound = $("btnSubtabInbound");
+  const btnPhoto = $("btnSubtabPhoto");
   const btnAi = $("btnSubtabAiChat");
   const panelInbound = $("subtabPanelInbound");
+  const panelPhoto = $("subtabPanelPhoto");
   const panelAi = $("subtabPanelAiChat");
-  if (!btnInbound || !btnAi || !panelInbound || !panelAi) return;
+  if (!btnInbound || !btnPhoto || !btnAi || !panelInbound || !panelPhoto || !panelAi) return;
 
-  if (tabName === "aichat") {
-    btnInbound.classList.remove("active");
-    btnInbound.setAttribute("aria-selected", "false");
-    btnAi.classList.add("active");
-    btnAi.setAttribute("aria-selected", "true");
-    panelInbound.classList.remove("active");
-    panelAi.classList.add("active");
-  } else {
-    btnInbound.classList.add("active");
-    btnInbound.setAttribute("aria-selected", "true");
-    btnAi.classList.remove("active");
-    btnAi.setAttribute("aria-selected", "false");
-    panelInbound.classList.add("active");
-    panelAi.classList.remove("active");
-  }
+  const isPhoto = tabName === "photo";
+  const isAi = tabName === "aichat";
+  [btnInbound, btnPhoto, btnAi].forEach((btn, index) => {
+    const active = index === 0 ? !isPhoto && !isAi : index === 1 ? isPhoto : isAi;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  [panelInbound, panelPhoto, panelAi].forEach((panel, index) => {
+    const active = index === 0 ? !isPhoto && !isAi : index === 1 ? isPhoto : isAi;
+    panel.classList.toggle("active", active);
+  });
 }
 
 function openNapcatAdvancedDialog(targetSubtab) {
   const dlg = $("napcatAdvancedDialog");
   if (!dlg) return;
   if (targetSubtab) switchNapcatSubtab(targetSubtab);
+  renderNapcatFeatureGroups("inbound", config.napcat_inbound?.allowed_groups || []);
+  renderNapcatFeatureGroups("photo", config.napcat_photo?.allowed_groups || []);
   renderAiChatAllowedGroups();
   dlg.showModal();
 }
 
 function bindNapcatAdvancedEvents() {
   $("btnSubtabInbound")?.addEventListener("click", () => switchNapcatSubtab("inbound"));
+  $("btnSubtabPhoto")?.addEventListener("click", () => switchNapcatSubtab("photo"));
   $("btnSubtabAiChat")?.addEventListener("click", () => switchNapcatSubtab("aichat"));
   $("btnNapcatAdvanced")?.addEventListener("click", () => openNapcatAdvancedDialog());
   $("napcatInboundPill")?.addEventListener("click", () => openNapcatAdvancedDialog("inbound"));
+  $("napcatPhotoPill")?.addEventListener("click", () => openNapcatAdvancedDialog("photo"));
   $("napcatAiChatPill")?.addEventListener("click", () => openNapcatAdvancedDialog("aichat"));
 
   $("inboundOn")?.addEventListener("change", updateNapcatAdvancedStatus);
   $("inboundTransport")?.addEventListener("change", updateNapcatAdvancedStatus);
+  $("inboundGroupScope")?.addEventListener("change", updateNapcatAdvancedStatus);
+  $("photoCommandOn")?.addEventListener("change", updateNapcatAdvancedStatus);
+  $("photoGroupScope")?.addEventListener("change", updateNapcatAdvancedStatus);
   $("aiChatOn")?.addEventListener("change", updateNapcatAdvancedStatus);
   $("aiChatModel")?.addEventListener("input", updateNapcatAdvancedStatus);
+
+  $("btnSelectAllInboundGroups")?.addEventListener("click", () => setNapcatFeatureGroups("inbound", true));
+  $("btnClearInboundGroups")?.addEventListener("click", () => setNapcatFeatureGroups("inbound", false));
+  $("btnSelectAllPhotoGroups")?.addEventListener("click", () => setNapcatFeatureGroups("photo", true));
+  $("btnClearPhotoGroups")?.addEventListener("click", () => setNapcatFeatureGroups("photo", false));
 
   document.querySelectorAll("[data-napcat-dialog-close]").forEach((btn) => {
     btn.addEventListener("click", () => {
