@@ -44,6 +44,40 @@
   --shadow-md:   0 12px 30px rgba(30, 38, 55, 0.08);
   --shadow-lg:   0 24px 48px rgba(44, 50, 70, 0.12);
 
+  /* 语义化尺寸：跨页面组件只引用这些 token，不再各自发明近似值。 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --radius-xs: 6px;
+  --radius-md: 12px;
+  --radius-pill: 999px;
+  --header-height: 60px;
+  --focus-ring: 0 0 0 3px var(--accent-ring);
+  --overlay: rgba(12, 14, 22, .55);
+  --hover: color-mix(in srgb, var(--accent) 6%, var(--card));
+  --bg-hover: color-mix(in srgb, var(--accent) 6%, var(--bg));
+  --bg-card: var(--card-solid);
+  --border-hover: color-mix(in srgb, var(--accent) 45%, var(--border));
+  --z-header: 1000;
+  --z-float: 1100;
+  --z-popover: 9999;
+  --z-modal: 10000;
+  --z-toast: 99999;
+  --z-lightbox: 20000;
+  --z-lightbox-controls: 20002;
+  --motion-fast: .15s;
+  --motion-normal: .25s;
+  --motion-ease: cubic-bezier(.2, .8, .2, 1);
+
   --radius:      15px;
   --radius-sm:   9px;
   --font: "Inter", "Segoe UI", "Hiragino Sans", "Microsoft YaHei", system-ui, sans-serif;
@@ -90,6 +124,10 @@
     --shadow-sm:   0 4px 12px rgba(0, 0, 0, 0.4);
     --shadow-md:   0 12px 32px rgba(0, 0, 0, 0.5);
     --shadow-lg:   0 24px 64px rgba(0, 0, 0, 0.7);
+    --hover:       color-mix(in srgb, var(--accent) 10%, var(--card));
+    --bg-hover:    color-mix(in srgb, var(--accent) 10%, var(--bg));
+    --bg-card:     var(--card-solid);
+    --border-hover: color-mix(in srgb, var(--accent) 55%, var(--border));
   }
 }
 
@@ -129,6 +167,10 @@
   --shadow-sm:   0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-md:   0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-lg:   0 24px 64px rgba(0, 0, 0, 0.7);
+  --hover:       color-mix(in srgb, var(--accent) 10%, var(--card));
+  --bg-hover:    color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --bg-card:     var(--card-solid);
+  --border-hover: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
 /* ── 基础 ─────────────────────────────────────────── */
@@ -150,6 +192,16 @@ body {
 }
 
 ::selection { background: var(--accent-ring); }
+
+/* 跨页面可访问性基础：组件可以覆盖颜色，但不应移除键盘焦点。 */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+:where(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+}
 
 /* 滚动条（Chromium / WebKit） */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
@@ -177,7 +229,7 @@ header.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
+  height: var(--header-height);
   padding: 0 24px;
   background: color-mix(in srgb, var(--card-solid) 85%, transparent);
   backdrop-filter: blur(20px) saturate(1.4);
@@ -185,7 +237,7 @@ header.app-header {
   border-bottom: 1px solid var(--border-soft);
   position: sticky;
   top: 0;
-  z-index: 1000 !important;
+  z-index: var(--z-header) !important;
   overflow: visible !important;
 }
 
@@ -224,7 +276,7 @@ header.app-header {
 }
 
 /* 成员工具下拉组件（z-index: 9999 绝对浮于最顶层 + 鼠标安全热区 bridge） */
-.header-dropdown { position: relative; display: inline-block; overflow: visible !important; z-index: 9999 !important; }
+.header-dropdown { position: relative; display: inline-block; overflow: visible !important; z-index: var(--z-popover) !important; }
 .header-dropdown .dropdown-toggle { white-space: nowrap; }
 .header-dropdown .dropdown-menu {
   position: absolute; top: 100%; left: 0;
@@ -233,7 +285,7 @@ header.app-header {
   border-radius: var(--radius-sm); padding: 6px; min-width: 185px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18); backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  display: none; flex-direction: column; gap: 2px; z-index: 9999 !important;
+  display: none; flex-direction: column; gap: 2px; z-index: var(--z-popover) !important;
 }
 /* 鼠标防脱离安全桥（Hover Bridge）：透明填充 12px 间隙 */
 .header-dropdown .dropdown-menu::before {
@@ -512,7 +564,13 @@ header.app-header {
 .theme-ready button { transition: background-color var(--tr), color var(--tr), border-color var(--tr); }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  html { scroll-behavior: auto !important; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── 搜索高亮与卡片虚拟化 ───────────────────────── */
@@ -570,11 +628,11 @@ dialog {
   min-width: 320px;
   max-width: 92vw;
   box-shadow: var(--shadow-lg);
-  animation: dlgIn .2s cubic-bezier(.2,.8,.3,1) both;
+  animation: dlgIn var(--motion-normal) cubic-bezier(.2,.8,.3,1) both;
 }
 dialog:not([open]) { display: none; }
 @keyframes dlgIn { from { opacity: 0; transform: translateY(10px) scale(.98); } }
-dialog::backdrop { background: rgba(12, 14, 22, .55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+dialog::backdrop { background: var(--overlay); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 dialog h3 { margin: 0 0 14px; font-size: 16px; color: var(--text-strong); }
 .dialog-note {
   background: var(--accent-soft);

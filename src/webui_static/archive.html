@@ -6,10 +6,10 @@
 <meta name="referrer" content="no-referrer">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>坂道监控 · 消息归档</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260920_1">
+<link rel="stylesheet" href="/static/theme.css?v=20260921_2">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260921_4">
-<link rel="preload" href="/static/archive.js?v=20260921_1" as="script">
+<link rel="stylesheet" href="/static/archive.css?v=20260921_5">
+<link rel="preload" href="/static/archive.js?v=20260921_2" as="script">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -328,28 +328,28 @@
 </main>
 </div>
 
-<button id="backTop" title="回到顶部">⬆</button>
+<button id="backTop" title="回到顶部" aria-label="回到顶部">⬆</button>
 
 <div id="lightbox" role="dialog" aria-modal="true" aria-label="图片预览" aria-hidden="true">
   <span id="lbCounter"></span>
   <div id="lbActions" class="lb-actions">
     <span id="lbStatus" class="lb-status" style="display:none;"></span>
     <a id="lbSourceBtn" class="lb-btn" target="_blank" rel="noopener noreferrer" style="display:none;"></a>
-    <button id="lbDownloadBtn" class="lb-btn" type="button" title="下载高清原图">💾 下载原图</button>
+    <button id="lbDownloadBtn" class="lb-btn" type="button" title="下载高清原图" aria-label="下载高清原图">💾 下载原图</button>
     <button id="lbClose" type="button" aria-label="关闭图片预览">关闭</button>
   </div>
-  <button class="nav-btn" id="lbPrev">‹</button>
+  <button class="nav-btn" id="lbPrev" aria-label="上一张图片">‹</button>
   <!-- Only the actual image is interactive; transparent stage area always belongs to the backdrop. -->
   <div id="lbStage" class="lb-stage">
     <img id="lbImg" alt="" referrerpolicy="no-referrer">
   </div>
-  <button class="nav-btn" id="lbNext">›</button>
+  <button class="nav-btn" id="lbNext" aria-label="下一张图片">›</button>
 </div>
 
-<div id="blogReader" class="blog-reader" style="display:none;" role="dialog" aria-modal="true">
+<div id="blogReader" class="blog-reader" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="brTitle">
   <div class="br-header">
     <div class="br-header-left">
-      <button id="brClose" class="br-back-btn" title="返回博客列表 (Esc)">
+      <button id="brClose" class="br-back-btn" title="返回博客列表 (Esc)" aria-label="返回博客列表">
         <span class="br-back-icon">←</span>
         <span>返回</span>
       </button>
@@ -387,7 +387,7 @@
 </div>
 
 <!-- Custom Confirm Modal -->
-<div id="customConfirmModal" class="custom-modal-backdrop" style="display:none;">
+<div id="customConfirmModal" class="custom-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cmTitle" aria-describedby="cmMessage" style="display:none;">
   <div class="custom-modal-card">
     <div class="cm-icon danger">🗑️</div>
     <h3 class="cm-title" id="cmTitle">确认操作</h3>
@@ -400,7 +400,7 @@
 </div>
 
 <!-- Custom Prompt Input Modal -->
-<div id="customPromptModal" class="custom-modal-backdrop" style="display:none;">
+<div id="customPromptModal" class="custom-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pmTitle" aria-describedby="pmMessage" style="display:none;">
   <div class="custom-modal-card">
     <div class="cm-icon" id="pmIcon">📥</div>
     <h3 class="cm-title" id="pmTitle">输入内容</h3>
@@ -459,11 +459,11 @@
 </div>
 
 <!-- Message Backfill Modal -->
-<div id="backfillMessageModal" class="custom-modal-backdrop" style="display:none;">
+<div id="backfillMessageModal" class="custom-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="bmTitle" aria-describedby="bmMessage" style="display:none;">
   <div class="custom-modal-card message-backfill-card">
     <div class="cm-icon">💬</div>
-    <h3 class="cm-title">回填成员历史消息</h3>
-    <p class="cm-message">从当前监控成员中选择目标；不选择则回填全部监控成员。</p>
+    <h3 class="cm-title" id="bmTitle">回填成员历史消息</h3>
+    <p class="cm-message" id="bmMessage">从当前监控成员中选择目标；不选择则回填全部监控成员。</p>
 
     <div class="cm-input-wrapper bm-member-picker">
       <div class="bm-member-picker-head">
@@ -518,11 +518,11 @@
 </div>
 
 <!-- Mobile Action Sheet for Member Archive Tools -->
-<div id="archiveToolsSheet" class="mobile-action-sheet" style="display:none;">
+<div id="archiveToolsSheet" class="mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="archiveToolsSheetTitle" style="display:none;">
   <div class="sheet-backdrop" id="archiveToolsBackdrop"></div>
   <div class="sheet-card">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">👥 成员归档工具</div>
+    <div class="sheet-title" id="archiveToolsSheetTitle">👥 成员归档工具</div>
     <button class="sheet-item" id="sheetBtnArchiveMember" type="button">
       <span class="icon">📄</span>
       <span class="label">归档三团全量博客</span>
@@ -536,9 +536,9 @@
 </div>
 
 <!-- 修改个人密码对话框 -->
-<dialog id="changePwDialog" style="max-width: 440px; width: 92%;">
-<h3>🔑 修改登录密码</h3>
-<div class="dialog-note">密码修改成功后将自动续期当前浏览器会话，其他设备上的历史登录将全部失效。</div>
+<dialog id="changePwDialog" style="max-width: 440px; width: 92%;" aria-labelledby="archiveChangePwTitle" aria-describedby="archiveChangePwNote">
+<h3 id="archiveChangePwTitle">🔑 修改登录密码</h3>
+<div class="dialog-note" id="archiveChangePwNote">密码修改成功后将自动续期当前浏览器会话，其他设备上的历史登录将全部失效。</div>
 <div class="secret-field">
 <div class="flabel"><span class="fname">当前原密码<span class="req">*</span></span></div>
 <div class="input-group">
@@ -569,7 +569,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20260921_1"></script>
+<script src="/static/archive.js?v=20260921_2"></script>
 
 </body>
 </html>

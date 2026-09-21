@@ -2179,7 +2179,8 @@ function customConfirm({ title = "确认操作", message = "确定继续吗？",
     $("cmMessage").textContent = message;
     $("cmConfirm").textContent = confirmText;
     modal.querySelector(".cm-icon").textContent = icon;
-    
+    const opener = document.activeElement;
+
     modal.style.display = "flex";
 
     const onConfirm = () => {
@@ -2190,14 +2191,24 @@ function customConfirm({ title = "确认操作", message = "确定继续吗？",
       cleanup();
       resolve(false);
     };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
     const cleanup = () => {
       modal.style.display = "none";
       $("cmConfirm").removeEventListener("click", onConfirm);
       $("cmCancel").removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKeydown);
+      if (opener && opener !== document.body && document.contains(opener)) opener.focus();
     };
 
     $("cmConfirm").addEventListener("click", onConfirm);
     $("cmCancel").addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKeydown);
+    setTimeout(() => $("cmConfirm")?.focus(), 0);
   });
 }
 
@@ -3753,10 +3764,13 @@ window.addEventListener("resize", () => {
 
 $("lightbox").addEventListener("click", (e) => {
   if (Date.now() - lbLastTouchEndTime < 500) return;
-  // 操作栏与左右箭头是交互控件，其余非图片区域统一视为返回相册。
+  // 操作栏与左右箭头是交互控件；仅灯箱背景或真实图片本身可以关闭。
+  // stage 可能在部分移动浏览器中成为事件目标，不能把它误当成背景，
+  // 否则加载中的原图点击会把事件继续交给底层相册卡片。
   const interactive = e.target.closest("#lbActions, #lbPrev, #lbNext");
   const onImage = e.target === $("lbImg");
-  if (!interactive || onImage) closeLightbox();
+  const isBackdrop = e.target === e.currentTarget;
+  if (!interactive && (isBackdrop || onImage)) closeLightbox();
 });
 
 if ($("lbImg")) {
@@ -5180,6 +5194,7 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
       checkLabel.style.display = "none";
     }
     
+    const opener = document.activeElement;
     modal.style.display = "flex";
     setTimeout(() => { input.focus(); input.select(); }, 60);
 
@@ -5212,7 +5227,16 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
     };
     const onKeydown = (e) => {
       if (e.key === "Enter") onConfirm();
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    const onDocumentKeydown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
     };
     const cleanup = () => {
       modal.style.display = "none";
@@ -5220,12 +5244,15 @@ function customPrompt({ title = "请输入", message = "", placeholder = "", def
       $("pmCancel").removeEventListener("click", onCancel);
       input.removeEventListener("keydown", onKeydown);
       input.removeEventListener("input", clearValidationError);
+      document.removeEventListener("keydown", onDocumentKeydown);
+      if (opener && opener !== document.body && document.contains(opener)) opener.focus();
     };
 
     $("pmConfirm").addEventListener("click", onConfirm);
     $("pmCancel").addEventListener("click", onCancel);
     input.addEventListener("keydown", onKeydown);
     input.addEventListener("input", clearValidationError);
+    document.addEventListener("keydown", onDocumentKeydown);
   });
 }
 

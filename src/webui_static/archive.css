@@ -72,7 +72,7 @@ html.view-home #messageMonthFooter { display: none !important; }
     border-radius: 6px; background: var(--field); color: var(--text);
     font-size: 13px; font-family: inherit; }
   .layout { display: flex; gap: 18px; max-width: 1060px; margin: 0 auto; padding: 16px 16px 60px; }
-  aside.side { width: 258px; flex: none; position: sticky; top: 76px; align-self: flex-start; }
+  aside.side { width: 258px; flex: none; position: sticky; top: calc(var(--header-height) + var(--space-4)); align-self: flex-start; }
   main { flex: 1; min-width: 0; margin: 0; padding: 0; }
   .calendar-toggle { display: none; }
   @media (max-width: 900px) {
@@ -104,8 +104,8 @@ html.view-home #messageMonthFooter { display: none !important; }
   .cal-day.today { outline: 1px dashed var(--muted); }
   .cal-day.active-day { outline: 2px solid var(--accent); outline-offset: 1px; font-weight: bold; }
   .cal-foot { margin-top: 8px; font-size: 11px; color: var(--muted); text-align: center; }
-  /* 日历 sticky 顶部为 60px 导航栏 + 16px 呼吸间距；日期跳转保持相同安全区。 */
-  .day-sep { scroll-margin-top: 92px; }
+  /* 日历 sticky 顶部为导航栏 + 24px 内容间距 + 4px 安全余量；日期跳转保持相同安全区。 */
+  .day-sep { scroll-margin-top: calc(var(--header-height) + var(--space-5) + var(--space-1)); }
   .day-sep.flash span { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   /* 今日跳转后的高亮脉冲动画 */
   @keyframes today-highlight {
@@ -391,7 +391,7 @@ html.view-home #messageMonthFooter { display: none !important; }
   .toggle-row input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
   body.hide-tags .tags { display: none !important; }
   /* 灯箱 */
-  #backTop { position: fixed; bottom: 32px; right: 28px; z-index: 1100; display: none;
+  #backTop { position: fixed; bottom: 32px; right: 28px; z-index: var(--z-float); display: none;
     width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border);
     background: color-mix(in srgb, var(--card) 85%, transparent);
     backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -402,7 +402,7 @@ html.view-home #messageMonthFooter { display: none !important; }
   #backTop.force-hide { display: none !important; }
   /* 灯箱 */
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none;
-              align-items: center; justify-content: center; z-index: 20000; cursor: zoom-out;
+              align-items: center; justify-content: center; z-index: var(--z-lightbox); cursor: zoom-out;
               backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
               touch-action: none; overscroll-behavior: contain; user-select: none; -webkit-user-select: none; }
   #lightbox.open { display: flex; }
@@ -417,11 +417,11 @@ html.view-home #messageMonthFooter { display: none !important; }
   #lightbox .nav-btn { position: absolute; top: 50%; transform: translateY(-50%);
     background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.18); font-size: 26px;
     width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
-    cursor: pointer; border-radius: 50%; z-index: 20002;
+    cursor: pointer; border-radius: 50%; z-index: var(--z-lightbox-controls);
     backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); transition: all .2s ease; }
   #lightbox .nav-btn:hover { background: rgba(255,255,255,.28); transform: translateY(-50%) scale(1.08); }
   #lbPrev { left: 24px; } #lbNext { right: 24px; }
-  .lb-actions { position: absolute; right: 28px; top: 24px; display: flex; align-items: center; gap: 10px; z-index: 20002; }
+  .lb-actions { position: absolute; right: 28px; top: 24px; display: flex; align-items: center; gap: 10px; z-index: var(--z-lightbox-controls); }
   .lb-status { color: #fff; font-size: 12px; font-weight: 500; padding: 6px 14px;
                background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.25);
                border-radius: 20px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -433,14 +433,14 @@ html.view-home #messageMonthFooter { display: none !important; }
   .lb-btn:hover { background: rgba(255,255,255,.25); border-color: rgba(255,255,255,.6); color: #fff; }
   #lbClose { position: static; background: rgba(0,0,0,.5); color: #fff;
              border: 1px solid rgba(255,255,255,.3); border-radius: 20px; padding: 6px 16px;
-             font-size: 13px; font-weight: 500; cursor: pointer; z-index: 20002;
+             font-size: 13px; font-weight: 500; cursor: pointer; z-index: var(--z-lightbox-controls);
              backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: all .2s ease; }
   #lbClose:hover { background: rgba(255,255,255,.25); border-color: rgba(255,255,255,.6); }
   #lbCounter { position: absolute; top: 24px; left: 28px;
                color: #fff; font-size: 13px; font-weight: 500; letter-spacing: 0.5px;
                padding: 6px 16px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.25);
                border-radius: 20px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-               z-index: 20002; pointer-events: none; }
+               z-index: var(--z-lightbox-controls); pointer-events: none; }
 
   /* 一键复制与 Toast 浮窗 */
   .copy-btn {
@@ -3201,8 +3201,9 @@ html.view-home #messageMonthFooter { display: none !important; }
 
 .gallery-cards.layout-masonry .gallery-card {
   width: 100%;
-  aspect-ratio: var(--photo-ratio, auto);
-  contain-intrinsic-size: unset;
+  /* 没有尺寸元数据时先保留稳定的肖像占位，图片加载后由 --photo-ratio 接管。 */
+  aspect-ratio: var(--photo-ratio, 3 / 4);
+  contain-intrinsic-size: 240px 320px;
   min-height: 0;
 }
 
