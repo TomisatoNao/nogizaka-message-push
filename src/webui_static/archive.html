@@ -8,8 +8,8 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260921_2">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260921_8">
-<link rel="preload" href="/static/archive.js?v=20260921_5" as="script">
+<link rel="stylesheet" href="/static/archive.css?v=20260921_9">
+<link rel="preload" href="/static/archive.js?v=20260921_6" as="script">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -162,7 +162,10 @@
             <input type="text" id="memberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
             <button class="clear-btn" id="btnMemberSearchClear" type="button" style="display:none;">✕</button>
           </div>
-          <span class="member-count-badge" id="memberTotalBadge">共 0 人</span>
+          <div class="popover-header-tools">
+            <button class="popover-expand-all" type="button" data-popover-scope="msg" hidden title="展开全部成员分组">全部展开</button>
+            <span class="member-count-badge" id="memberTotalBadge">共 0 人</span>
+          </div>
         </div>
         <div class="member-popover-list" id="memberPopoverList"></div>
       </div>
@@ -244,7 +247,10 @@
               <input type="text" id="letterMemberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
               <button class="clear-btn" id="btnLetterMemberSearchClear" type="button" style="display:none;">✕</button>
             </div>
-            <span class="member-count-badge" id="letterMemberTotalBadge">共 0 人</span>
+            <div class="popover-header-tools">
+              <button class="popover-expand-all" type="button" data-popover-scope="letter" hidden title="展开全部成员分组">全部展开</button>
+              <span class="member-count-badge" id="letterMemberTotalBadge">共 0 人</span>
+            </div>
           </div>
           <div class="member-popover-list" id="letterMemberPopoverList"></div>
         </div>
@@ -274,7 +280,10 @@
                 <input type="text" id="galleryMemberSearchInput" placeholder="输入姓名快速查找..." autocomplete="off" />
                 <button class="clear-btn" id="btnGalleryMemberSearchClear" type="button" style="display:none;">✕</button>
               </div>
-              <span class="member-count-badge" id="galleryMemberTotalBadge">全部成员</span>
+              <div class="popover-header-tools">
+                <button class="popover-expand-all" type="button" data-popover-scope="gallery" hidden title="展开全部成员分组">全部展开</button>
+                <span class="member-count-badge" id="galleryMemberTotalBadge">全部成员</span>
+              </div>
             </div>
             <div class="member-popover-list" id="galleryMemberPopoverList"></div>
           </div>
@@ -569,7 +578,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20260921_5"></script>
+<script src="/static/archive.js?v=20260921_6"></script>
 
 </body>
 </html>

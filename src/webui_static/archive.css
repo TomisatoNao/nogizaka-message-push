@@ -1745,6 +1745,35 @@ html.view-home #messageMonthFooter { display: none !important; }
     color: var(--muted);
     white-space: nowrap;
   }
+  .popover-header-tools {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .popover-expand-all {
+    min-height: 32px;
+    padding: 5px 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--tr-fast), border-color var(--tr-fast), color var(--tr-fast);
+  }
+  .popover-expand-all:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: var(--border-soft);
+  }
+  .popover-expand-all:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .popover-expand-all[hidden] { display: none; }
   .member-popover-list,
   .author-popover-list {
     overflow-y: auto;
@@ -2774,6 +2803,10 @@ html.view-home #messageMonthFooter { display: none !important; }
     .author-select-btn {
       width: 100% !important;
       justify-content: center !important;
+    }
+    .popover-expand-all {
+      min-height: 44px;
+      padding-inline: 8px;
     }
     /* 月份导航三件套（上月、月份下拉框、下月）固定在同一水平线 */
     .month-nav-group {

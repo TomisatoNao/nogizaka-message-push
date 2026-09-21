@@ -75,10 +75,10 @@ def test_archive_cache_versions_are_synchronised():
     perf = (ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
 
     for resource in (
-        "/static/archive.css?v=20260921_8",
-        "/static/archive.js?v=20260921_5",
+        "/static/archive.css?v=20260921_9",
+        "/static/archive.js?v=20260921_6",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_5") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_6") else 1)
         assert resource in perf
 
 
@@ -111,7 +111,11 @@ def test_message_day_separator_aligns_with_message_cards():
 def test_member_popovers_support_shared_collapsible_saka_groups():
     script = (STATIC / "archive.js").read_text(encoding="utf-8")
     styles = (STATIC / "archive.css").read_text(encoding="utf-8")
-    assert "const collapsedPopoverGroups = new Set();" in script
+    assert 'const POPOVER_GROUP_STATE_KEY = "archive_popover_collapsed_groups_v1";' in script
+    assert "const collapsedPopoverGroups = loadCollapsedPopoverGroups();" in script
+    assert "sessionStorage.getItem(POPOVER_GROUP_STATE_KEY)" in script
+    assert "sessionStorage.setItem(POPOVER_GROUP_STATE_KEY" in script
+    assert "function expandPopoverGroups(scope)" in script
     assert "function createPopoverGroupHeader(group, count, onToggle)" in script
     assert "event.stopPropagation();" in script[script.index("function createPopoverGroupHeader"):script.index("function renderMemberPopover")]
     for renderer in ("renderMemberPopover", "renderLetterMemberPopover", "renderGalleryMemberPopover"):
@@ -119,6 +123,10 @@ def test_member_popovers_support_shared_collapsible_saka_groups():
         next_start = script.find("function ", start + len(renderer) + 9)
         block = script[start:next_start if next_start >= 0 else len(script)]
         assert "createPopoverGroupHeader" in block
+    archive = (STATIC / "archive.html").read_text(encoding="utf-8")
+    for scope in ("msg", "letter", "gallery"):
+        assert f'data-popover-scope="{scope}"' in archive
+    assert ".popover-expand-all[hidden]" in styles
     assert ".popover-group-header[aria-expanded=\"false\"] .pgh-chevron" in styles
 
 

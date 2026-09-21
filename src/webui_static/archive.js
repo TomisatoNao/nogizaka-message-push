@@ -955,8 +955,63 @@ function renderMemberChips() {
   }
 }
 
-// 成员选择器、信件和相册共用坂道分组折叠状态，切换页面时保留用户的展开偏好。
-const collapsedPopoverGroups = new Set();
+// 成员选择器、信件和相册共用坂道分组折叠状态。
+// 默认全部展开；仅在当前标签页内记忆，避免一次折叠永久影响后续访问。
+const POPOVER_GROUP_STATE_KEY = "archive_popover_collapsed_groups_v1";
+const POPOVER_GROUP_KEYS = new Set(["nogizaka", "sakurazaka", "hinatazaka", "yodel", "other"]);
+
+function loadCollapsedPopoverGroups() {
+  try {
+    const raw = sessionStorage.getItem(POPOVER_GROUP_STATE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter(key => POPOVER_GROUP_KEYS.has(key)));
+  } catch (_) {
+    // 隐私模式、禁用存储或旧数据异常时回退到默认全部展开。
+    return new Set();
+  }
+}
+
+function persistCollapsedPopoverGroups() {
+  try {
+    sessionStorage.setItem(POPOVER_GROUP_STATE_KEY, JSON.stringify([...collapsedPopoverGroups]));
+  } catch (_) {
+    // 存储不可用不影响当前页面内的折叠操作。
+  }
+}
+
+const collapsedPopoverGroups = loadCollapsedPopoverGroups();
+
+function updatePopoverExpandAllControl(scope, groupKeys) {
+  const control = document.querySelector('.popover-expand-all[data-popover-scope="' + scope + '"]');
+  if (!control) return;
+  const canExpand = (groupKeys || []).some(key => collapsedPopoverGroups.has(key));
+  control.hidden = !canExpand;
+  control.setAttribute("aria-hidden", String(!canExpand));
+}
+
+function expandPopoverGroups(scope) {
+  const groupKeys = {
+    msg: ["nogizaka", "sakurazaka", "hinatazaka", "yodel", "other"],
+    letter: ["nogizaka", "sakurazaka", "hinatazaka"],
+    gallery: ["nogizaka", "sakurazaka", "hinatazaka"],
+  }[scope] || [];
+  let changed = false;
+  groupKeys.forEach(key => {
+    if (collapsedPopoverGroups.delete(key)) changed = true;
+  });
+  if (!changed) return;
+  persistCollapsedPopoverGroups();
+
+  if (scope === "msg") {
+    renderMemberPopover($("memberSearchInput")?.value || "");
+  } else if (scope === "letter") {
+    renderLetterMemberPopover($("letterMemberSearchInput")?.value || "");
+  } else if (scope === "gallery") {
+    renderGalleryMemberPopover($("galleryMemberSearchInput")?.value || "");
+  }
+}
 function createPopoverGroupHeader(group, count, onToggle) {
   const collapsed = collapsedPopoverGroups.has(group.key);
   const head = document.createElement("button");
@@ -972,6 +1027,7 @@ function createPopoverGroupHeader(group, count, onToggle) {
     event.stopPropagation();
     if (collapsedPopoverGroups.has(group.key)) collapsedPopoverGroups.delete(group.key);
     else collapsedPopoverGroups.add(group.key);
+    persistCollapsedPopoverGroups();
     onToggle();
   });
   return { head, collapsed };
@@ -992,6 +1048,7 @@ function renderMemberPopover(filterKeyword = "") {
   }
 
   if (!filtered.length) {
+    updatePopoverExpandAllControl("msg", []);
     const empty = document.createElement("div");
     empty.style.cssText = "text-align:center; padding:20px 0; color:var(--muted); font-size:12.5px;";
     empty.textContent = "未找到匹配成员";
@@ -1008,6 +1065,7 @@ function renderMemberPopover(filterKeyword = "") {
     { key: "other", name: "其他成员", icon: "👤", cls: "other" },
   ];
 
+  const visibleGroupKeys = [];
   groups.forEach(g => {
     const grpMems = filtered.filter(m => {
       const gK = inferMemberGroup(m);
@@ -1015,6 +1073,7 @@ function renderMemberPopover(filterKeyword = "") {
     });
 
     if (!grpMems.length) return;
+    visibleGroupKeys.push(g.key);
 
     const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderMemberPopover(filterKeyword));
     list.appendChild(groupHeader.head);
@@ -1060,6 +1119,7 @@ function renderMemberPopover(filterKeyword = "") {
       list.appendChild(item);
     });
   });
+  updatePopoverExpandAllControl("msg", visibleGroupKeys);
 }
 
 function toggleMemberPopover() {
@@ -4135,6 +4195,13 @@ if ($("btnMemberSearchClear")) {
     $("memberSearchInput").focus();
   });
 }
+document.querySelectorAll(".popover-expand-all").forEach((control) => {
+  control.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    expandPopoverGroups(control.dataset.popoverScope || "");
+  });
+});
 // ── 博客三坂分组分段控制器点击事件 ───────────────
 document.querySelectorAll("#blogGroupSegment .seg-btn").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -5775,6 +5842,7 @@ function renderLetterMemberPopover(filterKeyword = "") {
   }
 
   if (!filtered.length) {
+    updatePopoverExpandAllControl("letter", []);
     const empty = document.createElement("div");
     empty.style.cssText = "text-align:center; padding:20px 0; color:var(--muted); font-size:12.5px;";
     empty.textContent = "未找到匹配成员";
@@ -5789,9 +5857,11 @@ function renderLetterMemberPopover(filterKeyword = "") {
     { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" }
   ];
 
+  const visibleGroupKeys = [];
   groups.forEach(g => {
     const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
     if (!grpMems.length) return;
+    visibleGroupKeys.push(g.key);
 
     const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderLetterMemberPopover(filterKeyword));
     list.appendChild(groupHeader.head);
@@ -5824,6 +5894,7 @@ function renderLetterMemberPopover(filterKeyword = "") {
       list.appendChild(item);
     });
   });
+  updatePopoverExpandAllControl("letter", visibleGroupKeys);
 }
 
 function toggleLetterMemberPopover() {
@@ -6564,9 +6635,11 @@ function renderGalleryMemberPopover(filterKeyword = "") {
     { key: "hinatazaka", name: "日向坂46", icon: "🩵", cls: "hinata" }
   ];
 
+  const visibleGroupKeys = [];
   groups.forEach(g => {
     const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
     if (!grpMems.length) return;
+    visibleGroupKeys.push(g.key);
 
     const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderGalleryMemberPopover(filterKeyword));
     list.appendChild(groupHeader.head);
@@ -6607,6 +6680,7 @@ function renderGalleryMemberPopover(filterKeyword = "") {
       list.appendChild(item);
     });
   });
+  updatePopoverExpandAllControl("gallery", visibleGroupKeys);
 }
 
 function openGalleryMemberPopover() {
