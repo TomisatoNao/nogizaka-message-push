@@ -251,3 +251,73 @@ def test_instagram_anonymous_429_graceful_handling(tmp_path: Path):
     assert guard.record_failure(config, 429, has_session=True) is False
     assert guard.record_failure(config, 429, has_session=True) is True
     assert guard.status(config)["blocked"] is True
+
+
+def test_monitor_reloads_cookie_session_after_webui_update(tmp_path: Path, monkeypatch):
+    """WebUI 保存 Cookies 后，常驻监控线程不能继续使用旧 sessionid。"""
+    config = {
+        "platforms": {
+            "instagram": {
+                "enabled": True,
+                "accounts": ["public_user"],
+                "download_dir": str(tmp_path / "media"),
+            }
+        }
+    }
+    fetcher = InstagramFetcher(
+        config,
+        SocialStore(str(tmp_path / "social.db")),
+        _FeedDownloader(),
+    )
+
+    versions = iter([("sqlite", 1.0), ("sqlite", 2.0)])
+    cookies = iter([
+        {"sessionid": "old-session", "csrftoken": "old-csrf"},
+        {"sessionid": "new-session", "csrftoken": "new-csrf"},
+    ])
+    monkeypatch.setattr(ig_session, "cookie_store_version", lambda *_args: next(versions))
+    monkeypatch.setattr(ig_session, "read_cookie_file", lambda *_args: next(cookies))
+
+    fetcher._warm_session()
+    assert fetcher._session.cookies.get("sessionid") == "old-session"
+    assert fetcher._session.headers["X-CSRFToken"] == "old-csrf"
+
+    # 模拟管理端重新粘贴 Cookies 后的第二轮监控。
+    fetcher._warm_session()
+    assert fetcher._session.cookies.get("sessionid") == "new-session"
+    assert fetcher._session.headers["X-CSRFToken"] == "new-csrf"
+
+
+def test_invalid_cookie_source_keeps_feed_on_anonymous_path(tmp_path: Path, monkeypatch):
+    """失效的 cookies_file 不应阻断公开 Feed，也不应调用登录态接口。"""
+    config = {
+        "platforms": {
+            "instagram": {
+                "enabled": True,
+                "accounts": ["public_user"],
+                "cookies_file": str(tmp_path / "missing.cookies.txt"),
+                "download_dir": str(tmp_path / "media"),
+            }
+        }
+    }
+    fetcher = InstagramFetcher(
+        config,
+        SocialStore(str(tmp_path / "social.db")),
+        _FeedDownloader(),
+    )
+    fetcher._warm_session = lambda: setattr(fetcher, "_warmed", True)
+    monkeypatch.setattr(ig_session, "read_cookie_file", lambda *_args: {})
+    monkeypatch.setattr(ig_session, "resolve_cookies", lambda *_args: {})
+    monkeypatch.setattr(ig_session, "cookie_store_version", lambda *_args: ("sqlite", 0.0))
+    monkeypatch.setattr(
+        fetcher,
+        "_api_feed_entries",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("匿名 Feed 不应调用登录态 API")),
+    )
+    fetcher._dl.extract_info = lambda *_args, **_kwargs: {
+        "entries": [{"id": "public-post", "webpage_url": "https://www.instagram.com/p/public-post/"}]
+    }
+
+    entries = fetcher._list_feed_entries("public_user")
+
+    assert [entry["id"] for entry in entries] == ["public-post"]

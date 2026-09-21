@@ -235,6 +235,28 @@ def write_cookie_file(cookies: dict, path: str = "") -> str:
     return f"sqlite:{DB_PATH}#ig_session"
 
 
+def cookie_store_version(path: str = "") -> tuple:
+    """Return a non-sensitive version marker for the active cookie source.
+
+    The Instagram monitor is long-lived while the WebUI can replace Cookies
+    in the background. Consumers can use this marker to notice a changed
+    source without reading cookie values into logs or configuration snapshots.
+    """
+    if path:
+        configured = os.path.expanduser(str(path).strip())
+        try:
+            stat = os.stat(configured)
+        except OSError:
+            stat = None
+        if stat is not None:
+            return ("file", configured, int(stat.st_mtime_ns), int(stat.st_size))
+
+    conn = _get_db()
+    row = conn.execute("SELECT MAX(updated_at) AS version FROM ig_session").fetchone()
+    version = row["version"] if row else None
+    return ("sqlite", float(version or 0.0))
+
+
 def read_cookie_file(path: str = "") -> dict:
     """读取 cookies：显式文件优先，其次 SQLite，并支持旧文件静默迁移。"""
     # A configured cookies_file is an explicit source and must be honoured.

@@ -13,12 +13,13 @@ fetchers/instagram_fetcher.py — Instagram 监控
      用于在列表已知但逐帖 API 被拒时匿名补全正文与图片
 
 关于「免登录」的实测结论（2026-07）：
- Instagram 已对**匿名**的 `web_profile_info` / `feed/user` 接口统一返回
- 429「Please wait a few minutes」，主页 HTML 也不再内嵌帖子数据；
- yt-dlp 的 `instagram:story` 会直接提示需要登录。公开的单帖 Embed
- 仍可在不少情况下匿名取得图片/视频，但它不能替代账号 Feed，也不支持 Story。
+ 公开账号的 Feed 可以尝试匿名抓取：先走 yt-dlp 的公开主页解析，失败后再
+ 回退 `web_profile_info`；但 Instagram 会按出口 IP 对这些接口限流，不能把
+ 匿名 Feed 当成稳定的官方 API。登录态只用于更稳定的 Feed 直链、私密内容
+ 和 Story。公开的单帖 Embed 仍可在不少情况下匿名取得图片/视频，但它不能
+ 替代账号 Feed 的发现能力，也不支持 Story。
 
-  因此这里提供一条「不需要在本程序里登录」的可行路径：
+  因此这里还提供一条「不需要在本程序里登录」的可行路径：
       platforms.instagram.cookies_from_browser = "chrome"   （或 edge / firefox）
   程序会直接复用你浏览器里已有的 Instagram 登录态（不接触账号密码、
   不产生新的登录行为）。X 与 TikTok 则完全免登录，无需任何 cookies。
@@ -30,6 +31,7 @@ downloader 通过「扫描目录差集」把它们全部收集为 MediaItem。
 import logging
 import os
 import random
+import threading
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -90,6 +92,8 @@ class InstagramFetcher(SocialFetcher):
             "Accept-Language": "ja,en;q=0.8",
         })
         self._warmed = False
+        self._session_fingerprint: tuple | None = None
+        self._session_lock = threading.RLock()
         self._login_hint_shown = False
         self._last_blocked_log = 0.0
         # 每个账号单独维护 Story 限频状态；不能让先轮询的账号压住其它账号。
@@ -100,16 +104,48 @@ class InstagramFetcher(SocialFetcher):
 
     @property
     def has_cookies(self) -> bool:
-        """当前是否具备任何有效配置的登录态（cookies_file、浏览器复用或 sessionid）。"""
+        """当前会话是否真的加载了 Instagram 登录态。
+
+        不能仅凭 ``cookies_file`` / ``cookies_from_browser`` 有值就认为已
+        登录：路径可能失效、浏览器读取可能失败。Feed 的匿名路径应在这种
+        情况下继续工作，而 Story 则应明确跳过。
+        """
         if self._session.cookies.get("sessionid"):
             return True
-        if (self.cfg.get("cookies_file") or "").strip() or (self.cfg.get("cookies_from_browser") or "").strip():
-            return True
+        if self._warmed:
+            return False
+        cfg = self.cfg
+        cfile = (cfg.get("cookies_file") or "").strip()
+        browser = (cfg.get("cookies_from_browser") or "").strip()
         try:
             from src.social import ig_session
-            return bool(ig_session.read_cookie_file().get("sessionid"))
+            return bool(ig_session.resolve_cookies(cfile, browser).get("sessionid"))
         except Exception:
             return False
+
+    @staticmethod
+    def _cookie_file_marker(cfile: str) -> tuple:
+        if not cfile:
+            return ()
+        path = os.path.expanduser(cfile)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return ("missing", path)
+        return (int(stat.st_mtime_ns), int(stat.st_size))
+
+    def _session_source_fingerprint(self, cfg: dict) -> tuple:
+        """Return only non-secret inputs that determine session loading."""
+        from src.social import ig_session
+
+        cfile = (cfg.get("cookies_file") or "").strip()
+        return (
+            (cfg.get("user_agent") or "").strip(),
+            cfile,
+            self._cookie_file_marker(cfile),
+            (cfg.get("cookies_from_browser") or "").strip().lower(),
+            ig_session.cookie_store_version(),
+        )
 
     # ── 会话准备 ─────────────────────────────────────────
 
@@ -119,47 +155,51 @@ class InstagramFetcher(SocialFetcher):
         若配置了 cookies_from_browser / cookies_file，则同时把浏览器里已有的
         Instagram 登录态注入本 session —— 不需要在本程序里做任何登录动作。
         """
-        if self._warmed:
-            return
-        self._warmed = True
         cfg = self.cfg
+        source_fingerprint = self._session_source_fingerprint(cfg)
+        with self._session_lock:
+            if self._warmed and source_fingerprint == self._session_fingerprint:
+                return
 
-        # UA 应与建立该会话的浏览器一致 —— 同一个 sessionid 换客户端指纹
-        # 是明显的风险信号，配置里填了就用配置的
-        ua = (cfg.get("user_agent") or "").strip()
-        if ua:
-            self._session.headers["User-Agent"] = ua
-
-        # 1) 复用已有登录态：cookies_file 优先，其次 SQLite / 环境变量，其次浏览器
-        cookies: dict = {}
-        cfile = (cfg.get("cookies_file") or "").strip()
-        from src.social import ig_session
-        if not cfile:
-            cookies = ig_session.read_cookie_file()
-        else:
-            cookies = ig_session.read_cookie_file(cfile)
-        if cookies:
-            log.info("[instagram] 已加载登录态 cookies（%s 个）", len(cookies))
-        if not cookies:
-            browser = (cfg.get("cookies_from_browser") or "").strip()
-            if browser:
-                cookies = _cookies_from_browser(browser)
-                if cookies:
-                    log.info("[instagram] 已复用 %s 浏览器中的登录态（%s 个 cookie）",
-                             browser, len(cookies))
-
-        if cookies:
-            self._session.cookies.update(cookies)
-            # csrftoken 必须取自**同一套** cookies；若用预热请求拿到的匿名
-            # token，会和 sessionid 对不上，导致接口直接拒绝
-            if cookies.get("csrftoken"):
-                self._session.headers["X-CSRFToken"] = cookies["csrftoken"]
-            return      # 已有登录态，无需再做匿名预热
-        try:
-            self._session.get("https://www.instagram.com/", timeout=self._dl.timeout)
+            # Cookies 可由 WebUI 热更新。配置对象本身不一定变化，因此一旦
+            # 来源版本改变，必须清掉旧 session，避免用旧 sessionid 继续请求。
+            if self._warmed:
+                self._session.cookies.clear()
+                self._session.headers.pop("X-CSRFToken", None)
+                self._uid_cache.clear()
             self._warmed = True
-        except Exception as e:
-            log.debug("[instagram] 预热 session 失败（不影响主流程）: %s", e)
+            self._session_fingerprint = source_fingerprint
+
+            # UA 应与建立该会话的浏览器一致 —— 同一个 sessionid 换客户端指纹
+            # 是明显的风险信号，配置里填了就用配置的
+            ua = (cfg.get("user_agent") or "").strip()
+            self._session.headers["User-Agent"] = ua or _UA
+
+            # 1) 复用已有登录态：cookies_file 优先，其次 SQLite / 环境变量，其次浏览器
+            cfile = (cfg.get("cookies_file") or "").strip()
+            from src.social import ig_session
+            cookies = ig_session.read_cookie_file(cfile)
+            if cookies:
+                log.info("[instagram] 已加载登录态 cookies（%s 个）", len(cookies))
+            if not cookies:
+                browser = (cfg.get("cookies_from_browser") or "").strip()
+                if browser:
+                    cookies = _cookies_from_browser(browser)
+                    if cookies:
+                        log.info("[instagram] 已复用 %s 浏览器中的登录态（%s 个 cookie）",
+                                 browser, len(cookies))
+
+            if cookies:
+                self._session.cookies.update(cookies)
+                # csrftoken 必须取自**同一套** cookies；若用预热请求拿到的匿名
+                # token，会和 sessionid 对不上，导致接口直接拒绝
+                if cookies.get("csrftoken"):
+                    self._session.headers["X-CSRFToken"] = cookies["csrftoken"]
+                return      # 已有登录态，无需再做匿名预热
+            try:
+                self._session.get("https://www.instagram.com/", timeout=self._dl.timeout)
+            except Exception as e:
+                log.debug("[instagram] 预热 session 失败（不影响主流程）: %s", e)
 
     def _session_failed(self, reason: str) -> None:
         """标记登录态失效并（首次）告警。
@@ -168,9 +208,7 @@ class InstagramFetcher(SocialFetcher):
         立刻作废），所以不能靠猜 —— 只能在真的用不了时立刻发现并通知。
         """
         from src.social import ig_session
-        if not (self._session.cookies.get("sessionid")
-                or self.cfg.get("cookies_file")
-                or self.cfg.get("cookies_from_browser")):
+        if not self.has_cookies:
             return          # 本来就没配 cookies，不算「失效」
         if not ig_session.mark_invalid(reason):
             return          # 之前已经标记过，不重复告警
@@ -524,7 +562,7 @@ class InstagramFetcher(SocialFetcher):
         """返回 [{id, url, timestamp, title, kind}]（多后端自动回退）。"""
         self._warm_session()
         # 后端 0：带登录态的 Feed 接口 —— 有 cookies 时最可靠
-        if self._session.cookies.get("sessionid") or self.cfg.get("cookies_file") or self.cfg.get("cookies_from_browser"):
+        if self.has_cookies:
             try:
                 got = self._api_feed_entries(account)
                 if got:
@@ -532,6 +570,9 @@ class InstagramFetcher(SocialFetcher):
             except Exception as e:
                 log.debug("[instagram] Feed 接口失败，回退其它后端: %s",
                           str(e).replace("\n", " ")[:160])
+        else:
+            log.debug("[instagram] @%s Feed 使用匿名公开抓取路径（不调用登录态 Feed API）",
+                      account)
 
         # 后端 1：yt-dlp 扁平列出用户主页
         info = self._dl.extract_info(
