@@ -955,6 +955,28 @@ function renderMemberChips() {
   }
 }
 
+// 成员选择器、信件和相册共用坂道分组折叠状态，切换页面时保留用户的展开偏好。
+const collapsedPopoverGroups = new Set();
+function createPopoverGroupHeader(group, count, onToggle) {
+  const collapsed = collapsedPopoverGroups.has(group.key);
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "popover-group-header " + group.cls;
+  head.setAttribute("aria-expanded", String(!collapsed));
+  head.setAttribute("aria-label", group.name + (collapsed ? "，展开成员" : "，收起成员"));
+  head.innerHTML = '<span class="pgh-title">' + group.icon + ' ' + group.name + '</span>' +
+                   '<span class="pgh-meta"><span class="pgh-cnt">' + count + ' 人</span>' +
+                   '<span class="pgh-chevron" aria-hidden="true">▾</span></span>';
+  head.addEventListener("click", (event) => {
+    // 重绘会替换当前按钮节点；阻止旧节点继续冒泡到文档级“点击外部关闭”监听。
+    event.stopPropagation();
+    if (collapsedPopoverGroups.has(group.key)) collapsedPopoverGroups.delete(group.key);
+    else collapsedPopoverGroups.add(group.key);
+    onToggle();
+  });
+  return { head, collapsed };
+}
+
 function renderMemberPopover(filterKeyword = "") {
   const list = $("memberPopoverList");
   if (!list) return;
@@ -994,10 +1016,9 @@ function renderMemberPopover(filterKeyword = "") {
 
     if (!grpMems.length) return;
 
-    const gHead = document.createElement("div");
-    gHead.className = "popover-group-header " + g.cls;
-    gHead.innerHTML = '<span>' + g.icon + ' ' + g.name + '</span><span class="pgh-cnt">' + grpMems.length + ' 人</span>';
-    list.appendChild(gHead);
+    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderMemberPopover(filterKeyword));
+    list.appendChild(groupHeader.head);
+    if (groupHeader.collapsed) return;
 
     grpMems.forEach(m => {
       let avatarText = (m.display || "").replace(/[\s_　]/g, "");
@@ -2455,6 +2476,7 @@ async function loadMonths(preserveSelected = true) {
         sel.value = curYM.year + "-" + curYM.month;
       }
     }
+    syncMessageMonthNavigation();
   }
 
   try {
@@ -2482,9 +2504,11 @@ async function loadMonths(preserveSelected = true) {
         sel.value = curYM.year + "-" + curYM.month;
       }
     }
+    syncMessageMonthNavigation();
     return months;
   } catch (e) {
     if (e.name === "AbortError" || version !== memberVersion) return [];
+    syncMessageMonthNavigation();
     return memberMonthsCache.get(cacheKey) || [];
   }
 }
@@ -5769,10 +5793,9 @@ function renderLetterMemberPopover(filterKeyword = "") {
     const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
     if (!grpMems.length) return;
 
-    const gHead = document.createElement("div");
-    gHead.className = "popover-group-header " + g.cls;
-    gHead.innerHTML = '<span>' + g.icon + ' ' + g.name + '</span><span class="pgh-cnt">' + grpMems.length + ' 人</span>';
-    list.appendChild(gHead);
+    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderLetterMemberPopover(filterKeyword));
+    list.appendChild(groupHeader.head);
+    if (groupHeader.collapsed) return;
 
     grpMems.forEach(m => {
       let avatarText = (m.display || "").replace(/[\s_　]/g, "");
@@ -6545,10 +6568,9 @@ function renderGalleryMemberPopover(filterKeyword = "") {
     const grpMems = filtered.filter(m => inferMemberGroup(m) === g.key);
     if (!grpMems.length) return;
 
-    const gHead = document.createElement("div");
-    gHead.className = "popover-group-header " + g.cls;
-    gHead.innerHTML = '<span>' + g.icon + ' ' + g.name + '</span><span class="pgh-cnt">' + grpMems.length + ' 人</span>';
-    list.appendChild(gHead);
+    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderGalleryMemberPopover(filterKeyword));
+    list.appendChild(groupHeader.head);
+    if (groupHeader.collapsed) return;
 
     grpMems.forEach(m => {
       let avatarText = (m.display || "").replace(/[\s_　]/g, "");

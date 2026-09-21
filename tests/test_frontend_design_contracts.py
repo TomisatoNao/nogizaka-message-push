@@ -75,10 +75,10 @@ def test_archive_cache_versions_are_synchronised():
     perf = (ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
 
     for resource in (
-        "/static/archive.css?v=20260921_5",
-        "/static/archive.js?v=20260921_2",
+        "/static/archive.css?v=20260921_8",
+        "/static/archive.js?v=20260921_5",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_2") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_5") else 1)
         assert resource in perf
 
 
@@ -100,6 +100,26 @@ def test_archive_scroll_media_and_lightbox_contracts():
     assert "document.addEventListener(\"keydown\", onKeydown);" in script
     assert "document.addEventListener(\"keydown\", onDocumentKeydown);" in script
     assert "if (opener && opener !== document.body && document.contains(opener)) opener.focus();" in script
+
+
+def test_message_day_separator_aligns_with_message_cards():
+    styles = (STATIC / "archive.css").read_text(encoding="utf-8")
+    assert ".day-sep { display: flex; width: 92%; max-width: 100%;" in styles
+    assert "    .day-sep { width: 100%; }" in styles
+
+
+def test_member_popovers_support_shared_collapsible_saka_groups():
+    script = (STATIC / "archive.js").read_text(encoding="utf-8")
+    styles = (STATIC / "archive.css").read_text(encoding="utf-8")
+    assert "const collapsedPopoverGroups = new Set();" in script
+    assert "function createPopoverGroupHeader(group, count, onToggle)" in script
+    assert "event.stopPropagation();" in script[script.index("function createPopoverGroupHeader"):script.index("function renderMemberPopover")]
+    for renderer in ("renderMemberPopover", "renderLetterMemberPopover", "renderGalleryMemberPopover"):
+        start = script.index("function " + renderer)
+        next_start = script.find("function ", start + len(renderer) + 9)
+        block = script[start:next_start if next_start >= 0 else len(script)]
+        assert "createPopoverGroupHeader" in block
+    assert ".popover-group-header[aria-expanded=\"false\"] .pgh-chevron" in styles
 
 
 def test_sakurazaka_selected_state_has_explicit_dark_theme_contrast():

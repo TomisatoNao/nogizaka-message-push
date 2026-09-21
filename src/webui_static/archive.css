@@ -197,7 +197,8 @@ html.view-home #messageMonthFooter { display: none !important; }
   button.nav:hover { border-color: var(--accent); }
   button.nav:disabled { opacity: .4; cursor: default; }
   .stats { font-size: 12.5px; color: var(--muted); margin-left: auto; }
-  .day-sep { text-align: center; margin: 18px 0 10px; color: var(--muted); font-size: 12px; }
+  .day-sep { display: flex; width: 92%; max-width: 100%; box-sizing: border-box; align-items: center; justify-content: center;
+             text-align: center; margin: 18px 0 10px; color: var(--muted); font-size: 12px; }
   .day-sep span { background: var(--card); border: 1px solid var(--border);
                   border-radius: 999px; padding: 3px 14px; }
   .bubble { background: var(--bubble); border: 1px solid var(--border);
@@ -506,6 +507,7 @@ html.view-home #messageMonthFooter { display: none !important; }
 
     /* 消息气泡 */
     .bubble { max-width: 100%; padding: 10px 12px; }
+    .day-sep { width: 100%; }
     .bubble img { max-height: min(50vh, 480px); }
     .tag-chip { padding: 3px 12px; font-size: 13px; }
     .copy-btn { padding: 7px 12px; font-size: 12.5px; }
@@ -1759,13 +1761,28 @@ html.view-home #messageMonthFooter { display: none !important; }
     font-size: 11px;
     font-weight: 700;
     color: var(--muted);
-    padding: 6px 6px 2px;
+    padding: 6px 6px 4px;
+    min-height: 32px;
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
     letter-spacing: 0.02em;
     margin-top: 4px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--tr-fast), border-color var(--tr-fast);
   }
+  .popover-group-header:hover { background: var(--hover); border-color: var(--border-soft); }
+  .popover-group-header:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .popover-group-header .pgh-title,
+  .popover-group-header .pgh-meta { display: inline-flex; align-items: center; gap: 6px; }
+  .popover-group-header .pgh-chevron { font-size: 11px; transition: transform var(--tr-fast); }
+  .popover-group-header[aria-expanded="false"] .pgh-chevron { transform: rotate(-90deg); }
   .popover-group-header.nogi { color: #a78bfa; }
   .popover-group-header.sakura { color: #fb7185; }
   .popover-group-header.hinata { color: #38bdf8; }
