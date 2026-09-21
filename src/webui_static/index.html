@@ -5110,6 +5110,12 @@ function openSecretDialog(title, hint, fields, account, opts) {
   secretCtx = { fields, account, userAction: (opts || {}).userAction || null,
                 onDone: (opts || {}).onDone || null,
                 deferCommit: Boolean((opts || {}).deferCommit) };
+  // 同一弹窗也承载管理员重置密码；该流程走 /api/users，不会写入凭证或执行握手。
+  // 按操作上下文显示按钮文案，避免把密码修改误导成凭证握手。
+  const isPasswordAction = secretCtx.userAction && secretCtx.userAction.action === "passwd";
+  if ($("secretSave")) {
+    $("secretSave").textContent = isPasswordAction ? "确认修改" : "🔐 保存并自动握手";
+  }
   $("secretDialogTitle").textContent = title;
   $("secretDialogHint").innerHTML = hint || "";
   $("secretDialogHint").hidden = !hint;

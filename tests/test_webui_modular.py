@@ -1157,6 +1157,14 @@ def test_archive_message_copy_supports_insecure_context_fallback():
     assert "当前浏览器禁止复制，请手动选择文本复制" in script
 
 
+def test_admin_password_reset_dialog_uses_contextual_save_label():
+    """管理员重置密码不能复用凭证握手按钮文案。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="secretSave"' in html
+    assert 'const isPasswordAction = secretCtx.userAction && secretCtx.userAction.action === "passwd";' in html
+    assert '$("secretSave").textContent = isPasswordAction ? "确认修改" : "🔐 保存并自动握手";' in html
+
+
 def test_archive_favorite_filter_has_single_entry_point():
     """收藏筛选只保留消息工具栏入口，单条消息收藏按钮仍可用。"""
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
