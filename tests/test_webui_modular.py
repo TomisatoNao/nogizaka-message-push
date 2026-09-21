@@ -653,6 +653,27 @@ def test_message_media_totals_do_not_fall_back_to_total_messages():
     }
 
 
+def test_blog_media_totals_count_actual_images_not_posts():
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE blog_posts (images_json TEXT, image_paths_json TEXT)")
+    db.executemany(
+        "INSERT INTO blog_posts (images_json, image_paths_json) VALUES (?, ?)",
+        [
+            ('["remote-1", "remote-2"]', '["local-1", "local-2"]'),
+            ('["remote-3"]', '[]'),
+            ('not-json', '["local-4", "local-5", "local-6"]'),
+        ],
+    )
+    db.commit()
+
+    assert archive_handlers._blog_media_totals(db) == {
+        "pictures": 6,
+        "total": 6,
+    }
+
+
 def test_blog_calendar_endpoint_filters_group_author_and_invalid_dates(monkeypatch):
     import sqlite3
 
@@ -1127,16 +1148,19 @@ def test_archive_blog_route_and_request_guards_are_present():
     assert "const author = p.has(\"author\")" in script
     assert "blogReaderReturnHash" in script
     assert "message_media_total" in script
+    assert "blog_images_total" in script
+    assert "total_media" in script
+    assert "全站媒体" in script
     assert 'switchMainTab("blog", true)' not in script
 
 
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260921_7" in html
-    assert "/static/archive.css?v=20260921_9" in html
-    assert "/static/archive.js?v=20260921_7" in perf
-    assert "/static/archive.css?v=20260921_9" in perf
+    assert "/static/archive.js?v=20260921_8" in html
+    assert "/static/archive.css?v=20260921_11" in html
+    assert "/static/archive.js?v=20260921_8" in perf
+    assert "/static/archive.css?v=20260921_11" in perf
 
 
 def test_archive_refresh_reenables_month_navigation_after_months_load():

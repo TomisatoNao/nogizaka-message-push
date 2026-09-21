@@ -75,6 +75,65 @@ html.view-home #messageMonthFooter { display: none !important; }
   aside.side { width: 258px; flex: none; position: sticky; top: calc(var(--header-height) + var(--space-4)); align-self: flex-start; }
   main { flex: 1; min-width: 0; margin: 0; padding: 0; }
   .calendar-toggle { display: none; }
+
+  /* 消息/博客的主浏览区独立居中：日历是辅助栏，不参与主内容的视觉重心。 */
+  @media (min-width: 1280px) {
+    html.view-msg .layout,
+    html.view-blog .layout {
+      display: grid !important;
+      grid-template-columns: 258px minmax(0, 1fr) 258px;
+      column-gap: 24px;
+      max-width: 1440px;
+      padding: 24px 24px 60px;
+    }
+    html.view-msg .layout > #archiveSide,
+    html.view-blog .layout > #archiveSide {
+      grid-column: 1;
+      grid-row: 1;
+      justify-self: end;
+      width: 258px;
+    }
+    html.view-msg .layout > main,
+    html.view-blog .layout > main {
+      grid-column: 2;
+      grid-row: 1;
+      width: 100%;
+      max-width: 840px;
+      justify-self: center;
+    }
+  }
+
+  /* 中等桌面/平板优先收起日历，避免窄主列被左侧栏推向右侧。 */
+  @media (min-width: 901px) and (max-width: 1279px) {
+    html.view-msg .layout,
+    html.view-blog .layout {
+      display: block !important;
+      max-width: 1060px;
+      padding: 16px 16px 60px;
+    }
+    html.view-msg .layout > #archiveSide,
+    html.view-blog .layout > #archiveSide {
+      width: auto;
+      position: static;
+      margin-bottom: 12px;
+    }
+    html.view-msg .layout > #archiveSide:not(.expanded) .cal,
+    html.view-blog .layout > #archiveSide:not(.expanded) .cal {
+      display: none;
+    }
+    html.view-msg .layout .calendar-toggle,
+    html.view-blog .layout .calendar-toggle {
+      display: block;
+      width: 100%;
+    }
+    html.view-msg .layout > main,
+    html.view-blog .layout > main {
+      width: 100%;
+      max-width: 840px;
+      margin-inline: auto;
+    }
+  }
+
   @media (max-width: 900px) {
     .layout { display: block; }
     aside.side { width: auto; position: static; margin-bottom: 12px; }
@@ -205,6 +264,17 @@ html.view-home #messageMonthFooter { display: none !important; }
             border-radius: 16px 16px 16px 5px; padding: 12px 15px; margin: 9px 0; max-width: 92%;
             box-shadow: var(--shadow-sm); overflow-wrap: break-word;
             transition: box-shadow var(--tr); }
+  html.view-msg #timeline .day-sep,
+  html.view-msg #timeline .bubble,
+  html.view-msg .message-month-footer { margin-left: auto; margin-right: auto; }
+  /* 工具栏和消息内容共享同一条内容基线，避免控件比展示框更宽。 */
+  html.view-msg .layout > main > .msg-toolbar,
+  html.view-msg .layout > main > .msg-search-toolbar,
+  html.view-blog .layout > main > .msg-search-toolbar,
+  html.view-msg #timeline,
+  html.view-msg .message-month-footer { width: 100%; max-width: 100%; }
+  html.view-msg #timeline .day-sep,
+  html.view-msg #timeline .bubble { max-width: 100%; }
   .bubble:hover { box-shadow: var(--shadow-md); }
   .bubble .time { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
 

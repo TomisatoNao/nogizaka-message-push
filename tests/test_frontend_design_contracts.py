@@ -75,10 +75,10 @@ def test_archive_cache_versions_are_synchronised():
     perf = (ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
 
     for resource in (
-        "/static/archive.css?v=20260921_9",
-        "/static/archive.js?v=20260921_7",
+        "/static/archive.css?v=20260921_11",
+        "/static/archive.js?v=20260921_8",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_7") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_8") else 1)
         assert resource in perf
 
 
@@ -100,6 +100,18 @@ def test_archive_scroll_media_and_lightbox_contracts():
     assert "document.addEventListener(\"keydown\", onKeydown);" in script
     assert "document.addEventListener(\"keydown\", onDocumentKeydown);" in script
     assert "if (opener && opener !== document.body && document.contains(opener)) opener.focus();" in script
+
+
+def test_archive_primary_views_center_main_track_around_calendar():
+    """消息/博客的主内容居中，日历仅作为桌面辅助栏。"""
+    styles = (STATIC / "archive.css").read_text(encoding="utf-8")
+
+    assert "grid-template-columns: 258px minmax(0, 1fr) 258px;" in styles
+    assert "html.view-msg .layout > #archiveSide" in styles
+    assert "html.view-blog .layout > main" in styles
+    assert "html.view-msg .layout > #archiveSide:not(.expanded) .cal" in styles
+    assert "html.view-blog .layout .calendar-toggle" in styles
+    assert "html.view-msg #timeline .bubble" in styles
 
 
 def test_message_day_separator_aligns_with_message_cards():

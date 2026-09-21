@@ -29,7 +29,7 @@ _home_cache_building = False
 
 
 def _message_media_totals(members: list[dict]) -> dict[str, int]:
-    """汇总消息媒体数量；博客数量不应混入媒体指标。"""
+    """汇总 Message 媒体数量，保留分类明细供首页展示。"""
     pictures = sum(int((member.get("stats") or {}).get("pictures", 0) or 0) for member in members)
     videos = sum(int((member.get("stats") or {}).get("videos", 0) or 0) for member in members)
     voices = sum(int((member.get("stats") or {}).get("voices", 0) or 0) for member in members)
@@ -39,6 +39,38 @@ def _message_media_totals(members: list[dict]) -> dict[str, int]:
         "voices": voices,
         "total": pictures + videos + voices,
     }
+
+
+def _blog_media_totals(blog_db: sqlite3.Connection | None) -> dict[str, int]:
+    """统计博客实际图片数量，不把博客文章数当成媒体数。
+
+    ``image_paths_json`` 是已归档的本地图片列表，``images_json`` 是原始
+    图片列表。两者通常描述同一组图片，优先使用数量更完整的一组，和博客
+    列表中的 ``image_count`` 保持一致；坏数据只影响对应文章，不阻断首页。
+    """
+    if blog_db is None:
+        return {"pictures": 0, "total": 0}
+
+    def _count(raw: object) -> int:
+        try:
+            values = json.loads(raw or "[]") if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            return 0
+        if not isinstance(values, list):
+            return 0
+        return sum(1 for value in values if str(value or "").strip())
+
+    total = 0
+    try:
+        rows = blog_db.execute(
+            "SELECT images_json, image_paths_json FROM blog_posts"
+        ).fetchall()
+        for row in rows:
+            total += max(_count(row[0]), _count(row[1]))
+    except (sqlite3.Error, OSError, TypeError, ValueError):
+        # 首页统计是辅助信息；博客列表本身仍可独立工作。
+        return {"pictures": 0, "total": 0}
+    return {"pictures": total, "total": total}
 
 
 def _home_cache_key_for_request() -> tuple[float, float, str]:
@@ -411,6 +443,7 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     recent_feed = sorted(agg_msgs, key=lambda x: x.get("published_at", ""), reverse=True)[:8]
     total_messages = sum(m["stats"]["total"] for m in members)
     media_totals = _message_media_totals(members)
+    blog_media_totals = _blog_media_totals(blog_db)
     first_dates = [m["stats"]["first_date"] for m in members if m["stats"]["first_date"]] + [g["first_date"] for g in blog_groups if g["first_date"]]
     last_dates = [m["stats"]["last_date"] for m in members if m["stats"]["last_date"]] + [g["last_date"] for g in blog_groups if g["last_date"]]
 
@@ -420,11 +453,13 @@ def handle_home(handler, sub: str, guard_fn, read_body_json_fn) -> None:
             "total_messages": total_messages,
             "total_blogs": total_blogs,
             "total_all": total_messages + total_blogs,
-            # 明确区分消息媒体与消息/博客总量，避免首页把 total_all 当作媒体数。
+            # 保留消息媒体分类字段；total_media 单独表示全站实际媒体数量。
             "total_pictures": media_totals["pictures"],
             "total_videos": media_totals["videos"],
             "total_voices": media_totals["voices"],
             "message_media_total": media_totals["total"],
+            "blog_images_total": blog_media_totals["pictures"],
+            "total_media": media_totals["total"] + blog_media_totals["total"],
             "member_count": len(members),
             "blog_group_count": len(blog_groups),
             "blog_author_count": total_blog_authors,

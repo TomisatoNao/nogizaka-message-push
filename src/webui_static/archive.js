@@ -4614,14 +4614,19 @@ function renderHome(data) {
   heroHTML += '<div class="pm-sub">3 团全量 · ' + (summary.blog_author_count || 0) + ' 位作者 ↗</div>';
   heroHTML += '</div>';
 
-  const totalMedia = Number.isFinite(Number(summary.message_media_total))
+  const messageMedia = Number.isFinite(Number(summary.message_media_total))
     ? Number(summary.message_media_total)
     : (summary.total_pictures || 0) + (summary.total_videos || 0) + (summary.total_voices || 0);
+  const blogImagesValue = Number(summary.blog_images_total || 0);
+  const blogImages = Number.isFinite(blogImagesValue) ? blogImagesValue : 0;
+  const totalMedia = Number.isFinite(Number(summary.total_media))
+    ? Number(summary.total_media)
+    : messageMedia + blogImages;
   heroHTML += '<div class="portal-metric-card">';
-  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">消息媒体</span></div>';
+  heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">全站媒体</span></div>';
   heroHTML += '<div class="pm-val">' + totalMedia.toLocaleString() + ' <small>项</small></div>';
-  heroHTML += '<div class="pm-sub">照片 ' + (summary.total_pictures || 0).toLocaleString() + ' · 视频 ' +
-    (summary.total_videos || 0).toLocaleString() + ' · 语音 ' + (summary.total_voices || 0).toLocaleString() + '</div>';
+  heroHTML += '<div class="pm-sub">Message ' + messageMedia.toLocaleString() + ' · 博客图片 ' +
+    blogImages.toLocaleString() + '</div>';
   heroHTML += '</div>';
 
   const lu = summary.last_updated ? fmtDate(summary.last_updated) : '—';
