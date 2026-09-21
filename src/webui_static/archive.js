@@ -1012,19 +1012,28 @@ function expandPopoverGroups(scope) {
     renderGalleryMemberPopover($("galleryMemberSearchInput")?.value || "");
   }
 }
-function createPopoverGroupHeader(group, count, onToggle) {
-  const collapsed = collapsedPopoverGroups.has(group.key);
+function createPopoverGroupHeader(group, count, onToggle, options = {}) {
+  // 搜索期间只临时展开当前结果所属分组，不改写用户记忆的折叠状态。
+  // 清空搜索后重新渲染即可恢复原来的展开/收起选择。
+  const searchExpanded = Boolean(options.forceExpanded);
+  const collapsed = !searchExpanded && collapsedPopoverGroups.has(group.key);
   const head = document.createElement("button");
   head.type = "button";
-  head.className = "popover-group-header " + group.cls;
+  head.className = "popover-group-header " + group.cls + (searchExpanded ? " search-expanded" : "");
   head.setAttribute("aria-expanded", String(!collapsed));
-  head.setAttribute("aria-label", group.name + (collapsed ? "，展开成员" : "，收起成员"));
+  head.setAttribute("aria-label", searchExpanded
+    ? group.name + "，搜索结果已自动展开"
+    : group.name + (collapsed ? "，展开成员" : "，收起成员"));
+  if (searchExpanded) {
+    head.title = "搜索时自动展开，清空搜索后恢复折叠状态";
+  }
   head.innerHTML = '<span class="pgh-title">' + group.icon + ' ' + group.name + '</span>' +
                    '<span class="pgh-meta"><span class="pgh-cnt">' + count + ' 人</span>' +
                    '<span class="pgh-chevron" aria-hidden="true">▾</span></span>';
   head.addEventListener("click", (event) => {
     // 重绘会替换当前按钮节点；阻止旧节点继续冒泡到文档级“点击外部关闭”监听。
     event.stopPropagation();
+    if (searchExpanded) return;
     if (collapsedPopoverGroups.has(group.key)) collapsedPopoverGroups.delete(group.key);
     else collapsedPopoverGroups.add(group.key);
     persistCollapsedPopoverGroups();
@@ -1075,7 +1084,7 @@ function renderMemberPopover(filterKeyword = "") {
     if (!grpMems.length) return;
     visibleGroupKeys.push(g.key);
 
-    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderMemberPopover(filterKeyword));
+    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderMemberPopover(filterKeyword), { forceExpanded: Boolean(kw) });
     list.appendChild(groupHeader.head);
     if (groupHeader.collapsed) return;
 
@@ -5863,7 +5872,7 @@ function renderLetterMemberPopover(filterKeyword = "") {
     if (!grpMems.length) return;
     visibleGroupKeys.push(g.key);
 
-    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderLetterMemberPopover(filterKeyword));
+    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderLetterMemberPopover(filterKeyword), { forceExpanded: Boolean(kw) });
     list.appendChild(groupHeader.head);
     if (groupHeader.collapsed) return;
 
@@ -6641,7 +6650,7 @@ function renderGalleryMemberPopover(filterKeyword = "") {
     if (!grpMems.length) return;
     visibleGroupKeys.push(g.key);
 
-    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderGalleryMemberPopover(filterKeyword));
+    const groupHeader = createPopoverGroupHeader(g, grpMems.length, () => renderGalleryMemberPopover(filterKeyword), { forceExpanded: Boolean(kw) });
     list.appendChild(groupHeader.head);
     if (groupHeader.collapsed) return;
 

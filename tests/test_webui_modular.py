@@ -1133,9 +1133,9 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260921_6" in html
+    assert "/static/archive.js?v=20260921_7" in html
     assert "/static/archive.css?v=20260921_9" in html
-    assert "/static/archive.js?v=20260921_6" in perf
+    assert "/static/archive.js?v=20260921_7" in perf
     assert "/static/archive.css?v=20260921_9" in perf
 
 

@@ -76,9 +76,9 @@ def test_archive_cache_versions_are_synchronised():
 
     for resource in (
         "/static/archive.css?v=20260921_9",
-        "/static/archive.js?v=20260921_6",
+        "/static/archive.js?v=20260921_7",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_6") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20260921_7") else 1)
         assert resource in perf
 
 
@@ -116,7 +116,10 @@ def test_member_popovers_support_shared_collapsible_saka_groups():
     assert "sessionStorage.getItem(POPOVER_GROUP_STATE_KEY)" in script
     assert "sessionStorage.setItem(POPOVER_GROUP_STATE_KEY" in script
     assert "function expandPopoverGroups(scope)" in script
-    assert "function createPopoverGroupHeader(group, count, onToggle)" in script
+    assert "function createPopoverGroupHeader(group, count, onToggle, options = {})" in script
+    assert "const searchExpanded = Boolean(options.forceExpanded);" in script
+    assert "forceExpanded: Boolean(kw)" in script
+    assert "搜索时自动展开，清空搜索后恢复折叠状态" in script
     assert "event.stopPropagation();" in script[script.index("function createPopoverGroupHeader"):script.index("function renderMemberPopover")]
     for renderer in ("renderMemberPopover", "renderLetterMemberPopover", "renderGalleryMemberPopover"):
         start = script.index("function " + renderer)
