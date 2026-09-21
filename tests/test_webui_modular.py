@@ -1157,10 +1157,25 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260921_8" in html
+    assert "/static/archive.js?v=20260921_9" in html
     assert "/static/archive.css?v=20260921_11" in html
-    assert "/static/archive.js?v=20260921_8" in perf
+    assert "/static/archive.js?v=20260921_9" in perf
     assert "/static/archive.css?v=20260921_11" in perf
+
+
+def test_archive_day_jump_loads_only_missing_pages_and_invalidates_old_jumps():
+    """日期跳转不能每次重载第一页或无条件加载完整月份。"""
+    script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
+
+    assert "let dayJumpVersion = 0" in script
+    assert "function hasDaySeparator(dateKey)" in script
+    assert "function loadNextMessagePageForDay(dateKey, jumpVersion, expectedContentVersion)" in script
+    assert "if (hasDaySeparator(dateKey)) return { found: true, complete: page >= totalPages };" in script
+    assert "const sameMonth = sameMessageMonth(y, m);" in script
+    assert "if (!sameMonth) await selectMonth(y, m);" in script
+    assert "scrollToDay(dateKey, jumpVersion, contentVersion);" in script
+    assert "if (jumpVersion !== dayJumpVersion || expectedContentVersion !== contentVersion)" in script
+    assert "if (!loaded)" in script
 
 
 def test_archive_refresh_reenables_month_navigation_after_months_load():

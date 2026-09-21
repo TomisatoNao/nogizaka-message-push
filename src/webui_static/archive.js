@@ -34,6 +34,7 @@ let blogGroupsError = "";
 let contentVersion = 0;  // 成员 / 月份 / 筛选变化后，旧响应不应覆盖新页面
 let contentAbort = null;
 let pageLoading = false;
+let dayJumpVersion = 0;  // 日期跳转请求版本，避免连续点击时旧定位覆盖新目标
 let calendarVersion = 0;
 let calendarAbort = null;
 let blogPageVersion = 0;      // 博客列表请求版本，避免旧响应覆盖当前筛选
@@ -689,7 +690,99 @@ $("calNext").addEventListener("click", () => {
   renderCalendar();
 });
 
+function hasDaySeparator(dateKey) {
+  return Boolean(document.querySelector('.day-sep[data-date="' + dateKey + '"]'));
+}
+
+function sameMessageMonth(year, month) {
+  return curMode === "msg" && curYM && curYM.year === year && curYM.month === month;
+}
+
+function waitForMessagePageIdle(jumpVersion) {
+  if (!pageLoading) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const check = () => {
+      if (jumpVersion !== dayJumpVersion || !pageLoading) {
+        resolve(jumpVersion === dayJumpVersion);
+        return;
+      }
+      window.setTimeout(check, 16);
+    };
+    check();
+  });
+}
+
+async function loadNextMessagePageForDay(dateKey, jumpVersion, expectedContentVersion) {
+  if (hasDaySeparator(dateKey)) return { found: true, complete: page >= totalPages };
+  if (!(await waitForMessagePageIdle(jumpVersion))) {
+    return { found: false, complete: false, cancelled: true };
+  }
+
+  while (
+    jumpVersion === dayJumpVersion &&
+    expectedContentVersion === contentVersion &&
+    !hasDaySeparator(dateKey) &&
+    page < totalPages
+  ) {
+    const previousPage = page;
+    const nextPage = previousPage + 1;
+    page = nextPage;
+    const loaded = await loadPage();
+    if (jumpVersion !== dayJumpVersion || expectedContentVersion !== contentVersion) {
+      return { found: false, complete: false, cancelled: true };
+    }
+    if (!loaded) {
+      // 请求失败时不把页码推进到失败页，便于用户稍后重试。
+      if (page === nextPage) page = previousPage;
+      return { found: false, complete: false, failed: true };
+    }
+    if (hasDaySeparator(dateKey)) return { found: true, complete: page >= totalPages };
+  }
+  return { found: hasDaySeparator(dateKey), complete: page >= totalPages };
+}
+
+function scrollToDay(dateKey, jumpVersion, expectedContentVersion) {
+  // ── 滚动定位 + 校正 ──
+  // 图片是 lazy 的，加载时会撑高 DOM 把目标位置往下推，所以需要定时校正几次。
+  // 新的日期跳转、用户主动操作或内容上下文变化都会使本次校正失效。
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
+  const valid = () => !cancelled && jumpVersion === dayJumpVersion && expectedContentVersion === contentVersion;
+  window.addEventListener("wheel", cancel, { once: true, passive: true });
+  window.addEventListener("touchstart", cancel, { once: true, passive: true });
+  window.addEventListener("keydown", cancel, { once: true, passive: true });
+
+  const pin = () => {
+    if (!valid()) return false;
+    const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
+    if (!sep) return false;
+    sep.scrollIntoView({ block: "start", behavior: "instant" });
+    return true;
+  };
+
+  pin();
+  setTimeout(pin, 350);
+  setTimeout(pin, 900);
+  setTimeout(() => {
+    if (pin()) {
+      const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
+      if (sep && valid()) {
+        sep.classList.add("flash");
+        setTimeout(() => sep.classList.remove("flash"), 2500);
+      }
+    }
+  }, 2200);
+
+  // 清理监听器（最多保留 5 秒）
+  setTimeout(() => {
+    window.removeEventListener("wheel", cancel);
+    window.removeEventListener("touchstart", cancel);
+    window.removeEventListener("keydown", cancel);
+  }, 5000);
+}
+
 async function jumpToDay(dateKey) {
+  const jumpVersion = ++dayJumpVersion;
   const [y, m] = dateKey.split("-").map(Number);
   const keepMessageSearch = curMode === "msg" && Boolean(searchQuery);
   const keepBlogSearch = curMode === "blog" && Boolean(searchQuery);
@@ -709,62 +802,29 @@ async function jumpToDay(dateKey) {
     return;
   }
 
-  await selectMonth(y, m);
-  let jumpVersion = contentVersion;
-  // 加载全月（最多几页），保证目标日期的分隔条已渲染
-  while (jumpVersion === contentVersion && page < totalPages) { page++; await loadPage(); }
-  if (jumpVersion !== contentVersion) return;
-  $("loadMore").hidden = true;
+  const sameMonth = sameMessageMonth(y, m);
+  if (!sameMonth) await selectMonth(y, m);
+  if (jumpVersion !== dayJumpVersion) return;
+  const jumpContentVersion = contentVersion;
+
+  // 当前月份已经渲染目标日期时，只做定位，不重新请求第一页。
+  const jumpResult = await loadNextMessagePageForDay(dateKey, jumpVersion, jumpContentVersion);
+  if (jumpVersion !== dayJumpVersion || jumpContentVersion !== contentVersion) return;
+  $("loadMore").hidden = jumpResult.complete;
   // 兜底：当前类型筛选下该日期没有消息 → 自动切回「全部」重载
-  if (!document.querySelector('.day-sep[data-date="' + dateKey + '"]') && curType && !keepMessageSearch) {
+  if (!jumpResult.found && jumpResult.complete && curType && !keepMessageSearch) {
     curType = "";
     $("typeChips").querySelectorAll(".chip").forEach((c, i) =>
       c.classList.toggle("active", TYPES[i][0] === ""));
     loadCalendar();
     await selectMonth(y, m);
-    jumpVersion = contentVersion;
-    while (jumpVersion === contentVersion && page < totalPages) { page++; await loadPage(); }
-    if (jumpVersion !== contentVersion) return;
-    $("loadMore").hidden = true;
+    if (jumpVersion !== dayJumpVersion) return;
+    const fallbackContentVersion = contentVersion;
+    const fallbackResult = await loadNextMessagePageForDay(dateKey, jumpVersion, fallbackContentVersion);
+    if (jumpVersion !== dayJumpVersion || fallbackContentVersion !== contentVersion) return;
+    $("loadMore").hidden = fallbackResult.complete;
   }
-
-  // ── 滚动定位 + 校正 ──
-  // 全月消息加载完成后，图片是 lazy 的，加载时会撑高 DOM 把目标位置
-  // 往下推，所以需要定时校正几次。但一旦用户主动操作（滚轮 / 触摸 /
-  // 键盘），说明不需要这个位置了，立即停掉所有后续校正。
-  let cancelled = false;
-  const cancel = () => { cancelled = true; };
-  window.addEventListener("wheel", cancel, { once: true, passive: true });
-  window.addEventListener("touchstart", cancel, { once: true, passive: true });
-  window.addEventListener("keydown", cancel, { once: true, passive: true });
-
-  const pin = () => {
-    if (cancelled) return false;
-    const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
-    if (!sep) return false;
-    sep.scrollIntoView({ block: "start", behavior: "instant" });
-    return true;
-  };
-
-  pin();
-  setTimeout(pin, 350);
-  setTimeout(pin, 900);
-  setTimeout(() => {
-    if (pin()) {
-      const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
-      if (sep) {
-        sep.classList.add("flash");
-        setTimeout(() => sep.classList.remove("flash"), 2500);
-      }
-    }
-  }, 2200);
-
-  // 清理监听器（最多保留 5 秒）
-  setTimeout(() => {
-    window.removeEventListener("wheel", cancel);
-    window.removeEventListener("touchstart", cancel);
-    window.removeEventListener("keydown", cancel);
-  }, 5000);
+  if (hasDaySeparator(dateKey)) scrollToDay(dateKey, jumpVersion, contentVersion);
 }
 
 // ── 模式切换与记忆 ─────────────────────────────────────
@@ -2719,7 +2779,7 @@ async function selectMonth(year, month) {
 }
 
 async function loadPage() {
-  if (curMode !== "msg" || !curMember) return;
+  if (curMode !== "msg" || !curMember) return false;
   const version = contentVersion;
   contentAbort = new AbortController();
   setPageLoading(true);
@@ -2740,12 +2800,12 @@ async function loadPage() {
     data = await api(url, { signal: contentAbort.signal });
   } catch (e) {
     if (e.name !== "AbortError" && version === contentVersion) showEmpty("加载失败：" + e.message);
-    return;
+    return false;
   } finally {
     if (version === contentVersion) setPageLoading(false);
   }
-  if (version !== contentVersion) return;
-  if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return; }
+  if (version !== contentVersion) return false;
+  if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return false; }
   totalPages = data.total_pages;
   if (searchQuery) {
     $("stats").textContent = "搜索「" + searchQuery + "」· " + data.total + " 条" +
@@ -2801,6 +2861,7 @@ async function loadPage() {
       targetMsgId = "";
     }, 400);
   }
+  return true;
 }
 
 function startSearch(q, updateHash = true) {
