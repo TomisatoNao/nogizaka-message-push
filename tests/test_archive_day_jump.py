@@ -133,3 +133,76 @@ def test_message_day_jump_avoids_reloading_loaded_days_and_stops_at_target_page(
         assert [item["page"] for item in requests] == [2]
 
         browser.close()
+
+
+def test_message_day_jump_batches_missing_pages_using_calendar_index(archive_static_server):
+    """远日期跳转应按日历索引并行补齐缺页，而不是逐页串行等待。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    requests: list[int] = []
+    dates = [f"2026-09-{day:02d}" for day in range(20, 15, -1)]
+
+    def handle_api(route):
+        request = route.request
+        parsed = urlsplit(request.url)
+        query = parse_qs(parsed.query)
+        path = parsed.path
+        if path == "/api/archive/messages":
+            requested_page = int(query.get("page", ["1"])[0])
+            requests.append(requested_page)
+            date = dates[requested_page - 1]
+            payload = {
+                "ok": True,
+                "member": "示例成员",
+                "group": "nogizaka",
+                "year": 2026,
+                "month": 9,
+                "total": 5,
+                "page": requested_page,
+                "total_pages": 5,
+                "order": "desc",
+                "messages": [_message(f"page-{requested_page}", date)],
+            }
+        elif path == "/api/auth/me":
+            payload = {"ok": False}
+        elif path == "/api/archive/members":
+            payload = {
+                "ok": True,
+                "members": [{
+                    "name": "示例成员",
+                    "display": "示例成员",
+                    "group": "nogizaka",
+                    "total": 5,
+                    "stats": {"total": 5, "months": 1},
+                }],
+                "monitor_members": [],
+            }
+        elif path == "/api/archive/months":
+            payload = {"ok": True, "months": [{"year": 2026, "month": 9, "count": 5}]}
+        elif path == "/api/archive/calendar":
+            payload = {"ok": True, "days": {date: 1 for date in dates}}
+        elif path == "/api/archive/blog_groups":
+            payload = {"ok": True, "groups": []}
+        else:
+            payload = {"ok": True, "members": [], "groups": [], "months": [], "days": {}}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(payload, ensure_ascii=False))
+
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        page = context.new_page()
+        page.route("**/api/**", handle_api)
+        url = archive_static_server + "/archive.html#member=" + quote("示例成员") + "&y=2026&m=9"
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector('.day-sep[data-date="2026-09-20"]', timeout=10000)
+
+        requests.clear()
+        elapsed_ms = page.evaluate("""async () => {
+            const started = performance.now();
+            await jumpToDay('2026-09-16');
+            return performance.now() - started;
+        }""")
+        page.wait_for_selector('.day-sep[data-date="2026-09-16"]', timeout=10000)
+        assert sorted(requests) == [2, 3, 4, 5]
+        assert elapsed_ms < 1000
+        assert page.locator('.day-sep[data-date="2026-09-16"]').count() == 1
+        browser.close()

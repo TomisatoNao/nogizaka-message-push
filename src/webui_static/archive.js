@@ -33,6 +33,7 @@ let blogCalendarError = "";
 let blogGroupsError = "";
 let contentVersion = 0;  // 成员 / 月份 / 筛选变化后，旧响应不应覆盖新页面
 let contentAbort = null;
+let dayJumpAbort = null; // 仅取消过期的日期跳转批次，不打断普通滚动加载
 let pageLoading = false;
 let dayJumpVersion = 0;  // 日期跳转请求版本，避免连续点击时旧定位覆盖新目标
 let calendarVersion = 0;
@@ -52,6 +53,12 @@ const memberMonthsCache = new Map();   // `${member}:${type}:${fav}` -> months a
 const msgCalendarCache = new Map();    // `${member}:${type}:${fav}:${q}` -> dayCounts
 const blogAuthorsCache = new Map();    // groupKey -> authors array
 const blogCalendarCache = new Map();   // `${group}:${author}:${q}` -> dayCounts
+
+// 消息时间线分页参数。普通滚动仍保持 50 条/页；日期跳转会在此基础上
+// 以小批次并行补齐缺失页，避免从第 1 页逐页等待。
+const MESSAGE_PAGE_SIZE = 50;
+const DAY_JUMP_BATCH_SIZE = 4;
+let loadedMessagePages = new Set();
 
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
 function sanitizeHtml(htmlStr) {
@@ -347,9 +354,12 @@ function setMessageOrder(order, { persist = true, reload = true } = {}) {
 function resetContent() {
   contentVersion++;
   if (contentAbort) contentAbort.abort();
+  if (dayJumpAbort) dayJumpAbort.abort();
+  dayJumpAbort = null;
   contentAbort = null;
   pageLoading = false;
   page = 1; totalPages = 1; images = []; lastDay = "";
+  loadedMessagePages = new Set();
   clearArchiveMediaObservers($("timeline"));
   $("timeline").innerHTML = "";
   $("emptyHint").hidden = true;
@@ -698,6 +708,24 @@ function sameMessageMonth(year, month) {
   return curMode === "msg" && curYM && curYM.year === year && curYM.month === month;
 }
 
+function estimateMessagePageForDay(dateKey) {
+  // 日历接口已经按当前成员、类型、收藏和搜索条件给出精确的日计数。
+  // 消息接口按发布时间排序，因此可以用目标日期之前的消息数估算页码，
+  // 再由实际返回结果校正边界（异常时间戳/同秒排序不会影响最终命中）。
+  let offset = 0;
+  const monthPrefix = !searchQuery && curYM
+    ? curYM.year + "-" + String(curYM.month).padStart(2, "0") + "-"
+    : "";
+  for (const [day, rawCount] of Object.entries(dayCounts || {})) {
+    if (monthPrefix && !day.startsWith(monthPrefix)) continue;
+    if (messageOrder === "desc" ? day > dateKey : day < dateKey) {
+      const count = Number(rawCount);
+      if (Number.isFinite(count) && count > 0) offset += count;
+    }
+  }
+  return Math.max(1, Math.floor(offset / MESSAGE_PAGE_SIZE) + 1);
+}
+
 function waitForMessagePageIdle(jumpVersion) {
   if (!pageLoading) return Promise.resolve(true);
   return new Promise((resolve) => {
@@ -712,77 +740,163 @@ function waitForMessagePageIdle(jumpVersion) {
   });
 }
 
+function messagePageRange(startPage, endPage) {
+  const pages = [];
+  for (let p = startPage; p <= endPage; p++) {
+    if (!loadedMessagePages.has(p)) pages.push(p);
+  }
+  return pages;
+}
+
+async function loadMessagePageBatchForDay(pageNumbers, jumpVersion, expectedContentVersion) {
+  const pagesToLoad = [...new Set(pageNumbers)].filter((p) => p >= 1 && !loadedMessagePages.has(p));
+  if (!pagesToLoad.length) return true;
+  if (!(await waitForMessagePageIdle(jumpVersion))) return false;
+  if (jumpVersion !== dayJumpVersion || expectedContentVersion !== contentVersion) return false;
+
+  const version = contentVersion;
+  const controller = new AbortController();
+  dayJumpAbort = controller;
+  contentAbort = controller;
+  setPageLoading(true);
+  try {
+    const results = await Promise.all(pagesToLoad.map(async (pageNumber) => {
+      const data = await api(buildMessageUrl(pageNumber), { signal: controller.signal });
+      return { pageNumber, data };
+    }));
+    if (version !== contentVersion || jumpVersion !== dayJumpVersion) return false;
+    if (results.some(({ data }) => !data || !data.ok)) {
+      const failed = results.find(({ data }) => !data || !data.ok);
+      const errors = failed && failed.data && failed.data.errors;
+      showEmpty("加载失败：" + (errors || ["消息接口返回无效数据"]).join("；"));
+      return false;
+    }
+
+    // 按页码写入，保证消息顺序与逐页加载一致；每页使用 fragment，避免
+    // 50 个卡片逐个 append 导致浏览器反复布局。
+    results.sort((a, b) => a.pageNumber - b.pageNumber);
+    for (const { pageNumber, data } of results) {
+      if (version !== contentVersion || jumpVersion !== dayJumpVersion) return false;
+      const responseTotalPages = Number(data.total_pages) || totalPages;
+      totalPages = responseTotalPages;
+      // 估算页码可能因异常时间戳略微偏大；接口返回越界页时不要把
+      // 当前页推进到不存在的页，保持“加载更多”仍可重试的状态。
+      if (pageNumber > responseTotalPages) continue;
+      updateMessageStats(data);
+      renderMessageBatch(data.messages || []);
+      loadedMessagePages.add(pageNumber);
+      page = Math.max(page, pageNumber);
+    }
+    $("loadMore").hidden = page >= totalPages;
+    return true;
+  } catch (e) {
+    if (e.name !== "AbortError" && version === contentVersion) {
+      showEmpty("加载失败：" + e.message);
+    }
+    return false;
+  } finally {
+    if (dayJumpAbort === controller) dayJumpAbort = null;
+    if (version === contentVersion) setPageLoading(false);
+  }
+}
+
 async function loadNextMessagePageForDay(dateKey, jumpVersion, expectedContentVersion) {
   if (hasDaySeparator(dateKey)) return { found: true, complete: page >= totalPages };
   if (!(await waitForMessagePageIdle(jumpVersion))) {
     return { found: false, complete: false, cancelled: true };
   }
 
+  const estimatedPage = Math.max(page + 1, estimateMessagePageForDay(dateKey));
+  let nextPage = page + 1;
   while (
     jumpVersion === dayJumpVersion &&
     expectedContentVersion === contentVersion &&
     !hasDaySeparator(dateKey) &&
-    page < totalPages
+    nextPage <= Math.max(totalPages, estimatedPage)
   ) {
-    const previousPage = page;
-    const nextPage = previousPage + 1;
-    page = nextPage;
-    const loaded = await loadPage();
+    const batchEnd = Math.min(
+      Math.max(totalPages, estimatedPage),
+      Math.max(nextPage, Math.min(estimatedPage, nextPage + DAY_JUMP_BATCH_SIZE - 1)),
+    );
+    const batchPages = messagePageRange(nextPage, batchEnd);
+    const loaded = await loadMessagePageBatchForDay(batchPages, jumpVersion, expectedContentVersion);
     if (jumpVersion !== dayJumpVersion || expectedContentVersion !== contentVersion) {
       return { found: false, complete: false, cancelled: true };
     }
     if (!loaded) {
-      // 请求失败时不把页码推进到失败页，便于用户稍后重试。
-      if (page === nextPage) page = previousPage;
       return { found: false, complete: false, failed: true };
     }
     if (hasDaySeparator(dateKey)) return { found: true, complete: page >= totalPages };
+    nextPage = batchEnd + 1;
   }
   return { found: hasDaySeparator(dateKey), complete: page >= totalPages };
 }
 
 function scrollToDay(dateKey, jumpVersion, expectedContentVersion) {
-  // ── 滚动定位 + 校正 ──
-  // 图片是 lazy 的，加载时会撑高 DOM 把目标位置往下推，所以需要定时校正几次。
-  // 新的日期跳转、用户主动操作或内容上下文变化都会使本次校正失效。
+  // ── 滚动定位 + 短时布局校正 ──
+  // 图片是 lazy 的，加载时会撑高 DOM 把目标位置往下推。只在时间线尺寸
+  // 实际变化时校正，替代固定的多次 setTimeout，避免无变化时重复强制布局。
   let cancelled = false;
+  let observer = null;
+  let correctionFrame = 0;
+  let lastTop = null;
   const cancel = () => { cancelled = true; };
   const valid = () => !cancelled && jumpVersion === dayJumpVersion && expectedContentVersion === contentVersion;
   window.addEventListener("wheel", cancel, { once: true, passive: true });
   window.addEventListener("touchstart", cancel, { once: true, passive: true });
+  window.addEventListener("pointerdown", cancel, { once: true, passive: true });
   window.addEventListener("keydown", cancel, { once: true, passive: true });
 
   const pin = () => {
     if (!valid()) return false;
     const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
     if (!sep) return false;
+    const top = sep.getBoundingClientRect().top;
+    if (lastTop !== null && Math.abs(top - lastTop) < 2) return true;
+    lastTop = top;
     sep.scrollIntoView({ block: "start", behavior: "instant" });
     return true;
   };
 
   pin();
-  setTimeout(pin, 350);
-  setTimeout(pin, 900);
-  setTimeout(() => {
-    if (pin()) {
-      const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
-      if (sep && valid()) {
-        sep.classList.add("flash");
-        setTimeout(() => sep.classList.remove("flash"), 2500);
-      }
+  if (typeof ResizeObserver === "function") {
+    const timeline = $("timeline");
+    if (timeline) {
+      observer = new ResizeObserver(() => {
+        if (!valid() || correctionFrame) return;
+        correctionFrame = requestAnimationFrame(() => {
+          correctionFrame = 0;
+          pin();
+        });
+      });
+      observer.observe(timeline);
     }
-  }, 2200);
+  }
+  requestAnimationFrame(pin);
+  setTimeout(() => {
+    if (observer) observer.disconnect();
+    if (correctionFrame) cancelAnimationFrame(correctionFrame);
+    const sep = document.querySelector('.day-sep[data-date="' + dateKey + '"]');
+    if (pin() && sep && valid()) {
+      sep.classList.add("flash");
+      setTimeout(() => sep.classList.remove("flash"), 1800);
+    }
+  }, 1400);
 
-  // 清理监听器（最多保留 5 秒）
+  // 清理监听器（最多保留 2 秒）
   setTimeout(() => {
     window.removeEventListener("wheel", cancel);
     window.removeEventListener("touchstart", cancel);
+    window.removeEventListener("pointerdown", cancel);
     window.removeEventListener("keydown", cancel);
-  }, 5000);
+  }, 2000);
 }
 
 async function jumpToDay(dateKey) {
   const jumpVersion = ++dayJumpVersion;
+  // 连续点击不同日期时取消仍在网络中的旧批次，避免旧批次回包被丢弃
+  // 后，新批次又重复请求相同页面。
+  if (dayJumpAbort) dayJumpAbort.abort();
   const [y, m] = dateKey.split("-").map(Number);
   const keepMessageSearch = curMode === "msg" && Boolean(searchQuery);
   const keepBlogSearch = curMode === "blog" && Boolean(searchQuery);
@@ -2778,26 +2892,68 @@ async function selectMonth(year, month) {
   await loadPage();
 }
 
-async function loadPage() {
-  if (curMode !== "msg" || !curMember) return false;
-  const version = contentVersion;
-  contentAbort = new AbortController();
-  setPageLoading(true);
+function buildMessageUrl(requestPage = page) {
   const favParam = isFavFilter ? "&favorite=1" : "";
-  const url = searchQuery
-    ? "/api/archive/search?member=" + encodeURIComponent(curMember) +
+  if (searchQuery) {
+    return "/api/archive/search?member=" + encodeURIComponent(curMember) +
       "&q=" + encodeURIComponent(searchQuery) +
       "&type=" + curType +
       favParam +
-      "&order=" + messageOrder + "&page=" + page + "&per_page=50"
-    : "/api/archive/messages?member=" + encodeURIComponent(curMember) +
-      "&year=" + curYM.year + "&month=" + curYM.month +
-      "&type=" + curType +
-      favParam +
-      "&order=" + messageOrder + "&page=" + page + "&per_page=50";
+      "&order=" + messageOrder + "&page=" + requestPage + "&per_page=" + MESSAGE_PAGE_SIZE;
+  }
+  return "/api/archive/messages?member=" + encodeURIComponent(curMember) +
+    "&year=" + curYM.year + "&month=" + curYM.month +
+    "&type=" + curType +
+    favParam +
+    "&order=" + messageOrder + "&page=" + requestPage + "&per_page=" + MESSAGE_PAGE_SIZE;
+}
+
+function updateMessageStats(data, requestPage = page) {
+  if (searchQuery) {
+    $("stats").textContent = "搜索「" + searchQuery + "」· " + data.total + " 条" +
+      " · 全历史 · " + messageOrderLabel() +
+      (data.capped ? "（已达上限，仅显示" + (messageOrder === "asc" ? "最早" : "最新") + " 500 条）" : "");
+    if (!data.messages.length && requestPage === 1) showEmpty("没有匹配「" + searchQuery + "」的消息");
+    return;
+  }
+
+  const typeMap = { text: "文字", picture: "图片", video: "视频", voice: "语音" };
+  const filterParts = [];
+  if (curType && typeMap[curType]) filterParts.push(typeMap[curType]);
+  if (isFavFilter) filterParts.push("已收藏");
+  const filterDesc = filterParts.join(" · ");
+  const filterSuffix = filterDesc ? "（" + filterDesc + "）" : "";
+  $("stats").textContent = curYM.year + "/" + curYM.month + filterSuffix + " · " + data.total + " 条 · " + messageOrderLabel();
+  if (!data.messages.length && requestPage === 1) {
+    showEmpty("本月没有" + (filterDesc ? filterDesc + "的" : "") + "消息");
+  }
+}
+
+function renderMessageBatch(messages) {
+  if (!messages || !messages.length) return;
+  const fragment = document.createDocumentFragment();
+  for (const msg of messages) renderBubble(msg, fragment);
+  $("timeline").appendChild(fragment);
+}
+
+function applyMessagePage(data, requestPage) {
+  totalPages = Number(data.total_pages) || totalPages;
+  updateMessageStats(data, requestPage);
+  renderMessageBatch(data.messages || []);
+  loadedMessagePages.add(requestPage);
+  page = requestPage;
+  $("loadMore").hidden = page >= totalPages;
+}
+
+async function loadPage() {
+  if (curMode !== "msg" || !curMember) return false;
+  const version = contentVersion;
+  const requestPage = page;
+  contentAbort = new AbortController();
+  setPageLoading(true);
   let data;
   try {
-    data = await api(url, { signal: contentAbort.signal });
+    data = await api(buildMessageUrl(requestPage), { signal: contentAbort.signal });
   } catch (e) {
     if (e.name !== "AbortError" && version === contentVersion) showEmpty("加载失败：" + e.message);
     return false;
@@ -2806,26 +2962,7 @@ async function loadPage() {
   }
   if (version !== contentVersion) return false;
   if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return false; }
-  totalPages = data.total_pages;
-  if (searchQuery) {
-    $("stats").textContent = "搜索「" + searchQuery + "」· " + data.total + " 条" +
-      " · 全历史 · " + messageOrderLabel() +
-      (data.capped ? "（已达上限，仅显示" + (messageOrder === "asc" ? "最早" : "最新") + " 500 条）" : "");
-    if (!data.messages.length && page === 1) showEmpty("没有匹配「" + searchQuery + "」的消息");
-  } else {
-    const typeMap = { text: "文字", picture: "图片", video: "视频", voice: "语音" };
-    const filterParts = [];
-    if (curType && typeMap[curType]) filterParts.push(typeMap[curType]);
-    if (isFavFilter) filterParts.push("已收藏");
-    const filterDesc = filterParts.join(" · ");
-    const filterSuffix = filterDesc ? "（" + filterDesc + "）" : "";
-    $("stats").textContent = curYM.year + "/" + curYM.month + filterSuffix + " · " + data.total + " 条 · " + messageOrderLabel();
-    if (!data.messages.length && page === 1) {
-      showEmpty("本月没有" + (filterDesc ? filterDesc + "的" : "") + "消息");
-    }
-  }
-  for (const msg of data.messages) renderBubble(msg);
-  $("loadMore").hidden = page >= totalPages;
+  applyMessagePage(data, requestPage);
 
   // 首页跳转：滚动到目标消息（跨页查找）
   if (targetMsgId) {
@@ -2947,8 +3084,8 @@ function showEmpty(text) {
 }
 
 // ── 渲染 ─────────────────────────────────────────
-function renderBubble(msg) {
-  const tl = $("timeline");
+function renderBubble(msg, container = $("timeline")) {
+  const tl = container;
   const day = fmtDay(msg.published_at);
   if (day !== lastDay) {
     lastDay = day;
