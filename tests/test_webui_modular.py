@@ -1152,14 +1152,19 @@ def test_archive_blog_route_and_request_guards_are_present():
     assert "total_media" in script
     assert "全站媒体" in script
     assert 'switchMainTab("blog", true)' not in script
+    blog_reader = script.split("function renderCurrentBlogContent()", 1)[1].split(
+        "function highlightBlogReaderSearch", 1
+    )[0]
+    assert 'img.style.cursor = "zoom-in"' not in blog_reader
+    assert "img.onclick" not in blog_reader
 
 
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20260922_1" in html
+    assert "/static/archive.js?v=20260922_3" in html
     assert "/static/archive.css?v=20260921_11" in html
-    assert "/static/archive.js?v=20260922_1" in perf
+    assert "/static/archive.js?v=20260922_3" in perf
     assert "/static/archive.css?v=20260921_11" in perf
 
 

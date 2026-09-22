@@ -2134,25 +2134,13 @@ function renderCurrentBlogContent() {
     '<h1 style="margin-top:0; font-size:24px;">' + displayTitle + '</h1>' +
     bodyHtml;
 
-  // 博客正文图片支持点击灯箱放大预览、加载失败自动重试与兜底
+  // 博客正文图片保持正文阅读语义，仅处理加载失败自动重试与兜底
   const brImgs = $("brContent").querySelectorAll("img");
-  const blogImages = Array.from(brImgs).map(img => ({
-    url: img.src,
-    caption: currentBlogReaderPost.title || "",
-    source: "blog",
-    blogId: currentBlogReaderPost.id,
-    groupKey: currentBlogReaderPost.group_key || curBlogGroup || "nogizaka",
-  }));
-  brImgs.forEach((img, idx) => {
-    img.style.cursor = "zoom-in";
+  brImgs.forEach((img) => {
     img.onerror = () => handleImgError(img);
     if (img.complete && img.naturalWidth === 0) {
       handleImgError(img);
     }
-    img.onclick = () => {
-      images = blogImages;
-      openLightbox(idx, img, null, img.src);
-    };
   });
 
   updateModeSelectorUI();
@@ -3511,7 +3499,7 @@ function renderBubble(msg, container = $("timeline")) {
 
 
   const img = b.querySelector("img[data-lb]");
-  if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10), img));
+  if (img) img.addEventListener("click", () => openLightbox(parseInt(img.dataset.lb, 10), img, null, null, "message"));
   const jump = b.querySelector("a.jump");
   if (jump) jump.addEventListener("click", (e) => {
     e.preventDefault();
@@ -3550,6 +3538,8 @@ let lbTouchOnImage = false;
 // 导航只允许发生在当前图片已完成加载后；加载中的预览/空白区域不能触发切图。
 let lbImageReady = false;
 let lbTouchCanNavigate = false;
+// 来源跳转只属于混合来源的相册页；消息/博客阅读页不显示回到自身的入口。
+let lbContext = "gallery";
 
 function setLightboxNavigationReady(ready) {
   lbImageReady = Boolean(ready);
@@ -3653,7 +3643,7 @@ function resetMobileViewport() {
 }
 
 function buildLightboxSourceAction(item) {
-  if (!item || !item.source) return null;
+  if (lbContext !== "gallery" || !item || !item.source) return null;
   const params = new URLSearchParams();
   let label = "";
   let title = "";
@@ -3702,7 +3692,8 @@ function syncLightboxSourceAction(item) {
   btn.style.display = "inline-flex";
 }
 
-function openLightbox(i, opener, caption, placeholderUrl) {
+function openLightbox(i, opener, caption, placeholderUrl, context) {
+  if (context) lbContext = context;
   const currentVersion = ++lbImageLoadVersion;
   if (typeof i === "string") {
     if (opener) lightboxOpener = opener;
@@ -3741,7 +3732,7 @@ function openLightbox(i, opener, caption, placeholderUrl) {
   const targetUrl = item.url;
   const targetPlaceholder = placeholderUrl || item.thumbUrl || "";
 
-  // 1. 设置来源跳转与原图下载入口。来源在新标签页打开，当前相册浏览状态保持不变。
+  // 1. 按页面上下文设置来源跳转与原图下载入口；来源仅在相册页新标签页打开。
   syncLightboxSourceAction(item);
   if ($("lbDownloadBtn")) {
     $("lbDownloadBtn").style.display = targetUrl ? "inline-flex" : "none";
@@ -3850,6 +3841,7 @@ function closeLightbox() {
   if ($("lbStatus")) $("lbStatus").style.display = "none";
   if (lightboxOpener && document.contains(lightboxOpener)) lightboxOpener.focus();
   lightboxOpener = null;
+  lbContext = "gallery";
 }
 function lbMove(delta) {
   if (!lbImageReady) return;
@@ -5902,7 +5894,7 @@ let curLetterImages = [];
 function openLetterLightbox(idx) {
   if (idx < 0 || idx >= curLetterImages.length) return;
   images = curLetterImages;
-  openLightbox(idx);
+  openLightbox(idx, null, null, null, "letter");
 }
 
 async function selectLetterMember(mName) {
@@ -6415,7 +6407,7 @@ function openGalleryLightbox(idx, placeholderUrl) {
   if (idx < 0 || idx >= curGalleryImages.length) return;
   images = curGalleryImages;
   const item = curGalleryImages[idx];
-  openLightbox(idx, null, null, placeholderUrl || (item ? item.thumbUrl : ""));
+  openLightbox(idx, null, null, placeholderUrl || (item ? item.thumbUrl : ""), "gallery");
 }
 
 async function loadGalleryMembers() {

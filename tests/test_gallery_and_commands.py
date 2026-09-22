@@ -1100,7 +1100,7 @@ def test_gallery_card_thumbnail_frontend_contract():
     assert 'url: photo.url,' in js
     # 验证跨页去重与灯箱无缝渐进占位防止错位闪烁
     assert "existingUrls.has(photo.url)" in js
-    assert 'function openLightbox(i, opener, caption, placeholderUrl)' in js
+    assert 'function openLightbox(i, opener, caption, placeholderUrl, context)' in js
     assert '$("lbImg").removeAttribute("src");' in js
 
 
@@ -1125,8 +1125,12 @@ def test_blog_images_optimization_and_fallback_contract():
     assert 'coverImg.src = fullSrc;' in js
     assert '<div class="bc-cover no-pic">📝</div>' in js
 
-    # 3. 博客正文阅读器图片点击 0ms 秒开占位契约
-    assert "openLightbox(idx, img, null, img.src);" in js
+    # 3. 博客正文图片保持阅读语义，不绑定灯箱或放大光标。
+    blog_reader = js.split("function renderCurrentBlogContent()", 1)[1].split(
+        "function highlightBlogReaderSearch", 1
+    )[0]
+    assert "openLightbox(idx, img, null, img.src);" not in blog_reader
+    assert 'img.style.cursor = "zoom-in"' not in blog_reader
 
 
 def test_gallery_lightbox_source_navigation_and_actions_contract():
@@ -1162,6 +1166,8 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert "preloader.src = targetUrl;" in js
     assert "if (preloader.complete && preloader.naturalWidth > 0)" in js
     assert "function buildLightboxSourceAction(item)" in js
+    assert 'let lbContext = "gallery";' in js
+    assert 'if (lbContext !== "gallery" || !item || !item.source) return null;' in js
     assert 'params.set("id", String(item.blogId));' in js
     assert 'params.set("msg_id", String(item.messageId));' in js
     assert 'if (targetMsgId) p.set("msg_id", targetMsgId);' in js
@@ -1173,6 +1179,8 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert 'messageId: photo.source === "message" ? photo.id : ""' in js
     assert 'memberDir: photo.member_dir || ""' in js
     assert 'params.set("member", item.memberDir || item.memberName);' in js
+    assert '"message"));' in js
+    assert '"gallery");' in js
     assert '$("lbDownloadBtn")' in js
     assert 'a.download = filename;' in js
 
