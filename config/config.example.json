@@ -15,7 +15,9 @@
   "napcat_forward_nickname": "坂道监控",
   // NapCat 位于其他主机时填写群晖可被其访问的地址；留空表示同机 file:// 模式
   "napcat_media_base_url": "",
-  // 可选：固定媒体签名密钥；留空时使用 WEB_ADMIN_TOKEN 或进程随机密钥
+  // 远程媒体 URL 默认租约 1800 秒；可用 .env 的 NAPCAT_MEDIA_URL_TTL_SECONDS 覆盖
+  // 可选：固定媒体签名密钥；也可在 .env 中设置 NAPCAT_MEDIA_SIGNING_SECRET。
+  // 未设置时会回退到 NapCat API Token，最后才使用进程随机密钥。
   "napcat_media_signing_secret": "",
 
   // ── QQ 官方机器人列表（初始为空，在网页端添加）──

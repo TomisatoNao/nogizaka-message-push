@@ -14,7 +14,10 @@ import src.config.config as cfg
 from src.webui_modules.media_service import serve_file_range
 
 _PROCESS_SECRET = secrets.token_bytes(32)
-_MAX_URL_AGE = 600
+_DEFAULT_URL_TTL_SECONDS = 1800
+_MIN_URL_TTL_SECONDS = 300
+_MAX_URL_TTL_SECONDS = 86400
+_MAX_URL_AGE = _MAX_URL_TTL_SECONDS
 
 
 def _root() -> Path:
@@ -24,9 +27,50 @@ def _root() -> Path:
 
 
 def _secret() -> bytes:
-    raw = (getattr(cfg, "NAPCAT_MEDIA_SIGNING_SECRET", "") or os.getenv("NAPCAT_MEDIA_SIGNING_SECRET", "")
-           or os.getenv("WEB_ADMIN_TOKEN", ""))
-    return raw.encode("utf-8") if raw else _PROCESS_SECRET
+    """Return the stable key used for remote NapCat media URLs.
+
+    ``NAPCAT_MEDIA_SIGNING_SECRET`` is the preferred key.  Older deployments
+    did not have that setting and fell back to a process-random value, which
+    made every already-issued URL invalid after a restart.  The NapCat API
+    token is an existing, persistent secret and is therefore a safe backward
+    compatible fallback until the dedicated key is configured.
+    """
+
+    candidates = (
+        getattr(cfg, "NAPCAT_MEDIA_SIGNING_SECRET", ""),
+        os.getenv("NAPCAT_MEDIA_SIGNING_SECRET", ""),
+        os.getenv("WEB_ADMIN_TOKEN", ""),
+        getattr(cfg, "NAPCAT_API_TOKEN", ""),
+        os.getenv("NAPCAT_API_TOKEN", ""),
+    )
+    for candidate in candidates:
+        raw = str(candidate or "").strip()
+        if raw:
+            return raw.encode("utf-8")
+    # Keep the old fallback for installations that deliberately run without
+    # any persistent secret.  Such installations only get a warning in the
+    # deployment documentation; normal NAS deployments use one of the keys
+    # above and remain stable across process restarts.
+    return _PROCESS_SECRET
+
+
+def media_url_ttl_seconds() -> int:
+    """Return the bounded lifetime for a remote NapCat media URL.
+
+    The environment override is intentionally supported without changing the
+    existing config schema, so old management clients continue to work.  A
+    future config reload can also expose the same module attribute.
+    """
+
+    raw = os.getenv(
+        "NAPCAT_MEDIA_URL_TTL_SECONDS",
+        str(getattr(cfg, "NAPCAT_MEDIA_URL_TTL_SECONDS", "") or ""),
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = _DEFAULT_URL_TTL_SECONDS
+    return max(_MIN_URL_TTL_SECONDS, min(_MAX_URL_TTL_SECONDS, value))
 
 
 def _signature(relative_path: str, expires: int) -> str:
@@ -49,12 +93,12 @@ def _relative_media_path(local_path: str) -> str | None:
 
 
 def build_napcat_media_uri(local_path: str) -> str | None:
-    """将 NAS 本地媒体转换为 NapCat 可访问的短时效 HTTP URL。"""
+    """将 NAS 本地媒体转换为 NapCat 可访问的签名 HTTP URL。"""
     base = str(getattr(cfg, "NAPCAT_MEDIA_BASE_URL", "") or os.getenv("NAPCAT_MEDIA_BASE_URL", "")).strip().rstrip("/")
     relative = _relative_media_path(local_path)
     if not base or not relative:
         return None
-    expires = int(time.time()) + 300
+    expires = int(time.time()) + media_url_ttl_seconds()
     encoded = "/".join(quote(part) for part in relative.split("/"))
     return f"{base}/api/social/media/{encoded}?expires={expires}&sig={_signature(relative, expires)}"
 
@@ -71,7 +115,8 @@ def serve_signed_social_media(handler, request_path: str) -> bool:
     except ValueError:
         expires = 0
     supplied = (query.get("sig") or [""])[0]
-    valid_time = int(time.time()) <= expires <= int(time.time()) + _MAX_URL_AGE
+    now = int(time.time())
+    valid_time = now <= expires <= now + _MAX_URL_AGE
     if not valid_time or not hmac.compare_digest(supplied, _signature(relative, expires)):
         handler.send_error(403, "Invalid or expired media URL")
         return True
@@ -80,8 +125,20 @@ def serve_signed_social_media(handler, request_path: str) -> bool:
     if root not in target.parents or not target.is_file():
         handler.send_error(404, "Media not found")
         return True
-    serve_file_range(handler, target)
+    # Signed URLs are immutable for the duration of their lease.  A short
+    # private cache window avoids re-reading the same file for NapCat retries
+    # without turning the endpoint into a long-lived public file server.
+    cache_age = min(media_url_ttl_seconds(), 300)
+    serve_file_range(
+        handler,
+        target,
+        cache_control=f"private, max-age={cache_age}, immutable",
+    )
     return True
 
 
-__all__ = ["build_napcat_media_uri", "serve_signed_social_media"]
+__all__ = [
+    "build_napcat_media_uri",
+    "media_url_ttl_seconds",
+    "serve_signed_social_media",
+]

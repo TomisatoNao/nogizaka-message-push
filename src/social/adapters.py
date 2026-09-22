@@ -8,6 +8,7 @@ NapCat 消息链的一次性发送语义。
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -232,14 +233,83 @@ class NapCatAdapter:
         return nodes
 
     @staticmethod
-    def _chain_item(media: MediaItem) -> dict | None:
-        path = media.local_path
-        if not path or not os.path.exists(path):
+    def _bounded_env_int(
+        name: str,
+        default: int,
+        *,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        raw = os.getenv(name, "").strip()
+        try:
+            value = int(raw) if raw else default
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    @classmethod
+    def _inline_image_limits(cls) -> tuple[int, int]:
+        """Return ``(per_image_bytes, batch_payload_bytes)`` limits.
+
+        Small images are cheaper and more reliable as ``base64://`` segments:
+        NapCat does not need a second request back to the NAS and the segment
+        cannot expire while a forward card is being assembled.  Large images
+        and videos continue to use the signed HTTP media endpoint so the
+        OneBot request body stays bounded.
+        """
+
+        per_image = cls._bounded_env_int(
+            "NAPCAT_INLINE_IMAGE_MAX_BYTES",
+            4 * 1024 * 1024,
+            minimum=0,
+            maximum=15 * 1024 * 1024,
+        )
+        batch = cls._bounded_env_int(
+            "NAPCAT_INLINE_IMAGE_BATCH_MAX_BYTES",
+            16 * 1024 * 1024,
+            minimum=0,
+            maximum=64 * 1024 * 1024,
+        )
+        return per_image, batch
+
+    @classmethod
+    def _new_inline_budget(cls) -> dict[str, int]:
+        per_image, batch = cls._inline_image_limits()
+        return {"per_image": per_image, "remaining": batch}
+
+    @staticmethod
+    def _inline_image_uri(
+        path: str,
+        budget: dict[str, int] | None,
+    ) -> str | None:
+        if budget is None or budget.get("per_image", 0) <= 0:
             return None
-        from src.webui_modules.social_media_service import build_napcat_media_uri
-        file_uri = build_napcat_media_uri(path)
-        if not file_uri:
-            file_uri = "file:///" + os.path.abspath(path).replace("\\", "/")
+        try:
+            size = os.path.getsize(path)
+            if size <= 0 or size > budget["per_image"]:
+                return None
+            with open(path, "rb") as media_file:
+                raw = media_file.read()
+            if not raw or len(raw) > budget["per_image"]:
+                return None
+            encoded = base64.b64encode(raw).decode("ascii")
+            if len(encoded) > budget.get("remaining", 0):
+                return None
+            budget["remaining"] -= len(encoded)
+            return f"base64://{encoded}"
+        except (OSError, ValueError):
+            return None
+
+    @classmethod
+    def _chain_item(
+        cls,
+        media: MediaItem,
+        *,
+        inline_budget: dict[str, int] | None = None,
+    ) -> dict | None:
+        path = media.local_path
+        if not path or not os.path.isfile(path):
+            return None
         kind = {
             "image": "image",
             "video": "video",
@@ -247,6 +317,24 @@ class NapCatAdapter:
         }.get(media.type)
         if not kind:
             return None
+
+        file_uri = cls._inline_image_uri(path, inline_budget) if kind == "image" else None
+        if not file_uri:
+            from src.webui_modules.social_media_service import build_napcat_media_uri
+
+            file_uri = build_napcat_media_uri(path)
+        if not file_uri:
+            remote_base = str(
+                getattr(napcat.cfg, "NAPCAT_MEDIA_BASE_URL", "")
+                or os.getenv("NAPCAT_MEDIA_BASE_URL", "")
+            ).strip()
+            if remote_base:
+                # A file:// URI points at the sender's filesystem and is not
+                # readable by a NapCat process on another host.  Returning
+                # None lets send_post add an explicit placeholder instead of
+                # creating a broken/expired QQ image tile.
+                return None
+            file_uri = "file:///" + os.path.abspath(path).replace("\\", "/")
         return {"type": kind, "data": {"file": file_uri}}
 
     async def send_text(self, target: DeliveryTarget, text: str) -> bool:
@@ -265,7 +353,7 @@ class NapCatAdapter:
             return False
 
     async def send_media(self, target: DeliveryTarget, media: MediaItem) -> bool:
-        item = self._chain_item(media)
+        item = self._chain_item(media, inline_budget=self._new_inline_budget())
         if item is None:
             # 与旧版广播一致：媒体文件尚未落地时仍允许正文路由成功。
             return True
@@ -289,19 +377,36 @@ class NapCatAdapter:
         text: str,
         media: list[MediaItem],
     ) -> bool:
-        chain = [{"type": "text", "data": {"text": text}}]
+        message_text = text
+        chain = [{"type": "text", "data": {"text": message_text}}]
         media_items: list[dict] = []
+        inline_budget = self._new_inline_budget()
+        missing_media = 0
         for item in media:
-            chain_item = self._chain_item(item)
+            chain_item = self._chain_item(item, inline_budget=inline_budget)
             if chain_item:
                 chain.append(chain_item)
                 media_items.append(chain_item)
+            else:
+                missing_media += 1
+        if missing_media:
+            # Do not silently construct a forward card with fewer media nodes
+            # than the source post.  A visible placeholder is preferable to a
+            # later QQ “image expired” tile with no diagnostic context.
+            message_text = (
+                f"{text}\n\n⚠️ 有 {missing_media} 个媒体文件暂时无法读取，已跳过。"
+            )
+            chain[0]["data"]["text"] = message_text
+            self._log(
+                f"⚠️ NapCat 社媒转发跳过 {missing_media} 个不可用媒体文件",
+                is_error=True,
+            )
         try:
             # 多张图片/媒体使用一次合并转发，只占用 QQ 群的一条消息配额；
             # 首节点仅放正文，其余节点各放一项媒体，避免正文与图片内联。
             # 单张媒体继续走原有消息链，保持兼容和最快响应。
             if len(media_items) > 1:
-                nodes = self._forward_nodes(target, text, media_items)
+                nodes = self._forward_nodes(target, message_text, media_items)
                 if nodes is not None:
                     group_id = self._group_id(target)
                     return bool(

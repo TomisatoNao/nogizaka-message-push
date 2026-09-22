@@ -29,6 +29,44 @@ def test_napcat_media_uses_signed_http_url_for_remote_host(tmp_path, monkeypatch
     assert "file:///" not in item["data"]["file"]
 
 
+def test_signed_media_uses_stable_api_token_fallback_and_configurable_ttl(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "social_media"
+    media = root / "instagram" / "demo" / "post" / "photo.jpg"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(b"jpeg")
+    monkeypatch.setattr(media_service, "_root", lambda: root.resolve())
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_MEDIA_BASE_URL", "http://napcat-media", raising=False)
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_MEDIA_SIGNING_SECRET", "", raising=False)
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_API_TOKEN", "stable-api-token", raising=False)
+    monkeypatch.delenv("NAPCAT_MEDIA_SIGNING_SECRET", raising=False)
+    monkeypatch.setenv("NAPCAT_MEDIA_URL_TTL_SECONDS", "1200")
+    monkeypatch.setattr(media_service.time, "time", lambda: 1_000)
+
+    uri = media_service.build_napcat_media_uri(str(media))
+    assert uri is not None
+    query = dict(item.split("=", 1) for item in uri.split("?", 1)[1].split("&"))
+    assert int(query["expires"]) == 2_200
+
+    # A stable fallback key keeps a URL valid after a process restart.  The
+    # server-side check is exercised at a later point within the lease.
+    handler = SimpleNamespace(
+        path=uri.replace("http://napcat-media", "")
+    )
+    responses = []
+    handler.send_error = lambda code, message: responses.append((code, message))
+    handler.send_response = lambda code: responses.append(("status", code))
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    handler.headers = {}
+    handler.wfile = SimpleNamespace(write=lambda _chunk: None)
+    monkeypatch.setattr(media_service.time, "time", lambda: 1_100)
+    assert media_service.serve_signed_social_media(handler, "/api/social/media/instagram/demo/post/photo.jpg")
+    assert ("status", 200) in responses
+    assert not any(code == 403 for code, _ in responses if isinstance(code, int))
+
+
 def test_signed_media_rejects_invalid_signature(monkeypatch):
     handler = SimpleNamespace(path="/api/social/media/instagram/demo/photo.jpg?expires=9999999999&sig=bad")
     responses = []
@@ -134,6 +172,95 @@ async def test_napcat_multi_media_uses_group_forward_endpoint(tmp_path, monkeypa
     assert not any(call_url.endswith("/send_group_msg") for call_url, _ in client.calls)
 
 
+@pytest.mark.asyncio
+async def test_napcat_forward_inlines_small_images_without_extra_media_fetch(
+    tmp_path, monkeypatch
+):
+    first = tmp_path / "one.jpg"
+    second = tmp_path / "two.jpg"
+    first.write_bytes(b"first-image")
+    second.write_bytes(b"second-image")
+    monkeypatch.setenv("NAPCAT_INLINE_IMAGE_MAX_BYTES", "1024")
+    monkeypatch.setenv("NAPCAT_INLINE_IMAGE_BATCH_MAX_BYTES", "4096")
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036/send_group_msg", raising=False)
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0, raising=False)
+
+    client = _Client()
+    napcat.initialize(client)
+    target = DeliveryTarget("napcat", "123456", "groups").bind_runtime(
+        {"group_id": 123456, "self_id": "2272248496"}
+    )
+    media = [
+        MediaItem(type="image", url="", local_path=str(first)),
+        MediaItem(type="image", url="", local_path=str(second)),
+    ]
+
+    assert await NapCatAdapter().send_post(target, "caption", media) is True
+    payload = json.loads(client.calls[0][1]["content"])
+    assert all(
+        item["data"]["content"][0]["data"]["file"].startswith("base64://")
+        for item in payload["messages"][1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_napcat_forward_marks_missing_media_in_text(tmp_path, monkeypatch):
+    available = tmp_path / "available.jpg"
+    available.write_bytes(b"available")
+    missing = tmp_path / "missing.jpg"
+    monkeypatch.setenv("NAPCAT_INLINE_IMAGE_MAX_BYTES", "0")
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_MEDIA_BASE_URL", "", raising=False)
+    monkeypatch.delenv("NAPCAT_MEDIA_BASE_URL", raising=False)
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036/send_group_msg", raising=False)
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0, raising=False)
+
+    client = _Client()
+    napcat.initialize(client)
+    target = DeliveryTarget("napcat", "123456", "groups").bind_runtime(
+        {"group_id": 123456, "self_id": "2272248496"}
+    )
+    media = [
+        MediaItem(type="image", url="", local_path=str(available)),
+        MediaItem(type="image", url="", local_path=str(missing)),
+    ]
+
+    assert await NapCatAdapter().send_post(target, "caption", media) is True
+    payload = json.loads(client.calls[0][1]["content"])
+    text = payload["message"][0]["data"]["text"]
+    assert "1 个媒体文件暂时无法读取" in text
+
+
+@pytest.mark.asyncio
+async def test_napcat_forward_keeps_missing_media_notice_in_forward_node(
+    tmp_path, monkeypatch
+):
+    first = tmp_path / "one.jpg"
+    third = tmp_path / "three.jpg"
+    first.write_bytes(b"one")
+    third.write_bytes(b"three")
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_MEDIA_BASE_URL", "", raising=False)
+    monkeypatch.delenv("NAPCAT_MEDIA_BASE_URL", raising=False)
+    monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036/send_group_msg", raising=False)
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0, raising=False)
+
+    client = _Client()
+    napcat.initialize(client)
+    target = DeliveryTarget("napcat", "123456", "groups").bind_runtime(
+        {"group_id": 123456, "self_id": "2272248496"}
+    )
+    media = [
+        MediaItem(type="image", url="", local_path=str(first)),
+        MediaItem(type="image", url="", local_path=str(tmp_path / "missing.jpg")),
+        MediaItem(type="image", url="", local_path=str(third)),
+    ]
+
+    assert await NapCatAdapter().send_post(target, "caption", media) is True
+    payload = json.loads(client.calls[0][1]["content"])
+    assert payload["messages"][0]["data"]["content"][0]["data"]["text"].endswith(
+        "1 个媒体文件暂时无法读取，已跳过。"
+    )
+
+
 def test_napcat_seven_media_builds_body_plus_seven_media_nodes():
     target = DeliveryTarget("napcat", "123456", "groups").bind_runtime(
         {"group_id": 123456, "self_id": "2272248496"}
@@ -181,6 +308,8 @@ async def test_napcat_multi_media_without_identity_falls_back_to_normal_message(
     second = tmp_path / "two.jpg"
     first.write_bytes(b"one")
     second.write_bytes(b"two")
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_MEDIA_BASE_URL", "", raising=False)
+    monkeypatch.delenv("NAPCAT_MEDIA_BASE_URL", raising=False)
     monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036/send_group_msg", raising=False)
     monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0, raising=False)
     monkeypatch.delenv("NAPCAT_FORWARD_USER_ID", raising=False)
@@ -208,6 +337,8 @@ async def test_napcat_multi_media_without_identity_falls_back_to_normal_message(
 async def test_napcat_single_media_keeps_normal_message_endpoint(tmp_path, monkeypatch):
     path = tmp_path / "one.jpg"
     path.write_bytes(b"one")
+    monkeypatch.setattr(media_service.cfg, "NAPCAT_MEDIA_BASE_URL", "", raising=False)
+    monkeypatch.delenv("NAPCAT_MEDIA_BASE_URL", raising=False)
     monkeypatch.setattr(cfg, "QQ_BOT_API", "http://napcat:36036/send_group_msg", raising=False)
     monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0, raising=False)
     client = _Client()

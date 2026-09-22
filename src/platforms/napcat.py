@@ -588,9 +588,23 @@ async def _post_payload_detailed(
     payload_str = json.dumps(body, ensure_ascii=False)
     action_label = "合并转发" if action == "send_group_forward_msg" else "普通消息"
     if cfg.DEBUG_LOG_QQ_PAYLOAD:
+        # Only redact the small preview, never scan the potentially multi-MB
+        # request body.  Inline image payloads must not spill binary data into
+        # debug logs, while the full body still goes untouched to NapCat.
+        preview = payload_str[:200]
+        preview = re.sub(
+            r"base64://[A-Za-z0-9+/=]+",
+            "base64://<redacted>",
+            preview,
+        )
+        preview = re.sub(
+            r"([?&]sig=)[^&\\\"}]+",
+            r"\1<redacted>",
+            preview,
+        )
         log_all(
             f"📤 发送体: {len(payload_str)} 字节 | 方式={action_label} | "
-            f"预览: {payload_str[:200]}",
+            f"预览: {preview}",
             is_debug=True,
         )
 
