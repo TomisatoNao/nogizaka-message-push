@@ -7585,7 +7585,7 @@ $("openidStart").addEventListener("click", async () => {
     if (!data.ok) { setOpenidStatus("❌ " + (data.errors || []).join("；"), "var(--err)"); return; }
     $("openidStart").hidden = true;
     $("openidStop").hidden = false;
-    setOpenidStatus("⏳ 正在监听… <b>请让目标用户现在给 Bot 发一条私聊消息</b>", "var(--accent)");
+    setOpenidStatus("⏳ 正在监听… " + openidListenInstruction(), "var(--accent)");
     startOpenidPolling();
   } catch (e) {
     setOpenidStatus("请求失败：" + e.message, "var(--err)");
@@ -7601,6 +7601,12 @@ $("openidStop").addEventListener("click", async () => {
   $("openidStop").hidden = true;
   setOpenidStatus("已停止监听。", "var(--muted)");
 });
+
+function openidListenInstruction() {
+  return (openidCtx?.mode || "user") === "group"
+    ? "<b>请在目标群里 @机器人 发一条消息</b>"
+    : "<b>请让目标用户现在给 Bot 发一条私聊消息</b>";
+}
 
 function startOpenidPolling() {
   stopOpenidPolling();
@@ -7640,7 +7646,7 @@ function startOpenidPolling() {
       $("openidStop").hidden = true;
       setOpenidStatus("❌ " + esc(st.error || "监听失败"), "var(--err)");
     } else if (st.state === "waiting" || st.state === "connecting") {
-      setOpenidStatus("⏳ 正在监听… <b>请让目标用户现在给 Bot 发一条私聊消息</b>" +
+      setOpenidStatus("⏳ 正在监听… " + openidListenInstruction() +
         (st.seconds_left ? "<br><span style='color:var(--muted)'>剩余 " + st.seconds_left + " 秒</span>" : ""),
         "var(--accent)");
     }

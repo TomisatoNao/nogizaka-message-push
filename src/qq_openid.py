@@ -21,7 +21,7 @@ import httpx
 
 import src.config.config as cfg
 
-# 订阅群聊与单聊事件（openid 来自 C2C_MESSAGE_CREATE）
+# 订阅群聊与单聊事件（群聊返回 group_openid，单聊返回 author.user_openid）
 GROUP_AND_C2C_EVENT_INTENT = 1 << 25
 
 SESSION_TIMEOUT = 300      # 无人发消息时 5 分钟自动结束，避免空转占用连接
@@ -74,6 +74,26 @@ def find_openid_values(obj, path: str = "") -> list[tuple[str, str]]:
         for i, value in enumerate(obj):
             found.extend(find_openid_values(value, f"{path}[{i}]"))
     return found
+
+
+def _match_openid_event(event: dict, mode: str = "user") -> dict | None:
+    """按场景严格匹配 OpenID 事件，避免群聊/单聊身份串用。"""
+    event_type = event.get("t", "")
+    data = event.get("d") or {}
+    author = data.get("author") or {}
+    if mode == "group":
+        if event_type != "GROUP_AT_MESSAGE_CREATE":
+            return None
+        openid = data.get("group_openid")
+        sender = author.get("username", "") or author.get("member_openid", "")
+    else:
+        if event_type != "C2C_MESSAGE_CREATE":
+            return None
+        openid = author.get("user_openid") or data.get("user_openid")
+        sender = author.get("username", "") or openid or ""
+    if not isinstance(openid, str) or not openid.strip():
+        return None
+    return {"openid": openid.strip(), "sender": sender, "raw": event}
 
 
 async def get_access_token(client: httpx.AsyncClient, app_id: str, client_secret: str) -> str:
@@ -146,7 +166,8 @@ async def listen_once(app_id: str, client_secret: str,
             while True:
                 left = deadline - time.time()
                 if left <= 0:
-                    raise TimeoutError("等待超时：期间没有收到任何私聊消息")
+                    kind = "群聊 @ 消息" if mode == "group" else "私聊消息"
+                    raise TimeoutError(f"等待超时：期间没有收到任何{kind}")
                 raw = await asyncio.wait_for(ws.recv(), timeout=left)
                 event = json.loads(raw)
                 if event.get("s") is not None:
@@ -155,25 +176,9 @@ async def listen_once(app_id: str, client_secret: str,
                     continue
                 if on_event:
                     on_event(event)
-                t = event.get("t", "")
-                d = event.get("d") or {}
-                if mode == "group":
-                    if t == "GROUP_AT_MESSAGE_CREATE" and d.get("group_openid"):
-                        author = d.get("author") or {}
-                        return {
-                            "openid": d["group_openid"],
-                            "sender": author.get("username", "") or author.get("user_openid", ""),
-                            "raw": event,
-                        }
-                else:
-                    hits = find_openid_values(event)
-                    if hits:
-                        author = d.get("author") or {}
-                        return {
-                            "openid": hits[0][1],
-                            "sender": author.get("username", "") or author.get("user_openid", ""),
-                            "raw": event,
-                        }
+                matched = _match_openid_event(event, mode)
+                if matched:
+                    return matched
         finally:
             hb.cancel()
 

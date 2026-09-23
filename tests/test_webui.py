@@ -467,12 +467,15 @@ def main() -> None:
         assert code == 400 and "独立模式" in data["errors"][0], f"独立模式应 400: {data}"
 
         openid_calls = []
-        webui._on_openid_cb = lambda act, aid, sec: (
-            openid_calls.append((act, aid, bool(sec))), (True, "ok"))[1]
+        webui._on_openid_cb = lambda act, aid, sec, mode="user": (
+            openid_calls.append((act, aid, bool(sec), mode)), (True, "ok"))[1]
         code, data = _http("POST", base + "/api/qq_openid/start",
-                           body={"app_id": "102000001", "client_secret": "secret1"})
-        assert code == 200 and data["ok"] and openid_calls == [("start", "102000001", True)], \
+                           body={"app_id": "102000001", "client_secret": "secret1", "mode": "group"})
+        assert code == 200 and data["ok"] and openid_calls == [("start", "102000001", True, "group")], \
             f"应转发到回调: {data} {openid_calls}"
+        code, data = _http("POST", base + "/api/qq_openid/start",
+                           body={"app_id": "102000001", "client_secret": "secret1", "mode": "invalid"})
+        assert code == 400 and "mode" in data["errors"][0], "非法监听模式应被拒绝"
         code, data = _http("POST", base + "/api/qq_openid/start", body={"client_secret": "s"})
         assert code == 400 and "App ID" in data["errors"][0], "缺 app_id 应 400"
         code, data = _http("POST", base + "/api/qq_openid/start",

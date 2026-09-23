@@ -441,7 +441,11 @@ def handle_openid_action(handler, action: str, body: dict, on_openid_cb) -> None
     if not secret:
         send_json(handler, {"ok": False, "errors": ["缺少 Client Secret 且 .env 中未找到"]}, 400)
         return
-    ok, msg = on_openid_cb("start", app_id, secret)
+    mode = str(body.get("mode", "user")).strip().lower() or "user"
+    if mode not in {"user", "group"}:
+        send_json(handler, {"ok": False, "errors": ["mode 只能是 user 或 group"]}, 400)
+        return
+    ok, msg = on_openid_cb("start", app_id, secret, mode)
     if not ok:
         send_json(handler, {"ok": False, "errors": [msg]}, 400)
         return

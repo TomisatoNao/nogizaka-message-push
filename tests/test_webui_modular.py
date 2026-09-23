@@ -1518,6 +1518,10 @@ def test_admin_mobile_member_and_openid_layout_guards_are_present():
     assert "width: 100%; flex: 0 0 auto; justify-content: flex-start" in html
     assert "display: grid !important; grid-template-columns: auto minmax(0, 1fr)" in html
 
+    # OpenID 获取必须将群聊/单聊模式传到服务端，并显示对应的监听提示。
+    assert 'mode: openidCtx.mode || "user"' in html
+    assert "function openidListenInstruction()" in html
+
 
 def test_member_picker_uses_step_layout_and_shared_result_components():
     """成员拉取弹窗应以步骤卡片表达选择流程，并将结果项交给统一 CSS 管理。"""
