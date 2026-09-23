@@ -22,7 +22,6 @@ _trans_cache: dict[tuple[str, str], str] = {}   # (member_name, text_hash) -> tr
 _blog_cache: dict[tuple[str, str], str] = {}    # (member_name, html_hash) -> translated_html
 _blog_structured_cache: dict[tuple[str, str], tuple] = {}   # (member_name, html_hash) -> (结构化块列表, 模型名)
 _MAX_CACHE_SIZE = 1000
-_round_robin_counter: int = 0
 
 
 def _safe_float_config(name: str, default: float, minimum: float = 0.0) -> float:
@@ -197,13 +196,42 @@ def _is_already_chinese(text: str) -> bool:
             return False
     return True
 
-def _get_active_models() -> list[dict]:
-    """获取当前已配置有效 API Key 的可用模型列表（支持 Gemini 与 智谱 GLM 等多平台）。"""
+_BLOG_QUALITY_PRIORITY = {
+    "gemini-3.5-flash": 10,
+    "gemini-3-flash-preview": 20,
+    "gemini-2.5-flash": 30,
+    "gemini-2.5-flash-lite": 40,
+    "gemini-3.5-flash-lite": 50,
+    "gemini-3.1-flash-lite": 60,
+    "gemini-3.8-flash": 70,
+    "gemini-3.7-flash": 80,
+    "gemini-3.6-flash": 90,
+    "glm-4-flash": 100,
+}
+
+def _get_active_models(scenario: str = "default") -> list[dict]:
+    """获取当前已配置有效 API Key 的可用模型列表（支持 Gemini 与 智谱 GLM 等多平台）。
+
+    支持 scenario 参数区分场景：
+      - "blog": 博客长篇翻译场景，质量与语境还原优先（Quality First）；
+      - "message" / "default": 消息短文本推送场景，速度与配额保活优先（Speed First）。
+    """
     has_gemini = bool(getattr(cfg, "GEMINI_API_KEY", ""))
     has_zhipu = bool(getattr(cfg, "ZHIPU_API_KEY", ""))
 
+    if scenario == "blog":
+        models = getattr(cfg, "GEMINI_BLOG_MODELS", []) or []
+        if not models:
+            # 兼容：若用户未显式配置 GEMINI_BLOG_MODELS，从 GEMINI_MODELS 提取并按质量重排
+            raw_models = getattr(cfg, "GEMINI_MODELS", []) or []
+            models = sorted(
+                raw_models,
+                key=lambda m: _BLOG_QUALITY_PRIORITY.get(m.get("name", "").lower(), 999),
+            )
+    else:
+        models = getattr(cfg, "GEMINI_MODELS", []) or []
+
     active: list[dict] = []
-    models = getattr(cfg, "GEMINI_MODELS", []) or []
     for m in models:
         name = m.get("name", "")
         url = m.get("url", "")
@@ -221,15 +249,49 @@ def _get_active_models() -> list[dict]:
 
     return active
 
-def _get_round_robin_models() -> list[dict]:
-    """按 Round-Robin 算法选取本次请求的模型尝试序列（各平台智能轮流交替，失败自动 Failover）。"""
-    global _round_robin_counter
-    models = _get_active_models()
+_model_cooldowns: dict[str, float] = {}  # model_name -> cooldown_until_monotonic
+
+def mark_model_cooldown(model_name: str, seconds: float = 60.0, reason: str = "") -> None:
+    """将暂时异常（如 HTTP 429 限流、503 过载或超时）的模型置入短时冷却期。"""
+    if not model_name:
+        return
+    now = time.monotonic()
+    _model_cooldowns[model_name] = max(_model_cooldowns.get(model_name, 0.0), now + seconds)
+    log_all(
+        f"⏳ 翻译模型 {model_name} 进入临时冷却 ({int(seconds)}s，原因: {reason or '请求受阻'})，期间优先调用健康模型",
+        is_debug=True,
+    )
+
+def is_model_cooling(model_name: str) -> bool:
+    """检查模型是否在冷却保护中。"""
+    until = _model_cooldowns.get(model_name, 0.0)
+    return time.monotonic() < until
+
+def clear_model_cooldown(model_name: str) -> None:
+    """模型调用成功时清除冷却标记。"""
+    _model_cooldowns.pop(model_name, None)
+
+def _get_ordered_models(scenario: str = "default") -> list[dict]:
+    """按「场景诉求（质量优先/速度优先）+ 优先级梯队 + 健康状态 + 动态冷却熔断」选择本次请求的模型尝试序列。
+
+    1. scenario="blog": 博客长篇翻译场景，质量优先（品质天花板 3.5-flash 优先，长篇语境还原最好）；
+    2. scenario="message": 消息推送场景，速度优先（极速 2.5-flash-lite 优先，且利用 500 RPD 蓄水池保护限额）；
+    3. 优先使用未处于冷却期的健康模型；
+    4. 冷却中的模型降级排至队尾兜底（若全部模型皆处于冷却期则全部放行兜底）；
+    5. 支持 Failover 逐级降级。
+    """
+    models = _get_active_models(scenario=scenario)
     if not models:
         return []
-    start_idx = _round_robin_counter % len(models)
-    _round_robin_counter += 1
-    return models[start_idx:] + models[:start_idx]
+    healthy = [m for m in models if not is_model_cooling(m.get("name", ""))]
+    cooling = [m for m in models if is_model_cooling(m.get("name", ""))]
+    if healthy:
+        return healthy + cooling
+    return models
+
+def _get_round_robin_models(scenario: str = "default") -> list[dict]:
+    """向后兼容别名：返回当前经过场景、健康与优先级排序的模型尝试序列。"""
+    return _get_ordered_models(scenario=scenario)
 
 def _extract_text_gemini(data: dict, model_name: str) -> str:
     """从 Gemini 响应中取出译文。"""
@@ -302,9 +364,13 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
             data = resp.json()
             choices = data.get("choices") or []
             if choices:
-                return (choices[0].get("message", {}).get("content") or "").strip()
-        elif resp.status_code == 429:
-            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+                txt = (choices[0].get("message", {}).get("content") or "").strip()
+                if txt:
+                    clear_model_cooldown(model.get("name", ""))
+                return txt
+        elif resp.status_code in (429, 500, 502, 503, 504):
+            mark_model_cooldown(model.get("name", ""), 60.0, reason=f"HTTP {resp.status_code}")
+            raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         else:
             log_all(f"⚠️ 智谱模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
             return ""
@@ -319,9 +385,13 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
         }
         resp = await _post_json(url, payload, headers=headers if headers else None, custom_client=custom_client, timeout=text_timeout)
         if resp.status_code == 200:
-            return _extract_text_gemini(resp.json(), model["name"])
-        elif resp.status_code == 429:
-            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+            res_txt = _extract_text_gemini(resp.json(), model["name"])
+            if res_txt:
+                clear_model_cooldown(model.get("name", ""))
+            return res_txt
+        elif resp.status_code in (429, 500, 502, 503, 504):
+            mark_model_cooldown(model.get("name", ""), 60.0, reason=f"HTTP {resp.status_code}")
+            raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         else:
             log_all(f"⚠️ Gemini 模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
             return ""
@@ -359,9 +429,13 @@ async def _call_model_json(
             choices = data.get("choices") or []
             if choices:
                 raw_text = choices[0].get("message", {}).get("content") or ""
-                return _parse_json_response(raw_text)
-        elif resp.status_code == 429:
-            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+                parsed = _parse_json_response(raw_text)
+                if parsed:
+                    clear_model_cooldown(model.get("name", ""))
+                return parsed
+        elif resp.status_code in (429, 500, 502, 503, 504):
+            mark_model_cooldown(model.get("name", ""), 60.0, reason=f"HTTP {resp.status_code}")
+            raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         else:
             raise httpx.HTTPStatusError(
                 f"HTTP {resp.status_code}", request=resp.request, response=resp
@@ -385,9 +459,13 @@ async def _call_model_json(
         if resp.status_code == 200:
             raw_text = _extract_text_gemini(resp.json(), model["name"])
             if raw_text:
-                return _parse_json_response(raw_text)
-        elif resp.status_code == 429:
-            raise httpx.HTTPStatusError("429 Too Many Requests", request=resp.request, response=resp)
+                parsed = _parse_json_response(raw_text)
+                if parsed:
+                    clear_model_cooldown(model.get("name", ""))
+                return parsed
+        elif resp.status_code in (429, 500, 502, 503, 504):
+            mark_model_cooldown(model.get("name", ""), 60.0, reason=f"HTTP {resp.status_code}")
+            raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         else:
             raise httpx.HTTPStatusError(
                 f"HTTP {resp.status_code}", request=resp.request, response=resp
@@ -405,14 +483,14 @@ async def _do_translate_gemini_json(
     batch_total: int = 1,
     deadline: float | None = None,
 ) -> tuple[dict[str, str], str]:
-    """纯文本段落组批量整体翻译（日文前缀语义锚点绑定 + 双引擎智能轮流 Round-Robin + 自动 Failover 降级）。
+    """纯文本段落组批量整体翻译（日文前缀语义锚点绑定 + 场景优先级调度 + 自动 Failover 降级）。
 
     返回 (译文映射 {str(id): zh}, 成功使用的模型名)；无可用结果时返回 ({}, "")。
     """
     if not items:
         return {}, ""
 
-    try_models = _get_round_robin_models()
+    try_models = _get_ordered_models(scenario="blog")
     if not try_models:
         log_all(
             f"⚠️ 博客翻译没有可用模型 | trace={request_id or '-'} | "
@@ -487,12 +565,16 @@ async def _do_translate_gemini_json(
                         )
                     break  # 未返回有效 JSON，切换下一个模型
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429:
+                    code = e.response.status_code
+                    if code in (429, 500, 502, 503, 504):
+                        mark_model_cooldown(curr_model_name, 60.0, reason=f"HTTP {code}")
+                    # 若存在后备模型，不再对已进入冷却的模型原地等待重试，立即触发故障转移以降低延迟
+                    if code == 429 and not has_next_model:
                         wait_s = float((attempt + 1) * 2)
                         if deadline is not None:
                             wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
                         log_all(
-                            f"⏳ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 频控限流 (429)，等待 {wait_s:.1f}s 后重试",
+                            f"⏳ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 频控限流 (429) 且无备用模型，等待 {wait_s:.1f}s 后重试",
                             is_warning=True,
                         )
                         if wait_s <= 0:
@@ -502,16 +584,17 @@ async def _do_translate_gemini_json(
 
                     if has_next_model:
                         log_all(
-                            f"🔄 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 暂时不可用 ({e.response.status_code})，自动降级切换至备用模型 {next_model_name}",
+                            f"🔄 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 暂时受阻 ({code})，已置入冷却并自动切换备用模型 {next_model_name}",
                             is_warning=True,
                         )
                     else:
                         log_all(
-                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 服务不可用 ({e.response.status_code})，无后续备用模型",
+                            f"⚠️ [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 服务不可用 ({code})，无后续备用模型",
                             is_warning=True,
                         )
                     break
                 except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException):
+                    mark_model_cooldown(curr_model_name, 60.0, reason="响应超时")
                     elapsed_s = round(time.monotonic() - started, 1)
                     if has_next_model:
                         log_all(
@@ -524,16 +607,30 @@ async def _do_translate_gemini_json(
                             is_warning=True,
                         )
                     break
-                except httpx.HTTPError as e:
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.NetworkError) as e:
+                    mark_model_cooldown(curr_model_name, 60.0, reason="网络连接异常")
                     elapsed_s = round(time.monotonic() - started, 1)
                     if has_next_model:
                         log_all(
-                            f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 网络连接失败，自动切换备用模型 {next_model_name}",
+                            f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 网络连接失败 ({type(e).__name__})，已置入冷却并自动切换备用模型 {next_model_name}",
                             is_warning=True,
                         )
                     else:
                         log_all(
                             f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 网络连接失败 ({describe_exception(e)})",
+                            is_warning=True,
+                        )
+                    break
+                except httpx.HTTPError as e:
+                    elapsed_s = round(time.monotonic() - started, 1)
+                    if has_next_model:
+                        log_all(
+                            f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 请求失败，自动切换备用模型 {next_model_name}",
+                            is_warning=True,
+                        )
+                    else:
+                        log_all(
+                            f"🌐 [第 {batch_index}/{batch_total} 批] 模型 {curr_model_name} 请求失败 ({describe_exception(e)})",
                             is_warning=True,
                         )
                     break
@@ -574,12 +671,12 @@ async def _do_translate_gemini_json(
 async def translate_text_with_model(
     text: str, member_name: str = "", group_type: str = "", custom_client: httpx.AsyncClient = None
 ) -> tuple[str, str]:
-    """普通文本消息翻译接口（返回 (译文, 翻译模型名)），支持多引擎智能轮番调度与 Failover。"""
+    """普通文本消息翻译接口（返回 (译文, 翻译模型名)），支持多引擎优先级调度、健康熔断与 Failover。"""
     if not text or not text.strip():
         return text, ""
     if _is_already_chinese(text):
         return text, ""
-    try_models = _get_round_robin_models()
+    try_models = _get_ordered_models(scenario="message")
     if not try_models:
         return text, ""
     if len(text) > cfg.TRANSLATE_MAX_LENGTH:
@@ -606,7 +703,9 @@ async def translate_text_with_model(
         _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
 
     async with _limiter:
-        for model in try_models:
+        for model_idx, model in enumerate(try_models):
+            curr_name = model.get("name", "")
+            has_next = (model_idx + 1 < len(try_models))
             for attempt in range(2):
                 try:
                     result = await _call_model_text(model, prompt, custom_client=custom_client)
@@ -619,12 +718,25 @@ async def translate_text_with_model(
                         return entry
                     break
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429:
+                    code = e.response.status_code
+                    if code in (429, 500, 502, 503, 504):
+                        mark_model_cooldown(curr_name, 60.0, reason=f"HTTP {code}")
+                    # 若存在后备模型，不再对已进入冷却的模型原地等待重试，立即触发故障转移以保证消息推送低延迟
+                    if code == 429 and not has_next:
                         await asyncio.sleep((attempt + 1) * 2)
                         continue
+                    log_all(f"⚠️ 翻译模型 {curr_name} HTTP {code}，切换备用模型", is_debug=True)
+                    break
+                except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException):
+                    mark_model_cooldown(curr_name, 60.0, reason="响应超时")
+                    log_all(f"⏱️ 翻译模型 {curr_name} 响应超时，切换备用模型", is_debug=True)
+                    break
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.NetworkError) as e:
+                    mark_model_cooldown(curr_name, 60.0, reason="网络连接异常")
+                    log_all(f"🌐 翻译模型 {curr_name} 网络连接失败 ({type(e).__name__})，切换备用模型", is_debug=True)
                     break
                 except Exception as e:
-                    log_all(f"⚠️ 翻译模型 {model['name']} 请求异常: {type(e).__name__}: {e}", is_debug=True)
+                    log_all(f"⚠️ 翻译模型 {curr_name} 请求异常: {type(e).__name__}: {e}", is_debug=True)
                     break
 
     return "[翻译失败]", ""

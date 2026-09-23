@@ -222,15 +222,31 @@
 
   // ── AI 翻译配置（默认关闭，需在 .env 配置 GEMINI_API_KEY）──
   "translate": false,
+  // 消息翻译（Message：高频次短内容，速度与推送时效优先，利用 500 RPD 蓄水池保护限额）
   "gemini_models": [
-    {"name": "gemini-3.7-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
-    {"name": "glm-4-flash", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
-    {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
-    {"name": "gemini-3.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
+    {"name": "gemini-2.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"},
+    {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
     {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
     {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
+    {"name": "gemini-3.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
+    {"name": "gemini-3-flash-preview", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"},
+    {"name": "gemini-3.8-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"},
+    {"name": "gemini-3.7-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
+    {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
+    {"name": "glm-4-flash", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"}
+  ],
+  // 博客翻译（Blog：低频次长篇内容，质量与语境还原优先，深度理解偶像文笔）
+  "gemini_blog_models": [
+    {"name": "gemini-3.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
+    {"name": "gemini-3-flash-preview", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"},
     {"name": "gemini-2.5-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
-    {"name": "gemini-2.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"}
+    {"name": "gemini-2.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"},
+    {"name": "gemini-3.5-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
+    {"name": "gemini-3.1-flash-lite", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
+    {"name": "gemini-3.8-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"},
+    {"name": "gemini-3.7-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
+    {"name": "gemini-3.6-flash", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
+    {"name": "glm-4-flash", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"}
   ],
   "gemini_min_interval": 7,
   "translate_timeout": 90,

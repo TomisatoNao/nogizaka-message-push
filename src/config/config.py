@@ -52,20 +52,24 @@ _DEFAULTS: dict = {
     "qq_official_media_timeout": 60,   # 下载/上传媒体的独立超时（25MB 视频跑不进 15s）
     "qq_official_media_max_bytes": 26214400,
     "qq_official_bots":         [],
-    # AI 翻译（双引擎：Google Gemini + 智谱 GLM-4 智能轮番调度与容灾）
+    # AI 翻译（双引擎：Google Gemini + 智谱 GLM-4 智能分场景调度与容灾）
     "gemini_api_key":           "",
     "zhipu_api_key":            "",
-    # 注：限速是全局串行的 gemini_min_interval，模型级 rpm 从未生效，已移除
+    # 消息翻译（Message：高频次短内容，速度与推送时效优先，兼顾 500 RPD 海量配额保活）
     "gemini_models": [
-        {"name": "gemini-3.7-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
-        {"name": "glm-4-flash",            "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
-        {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
-        {"name": "gemini-3.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
+        {"name": "gemini-2.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"},
+        {"name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
         {"name": "gemini-3.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"},
         {"name": "gemini-3.1-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"},
-        {"name": "gemini-2.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"},
-        {"name": "gemini-2.5-flash-lite",  "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"},
+        {"name": "gemini-3.5-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"},
+        {"name": "gemini-3-flash-preview", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"},
+        {"name": "gemini-3.8-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"},
+        {"name": "gemini-3.7-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"},
+        {"name": "gemini-3.6-flash",       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"},
+        {"name": "glm-4-flash",            "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
     ],
+    # 博客翻译（Blog：默认留空自动从 gemini_models 派生质量优先顺序；亦可显式单独配置）
+    "gemini_blog_models":       [],
     "gemini_min_interval":      7.0,
     "translate_max_length":     2500,
     "translate_timeout":        90,
@@ -751,6 +755,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "gemini_api_key":               "GEMINI_API_KEY",
     "zhipu_api_key":                "ZHIPU_API_KEY",
     "gemini_models":                "GEMINI_MODELS",
+    "gemini_blog_models":           "GEMINI_BLOG_MODELS",
     "gemini_min_interval":          "GEMINI_MIN_INTERVAL",
     "translate_max_length":         "TRANSLATE_MAX_LENGTH",
     "translate_timeout":            "TRANSLATE_TIMEOUT",
@@ -781,7 +786,7 @@ _KEY_TO_VAR: dict[str, str] = {
 # 注意：tuple 不可变（如 day_interval），不在其中
 _CONTAINER_KEYS = frozenset({
     "accounts", "monitor_list", "qq_official_bots",
-    "gemini_models", "gemini_tag_models",
+    "gemini_models", "gemini_blog_models", "gemini_tag_models",
     "skip_publish_types", "media_type_map",
     "platforms", "blog_monitor", "blog_records",
     "media", "social", "napcat_routes", "napcat_inbound", "tg_bots",

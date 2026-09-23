@@ -773,6 +773,26 @@
         }
       }
     },
+    "gemini_blog_models": {
+      "type": "array",
+      "description": "博客翻译模型列表（质量与语境还原优先，深度理解偶像文笔）",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      }
+    },
     "gemini_min_interval": {
       "type": "number",
       "minimum": 0
