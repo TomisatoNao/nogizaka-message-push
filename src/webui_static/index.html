@@ -201,12 +201,14 @@
   .admin-storage-clean { min-height: 32px; padding: 4px 10px; color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, var(--border)); background: transparent; font-size: 11px; }
   .admin-channel-switches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .admin-channel-switches .switch { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 55%, transparent); }
-  .admin-submodule { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
+  .admin-submodule { margin-top: 18px; padding: 16px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 42%, transparent); }
   .admin-submodule-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
   .admin-submodule-title { min-width: 0; flex: 1 1 320px; }
   .admin-submodule-title h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14.5px; }
   .admin-submodule-title p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
   .admin-command-options { transition: all var(--tr); }
+  .qq-command-dialog { width: min(720px, calc(100vw - 32px)); max-width: 720px; }
+  .qq-command-dialog .admin-command-options { display: flex; flex-direction: column; gap: 12px; }
   .admin-whitelist { padding: 14px 16px; background: color-mix(in srgb, var(--card-solid) 95%, transparent); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
   .admin-whitelist-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   .admin-whitelist-label { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); font-size: 13.5px; font-weight: 600; }
@@ -787,6 +789,7 @@
     .napcat-advanced-status { width: 100%; }
     .napcat-status-pill { max-width: 100%; }
     .admin-summary-item { padding: 10px 12px; }
+    .admin-submodule { padding: 12px; }
     .admin-whitelist { padding: 12px; }
     .admin-whitelist-heading { align-items: flex-start; }
     .admin-whitelist-tools { width: 100%; }
@@ -1200,36 +1203,11 @@
       <div class="admin-submodule-heading">
         <div class="admin-submodule-title">
           <h3>🤖 Bot 智能指令响应与社媒自动解析</h3>
-          <p>支持在 QQ 私聊或群聊 @机器人 触发 /help, /status, /latest 等指令，及发送社媒链接自动解析并 AI 双语翻译</p>
+          <p>支持在 QQ 私聊或群聊 @机器人 触发 /help、/status 等指令，并自动解析收到的社媒链接</p>
         </div>
-        <label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许 Bot 响应指令与社媒解析</label>
-      </div>
-
-      <div id="cmdOptionsBlock" class="admin-command-options">
-        <div class="admin-field-grid admin-field-grid--compact">
-          <label class="field">响应权限范围
-            <select id="cmdMode">
-              <option value="configured">🎯 自动授权上方已配置的 Bot 目标（群聊 / 私聊，推荐）</option>
-              <option value="whitelist">🔒 自定义授权白名单（仅允许下方列表登记的 OpenID）</option>
-              <option value="all">🌐 全开放响应（允许任何群聊 @机器人 或私聊）</option>
-            </select>
-          </label>
-        </div>
-
-        <div id="cmdWhitelistWrap" class="admin-whitelist">
-          <div class="admin-whitelist-heading">
-            <div class="admin-whitelist-label">
-              <span>📋 授权 OpenID 白名单</span>
-              <span id="cmdWhitelistCountBadge" class="admin-whitelist-count">0 个授权</span>
-            </div>
-            <div class="admin-whitelist-tools">
-              <button class="btn small" id="btnSyncBotOpenids" type="button" title="从上方 QQ 官方 Bot 列表中快速导入所有已配置的 OpenID">⚡ 一键导入上方 Bot 目标</button>
-              <button class="btn small primary" id="btnAddCmdOpenid" type="button">＋ 添加授权 OpenID</button>
-            </div>
-          </div>
-
-          <div id="cmdModeHintBanner" class="admin-command-hint"></div>
-          <div id="cmdOpenidList" class="admin-openid-list"></div>
+        <div class="admin-actions">
+          <label class="switch"><input id="cmdOn" type="checkbox"/><span class="track"></span>允许 Bot 响应指令与社媒解析</label>
+          <button class="btn" id="btnQqCommandSettings" type="button" title="配置 Bot 指令权限、授权名单和社媒翻译" aria-haspopup="dialog">⚙️ 设置</button>
         </div>
       </div>
 
@@ -1924,6 +1902,50 @@
 </div>
 <span class="msg" id="saveMsg"></span>
 </footer>
+<!-- QQ 官方 Bot 指令与社媒解析设置弹窗 -->
+<dialog id="qqCommandSettingsDialog" class="monitor-settings-dialog qq-command-dialog" aria-labelledby="qqCommandSettingsTitle" aria-describedby="qqCommandSettingsNote">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="qqCommandSettingsTitle">🤖 Bot 指令与社媒解析设置</h3>
+      <p id="qqCommandSettingsNote">配置响应权限、授权名单与社媒链接翻译；修改后由页面底部保存栏统一保存。</p>
+    </div>
+    <button class="btn small" type="button" data-qq-command-dialog-close aria-label="关闭 Bot 设置">关闭</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div id="cmdOptionsBlock" class="admin-command-options">
+      <div class="admin-control-group">
+        <label class="switch"><input id="cmdSocialTranslate" type="checkbox"/><span class="track"></span>社媒链接自动 AI 翻译</label>
+        <span class="hint">关闭后仍会解析正文、原图和视频，只跳过翻译。</span>
+      </div>
+      <div class="admin-field-grid admin-field-grid--compact">
+        <label class="field">响应权限范围
+          <select id="cmdMode">
+            <option value="configured">🎯 自动授权上方已配置的 Bot 目标（群聊 / 私聊，推荐）</option>
+            <option value="whitelist">🔒 自定义授权白名单（仅允许下方列表登记的 OpenID）</option>
+            <option value="all">🌐 全开放响应（允许任何群聊 @机器人 或私聊）</option>
+          </select>
+        </label>
+      </div>
+      <div id="cmdWhitelistWrap" class="admin-whitelist">
+        <div class="admin-whitelist-heading">
+          <div class="admin-whitelist-label">
+            <span>📋 授权 OpenID 白名单</span>
+            <span id="cmdWhitelistCountBadge" class="admin-whitelist-count">0 个授权</span>
+          </div>
+          <div class="admin-whitelist-tools">
+            <button class="btn small" id="btnSyncBotOpenids" type="button" title="从上方 QQ 官方 Bot 列表中快速导入所有已配置的 OpenID">⚡ 一键导入上方 Bot 目标</button>
+            <button class="btn small primary" id="btnAddCmdOpenid" type="button">＋ 添加授权 OpenID</button>
+          </div>
+        </div>
+        <div id="cmdModeHintBanner" class="admin-command-hint"></div>
+        <div id="cmdOpenidList" class="admin-openid-list"></div>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-qq-command-dialog-close>完成</button>
+  </div>
+</dialog>
 <!-- 通用确认 / 提示对话框（替代原生 confirm/alert） -->
 <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
 <h3 id="confirmTitle">确认操作</h3>
@@ -4381,6 +4403,7 @@ function renderGeneral() {
   $("summaryHour").value = (ds.hour === undefined) ? 23 : ds.hour;
   const qc = config.qq_commands || {};
   $("cmdOn").checked = !!qc.enabled;
+  $("cmdSocialTranslate").checked = qc.translate_social !== false;
   if ($("cmdMode")) $("cmdMode").value = qc.mode || "configured";
   window._cmdOpenids = (qc.allow_openids || []).map((x) => {
     if (typeof x === "string") {
@@ -5011,6 +5034,7 @@ function collectGeneral() {
   config.qq_commands = {
     ...(config.qq_commands || {}),
     enabled: $("cmdOn").checked,
+    translate_social: $("cmdSocialTranslate").checked,
     mode: $("cmdMode") ? $("cmdMode").value : "configured",
     allow_openids: (window._cmdOpenids || []).map(item => ({
       openid: (item.openid || "").trim().toUpperCase(),
@@ -5027,7 +5051,7 @@ function collectGeneral() {
 }
 
 function isAdminFormTarget(target) {
-  return Boolean(target && target.closest && target.closest("main, #napcatAdvancedDialog"));
+  return Boolean(target && target.closest && target.closest("main, #napcatAdvancedDialog, #qqCommandSettingsDialog"));
 }
 
 document.addEventListener("input", (e) => {
@@ -7722,6 +7746,30 @@ function renderCmdOpenids() {
     container.appendChild(card);
   });
 }
+
+function bindQqCommandSettingsDialog() {
+  const dialog = $("qqCommandSettingsDialog");
+  const trigger = $("btnQqCommandSettings");
+  if (!dialog || !trigger) return;
+  trigger.addEventListener("click", () => {
+    try {
+      dialog.showModal();
+      $("cmdSocialTranslate")?.focus();
+    } catch (e) {
+      console.warn("打开 QQ Bot 设置失败:", e);
+    }
+  });
+  document.querySelectorAll("[data-qq-command-dialog-close]").forEach((button) => {
+    button.addEventListener("click", () => dialog.close());
+  });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    if (document.contains(trigger)) trigger.focus();
+  });
+}
+bindQqCommandSettingsDialog();
 
 function openCmdOpenidDialog(idx = -1) {
   _editingCmdOpenidIdx = idx;

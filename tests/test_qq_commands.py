@@ -5,6 +5,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -82,6 +83,7 @@ def main() -> None:
         "bots": list(cfg.QQ_OFFICIAL_BOTS),
         "monitor": list(cfg.MONITOR_LIST), "allow": list(getattr(cfg, "QQ_COMMANDS_ALLOW", [])),
         "mode": getattr(cfg, "QQ_COMMANDS_MODE", "configured"),
+        "translate_social": getattr(cfg, "QQ_COMMANDS_TRANSLATE_SOCIAL", True),
     }
     cfg.QQ_OFFICIAL_BOTS.clear()
     cfg.QQ_OFFICIAL_BOTS.append({"name": "b1", "app_id": "1", "client_secret": "s",
@@ -159,6 +161,7 @@ def main() -> None:
         cfg.QQ_OFFICIAL_BOTS.clear()
         cfg.QQ_OFFICIAL_BOTS.append({"app_id": "A1", "target_openid": ME})
         cfg.QQ_COMMANDS_ALLOW = [ME]
+        cfg.QQ_COMMANDS_TRANSLATE_SOCIAL = True
         orig_trigger = qq_commands._trigger_social_reply_task
         qq_commands._trigger_social_reply_task = lambda *a, **kw: None
         try:
@@ -169,6 +172,12 @@ def main() -> None:
             assert res_ins and "社媒链接" in res_ins, f"应识别 Ins 链接: {res_ins}"
             res_tt = qq_commands.handle("https://vt.tiktok.com/ZSV2J7Bor/", ME)
             assert res_tt and "社媒链接" in res_tt, f"应识别 TikTok 短链接: {res_tt}"
+
+            cfg.QQ_COMMANDS_TRANSLATE_SOCIAL = False
+            res_no_translate = qq_commands.handle("https://x.com/nogizaka46/status/654321", ME)
+            assert res_no_translate and "AI 双语翻译" not in res_no_translate
+            assert "原图/视频" in res_no_translate
+            assert "AI 双语翻译" not in qq_commands.handle("/help", ME)
         finally:
             qq_commands._trigger_social_reply_task = orig_trigger
         print("✅ Test 5 通过\n")
@@ -180,6 +189,7 @@ def main() -> None:
         cfg.MONITOR_LIST.extend(saved["monitor"])
         cfg.QQ_COMMANDS_ALLOW = saved["allow"]
         cfg.QQ_COMMANDS_MODE = saved["mode"]
+        cfg.QQ_COMMANDS_TRANSLATE_SOCIAL = saved["translate_social"]
 
     print("=" * 50)
     print("🎉 全部测试通过！官方 Bot 指令工作正常")
@@ -187,6 +197,52 @@ def main() -> None:
 
 def test_qq_commands() -> None:
     main()
+
+
+def test_social_parser_respects_translation_switch(monkeypatch) -> None:
+    """网页开关关闭后，执行层必须真正跳过翻译。"""
+    import src.config.config as cfg
+    from src import qq_commands
+    from src.platforms import qq_official
+    from src.social import service as social_service
+
+    captured: dict = {}
+
+    class FakeSocialService:
+        def __init__(self, raw_cfg):
+            captured["raw_cfg"] = raw_cfg
+
+        def process_url(self, _url, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                completed=True,
+                delivery=SimpleNamespace(media_sent=0, media_total=0),
+                post=SimpleNamespace(platform="x", author="tester", media=[]),
+            )
+
+    bot = SimpleNamespace(name="test_bot", app_id="A1")
+    monkeypatch.setattr(social_service, "SocialService", FakeSocialService)
+    monkeypatch.setattr(qq_official, "get_configured_bots", lambda: [bot])
+    monkeypatch.setattr(cfg, "QQ_COMMANDS_TRANSLATE_SOCIAL", False)
+
+    asyncio.run(qq_commands._async_parse_and_reply_social(
+        "https://x.com/example/status/1", "OPENID", app_id="A1"
+    ))
+
+    assert captured["translate"] is False
+    assert captured["archive"] is True
+
+
+def test_social_translation_setting_is_normalized() -> None:
+    """管理端保存的嵌套字段应映射为运行时热重载标量。"""
+    import src.config.config as cfg
+
+    normalized = cfg._normalize_config({
+        "qq_commands": {"enabled": True, "translate_social": False},
+    })
+
+    assert normalized["qq_commands_enabled"] is True
+    assert normalized["qq_commands_translate_social"] is False
 
 
 if __name__ == "__main__":

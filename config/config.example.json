@@ -105,6 +105,7 @@
   // ── 官方 Bot 指令（/status 等）──
   "qq_commands": {
     "enabled": false,
+    "translate_social": true,
     "allow_openids": []
   },
 

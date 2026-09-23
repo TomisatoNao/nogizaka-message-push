@@ -628,6 +628,7 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                     assert {dialog["id"] for dialog in summary["dialogs"]} == {
                         "monitorMessageDialog", "monitorBlogDialog", "monitorXDialog",
                         "monitorInstagramDialog", "monitorTiktokDialog", "monitorLiveDialog",
+                        "qqCommandSettingsDialog",
                     }
                     assert all(dialog["fieldCount"] > 0 and dialog["hasScroll"] for dialog in summary["dialogs"])
                     dialog_fields = {dialog["id"]: set(dialog["fieldIds"]) for dialog in summary["dialogs"]}
@@ -880,6 +881,23 @@ def test_admin_mobile_openid_cards_keep_information_and_actions_separate(admin_s
             page.goto(f"{admin_static_server}/#tab=channels", wait_until="domcontentloaded")
             page.add_style_tag(content="*{animation:none!important;transition:none!important;caret-color:transparent!important}")
             page.locator("#tab-channels.active .admin-module").first.wait_for(state="visible", timeout=10000)
+            page.locator("#btnQqCommandSettings").click()
+            page.locator("#qqCommandSettingsDialog[open]").wait_for(state="visible", timeout=5000)
+            dialog_metrics = page.evaluate(
+                """() => {
+                    const dialog = document.querySelector('#qqCommandSettingsDialog');
+                    const scroll = dialog?.querySelector('.monitor-dialog-scroll');
+                    return {
+                        width: dialog?.getBoundingClientRect().width || 0,
+                        viewportWidth: window.innerWidth,
+                        dialogOverflow: !!dialog && dialog.scrollWidth > dialog.clientWidth + 1,
+                        scrollOverflow: !!scroll && scroll.scrollWidth > scroll.clientWidth + 1,
+                    };
+                }"""
+            )
+            assert dialog_metrics["width"] <= dialog_metrics["viewportWidth"] + 1
+            assert dialog_metrics["dialogOverflow"] is False
+            assert dialog_metrics["scrollOverflow"] is False
             page.evaluate(
                 """() => {
                     window._cmdOpenids = [

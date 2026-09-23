@@ -159,6 +159,8 @@ _DEFAULTS: dict = {
     "qq_commands_enabled":      False,
     "qq_commands_mode":         "configured",
     "qq_commands_allow":        [],
+    # QQ 官方 Bot 收到社媒链接后是否调用 AI 翻译；独立于全局 Message/博客翻译。
+    "qq_commands_translate_social": True,
     # 通道（默认值，config.json 的 channels / NapCat 地址字段可覆盖）
     # QQ_BOT_API 保留为运行时兼容别名；新配置使用 napcat_api_base +
     # napcat_api_token，由发送侧按 action 自动拼接请求地址。
@@ -359,6 +361,8 @@ def _normalize_config(raw: dict) -> dict:
                 cfg["qq_commands_mode"] = qc["mode"]
             if "allow_openids" in qc:
                 cfg["qq_commands_allow"] = qc["allow_openids"]
+            if "translate_social" in qc:
+                cfg["qq_commands_translate_social"] = qc["translate_social"]
 
         if "auth" in cfg:
             au = cfg.pop("auth")
@@ -717,6 +721,7 @@ _KEY_TO_VAR: dict[str, str] = {
     "qq_commands_enabled":          "QQ_COMMANDS_ENABLED",
     "qq_commands_mode":             "QQ_COMMANDS_MODE",
     "qq_commands_allow":            "QQ_COMMANDS_ALLOW",
+    "qq_commands_translate_social": "QQ_COMMANDS_TRANSLATE_SOCIAL",
     "auth_enabled":                 "AUTH_ENABLED",
     "auth_archive_public":          "AUTH_ARCHIVE_PUBLIC",
     "auth_session_hours":           "AUTH_SESSION_HOURS",

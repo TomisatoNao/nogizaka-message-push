@@ -40,14 +40,17 @@ def _clip(text: str, limit: int) -> str:
 # ──────────────────────────────────────────────
 
 def _cmd_help(_args: str) -> str:
+    social_action = "提取高清原图/视频并附带 AI 双语翻译回复" \
+        if getattr(cfg, "QQ_COMMANDS_TRANSLATE_SOCIAL", True) \
+        else "提取高清原图/视频并回复"
     return (
         "📖 坂道消息推送 Bot 指令菜单\n\n"
         "【📊 系统与监控】\n"
         "• /status — 查看程序运行状态、Token寿命与轮询周期\n"
         "• /members — 查看当前各平台已订阅监控的偶像名单\n"
         "• /ping — 快速测试机器人连接状态与网络延迟\n\n"
-        "【🌐 社媒自动解析与 AI 双语翻译】\n"
-        "• 直接发送 X(Twitter) / Instagram / TikTok 动态链接，Bot 将自动提取高清原图/视频并附带 AI 双语翻译回复！\n\n"
+        "【🌐 社媒自动解析】\n"
+        f"• 直接发送 X(Twitter) / Instagram / TikTok 动态链接，Bot 将自动{social_action}！\n\n"
         "💡 提示：支持中英文指令别名（如「状态」「成员」），群聊中请 @机器人 使用。"
     )
 
@@ -177,7 +180,7 @@ def allowed_senders() -> set[str]:
 
 
 async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "users", app_id: str = ""):
-    """后台任务：解析社媒链接、下载多媒体、AI 翻译并回复（支持单聊与群聊）。"""
+    """后台任务：解析社媒链接、下载多媒体并按配置翻译后回复。"""
     from src.logger import log_all
     request_id = f"qq-{uuid4().hex[:12]}"
     raw_cfg = {}
@@ -241,7 +244,7 @@ async def _async_parse_and_reply_social(url: str, target_id: str, scope: str = "
             service.process_url,
             url,
             targets=[target],
-            translate=True,
+            translate=bool(getattr(cfg, "QQ_COMMANDS_TRANSLATE_SOCIAL", True)),
             archive=True,
             request_id=request_id,
         )
@@ -378,7 +381,9 @@ def handle(text: str, sender_openid: str, app_id: str = "", group_openid: str = 
         url = social_match.group(0)
         _trigger_social_reply_task(url, target_id, scope=scope, app_id=app_id)
         log_all(f"🤖 [社媒解析] 收到来自 {scope}:{target_id[:8]}… 的社媒链接: {url[:50]}")
-        return "🔍 已识别社媒链接，正在解析、提取原图/视频与 AI 双语翻译并回复给您…"
+        if getattr(cfg, "QQ_COMMANDS_TRANSLATE_SOCIAL", True):
+            return "🔍 已识别社媒链接，正在解析、提取原图/视频与 AI 双语翻译并回复给您…"
+        return "🔍 已识别社媒链接，正在解析并提取原图/视频回复给您…"
 
     # 3. 指令解析（支持 / 开头 或 预定义中文简写指令）
     cmd_name = ""

@@ -558,6 +558,10 @@
           "type": "boolean",
           "default": false
         },
+        "translate_social": {
+          "type": "boolean",
+          "default": true
+        },
         "mode": {
           "type": "string",
           "enum": ["configured", "whitelist", "all"],

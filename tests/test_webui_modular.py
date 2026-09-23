@@ -447,7 +447,7 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
         "stDiskFree", "stDiskPercent", "stDiskBar", "stAppTotal", "stStorageGrid", "stErrors",
         "accountRows", "accountEmpty", "btnAddAccount", "memberRows", "memberEmpty",
         "btnPickMember", "btnSyncSubs", "pickGroupChips", "pickAccountChips", "channelSwitches", "qqBotRows",
-        "btnAddQqBot", "qqBotHint", "cmdOn", "cmdOptionsBlock", "cmdMode", "cmdWhitelistWrap",
+        "btnAddQqBot", "qqBotHint", "cmdOn", "btnQqCommandSettings", "qqCommandSettingsDialog", "cmdOptionsBlock", "cmdSocialTranslate", "cmdMode", "cmdWhitelistWrap",
         "cmdWhitelistCountBadge", "btnSyncBotOpenids", "btnAddCmdOpenid", "cmdModeHintBanner",
         "cmdOpenidList", "napcatApi", "napcatApiToken", "napcatMediaBaseUrl", "napcatRows", "btnAddNapcat",
         "tgTokenMigrationNotice", "tgBotRows", "btnAddTGBot",
@@ -463,6 +463,9 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
     ):
         assert selector in html
     assert ".admin-field-grid { display: grid; grid-template-columns: repeat(3" in html
+    assert ".admin-submodule { margin-top: 18px; padding: 16px; border: 1px solid var(--border-soft);" in html
+    assert 'id="btnQqCommandSettings"' in html
+    assert '<dialog id="qqCommandSettingsDialog" class="monitor-settings-dialog qq-command-dialog"' in html
     assert ".admin-field-grid { grid-template-columns: repeat(2" in html
     assert ".admin-field-grid," in html and "grid-template-columns: 1fr" in html
     assert ".admin-module-heading > .status-actions" in html
@@ -507,7 +510,7 @@ def test_napcat_advanced_entry_and_dialog_layout_are_single_and_compact():
     assert 'id="inboundAllowedGroupsWrap"' in html and 'id="photoAllowedGroupsWrap"' in html
     assert "function renderNapcatFeatureGroups(" in html
     assert "config.napcat_photo" in html
-    assert 'target.closest("main, #napcatAdvancedDialog")' in html
+    assert 'target.closest("main, #napcatAdvancedDialog, #qqCommandSettingsDialog")' in html
     assert "配置入站解析、美图指令与 AI 群聊；修改后由底部保存栏统一保存。" in html
 
 
