@@ -331,9 +331,10 @@ def test_legacy_config_file_e2e_load_fixture(tmp_path, monkeypatch):
 
     orig_config_path = cfg._CONFIG_PATH
     monkeypatch.setattr(cfg, "_CONFIG_PATH", legacy_cfg_file)
-    monkeypatch.setattr(cfg, "GEMINI_API_KEY", "dummy-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy-key")
     success = cfg.reload()
     assert success is True
+    monkeypatch.setattr(cfg, "GEMINI_API_KEY", "dummy-key")
 
     try:
         # 1. 验证内存中 GEMINI_BLOG_MODELS 保持为 []，未被默认值强行覆盖
