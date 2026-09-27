@@ -13,11 +13,13 @@ import time
 from datetime import datetime, timezone
 
 import httpx
+from anyio import BrokenResourceError, ClosedResourceError
 
 # 统一通过 cfg.X 访问，热重载后标量值（告警冷却、刷新阈值等）才能生效
 import src.config.config as cfg
 from src.health import ErrorTier, get_tracker as _health_tracker
 from src.logger import format_httpx_error, log_all, log_response
+from src.http_diagnostics import observe_request
 
 # ---- 运行时状态 ----
 ACCOUNT_CREDS:        dict[str, dict]          = {}
@@ -314,7 +316,7 @@ async def _post(url: str, *, headers: dict,
             return await client_to_use.post(
                 url, headers=headers, json=json_body, content=content, timeout=15,
             )
-        except (httpx.PoolTimeout, httpx.ConnectError) as exc:
+        except (httpx.PoolTimeout, httpx.ConnectError, httpx.ConnectTimeout) as exc:
             # 代理短暂中断后，httpcore 连接池可能继续持有不可用连接/槽位。
             # 认证池由主程序托管时原子替换它，并仅对「尚未获得连接」或
             # 「连接建立失败」执行一次安全重试；不会对可能已到达服务端的
@@ -347,6 +349,22 @@ async def _post(url: str, *, headers: dict,
                         json=json_body,
                         content=content,
                         timeout=15,
+                    )
+            raise
+        except (ClosedResourceError, BrokenResourceError):
+            # 传输关闭可能发生在 POST 已发出之后；修复供后续使用，但不立即
+            # 重放可能已经消费 refresh_token 的请求，交由现有账号冷却处理。
+            if using_auth_client:
+                try:
+                    from src import http_pool
+
+                    await http_pool.reset_auth_client(expected_client=client_to_use)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as reset_exc:
+                    log_all(
+                        f"Token 认证连接池修复失败 | error={type(reset_exc).__name__}",
+                        is_warning=True,
                     )
             raise
         except RuntimeError as e:
@@ -573,8 +591,11 @@ async def refresh_mobile_token(account_id: str, target_group: int,
         headers.pop("Authorization", None)  # 移动端刷新时不含旧 Auth
 
         try:
-            async with _get_refresh_semaphore():
+            async with observe_request(
+                "token_refresh", url, account_id=account_id, semaphore=_get_refresh_semaphore(),
+            ) as sample:
                 r = await _post(url, headers=headers, json_body={"refresh_token": rt})
+                sample.status_code = r.status_code
             log_response(r.text)
 
             if r.status_code == 200:
@@ -622,7 +643,7 @@ async def refresh_mobile_token(account_id: str, target_group: int,
                 f"🔥 账号 {account_id} 移动端续期超时: {format_httpx_error(e)}",
                 is_error=True,
             )
-        except httpx.RequestError as e:
+        except (httpx.RequestError, ClosedResourceError, BrokenResourceError) as e:
             failure_kind = "transient_network"
             failure_detail = f"{type(e).__name__}: {format_httpx_error(e)}"
             log_all(
@@ -954,8 +975,11 @@ async def refresh_token(account_id: str, target_group: int,
         headers["cookie"] = cookie_str
 
         try:
-            async with _get_refresh_semaphore():
+            async with observe_request(
+                "token_refresh", url, account_id=account_id, semaphore=_get_refresh_semaphore(),
+            ) as sample:
                 r = await _post(url, headers=headers, content=b'{"refresh_token":null}')
+                sample.status_code = r.status_code
             log_response(r.text)
 
             if r.status_code == 200:
@@ -1003,7 +1027,7 @@ async def refresh_token(account_id: str, target_group: int,
                 f"🔥 账号 {account_id} Web 续期超时: {format_httpx_error(e)}",
                 is_error=True,
             )
-        except httpx.RequestError as e:
+        except (httpx.RequestError, ClosedResourceError, BrokenResourceError) as e:
             failure_kind = "transient_network"
             failure_detail = f"{type(e).__name__}: {format_httpx_error(e)}"
             log_all(

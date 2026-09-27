@@ -157,7 +157,8 @@ def test_post_closed_loop_self_heal(monkeypatch):
         loop.close()
 
 
-def test_post_pool_timeout_rebuilds_managed_auth_pool_and_retries_once(monkeypatch):
+@pytest.mark.parametrize("failure", [httpx.PoolTimeout, httpx.ConnectError, httpx.ConnectTimeout])
+def test_post_presend_failure_rebuilds_managed_auth_pool_and_retries_once(monkeypatch, failure):
     """认证池耗尽时应替换旧池，并在新池上安全重试一次。"""
     calls = []
 
@@ -166,7 +167,7 @@ def test_post_pool_timeout_rebuilds_managed_auth_pool_and_retries_once(monkeypat
 
         async def post(self, *_args, **_kwargs):
             calls.append("broken")
-            raise httpx.PoolTimeout("pool exhausted")
+            raise failure("connection unavailable")
 
     class HealthyClient:
         is_closed = False
@@ -308,3 +309,65 @@ def test_refresh_token_runtime_error_classification(monkeypatch):
     # 告警中应为暂态提示，而不是要求用户检查持久化
     if alerted:
         assert "请检查 Cookie/Token 持久化" not in alerted[0][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mobile", [False, True])
+async def test_closed_transport_is_transient_and_uses_account_cooldown(monkeypatch, mobile):
+    from anyio import ClosedResourceError
+    from src import notifier
+
+    _configure_web_account(monkeypatch)
+    credentials.ACCOUNT_CREDS["demo"]["refresh_token"] = "test-refresh-token"
+    calls = []
+
+    async def fail_post(*_args, **_kwargs):
+        calls.append(1)
+        raise ClosedResourceError()
+
+    async def alert(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(credentials, "_post", fail_post)
+    monkeypatch.setattr(notifier, "send_alert_message", alert)
+    refresh = credentials.refresh_mobile_token if mobile else credentials.refresh_token
+    try:
+        assert await refresh("demo", 0) is False
+        assert await refresh("demo", 0) is False
+        state = credentials.get_refresh_state("demo")
+        assert state["kind"] == "transient_network"
+        assert state["blocked"] is True
+        assert calls == [1]
+        assert credentials.ACCOUNT_CREDS["demo"]["refresh_token"] == "test-refresh-token"
+    finally:
+        credentials.clear_loop_state()
+
+
+@pytest.mark.asyncio
+async def test_auth_closed_transport_repairs_pool_without_replaying_post(monkeypatch):
+    from anyio import ClosedResourceError
+    from src import http_pool
+
+    calls = []
+    repaired = []
+
+    class Broken:
+        is_closed = False
+
+        async def post(self, *_args, **_kwargs):
+            calls.append(1)
+            raise ClosedResourceError()
+
+    client = Broken()
+
+    async def reset(*, expected_client=None):
+        repaired.append(expected_client)
+        return object()
+
+    monkeypatch.setattr(credentials, "_client_loop", asyncio.get_running_loop())
+    monkeypatch.setattr(credentials, "_auth_http_client", client)
+    monkeypatch.setattr(http_pool, "reset_auth_client", reset)
+    with pytest.raises(ClosedResourceError):
+        await credentials._post("https://api.test/update_token", headers={}, json_body={"refresh_token": "test"})
+    assert calls == [1]
+    assert repaired == [client]

@@ -1,4 +1,5 @@
 httpx>=0.27,<1.0
+anyio>=3.7,<5.0            # HTTP 传输关闭/损坏异常分类（httpx 使用的异步后端）
 requests>=2.31,<3.0
 python-dotenv>=1.0,<2.0
 json5>=0.9,<1.0

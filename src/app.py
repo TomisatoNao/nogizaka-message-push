@@ -752,24 +752,8 @@ async def main() -> None:
         # 2. 创建普通请求与认证专用 HTTP 客户端。
         #    认证续期使用独立连接池，避免媒体/翻译慢请求占满普通池；
         #    credentials 内部还会用 TOKEN_REFRESH_CONCURRENCY 限制续期并发。
-        http_client = httpx.AsyncClient(
-            timeout=20,
-            proxy=proxy_url,
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-        )
-        try:
-            refresh_concurrency = max(1, int(getattr(cfg, "TOKEN_REFRESH_CONCURRENCY", 2)))
-        except (TypeError, ValueError):
-            refresh_concurrency = 2
-        auth_http_client = httpx.AsyncClient(
-            timeout=15,
-            proxy=proxy_url,
-            follow_redirects=True,
-            limits=httpx.Limits(
-                max_connections=max(2, refresh_concurrency * 2),
-                max_keepalive_connections=refresh_concurrency,
-            ),
-        )
+        http_client = http_pool.new_general_client()
+        auth_http_client = http_pool.new_auth_client()
         qq_client = httpx.AsyncClient(
             timeout=15,
             transport=httpx.AsyncHTTPTransport(retries=0, http2=False, trust_env=False),

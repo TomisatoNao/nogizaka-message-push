@@ -17,6 +17,7 @@ import httpx
 import src.config.config as cfg
 from src.config.credentials import proactive_refresh_if_expiring
 from src import fetcher, health, http_pool
+from src.http_diagnostics import CycleHTTPDiagnostics, cycle_diagnostics, request_scope
 from src.app_modules.daily_summary import _get_jst_now
 from src.app_modules.process_lock import _stop_requested
 from src.logger import log_all
@@ -42,14 +43,30 @@ class _MemberCycleResult:
 class _MemberFetchTimeout(TimeoutError):
     """带成员上下文的抓取超时结果，不让一个成员拖住整轮巡查。"""
 
-    def __init__(self, member_id: str, account_id: str, timeout_seconds: float):
+    def __init__(self, member_id: str, account_id: str, timeout_seconds: float, diagnostics: str = ""):
         self.member_id = str(member_id or "")
         self.account_id = str(account_id or "")
         self.timeout_seconds = float(timeout_seconds)
+        self.diagnostics = diagnostics
         super().__init__(
             f"成员抓取超时（member_id={self.member_id or '-'}, "
             f"account_id={self.account_id or '-'}, timeout={self.timeout_seconds:g}s）"
         )
+
+
+@dataclass(frozen=True)
+class _CycleResult:
+    members: tuple[_MemberCycleResult, ...] = ()
+
+    @property
+    def outcome(self) -> str:
+        active = [member for member in self.members if not member.skipped]
+        if not active:
+            return "skipped"
+        failures = sum(member.failed for member in active)
+        if failures == len(active):
+            return "error"
+        return "partial" if failures else "success"
 
 
 def _timeout_setting(name: str, default: float) -> float:
@@ -92,6 +109,18 @@ async def _cancel_task_bounded(task: asyncio.Task, cleanup_timeout: float = 5.0)
 
 
 async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str) -> None:
+    """收集本轮诊断，任务及子协程共享数据，结束后恢复调用方上下文。"""
+    diagnostics = CycleHTTPDiagnostics(cycle_id)
+    token = cycle_diagnostics.set(diagnostics)
+    try:
+        await _run_cycle_with_lifecycle(run_cycle_fn, timeout_seconds, cycle_id)
+    finally:
+        cycle_diagnostics.reset(token)
+        for line in diagnostics.report():
+            log_all(line, is_debug=True)
+
+
+async def _run_cycle_with_lifecycle(run_cycle_fn, timeout_seconds: float, cycle_id: str) -> None:
     """运行一轮巡查并设置总预算；超时后显式取消并有限等待清理。"""
     tracker = health.get_tracker()
     started = time.monotonic()
@@ -140,7 +169,7 @@ async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str
             )
 
         # wait() 已确认 task 完成；result() 会正确传播业务异常。
-        task.result()
+        result = task.result()
     except asyncio.CancelledError:
         phase = tracker.monitor_snapshot().get("phase", "unknown")
         await _cancel_task_bounded(task, cleanup_timeout=5.0)
@@ -157,13 +186,17 @@ async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str
         raise
     else:
         elapsed_ms = (time.monotonic() - started) * 1000
+        # 兼容独立工具提供的无返回值回调；正式巡查始终返回业务统计。
+        outcome = result.outcome if isinstance(result, _CycleResult) else "success"
         tracker.record_cycle_finished(
-            "success", elapsed_ms=elapsed_ms, phase="idle"
+            outcome, elapsed_ms=elapsed_ms, phase="idle"
         )
         log_all(
-            f"✅ 巡查轮次结束 | cycle_id={cycle_id} | phase=idle | "
-            f"outcome=success | elapsed_ms={elapsed_ms:.0f}",
-            is_debug=True,
+            f"巡查轮次结束 | cycle_id={cycle_id} | phase=idle | "
+            f"outcome={outcome} | elapsed_ms={elapsed_ms:.0f}",
+            is_debug=outcome in {"success", "skipped"},
+            is_warning=outcome == "partial",
+            is_error=outcome == "error",
         )
 
 
@@ -243,6 +276,11 @@ async def _refresh_account_bounded(
     timeout_seconds: float,
 ) -> None:
     """为单个账号续期设置边界，失败只影响该账号而不取消整轮。"""
+    with request_scope() as scope:
+        await _refresh_account_with_scope(acc_id, target_group, account_cfg, timeout_seconds, scope)
+
+
+async def _refresh_account_with_scope(acc_id, target_group, account_cfg, timeout_seconds, scope) -> None:
     try:
         await asyncio.wait_for(
             proactive_refresh_if_expiring(
@@ -255,7 +293,10 @@ async def _refresh_account_bounded(
     except asyncio.TimeoutError:
         message = f"账号 {acc_id} Token 续期超时（{timeout_seconds:g}s）"
         health.get_tracker().record_error(message, health.ErrorTier.TRANSIENT)
-        log_all(f"⏱️ {message} | cycle_id={_current_cycle_id()} | phase=token_refresh", is_error=True)
+        log_all(
+            f"⏱️ {message} | cycle_id={_current_cycle_id()}\nphase=token_refresh\n{scope.describe()}",
+            is_error=True,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -269,15 +310,17 @@ async def _refresh_account_bounded(
 
 async def _fetch_member_bounded(member: dict, fetch_coro, timeout_seconds: float) -> object:
     """为单个成员抓取设置边界，并返回可定位的超时结果。"""
-    try:
-        return await asyncio.wait_for(fetch_coro, timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        return _MemberFetchTimeout(
-            member.get("m_id", ""), member.get("account_id", ""), timeout_seconds
-        )
+    with request_scope() as scope:
+        try:
+            return await asyncio.wait_for(fetch_coro, timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            return _MemberFetchTimeout(
+                member.get("m_id", ""), member.get("account_id", ""), timeout_seconds,
+                scope.describe(),
+            )
 
 
-async def _run_cycle() -> None:
+async def _run_cycle() -> _CycleResult:
     """单轮巡查：获取周期快照 → 主动续期 → 并发抓取 → 串行推送。"""
     app_mod = sys.modules.get("src.app")
     cycle_summary_fn = getattr(app_mod, "_message_cycle_summary", _message_cycle_summary) if app_mod else _message_cycle_summary
@@ -357,10 +400,9 @@ async def _run_cycle() -> None:
                         name, False, health.ErrorTier.TRANSIENT, error
                     )
                     log_all(
-                        f"⏱️ 抓取超时 [{name}] | member_id={result.member_id or '-'} | "
-                        f"account_id={result.account_id or '-'} | "
-                        f"timeout={result.timeout_seconds:g}s | cycle_id={_current_cycle_id()} | "
-                        "phase=member_fetch",
+                        f"⏱️ 抓取超时 [{name}] | timeout={result.timeout_seconds:g}s | "
+                        f"cycle_id={_current_cycle_id()}\nmember_id={result.member_id or '-'} | "
+                        f"account_id={result.account_id or '-'} | phase=member_fetch\n{result.diagnostics}",
                         is_error=True,
                     )
                     return _MemberCycleResult(name=name)
@@ -419,8 +461,10 @@ async def _run_cycle() -> None:
                 member_results, time.monotonic() - message_cycle_started
             )
             log_all(f"{summary} | cycle_id={_current_cycle_id()} | phase=member_push", is_error=has_errors)
+            return _CycleResult(tuple(member_results))
     else:
         log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
+    return _CycleResult()
 
 async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
                     stop_event: asyncio.Event | None = None) -> None:

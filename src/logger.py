@@ -11,6 +11,7 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 import src.config.config as cfg
+from src.http_diagnostics import classify_http_error
 
 # ---- ANSI 彩色支持检测 ----
 _ANSI_SUPPORTED: bool = (
@@ -86,7 +87,11 @@ def redact_sensitive(content: str) -> str:
     safe = re.sub(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', "***JWT***", safe)
     safe = re.sub(r'\bBearer\s+[A-Za-z0-9._~+/=-]+', "Bearer ***HIDDEN***", safe, flags=re.IGNORECASE)
     safe = re.sub(r'\bQQBot\s+[A-Za-z0-9._~+/=-]+', "QQBot ***HIDDEN***", safe, flags=re.IGNORECASE)
-    safe = re.sub(r'([?&]key=)[^&\s]+', r'\1***HIDDEN***', safe, flags=re.IGNORECASE)
+    safe = re.sub(
+        r'([?&](?:amp;)?(?:key|api_key|apikey|token|access_token|refresh_token|'
+        r'client_secret|authorization|cookie|session|signature|sig)=)[^&\s\x22\x27<>#]+',
+        r'\1***HIDDEN***', safe, flags=re.IGNORECASE,
+    )
     return safe
 
 
@@ -174,4 +179,4 @@ def format_httpx_error(e: Exception) -> str:
     if getattr(e, "__cause__", None) is not None:
         cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
         detail += f" | 原因: {cause_msg}"
-    return detail
+    return redact_sensitive(f"kind={classify_http_error(e)} | {detail}")

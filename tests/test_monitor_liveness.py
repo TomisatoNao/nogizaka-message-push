@@ -198,3 +198,57 @@ def test_login_page_has_request_timeout_and_visible_fallback():
     assert "AbortController" in html
     assert "登录请求超时（30 秒）" in html
     assert "正在验证账号" in html
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed,skipped,outcome", [
+    (0, False, "success"), (1, False, "partial"), (3, False, "error"), (3, True, "skipped"),
+])
+async def test_real_cycle_propagates_member_business_results(monkeypatch, failed, skipped, outcome):
+    from types import SimpleNamespace
+    from src import member_directory
+    from src.http_diagnostics import cycle_diagnostics
+
+    health.initialize()
+    members = [{"account_id": "test", "m_id": str(i), "m_name": f"Member{i}"} for i in range(3)]
+    snapshot = SimpleNamespace(
+        monitor_list=members, accounts={"test": {}}, backtrack_hours=12, skip_publish_types=(),
+    )
+    monkeypatch.setattr(cfg, "get_cycle_snapshot", lambda: snapshot)
+    monkeypatch.setattr(message_worker, "_is_message_monitor_enabled", lambda: True)
+    monkeypatch.setattr(member_directory, "is_member_active_subscription", lambda *_: not skipped)
+
+    async def refresh(*_args, **_kwargs):
+        return None
+
+    async def fetch(member, **_kwargs):
+        if int(member["m_id"]) < failed:
+            return None
+        return [], [], set(), ["timestamp"], "unused", None
+
+    async def push(*_args):
+        return True
+
+    monkeypatch.setattr(message_worker, "proactive_refresh_if_expiring", refresh)
+    monkeypatch.setattr(message_worker.fetcher, "fetch_member_messages", fetch)
+    monkeypatch.setattr(message_worker.fetcher, "push_member_messages", push)
+    previous_context = cycle_diagnostics.get()
+    await message_worker._run_cycle_bounded(message_worker._run_cycle, 1, "business-outcome")
+    monitor = health.get_tracker().monitor_snapshot()
+    assert monitor["last_cycle_outcome"] == outcome
+    assert monitor["cycle_in_progress"] is False
+    assert monitor["phase"] == "idle"
+    assert cycle_diagnostics.get() is previous_context
+
+
+@pytest.mark.asyncio
+async def test_failed_push_does_not_report_success():
+    health.initialize()
+
+    async def cycle():
+        return message_worker._CycleResult((
+            message_worker._MemberCycleResult("demo", fetch_ok=True, new_count=1, push_ok=False),
+        ))
+
+    await message_worker._run_cycle_bounded(cycle, 1, "failed-push")
+    assert health.get_tracker().monitor_snapshot()["last_cycle_outcome"] == "error"

@@ -142,7 +142,17 @@ def _notify_auth_rebind(client: httpx.AsyncClient) -> None:
             log.warning("auth HTTP client rebind failed: %s", type(exc).__name__)
 
 
-def _new_auth_client() -> httpx.AsyncClient:
+def new_general_client() -> httpx.AsyncClient:
+    """启动、自愈和重置共用同一组参数，避免恢复后连接池配置漂移。"""
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=20, read=20, write=20, pool=20),
+        proxy=getattr(cfg, "PROXY", "") or None,
+        follow_redirects=False,
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    )
+
+
+def new_auth_client() -> httpx.AsyncClient:
     """按当前热配置创建 Token 续期专用 Client。"""
     try:
         concurrency = max(1, int(getattr(cfg, "TOKEN_REFRESH_CONCURRENCY", 2)))
@@ -224,12 +234,7 @@ async def get_general_client() -> httpx.AsyncClient:
             if _is_current_loop_client(_general_client, _general_loop):
                 return _general_client  # type: ignore[return-value]
             stale = _general_client
-            proxy_url = getattr(cfg, "PROXY", "") or None
-            _general_client = httpx.AsyncClient(
-                timeout=getattr(cfg, "TIMEOUT", 30),
-                proxy=proxy_url,
-                follow_redirects=True,
-            )
+            _general_client = new_general_client()
             _general_loop = loop
             current = _general_client
         _notify_general_rebind(current)
@@ -246,7 +251,7 @@ async def get_auth_client() -> httpx.AsyncClient:
             if _is_current_loop_client(_auth_client, _auth_loop):
                 return _auth_client  # type: ignore[return-value]
             stale = _auth_client
-            _auth_client = _new_auth_client()
+            _auth_client = new_auth_client()
             _auth_loop = loop
             current = _auth_client
         _notify_auth_rebind(current)
@@ -295,19 +300,20 @@ async def get_blog_client() -> httpx.AsyncClient:
         return current
 
 
-async def reset_general_client() -> httpx.AsyncClient:
-    """强制重置并返回全新的通用 HTTP 客户端（用于 Loop 变动自愈）。"""
+async def reset_general_client(
+    *, expected_client: httpx.AsyncClient | None = None,
+) -> httpx.AsyncClient:
+    """重置通用池；同一旧池的并发故障只替换一次，独立注入的池不接管。"""
     global _general_client, _general_loop
     loop = asyncio.get_running_loop()
     async with _get_lifecycle_lock():
         with _thread_lock:
+            if expected_client is not None and _general_client is not expected_client:
+                if _is_current_loop_client(_general_client, _general_loop):
+                    return _general_client  # type: ignore[return-value]
+                return expected_client
             stale = _general_client
-            proxy_url = getattr(cfg, "PROXY", "") or None
-            _general_client = httpx.AsyncClient(
-                timeout=getattr(cfg, "TIMEOUT", 30),
-                proxy=proxy_url,
-                follow_redirects=True,
-            )
+            _general_client = new_general_client()
             _general_loop = loop
             current = _general_client
         _notify_general_rebind(current)
@@ -340,7 +346,7 @@ async def reset_auth_client(
                     return _auth_client  # type: ignore[return-value]
                 return expected_client
             stale = _auth_client
-            _auth_client = _new_auth_client()
+            _auth_client = new_auth_client()
             _auth_loop = loop
             current = _auth_client
         _notify_auth_rebind(current)
@@ -380,6 +386,8 @@ __all__ = [
     "get_blog_client",
     "get_general_client",
     "get_qq_client",
+    "new_auth_client",
+    "new_general_client",
     "register_auth_client_rebind",
     "register_general_client_rebind",
     "reset_auth_client",

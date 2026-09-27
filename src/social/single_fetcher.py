@@ -13,6 +13,7 @@ from typing import Any
 import requests
 
 from src.social import ig_session
+from src.logger import redact_sensitive
 from src.social.instagram_embed import InstagramEmbedUnavailable, fetch_public_post
 from src.social.models import MediaItem, Post
 
@@ -201,7 +202,7 @@ class SocialUrlParser:
                     },
                 )
         except Exception as ex:
-            log.warning("[single_fetcher] X syndication 解析失败 %s: %s", tweet_id, ex)
+            log.warning("[single_fetcher] X syndication 解析失败 %s: %s", tweet_id, redact_sensitive(str(ex)))
 
         # 回退 yt-dlp 抓取单推
         return self._extract_with_ytdlp(url, platform="x", post_id=tweet_id)

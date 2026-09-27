@@ -112,3 +112,59 @@ def test_http_pool_does_not_reuse_clients_across_event_loops():
         assert first.is_closed, "切换事件循环时应关闭并替换旧 Client"
     finally:
         asyncio.run(http_pool.close_all())
+
+
+@pytest.mark.asyncio
+async def test_general_pool_concurrent_closed_transport_only_replaces_once():
+    try:
+        original = await http_pool.get_general_client()
+        first, second = await asyncio.gather(
+            http_pool.reset_general_client(expected_client=original),
+            http_pool.reset_general_client(expected_client=original),
+        )
+        assert first is second
+        assert original.is_closed
+        assert not first.is_closed
+    finally:
+        await http_pool.close_all()
+
+
+@pytest.mark.asyncio
+async def test_startup_and_recovery_keep_the_same_general_pool_configuration(monkeypatch):
+    constructors = []
+    original_constructor = http_pool.httpx.AsyncClient
+
+    def capture(**kwargs):
+        constructors.append(kwargs)
+        return original_constructor(**kwargs)
+
+    monkeypatch.setattr(http_pool.httpx, "AsyncClient", capture)
+    monkeypatch.setattr(http_pool.cfg, "PROXY", "http://127.0.0.1:19090")
+    monkeypatch.setattr(http_pool.cfg, "TIMEOUT", 99, raising=False)
+    try:
+        startup = http_pool.new_general_client()
+        http_pool.bind_runtime_clients(startup)
+        assert await http_pool.get_general_client() is startup
+        replacement = await http_pool.reset_general_client(expected_client=startup)
+        assert replacement is not startup
+        assert len(constructors) == 2
+        assert constructors[0] == constructors[1]
+        assert replacement.timeout.pool == 20
+        assert constructors[0]["limits"].max_connections == 20
+        assert constructors[0]["limits"].max_keepalive_connections == 10
+        assert constructors[0]["proxy"] == "http://127.0.0.1:19090"
+        await replacement.aclose()
+        healed = await http_pool.get_general_client()
+        assert not healed.is_closed
+        assert constructors[0] == constructors[2]
+    finally:
+        await http_pool.close_all()
+
+
+@pytest.mark.asyncio
+async def test_expected_unmanaged_general_client_is_not_taken_over(monkeypatch):
+    monkeypatch.setattr(http_pool, "_general_client", None)
+    async with http_pool.httpx.AsyncClient() as external:
+        assert await http_pool.reset_general_client(expected_client=external) is external
+        assert http_pool._general_client is None
+        assert not external.is_closed

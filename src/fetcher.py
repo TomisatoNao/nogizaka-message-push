@@ -10,10 +10,12 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import httpx
+from anyio import BrokenResourceError, ClosedResourceError
 
 import src.config.config as cfg
 from src import archive
 from src.logger import format_httpx_error, log_all, log_response
+from src.http_diagnostics import is_closed_transport_error, observe_request, set_request_phase
 from src.config.credentials import (
     ACCOUNT_CREDS, get_file_lock, get_mobile_api_base, get_mobile_headers,
     get_web_headers, refresh_mobile_token, refresh_token, write_time_record,
@@ -117,6 +119,31 @@ def initialize(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> None:
     global _http_client, _semaphore
     _http_client = client
     _semaphore   = semaphore
+
+
+async def _fetch_get(url: str, *, headers: dict, account_id: str, operation: str):
+    """测量每次 GET；关闭的传输只重建对应旧池，重试预算由抓取层统一控制。"""
+    global _http_client
+    client = None
+    try:
+        async with observe_request(operation, url, account_id=account_id, semaphore=_semaphore) as sample:
+            client = _http_client
+            response = await client.get(url, headers=headers)
+            sample.status_code = response.status_code
+            return response
+    except (RuntimeError, ClosedResourceError, BrokenResourceError) as exc:
+        if client is not None and is_closed_transport_error(exc):
+            from src import http_pool
+
+            try:
+                set_request_phase("client_recovery")
+                _http_client = await http_pool.reset_general_client(expected_client=client)
+            except Exception as reset_exc:
+                log_all(
+                    f"HTTP 抓取连接池修复失败 | error={type(reset_exc).__name__}",
+                    is_warning=True,
+                )
+        raise
 
 
 async def fetch_member_messages(
@@ -306,7 +333,6 @@ async def _fetch_member_messages(
     Phase 1（并发抓取）：读取时间戳 → API 请求（含 401 续期/重试）→ 排序过滤。
     返回 (new_msgs, id_list, id_set, l_time_ref, time_file, file_lock) 或 None。
     """
-    global _http_client
     account_id   = member.get("account_id") or ""
     group_type   = member.get("group_type") or ""
     m_id         = member.get("m_id") or ""
@@ -433,8 +459,7 @@ async def _fetch_member_messages(
                     f"(尝试 {attempt}/{MAX_FETCH_ATTEMPTS})",
                     is_debug=True,
                 )
-            async with _semaphore:
-                resp = await _http_client.get(url, headers=headers)
+            resp = await _fetch_get(url, headers=headers, account_id=account_id, operation="timeline")
 
             if resp.status_code == 200:
                 try:
@@ -466,8 +491,9 @@ async def _fetch_member_messages(
                 # 首次加入监控时，额外尝试拉取过去 24 小时历史消息 (/past_messages)
                 if is_first_fetch:
                     try:
-                        async with _semaphore:
-                            past_resp = await _http_client.get(past_url, headers=headers)
+                        past_resp = await _fetch_get(
+                            past_url, headers=headers, account_id=account_id, operation="past_messages",
+                        )
                         if past_resp.status_code == 200:
                             past_msgs = past_resp.json().get("messages", [])
                             if past_msgs:
@@ -552,14 +578,15 @@ async def _fetch_member_messages(
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
             log_all(
                 f"🔥 {m_name} 网络错误 (尝试 {attempt}/{MAX_FETCH_ATTEMPTS}): {format_httpx_error(e)}",
-                is_error=True,
+                is_warning=attempt < MAX_FETCH_ATTEMPTS,
+                is_error=attempt >= MAX_FETCH_ATTEMPTS,
             )
             if attempt < MAX_FETCH_ATTEMPTS:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)  # nosec B311
                 log_all(f"⏳ {m_name} {delay:.1f}s 后重试...", is_debug=True)
+                set_request_phase("retry_backoff")
                 await asyncio.sleep(delay)
             else:
-                log_all(f"🚨 {m_name} 达到最大重试次数，放弃", is_error=True)
                 _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"网络错误: {format_httpx_error(e)}")
                 return None
 
@@ -570,21 +597,21 @@ async def _fetch_member_messages(
             )
             if attempt < MAX_FETCH_ATTEMPTS:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1.5)  # nosec B311
+                set_request_phase("retry_backoff")
                 await asyncio.sleep(delay)
                 continue
             _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, "HTTP 请求失败")
             return None
 
-        except RuntimeError as e:
-            if "Event loop is closed" in str(e) or "closed" in str(e):
-                log_all(f"⚠️ {m_name} 检测到连接池 Loop 变动，自动重置客户端并重试...", is_debug=True)
-                from src import http_pool
-                _http_client = await http_pool.reset_general_client()
+        except (RuntimeError, ClosedResourceError, BrokenResourceError) as e:
+            if is_closed_transport_error(e):
+                log_all(f"⚠️ {m_name} 传输已关闭，已尝试修复连接池 | error={type(e).__name__}", is_warning=True)
                 if attempt < MAX_FETCH_ATTEMPTS:
+                    set_request_phase("retry_backoff")
                     await asyncio.sleep(1.0)
                     continue
-            log_all(f"🔥 {m_name} 运行时异常: {e}", is_error=True)
-            _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, f"RuntimeError: {e}")
+            log_all(f"🔥 {m_name} 运行时异常: {format_httpx_error(e)}", is_error=True)
+            _health_tracker().record_member_fetch(m_name, False, ErrorTier.TRANSIENT, format_httpx_error(e))
             return None
 
         except Exception as e:
