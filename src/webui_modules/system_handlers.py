@@ -89,6 +89,11 @@ def handle_status(handler, on_poll_cb=None) -> None:
     """GET /api/status 运行状态快照。"""
     from src.health import get_tracker
     snap = get_tracker().snapshot()
+    try:
+        from src.social.manager import get_instagram_monitor_status
+        snap["instagram_monitor"] = get_instagram_monitor_status()
+    except Exception:
+        snap["instagram_monitor"] = {"running": False, "accounts": {}}
 
     # 路由 lane 的待补偿状态来自持久化投递表，不混入内存通道成功率；
     # 即使服务重启，状态页也能显示仍有多少消息/路由等待恢复。

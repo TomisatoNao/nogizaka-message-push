@@ -201,6 +201,58 @@ def _api_payload(path: str) -> dict:
     return {"ok": True}
 
 
+@pytest.mark.parametrize("viewport_name", ("desktop", "mobile"))
+@pytest.mark.parametrize("theme", ("dark", "light"))
+def test_instagram_discovery_failure_summary_layout(admin_static_server, viewport_name, theme):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport=VIEWPORTS[viewport_name], color_scheme=theme, locale="zh-CN",
+        )
+        context.add_init_script(f"localStorage.setItem('sakamichiTheme', '{theme}');")
+
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            payload = _api_payload(path)
+            if path == "/api/status":
+                payload["instagram_monitor"] = {
+                    "running": True,
+                    "accounts": {"demo_ig": {
+                        "state": "error", "consecutive_failures": 3,
+                        "reason": "Feed 接口 HTTP 429", "last_success_at": 1788900000,
+                    }},
+                }
+            route.fulfill(
+                status=200, content_type="application/json; charset=utf-8",
+                body=json.dumps(payload, ensure_ascii=False),
+            )
+
+        page = context.new_page()
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/#tab=social", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "document.querySelector('#monitorInstagramStatus')?.textContent.includes('发现受阻')"
+        )
+        assert "失败 3 次" in page.locator("#monitorInstagramMetrics").inner_text()
+        layout = page.evaluate("""() => {
+            const card = document.querySelector('[data-monitor-summary-card="instagram"]');
+            const metrics = document.querySelector('#monitorInstagramMetrics');
+            const cardRect = card.getBoundingClientRect();
+            const metricsRect = metrics.getBoundingClientRect();
+            return {
+                cardBottom: cardRect.bottom,
+                metricsBottom: metricsRect.bottom,
+                scrollWidth: document.documentElement.scrollWidth,
+                viewportWidth: window.innerWidth,
+            };
+        }""")
+        assert layout["metricsBottom"] <= layout["cardBottom"] + 1
+        assert layout["scrollWidth"] <= layout["viewportWidth"] + 1
+        context.close()
+        browser.close()
+
+
 def _assert_screenshot(actual, expected, *, max_ratio: float = 0.005) -> None:
     import sys
     from PIL import Image, ImageChops

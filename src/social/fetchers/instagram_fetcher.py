@@ -5,19 +5,13 @@ fetchers/instagram_fetcher.py — Instagram 监控
   * Feed 帖子（单图 / 多图 Carousel / Reel）
   * Story（图片 / 视频）—— Story 更新同步推送
 
-数据来源（多后端，自动回退）：
-  1. yt-dlp（主）—— `instagram:user` / `instagram:story` extractor
-  2. web_profile_info（备）—— Instagram Web API；请求前先访问首页拿
-     csrftoken / mid cookie 再带上 X-IG-App-ID，可提高匿名成功率
-  3. 帖子 Embed 页面（末）—— 单帖 `/p/<code>/embed/captioned/`，
-     用于在列表已知但逐帖 API 被拒时匿名补全正文与图片
+定时发现只使用已配置会话的 Feed 接口。yt-dlp 的 `instagram:user` 已被
+上游标记为失效；匿名 `web_profile_info` 在部署出口被限流，均不能把失败
+当作“没有新帖”。已知帖子链接的 yt-dlp / Embed 解析仍保留作逐帖兜底。
 
-关于「免登录」的实测结论（2026-07）：
- 公开账号的 Feed 可以尝试匿名抓取：先走 yt-dlp 的公开主页解析，失败后再
- 回退 `web_profile_info`；但 Instagram 会按出口 IP 对这些接口限流，不能把
- 匿名 Feed 当成稳定的官方 API。登录态只用于更稳定的 Feed 直链、私密内容
- 和 Story。公开的单帖 Embed 仍可在不少情况下匿名取得图片/视频，但它不能
- 替代账号 Feed 的发现能力，也不支持 Story。
+关于「免登录」的实测结论（2026-09）：
+ 公开单帖 Embed 仍可在部分情况下匿名取得媒体，但不能替代账号 Feed
+ 的定时发现能力。匿名定时发现暂不执行；Story 也需要有效登录态。
 
   因此这里还提供一条「不需要在本程序里登录」的可行路径：
       platforms.instagram.cookies_from_browser = "chrome"   （或 edge / firefox）
@@ -31,6 +25,7 @@ downloader 通过「扫描目录差集」把它们全部收集为 MediaItem。
 import logging
 import os
 import random
+import re
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -57,6 +52,22 @@ _IG_APP_ID = "936619743392459"
 
 class InstagramSessionRejected(RuntimeError):
     """A logged-in Instagram endpoint explicitly rejected the session."""
+
+
+class InstagramDiscoveryUnavailable(RuntimeError):
+    """No reliable account-feed discovery source is available."""
+
+
+def _safe_feed_reason(error: Exception) -> str:
+    """Avoid exposing URLs, cookies or proxy credentials in the status API."""
+    if isinstance(error, InstagramDiscoveryUnavailable):
+        return str(error)
+    match = re.search(r"feed/username HTTP (\d{3})", str(error))
+    if match:
+        return f"Feed 接口 HTTP {match.group(1)}"
+    if "feed/username 响应缺少 items" in str(error):
+        return "Feed 接口响应格式异常"
+    return type(error).__name__
 
 
 class InstagramFetcher(SocialFetcher):
@@ -101,6 +112,32 @@ class InstagramFetcher(SocialFetcher):
         self._story_next_gap: dict[str, int] = {}
         # 账号名 → 数字 ID（Story 接口需要，解析一次即缓存）
         self._uid_cache: dict[str, str] = {}
+        self._feed_status_lock = threading.Lock()
+        self._feed_status: dict[str, dict] = {}
+
+    def discovery_status(self) -> dict:
+        """Runtime-only, non-secret Feed check results for the admin status page."""
+        with self._feed_status_lock:
+            return {account: status.copy() for account, status in self._feed_status.items()
+                    if account in self.accounts}
+
+    def _record_feed_status(self, account: str, state: str, reason: str = "") -> None:
+        now = time.time()
+        with self._feed_status_lock:
+            previous = self._feed_status.get(account, {})
+            status = {
+                "state": state,
+                "last_attempt_at": now,
+                "last_success_at": previous.get("last_success_at"),
+                "consecutive_failures": previous.get("consecutive_failures", 0),
+                "reason": reason[:160],
+            }
+            if state == "ok":
+                status["last_success_at"] = now
+                status["consecutive_failures"] = 0
+            elif state in ("error", "unavailable"):
+                status["consecutive_failures"] += 1
+            self._feed_status[account] = status
 
     @property
     def has_cookies(self) -> bool:
@@ -150,11 +187,7 @@ class InstagramFetcher(SocialFetcher):
     # ── 会话准备 ─────────────────────────────────────────
 
     def _warm_session(self) -> None:
-        """先访问首页取 csrftoken / mid cookie，提高匿名接口成功率。
-
-        若配置了 cookies_from_browser / cookies_file，则同时把浏览器里已有的
-        Instagram 登录态注入本 session —— 不需要在本程序里做任何登录动作。
-        """
+        """Load an existing session without touching Instagram anonymously."""
         cfg = self.cfg
         source_fingerprint = self._session_source_fingerprint(cfg)
         with self._session_lock:
@@ -195,11 +228,7 @@ class InstagramFetcher(SocialFetcher):
                 # token，会和 sessionid 对不上，导致接口直接拒绝
                 if cookies.get("csrftoken"):
                     self._session.headers["X-CSRFToken"] = cookies["csrftoken"]
-                return      # 已有登录态，无需再做匿名预热
-            try:
-                self._session.get("https://www.instagram.com/", timeout=self._dl.timeout)
-            except Exception as e:
-                log.debug("[instagram] 预热 session 失败（不影响主流程）: %s", e)
+            # 匿名主页发现已暂停；无凭证时不再预热主页，避免无效请求。
 
     def _session_failed(self, reason: str) -> None:
         """标记登录态失效并（首次）告警。
@@ -237,8 +266,8 @@ class InstagramFetcher(SocialFetcher):
             return
         self._login_hint_shown = True
         log.warning(
-            "[instagram] ⚠️ 当前未配置有效登录态，只能尝试公开 Feed/单帖 Embed，"
-            "且无法抓取 Story、私密或受限内容。\n"
+            "[instagram] ⚠️ 当前未配置有效登录态，Feed 定时发现与 Story 已暂停；"
+            "已知公开单帖链接仍可尝试匿名 Embed，私密或受限内容无法抓取。\n"
             "建议在具有 Instagram 正常访问权限的环境中配置登录态（任选其一）：\n"
             "  ① 安装浏览器扩展（如 Get cookies.txt LOCALLY），导出 "
             "instagram.com 的 cookies.txt，填到 config.json → "
@@ -265,6 +294,9 @@ class InstagramFetcher(SocialFetcher):
             try:
                 guard.peek_blocked(self._config)
             except Blocked as e:
+                if self.cfg.get("include_feed", True):
+                    for pending_account in accounts[idx:]:
+                        self._record_feed_status(pending_account, "paused", str(e))
                 now = time.time()
                 if now - self._last_blocked_log > 60:
                     self._last_blocked_log = now
@@ -277,8 +309,10 @@ class InstagramFetcher(SocialFetcher):
             try:
                 got = self._fetch_account(account)
             except Exception as e:
+                if self.cfg.get("include_feed", True):
+                    self._record_feed_status(account, "error", _safe_feed_reason(e))
                 log.warning("[%s] @%s 检查失败: %s", self.platform_name, account,
-                            str(e).replace("\n", " ")[:200])
+                            _safe_feed_reason(e))
                 got = []
 
             if got:
@@ -290,7 +324,12 @@ class InstagramFetcher(SocialFetcher):
                 log.info("[%s] 🆕 @%s 发现 %s 条新内容", self.platform_name, account, len(got))
                 posts.extend(got)
             else:
-                log.debug("[%s] ✅ @%s 无新内容", self.platform_name, account)
+                state = self.discovery_status().get(account, {}).get("state")
+                if state in ("error", "unavailable", "paused"):
+                    log.debug("[%s] @%s 未取得新内容（Feed 检查状态：%s）",
+                              self.platform_name, account, state)
+                else:
+                    log.debug("[%s] ✅ @%s 无新内容", self.platform_name, account)
 
             # 2. 若不是最后一个账号，在账号间增加 2.0 ~ 4.5 秒的随机休眠，模拟真人浏览节奏
             if idx < len(accounts) - 1:
@@ -308,6 +347,8 @@ class InstagramFetcher(SocialFetcher):
         try:
             guard.peek_blocked(self._config)
         except Blocked as e:
+            if cfg.get("include_feed", True):
+                self._record_feed_status(account, "paused", str(e))
             now = time.time()
             if now - self._last_blocked_log > 60:
                 self._last_blocked_log = now
@@ -316,22 +357,25 @@ class InstagramFetcher(SocialFetcher):
                 log.debug("[instagram] ⏸ %s", e)
             return posts
 
-        self._warm_session()
         if cfg.get("include_feed", True):
             try:
                 posts.extend(self._fetch_feed(account))
+                self._record_feed_status(account, "ok")
                 guard.record_ok()
             except Blocked as e:
+                self._record_feed_status(account, "paused", str(e))
                 log.info("[instagram] ⏸ %s", e)
                 return posts
+            except InstagramDiscoveryUnavailable as e:
+                self._record_feed_status(account, "unavailable", str(e))
+                log.warning("[instagram] @%s Feed 未检查：%s", account, e)
             except Exception as e:
+                self._record_feed_status(account, "error", _safe_feed_reason(e))
                 self._note_risk(e)
-                if not self.has_cookies and "429" in str(e):
-                    # 匿名模式下遇到 IP 级 429：由 _note_risk 触发全局退避并提示，此处不再警告刷屏
-                    pass
-                else:
-                    log.warning("[instagram] @%s Feed 检查失败: %s", account,
-                                str(e).replace("\n", " ")[:200])
+                log.warning("[instagram] @%s Feed 检查失败: %s", account,
+                            _safe_feed_reason(e))
+        else:
+            self._record_feed_status(account, "disabled")
 
         # Story 是强登录态接口，审查更严 —— 未配置 Cookies 时直接跳过，避免无效 401/403
         if cfg.get("include_stories", True) and self._story_due(account):
@@ -456,14 +500,17 @@ class InstagramFetcher(SocialFetcher):
             raise RuntimeError(f"feed/username HTTP {r.status_code}（登录态被拒）")
         if r.status_code != 200:
             raise RuntimeError(f"feed/username HTTP {r.status_code}")
-        self._session_ok()
         try:
             data = r.json()
         except ValueError as e:
             raise RuntimeError(f"feed/username 返回非 JSON: {e}") from e
 
+        items = data.get("items")
+        if not isinstance(items, list):
+            raise RuntimeError("feed/username 响应缺少 items 列表，不能视为无新帖")
+        self._session_ok()
         out: list[dict] = []
-        for m in (data.get("items") or []):
+        for m in items:
             code = m.get("code")
             if not code:
                 continue
@@ -559,48 +606,17 @@ class InstagramFetcher(SocialFetcher):
         return out
 
     def _list_feed_entries(self, account: str) -> list[dict]:
-        """返回 [{id, url, timestamp, title, kind}]（多后端自动回退）。"""
+        """List Feed posts only when a usable discovery session is available.
+
+        The yt-dlp ``instagram:user`` extractor is marked broken upstream, and
+        anonymous ``web_profile_info`` is rate-limited on our deployment IP.
+        Neither can establish that an empty response means "no new posts".
+        """
         self._warm_session()
-        # 后端 0：带登录态的 Feed 接口 —— 有 cookies 时最可靠
-        if self.has_cookies:
-            try:
-                got = self._api_feed_entries(account)
-                if got:
-                    return got
-            except Exception as e:
-                log.debug("[instagram] Feed 接口失败，回退其它后端: %s",
-                          str(e).replace("\n", " ")[:160])
-        else:
-            log.debug("[instagram] @%s Feed 使用匿名公开抓取路径（不调用登录态 Feed API）",
-                      account)
-
-        # 后端 1：yt-dlp 扁平列出用户主页
-        info = self._dl.extract_info(
-            USER_URL.format(account=account),
-            platform_cfg=self.ytdlp_config(),
-            extra_opts={"extract_flat": "in_playlist",
-                        "playlistend": self.max_items_per_poll * 3},
-        )
-        entries = []
-        if info and info.get("entries"):
-            for e in info["entries"]:
-                if not isinstance(e, dict) or not e.get("id"):
-                    continue
-                entries.append({
-                    "id": str(e["id"]),
-                    "url": e.get("url") or e.get("webpage_url")
-                           or POST_URL.format(shortcode=e["id"]),
-                    "timestamp": e.get("timestamp") or 0,
-                    "title": e.get("title") or e.get("description") or "",
-                    "kind": "reel" if "/reel" in str(e.get("url") or "") else "post",
-                })
-        if entries:
-            log.debug("[instagram] yt-dlp 列出 @%s 的 %s 条帖子", account, len(entries))
-            return entries
-
-        # 后端 2：web_profile_info
-        log.debug("[instagram] yt-dlp 未列出内容，回退 web_profile_info")
-        return self._web_profile_entries(account)
+        if not self.has_cookies:
+            raise InstagramDiscoveryUnavailable(
+                "未配置有效登录态；匿名主页发现源暂不可用，未进行 Feed 检查")
+        return self._api_feed_entries(account)
 
     def _web_profile_entries(self, account: str) -> list[dict]:
         from src.social.ig_safety import get_guard
@@ -654,8 +670,10 @@ class InstagramFetcher(SocialFetcher):
         kind = entry.get("kind") or "post"
         self.mark_seen(post_id, account, kind)
 
-        # 完整解析拿正文与准确时间戳（扁平列表里往往缺失）
-        info = self._dl.extract_info(url, platform_cfg=self.ytdlp_config()) or {}
+        # 登录态 Feed API 已经给出正文、时间和媒体直链，不再对每条帖子
+        # 重复发起 yt-dlp 解析；仅缺少媒体时保留已知链接的兜底能力。
+        info = (self._dl.extract_info(url, platform_cfg=self.ytdlp_config()) or {}
+                if not entry.get("media") else {})
         public_embed_post = None
         # 用户主页列表在部分出口仍能列出公开帖子，但逐帖 yt-dlp 解析会
         # 因 media/info 403 失败。只有没有 API 直链时才启动匿名 Embed，

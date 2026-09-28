@@ -169,6 +169,22 @@ def get_social_service() -> SocialService | None:
         return _service
 
 
+def get_instagram_monitor_status() -> dict:
+    """Return non-secret, in-memory Feed discovery diagnostics."""
+    with _lock:
+        scheduler = _scheduler
+        if scheduler is None:
+            return {"running": False, "accounts": {}}
+        fetcher = next(
+            (item for item in scheduler._fetchers if item.platform_name == "instagram"),
+            None,
+        )
+    return {
+        "running": True,
+        "accounts": fetcher.discovery_status() if fetcher is not None else {},
+    }
+
+
 def stop_social_service():
     """优雅停止社媒监控服务。"""
     global _scheduler, _shared_config, _service

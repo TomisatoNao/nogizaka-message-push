@@ -12,7 +12,11 @@ from src.social.downloader import MediaDownloader
 from src.social.instagram_embed import _extract_page_data
 from src.social.models import MediaItem, Post
 from src.social.single_fetcher import InstagramAuthRequired, SocialUrlParser
-from src.social.fetchers.instagram_fetcher import InstagramFetcher
+from src.social.fetchers.instagram_fetcher import (
+    InstagramDiscoveryUnavailable,
+    InstagramFetcher,
+    _safe_feed_reason,
+)
 from src.social.store import SocialStore
 
 
@@ -225,6 +229,31 @@ def test_scheduled_feed_uses_embed_when_detail_extraction_fails(tmp_path, monkey
     assert post.media[0].local_path and Path(post.media[0].local_path).exists()
 
 
+def test_feed_direct_media_skips_redundant_ytdlp_probe(tmp_path: Path, monkeypatch):
+    config = {"platforms": {"instagram": {
+        "enabled": True, "accounts": ["public_user"],
+        "download_dir": str(tmp_path / "media"),
+    }}}
+    downloader = _FeedDownloader()
+    downloader.extract_info = lambda *_args, **_kwargs: (
+        _ for _ in ()).throw(AssertionError("Feed 已有媒体时不应逐帖解析"))
+    fetcher = InstagramFetcher(config, SocialStore(str(tmp_path / "social.db")), downloader)
+    monkeypatch.setattr(
+        "src.social.instagram_embed.fetch_public_post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("不应启动 Embed")),
+    )
+
+    post = fetcher._build_feed_post("public_user", {
+        "id": "shortcode", "url": "https://www.instagram.com/p/shortcode/",
+        "timestamp": 1788300000, "title": "caption", "kind": "post",
+        "media": [{"type": "image", "url": "https://scontent.cdninstagram.com/photo.jpg"}],
+    })
+
+    assert post is not None
+    assert post.text == "caption"
+    assert len(post.media) == 1
+
+
 def test_instagram_anonymous_429_graceful_handling(tmp_path: Path):
     from src.social.ig_safety import get_guard
     guard = get_guard()
@@ -288,8 +317,8 @@ def test_monitor_reloads_cookie_session_after_webui_update(tmp_path: Path, monke
     assert fetcher._session.headers["X-CSRFToken"] == "new-csrf"
 
 
-def test_invalid_cookie_source_keeps_feed_on_anonymous_path(tmp_path: Path, monkeypatch):
-    """失效的 cookies_file 不应阻断公开 Feed，也不应调用登录态接口。"""
+def test_invalid_cookie_source_reports_discovery_unavailable(tmp_path: Path, monkeypatch):
+    """An invalid session must not turn broken anonymous discovery into a false empty scan."""
     config = {
         "platforms": {
             "instagram": {
@@ -314,10 +343,74 @@ def test_invalid_cookie_source_keeps_feed_on_anonymous_path(tmp_path: Path, monk
         "_api_feed_entries",
         lambda *_args: (_ for _ in ()).throw(AssertionError("匿名 Feed 不应调用登录态 API")),
     )
-    fetcher._dl.extract_info = lambda *_args, **_kwargs: {
-        "entries": [{"id": "public-post", "webpage_url": "https://www.instagram.com/p/public-post/"}]
-    }
+    fetcher._dl.extract_info = lambda *_args, **_kwargs: (
+        _ for _ in ()).throw(AssertionError("不应再轮询 yt-dlp 用户主页"))
 
-    entries = fetcher._list_feed_entries("public_user")
+    with pytest.raises(InstagramDiscoveryUnavailable, match="匿名主页发现源暂不可用"):
+        fetcher._list_feed_entries("public_user")
 
-    assert [entry["id"] for entry in entries] == ["public-post"]
+
+def test_anonymous_session_setup_does_not_preheat_instagram(tmp_path: Path, monkeypatch):
+    config = {"platforms": {"instagram": {
+        "enabled": True, "accounts": ["public_user"],
+        "download_dir": str(tmp_path / "media"),
+    }}}
+    fetcher = InstagramFetcher(config, SocialStore(str(tmp_path / "social.db")), _FeedDownloader())
+    monkeypatch.setattr(ig_session, "read_cookie_file", lambda *_args: {})
+    monkeypatch.setattr(ig_session, "cookie_store_version", lambda: ("sqlite", 0))
+    fetcher._session.get = lambda *_args, **_kwargs: (
+        _ for _ in ()).throw(AssertionError("无登录态不应请求 Instagram 主页"))
+
+    fetcher._warm_session()
+
+    assert fetcher._warmed is True
+    assert not fetcher._session.cookies.get("sessionid")
+
+
+def test_feed_runtime_status_distinguishes_failed_and_empty_scan(tmp_path: Path):
+    from src.social.ig_safety import get_guard
+    get_guard().reset()
+    config = {"platforms": {"instagram": {
+        "enabled": True, "accounts": ["public_user"], "include_stories": False,
+        "download_dir": str(tmp_path / "media"),
+    }}}
+    fetcher = InstagramFetcher(config, SocialStore(str(tmp_path / "social.db")), _FeedDownloader())
+    fetcher._warm_session = lambda: None
+    fetcher._list_feed_entries = lambda _account: (_ for _ in ()).throw(
+        InstagramDiscoveryUnavailable("no discovery source"))
+
+    assert fetcher._fetch_account("public_user") == []
+    failed = fetcher.discovery_status()["public_user"]
+    assert failed["state"] == "unavailable"
+    assert failed["last_success_at"] is None
+    assert failed["consecutive_failures"] == 1
+
+    fetcher._list_feed_entries = lambda _account: []
+    assert fetcher._fetch_account("public_user") == []
+    checked = fetcher.discovery_status()["public_user"]
+    assert checked["state"] == "ok"
+    assert checked["last_success_at"] is not None
+    assert checked["consecutive_failures"] == 0
+    get_guard().reset()
+
+
+def test_logged_in_discovery_failure_does_not_fall_back_to_anonymous(tmp_path: Path):
+    config = {"platforms": {"instagram": {
+        "enabled": True, "accounts": ["public_user"],
+        "download_dir": str(tmp_path / "media"),
+    }}}
+    fetcher = InstagramFetcher(config, SocialStore(str(tmp_path / "social.db")), _FeedDownloader())
+    fetcher._warm_session = lambda: None
+    fetcher._session.cookies.set("sessionid", "test-session")
+    fetcher._api_feed_entries = lambda _account: (_ for _ in ()).throw(RuntimeError("feed HTTP 429"))
+    fetcher._dl.extract_info = lambda *_args, **_kwargs: (
+        _ for _ in ()).throw(AssertionError("不应回退到用户主页提取器"))
+
+    with pytest.raises(RuntimeError, match="429"):
+        fetcher._list_feed_entries("public_user")
+
+
+def test_feed_status_reason_never_exposes_proxy_credentials():
+    error = RuntimeError("Proxy failed at https://user:secret@proxy.example/")
+    assert _safe_feed_reason(error) == "RuntimeError"
+    assert _safe_feed_reason(RuntimeError("feed/username HTTP 429")) == "Feed 接口 HTTP 429"

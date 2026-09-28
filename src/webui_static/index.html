@@ -340,6 +340,8 @@
   #tab-social > .schedule-card { margin-bottom: 14px; }
   .monitor-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 176px; gap: 14px; align-items: stretch; margin-bottom: 14px; }
   .monitor-summary-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box; padding: 18px 20px; margin: 0; }
+  .monitor-summary-card.monitor-summary-card--diagnostic { gap: 6px; padding-block: 8px; }
+  .monitor-summary-card--diagnostic .monitor-summary-metric { padding-block: 3px; }
   .monitor-summary-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
   .monitor-summary-title { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--text); font-size: 14px; line-height: 1.4; font-weight: 650; overflow-wrap: anywhere; }
   .monitor-summary-settings { flex: 0 0 auto; white-space: nowrap; }
@@ -3639,6 +3641,11 @@ function switchAdminTab(targetTab, updateHash = true) {
   } else {
     stopStatusPolling();
   }
+  if (targetTab === "social") {
+    startInstagramMonitorPolling();
+  } else {
+    stopInstagramMonitorPolling();
+  }
   
   document.querySelectorAll(".header-nav .nav-tab, nav.tabs button").forEach((b) => b.classList.toggle("active", b === btn));
   document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
@@ -3685,6 +3692,41 @@ let stNextCycle = null, stClockDelta = 0, stCycleCount = 0;
 let latestStatusData = null;
 let statusFetchInFlight = false;
 let statusLastSuccessAt = null;
+let instagramMonitorTimer = null;
+let instagramMonitorFetchInFlight = false;
+let instagramMonitorStatusStale = false;
+
+async function refreshInstagramMonitorRuntime() {
+  if (document.hidden || instagramMonitorFetchInFlight) return;
+  instagramMonitorFetchInFlight = true;
+  try {
+    const data = await api("/api/status");
+    if (data && data.ok) {
+      instagramMonitorStatusStale = false;
+      latestStatusData = data;
+      renderMonitorSummaries();
+    }
+  } catch (_e) {
+    instagramMonitorStatusStale = true;
+    renderMonitorSummaries();
+  } finally {
+    instagramMonitorFetchInFlight = false;
+  }
+}
+
+function startInstagramMonitorPolling() {
+  refreshInstagramMonitorRuntime();
+  if (instagramMonitorTimer === null) {
+    instagramMonitorTimer = setInterval(refreshInstagramMonitorRuntime, 30000);
+  }
+}
+
+function stopInstagramMonitorPolling() {
+  if (instagramMonitorTimer !== null) {
+    clearInterval(instagramMonitorTimer);
+    instagramMonitorTimer = null;
+  }
+}
 
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
@@ -3727,6 +3769,8 @@ async function fetchStatus() {
   statusFetchInFlight = false;
   statusLastSuccessAt = Date.now();
   latestStatusData = data;
+  instagramMonitorStatusStale = false;
+  renderMonitorSummaries();
   stClockDelta = data.now_epoch - Date.now() / 1000;
   stNextCycle = data.next_cycle;
   stCycleCount = data.cycle_count;
@@ -4248,12 +4292,46 @@ function renderMonitorSummaries() {
 
   const instagram = platforms.instagram || {};
   const cookieText = igSessionConfigured === true ? "Cookies 已配置" : igSessionConfigured === false ? "Cookies 未配置" : "Cookies 检测中";
-  setMonitorSummary("monitorInstagramStatus", "monitorInstagramMetrics", !!instagram.enabled, [
+  const runtime = (latestStatusData || {}).instagram_monitor || {};
+  const accountStates = Object.entries(runtime.accounts || {});
+  const igCard = document.querySelector('[data-monitor-summary-card="instagram"]');
+  if (igCard) igCard.classList.toggle("monitor-summary-card--diagnostic", accountStates.length > 0);
+  const failures = accountStates.filter(([, state]) => state.state === "error" || state.state === "unavailable");
+  const paused = accountStates.filter(([, state]) => state.state === "paused");
+  const successes = accountStates.filter(([, state]) => state.state === "ok");
+  const latestSuccess = Math.max(0, ...accountStates.map(([, state]) => Number(state.last_success_at) || 0));
+  const metrics = [
     "Feed " + (instagram.include_feed !== false ? "开" : "关"),
     "Story " + (instagram.include_stories !== false ? "开" : "关"),
     "账号 " + monitorCount(instagram.accounts),
     cookieText,
-  ]);
+  ];
+  if (accountStates.length) {
+    metrics.splice(0, metrics.length,
+      "Feed " + (instagram.include_feed !== false ? "开" : "关") + " · Story " + (instagram.include_stories !== false ? "开" : "关"),
+      "账号 " + monitorCount(instagram.accounts) + " · " + cookieText);
+  }
+  if (latestSuccess) metrics.push("最近成功 " + new Date(latestSuccess * 1000).toLocaleString());
+  if (failures.length) {
+    const [, state] = failures[0];
+    metrics.push("失败 " + state.consecutive_failures + " 次 · " + String(state.reason || "未知原因").slice(0, 24));
+  }
+  setMonitorSummary("monitorInstagramStatus", "monitorInstagramMetrics", !!instagram.enabled, metrics);
+  const igStatus = $("monitorInstagramStatus");
+  if (igStatus && instagram.enabled && instagram.include_feed !== false) {
+    let label = "待首轮检查", tone = "muted";
+    if (!monitorCount(instagram.accounts)) label = "未配置账号";
+    else if (instagramMonitorStatusStale) { label = "状态刷新失败"; tone = "warn"; }
+    else if (runtime.running === false) { label = "监控服务未运行"; tone = "warn"; }
+    else if (failures.length) { label = "发现受阻 " + failures.length + " 个账号"; tone = "warn"; }
+    else if (paused.length) { label = "巡查暂停"; tone = "warn"; }
+    else if (successes.length === monitorCount(instagram.accounts)) { label = "检查正常"; tone = "ok"; }
+    else if (igSessionConfigured === false) { label = "发现不可用"; tone = "warn"; }
+    igStatus.className = "admin-status-badge monitor-summary-status " + tone;
+    igStatus.textContent = label;
+    igStatus.title = [...failures, ...paused]
+      .map(([account, state]) => account + "：" + state.reason).join("\n");
+  }
 
   const tiktok = platforms.tiktok || {};
   setMonitorSummary("monitorTiktokStatus", "monitorTiktokMetrics", !!tiktok.enabled, [
@@ -5601,7 +5679,7 @@ async function renderIgSessionUI() {
     igSessionConfigured = data ? false : null;
     igStatusEl.innerHTML = '<span class="admin-status-badge err">✗ 未配置</span>';
     if (igDetailEl) {
-      igDetailEl.textContent = "未配置 Cookies。当前为匿名模式，单帖链接可正常解析，但主页定时巡查易触发官方 429 限流。";
+      igDetailEl.textContent = "未配置 Cookies。Feed 定时发现和 Story 暂停；已知公开单帖链接仍可尝试匿名解析。";
     }
     if (btnClear) btnClear.style.display = "none";
     if (btnCheck) btnCheck.style.display = "none";
@@ -5724,7 +5802,7 @@ if ($("btnCheckIgSession")) {
 
 if ($("btnClearIgSession") || $("btnIgCookieClear")) {
   const doClear = async () => {
-    const ok = await uiConfirm("确定要清空 Instagram Cookies 吗？\n\n清空后将从系统磁盘和环境变量移除，快拍及部分受限图集将无法抓取。", {
+    const ok = await uiConfirm("确定要清空 Instagram Cookies 吗？\n\n清空后将从系统磁盘和环境变量移除，Feed 定时发现与 Story 将暂停，部分受限图集也无法抓取。", {
       title: "清空 Instagram Cookies 确认",
       danger: true,
       yesText: "确认清空",
@@ -8229,6 +8307,7 @@ $("btnRestart").addEventListener("click", async () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   if (statusTimer !== null) fetchStatus();
+  if (instagramMonitorTimer !== null) refreshInstagramMonitorRuntime();
   if (logTimer !== null) fetchLogs();
 });
 
