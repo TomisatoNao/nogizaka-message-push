@@ -345,8 +345,8 @@
   .monitor-summary-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
   .monitor-summary-title { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--text); font-size: 14px; line-height: 1.4; font-weight: 650; overflow-wrap: anywhere; }
   .monitor-summary-settings { flex: 0 0 auto; white-space: nowrap; }
-  .monitor-summary-status-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .monitor-summary-toggle { flex: 1 1 auto; min-width: 0; align-items: flex-start; font-size: 13px; line-height: 1.4; white-space: normal; }
+  .monitor-summary-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; min-width: 0; }
+  .monitor-summary-toggle { min-width: 0; align-items: flex-start; font-size: 13px; line-height: 1.4; white-space: normal; }
   .monitor-summary-toggle .track { transform: scale(.88); transform-origin: left center; margin-right: -4px; }
   .monitor-summary-status { flex: 0 0 auto; }
   .monitor-summary-metrics { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; margin-top: auto; }
@@ -4243,6 +4243,24 @@ function monitorCount(values) {
   return Array.isArray(values) ? values.filter((value) => String(value || "").trim()).length : 0;
 }
 
+function instagramMonitorAccounts(platformConfig) {
+  const accounts = new Set();
+  const add = (values) => {
+    const list = Array.isArray(values) ? values : [values];
+    list.forEach((value) => {
+      const account = String(value || "").replace(/^@+/, "").trim();
+      if (account) accounts.add(account);
+    });
+  };
+
+  add(platformConfig.accounts);
+  (Array.isArray(config?.monitor) ? config.monitor : []).forEach((member) => {
+    const social = member?.social;
+    if (social && typeof social === "object") add(social.instagram);
+  });
+  return [...accounts];
+}
+
 function setMonitorSummary(statusId, metricsId, enabled, metrics) {
   const status = $(statusId);
   if (status) {
@@ -4291,6 +4309,8 @@ function renderMonitorSummaries() {
   ]);
 
   const instagram = platforms.instagram || {};
+  const instagramAccounts = instagramMonitorAccounts(instagram);
+  const instagramAccountCount = instagramAccounts.length;
   const cookieText = igSessionConfigured === true ? "Cookies 已配置" : igSessionConfigured === false ? "Cookies 未配置" : "Cookies 检测中";
   const runtime = (latestStatusData || {}).instagram_monitor || {};
   const accountStates = Object.entries(runtime.accounts || {});
@@ -4303,13 +4323,13 @@ function renderMonitorSummaries() {
   const metrics = [
     "Feed " + (instagram.include_feed !== false ? "开" : "关"),
     "Story " + (instagram.include_stories !== false ? "开" : "关"),
-    "账号 " + monitorCount(instagram.accounts),
+    "账号 " + instagramAccountCount,
     cookieText,
   ];
   if (accountStates.length) {
     metrics.splice(0, metrics.length,
       "Feed " + (instagram.include_feed !== false ? "开" : "关") + " · Story " + (instagram.include_stories !== false ? "开" : "关"),
-      "账号 " + monitorCount(instagram.accounts) + " · " + cookieText);
+      "账号 " + instagramAccountCount + " · " + cookieText);
   }
   if (failures.length) {
     const [, state] = failures[0];
@@ -4319,12 +4339,12 @@ function renderMonitorSummaries() {
   const igStatus = $("monitorInstagramStatus");
   if (igStatus && instagram.enabled && instagram.include_feed !== false) {
     let label = "待首轮检查", tone = "muted";
-    if (!monitorCount(instagram.accounts)) label = "未配置账号";
+    if (!instagramAccountCount) label = "未配置账号";
     else if (instagramMonitorStatusStale) { label = "状态刷新失败"; tone = "warn"; }
     else if (runtime.running === false) { label = "监控服务未运行"; tone = "warn"; }
     else if (failures.length) { label = "发现受阻 " + failures.length + " 个账号"; tone = "warn"; }
     else if (paused.length) { label = "巡查暂停"; tone = "warn"; }
-    else if (successes.length === monitorCount(instagram.accounts)) { label = "检查正常"; tone = "ok"; }
+    else if (successes.length === instagramAccountCount) { label = "检查正常"; tone = "ok"; }
     else if (igSessionConfigured === false) { label = "发现不可用"; tone = "warn"; }
     igStatus.className = "admin-status-badge monitor-summary-status " + tone;
     igStatus.textContent = label;
