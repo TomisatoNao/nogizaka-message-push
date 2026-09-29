@@ -134,6 +134,43 @@ def test_platform_settings_supports_direct_platform_dict():
     assert "https://nitter.perennialte.ch" in merged["nitter_instances"]
 
 
+def test_member_bound_instagram_account_joins_manual_monitor_list():
+    from src.social.fetchers.instagram_fetcher import InstagramFetcher
+
+    fetcher = InstagramFetcher({
+        "platforms": {"instagram": {"enabled": True, "accounts": ["manual", "shared"]}},
+        "monitor": [
+            {"name": "成员 A", "social": {"instagram": [" @shared"]}},
+        ],
+    })
+
+    assert fetcher.accounts == ["manual", "shared"]
+    assert fetcher.member_name("shared") == "成员 A"
+    assert fetcher.display_name("shared") == "成员 A (shared)"
+
+
+def test_member_tiktok_binding_is_shared_with_live_and_legacy_live_is_kept():
+    from src.social.fetchers.tiktok_fetcher import TikTokFetcher
+    from src.social.fetchers.tiktok_live_fetcher import TikTokLiveFetcher
+
+    config = {
+        "platforms": {
+            "tiktok": {"accounts": ["manual_video"]},
+            "tiktok_live": {"accounts": ["manual_live"]},
+        },
+        "monitor": [
+            {"name": "成员 A", "social": {"tiktok": ["shared_user"]}},
+            {"name": "成员 B", "social": {"tiktok_live": ["legacy_live"]}},
+        ],
+    }
+    video = TikTokFetcher(config)
+    live = TikTokLiveFetcher(config)
+    assert video.accounts == ["manual_video", "shared_user"]
+    assert live.accounts == ["manual_live", "shared_user", "legacy_live"]
+    assert live.member_name("shared_user") == "成员 A"
+    assert live.member_name("legacy_live") == "成员 B"
+
+
 def test_ig_session_check_session_fallback_proxy(monkeypatch):
     from src.social import ig_session
     monkeypatch.setattr(cfg, "PROXY", "http://127.0.0.1:9999")

@@ -466,11 +466,11 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                     assert members["accountActionCount"] >= 1
                     assert members["memberActionCount"] >= 1
                     if viewport_name == "mobile":
-                        assert members["tableMinWidth"] == "760px"
+                        assert members["tableMinWidth"] == "890px"
                         assert members["theadDisplay"] == "table-header-group"
                         assert members["rowDisplay"] == "table-row"
-                        assert members["labels"] == ["姓名", "Message 账号", "订阅状态", "操作"]
-                        assert members["tableBox"]["width"] >= 760
+                        assert members["labels"] == ["姓名", "Message 账号", "订阅状态", "社媒账号", "操作"]
+                        assert members["tableBox"]["width"] >= 890
                         assert members["tableWrapBox"]["right"] <= metrics["viewportWidth"] + 1
                         assert members["tableBox"]["right"] > members["tableWrapBox"]["right"]
                         assert members["accountBox"]["right"] <= members["tableBox"]["right"] + 1
@@ -479,7 +479,7 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         assert members["accountReadonlyBox"]["right"] <= members["accountBox"]["right"] + 1
                         assert members["subscriptionTextAlign"] == "left"
                     else:
-                        assert members["tableMinWidth"] == "760px"
+                        assert members["tableMinWidth"] == "890px"
                         assert members["rowDisplay"] == "table-row"
                     assert members["accountReadonlyStyle"]["display"] == "inline"
                     assert members["accountReadonlyStyle"]["borderTopWidth"] == "0px"
@@ -1014,6 +1014,177 @@ def _open_admin_page(playwright, admin_static_server, route_handler, *, tab: str
     page.route("**/api/**", route_handler)
     page.goto(f"{admin_static_server}/#tab={tab}", wait_until="domcontentloaded")
     return browser, context, page
+
+
+def test_member_social_bindings_edit_and_account_sources(admin_static_server):
+    """旧绑定可编辑；重复成员绑定会被拦截，手动与绑定来源合并后提交。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            fixture = _fixture_config()
+            fixture["monitor"].append({"id": "56", "name": "另一成员", "account": "demo_main"})
+            saved = []
+
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                if path == "/api/config" and route.request.method == "PUT":
+                    saved.append(json.loads(route.request.post_data or "{}"))
+                    payload = {"ok": True, "reloaded": True, "cred_status": {}}
+                else:
+                    payload = _api_payload(path)
+                    if path == "/api/config":
+                        payload["config"] = fixture
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(payload, ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(p, admin_static_server, handle_api, tab="monitors")
+            page.locator("#memberRows tr").nth(1).wait_for(state="visible")
+            first = page.locator("#memberRows tr").first
+            second = page.locator("#memberRows tr").nth(1)
+            assert "IG @demo.member" in first.locator(".admin-member-social-cell").inner_text()
+
+            second.locator(".admin-member-actions-cell button").first.click()
+            page.locator("#memberSocialInstagram").fill("demo.member")
+            page.locator("#memberSocialConfirm").click()
+            assert page.locator("#memberSocialDialog").evaluate("el => el.open")
+            assert "已绑定其他成员" in page.locator("#memberSocialDialog .admin-field-error").inner_text()
+            page.locator("#memberSocialCancel").click()
+            assert "未绑定" in second.locator(".admin-member-social-cell").inner_text()
+
+            first.locator(".admin-member-actions-cell button").first.click()
+            assert page.locator("#memberSocialInstagram").input_value() == "demo.member"
+            page.locator("#memberSocialInstagram").fill("@new.member")
+            page.locator("#memberSocialTiktok").fill("shared_tiktok")
+            page.locator("#memberSocialConfirm").click()
+            assert "IG @new.member" in first.locator(".admin-member-social-cell").inner_text()
+            assert "TikTok @shared_tiktok" in first.locator(".admin-member-social-cell").inner_text()
+
+            page.locator('.nav-tab[data-tab="social"]').click()
+            page.locator('[data-monitor-dialog-target="monitorInstagramDialog"]').first.click()
+            sources = page.locator("#socialIgAccountSources")
+            assert "手动 1 · 成员绑定 1 · 实际监控 2" in sources.inner_text()
+            page.locator("#socialIgAccounts").fill("demo_ig\ndemo.member")
+            page.wait_for_function(
+                "document.getElementById('socialIgAccountSources').textContent.includes('手动 2 · 成员绑定 1 · 实际监控 3')"
+            )
+            page.locator("#monitorInstagramDialog [data-monitor-dialog-close]").last.click()
+            page.locator('[data-monitor-dialog-target="monitorLiveDialog"]').first.click()
+            assert "成员绑定 1" in page.locator("#socialLiveAccountSources").inner_text()
+            page.locator("#monitorLiveDialog [data-monitor-dialog-close]").last.click()
+            page.locator("#btnSave").click()
+            page.wait_for_function("document.querySelector('#saveMsg').textContent.includes('已保存')")
+            assert len(saved) == 1
+            assert saved[0]["monitor"][0]["social"]["instagram"] == ["new.member"]
+            assert saved[0]["monitor"][0]["social"]["tiktok"] == ["shared_tiktok"]
+            assert "tiktok_live" not in saved[0]["monitor"][0]["social"]
+            assert saved[0]["monitor"][1].get("social") is None
+            assert saved[0]["platforms"]["instagram"]["accounts"] == ["demo_ig", "demo.member"]
+
+            page.locator('.nav-tab[data-tab="monitors"]').click()
+            first.locator(".admin-member-actions-cell button").first.click()
+            page.locator("#memberSocialX").fill("")
+            page.locator("#memberSocialInstagram").fill("")
+            page.locator("#memberSocialTiktok").fill("")
+            page.locator("#memberSocialConfirm").click()
+            assert "未绑定" in first.locator(".admin-member-social-cell").inner_text()
+            page.locator("#btnSave").click()
+            page.wait_for_function("document.querySelector('#saveMsg').textContent.includes('已保存')")
+            assert len(saved) == 2
+            assert saved[1]["monitor"][0].get("social") is None
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+def test_member_social_legacy_live_binding_requires_explicit_resolution(admin_static_server):
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            fixture = _fixture_config()
+            fixture["monitor"][0]["social"].update({
+                "tiktok": ["video_user"], "tiktok_live": ["live_user"],
+            })
+
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                payload = _api_payload(path)
+                if path == "/api/config":
+                    payload["config"] = fixture
+                route.fulfill(status=200, content_type="application/json; charset=utf-8",
+                              body=json.dumps(payload, ensure_ascii=False))
+
+            browser, context, page = _open_admin_page(p, admin_static_server, handle_api, tab="monitors")
+            first = page.locator("#memberRows tr").first
+            assert "TikTok @video_user" in first.locator(".admin-member-social-cell").inner_text()
+            assert "Live 旧绑定 @live_user" in first.locator(".admin-member-social-cell").inner_text()
+            first.locator(".admin-member-actions-cell button").first.click()
+            assert page.locator("#memberSocialTiktok").input_value() == ""
+            assert "@video_user" in page.locator("#memberSocialLegacyNote").inner_text()
+            assert "@live_user" in page.locator("#memberSocialLegacyNote").inner_text()
+            page.locator("#memberSocialConfirm").click()
+            assert page.locator("#memberSocialDialog").evaluate("el => el.open")
+            assert "多个旧绑定" in page.locator("#memberSocialDialog .admin-field-error").inner_text()
+            page.locator("#memberSocialTiktok").fill("video_user")
+            page.locator("#memberSocialConfirm").click()
+            social = page.evaluate("config.monitor[0].social")
+            assert social["tiktok"] == ["video_user"]
+            assert "tiktok_live" not in social
+            assert "TikTok @video_user" in first.locator(".admin-member-social-cell").inner_text()
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+@pytest.mark.parametrize("viewport_name,theme", [
+    ("desktop", "light"), ("desktop", "dark"), ("mobile", "light"), ("mobile", "dark"),
+])
+def test_member_social_editor_fits_viewport(admin_static_server, viewport_name, theme):
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(p, admin_static_server, handle_api, tab="monitors")
+            page.set_viewport_size(VIEWPORTS[viewport_name])
+            page.evaluate("theme => document.documentElement.dataset.theme = theme", theme)
+            page.locator("#memberRows tr").first.locator(".admin-member-actions-cell button").first.click()
+            dialog = page.locator("#memberSocialDialog")
+            dialog.wait_for(state="visible")
+            bounds = dialog.evaluate("""el => {
+                const rect = el.getBoundingClientRect();
+                const actions = el.querySelector('.actions').getBoundingClientRect();
+                return {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+                    actionsBottom: actions.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight};
+            }""")
+            assert bounds["left"] >= 0
+            assert bounds["right"] <= bounds["viewportWidth"] + 1
+            assert bounds["top"] >= 0
+            assert bounds["bottom"] <= bounds["viewportHeight"] + 1
+            assert bounds["actionsBottom"] <= bounds["bottom"]
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+            page.keyboard.press("Escape")
+            assert not dialog.evaluate("el => el.open")
+            context.close()
+            browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
 
 
 def _hold_fetch_init_script(path: str, method: str) -> str:

@@ -1468,16 +1468,17 @@ def test_admin_mobile_member_and_openid_layout_guards_are_present():
 
     # 各尺寸均保留稳定列宽；手机端与账号池一样由表格容器负责横向滚动。
     assert '<table class="member-table">' in html
-    assert ".member-table { min-width: 760px; }" in html
-    assert ".member-table { min-width: 760px; width: 100%; border-collapse: collapse; }" in html
+    assert ".member-table { min-width: 890px; }" in html
+    assert ".member-table { min-width: 890px; width: 100%; border-collapse: collapse; }" in html
     assert ".member-table thead { display: table-header-group; }" in html
     assert ".member-table tbody tr { display: table-row; }" in html
     assert ".member-table tbody td::before { content: none; display: none; }" in html
     assert 'tdName.dataset.label = "姓名"' in html
     assert 'tdAcc.dataset.label = "Message 账号"' in html
     assert 'tdSub.dataset.label = "订阅状态"' in html
+    assert 'tdSocial.dataset.label = "社媒账号"' in html
     assert 'tdOps.dataset.label = "操作"' in html
-    assert 'tr.append(tdName, tdAcc, tdSub, tdOps)' in html
+    assert 'tr.append(tdName, tdAcc, tdSub, tdSocial, tdOps)' in html
     assert 'className = "admin-member-readonly admin-member-name"' in html
     assert 'className = "admin-member-readonly admin-member-account-readonly"' in html
     assert ".admin-member-account-readonly { display: inline; min-height: 0;" in html
@@ -1487,8 +1488,8 @@ def test_admin_mobile_member_and_openid_layout_guards_are_present():
     assert 'm.name = v.trim()' not in html
     assert 'm.account = sel.value' not in html
     assert 'id="btnAddMember"' not in html
-    assert 'memberSocialDialog' not in html
-    assert 'memSocial' not in html
+    assert 'id="memberSocialDialog"' in html
+    assert 'id="memberSocialInstagram"' in html
     assert 'const SUPPORTED_MEMBER_GROUPS = [' in html
     for group in ("nogizaka46", "hinatazaka46", "sakurazaka46", "yodel"):
         assert f'["{group}"' in html

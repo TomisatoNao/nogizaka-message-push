@@ -174,9 +174,20 @@
   .admin-member-name { font-weight: 600; }
   /* Message 账号列与账号池的“账号 ID”列使用同一纯文本语义，不再额外包一层胶囊。 */
   .admin-member-account-readonly { display: inline; min-height: 0; max-width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-strong); font-family: var(--mono); font-size: 12px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-  .admin-member-account-cell { min-width: 210px; }
-  .admin-member-subscription-cell { min-width: 175px; }
-  .admin-member-actions-cell { min-width: 92px; }
+  .admin-member-account-cell { min-width: 165px; }
+  .admin-member-subscription-cell { min-width: 150px; }
+  .admin-member-social-cell { min-width: 250px; }
+  .admin-member-social-list { display: flex; flex-wrap: wrap; gap: 4px 6px; max-width: 380px; }
+  .admin-member-social-item { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; padding: 3px 7px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--card-soft); color: var(--text); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+  .admin-member-social-empty { color: var(--muted); font-size: 12px; }
+  .admin-member-actions-cell { min-width: 180px; }
+  .member-social-dialog { width: min(92vw, 650px); max-height: min(85dvh, 760px); overflow: hidden; }
+  .member-social-dialog[open] { display: flex; flex-direction: column; }
+  .member-social-dialog .member-social-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-height: 0; margin: 16px 0; overflow-y: auto; }
+  .member-social-dialog .field { min-width: 0; }
+  .member-social-dialog input { width: 100%; }
+  .member-social-dialog .member-social-legacy-note { grid-column: 1 / -1; margin: 0; }
+  .member-social-dialog .admin-field-error { margin-top: 4px; }
   .admin-member-sub-badge { display: inline-flex; align-items: center; white-space: nowrap; flex: 0 0 auto; }
   .admin-member-sub-badge > span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; }
   .admin-member-sub-badge .is-neutral { color: var(--muted); background: color-mix(in srgb, var(--border) 28%, transparent); border: 1px solid var(--border-soft); }
@@ -490,13 +501,14 @@
   .delivery-backlog[data-tone="warn"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft)); }
   .delivery-backlog[data-tone="ok"] { color: var(--ok); }
   .delivery-backlog-actions { margin-top: 8px; display: flex; justify-content: flex-end; }
-  /* 成员表只展示官方目录同步的姓名/Message 账号，内部 ID 仍由配置保留但不展示。 */
-  .member-table { min-width: 760px; }
-  .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 190px; min-width: 190px; }
-  .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 230px; min-width: 230px; }
-  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 195px; min-width: 195px; }
-  .member-table th:nth-child(4), .member-table td:nth-child(4) { width: 105px; min-width: 105px; text-align: center; }
-  .member-table td:nth-child(4) .admin-row-actions { justify-content: center; }
+  /* 内部 ID 只供同步使用；社媒绑定在表格中直接可见，窄屏由容器横向滚动。 */
+  .member-table { min-width: 890px; }
+  .member-table th:nth-child(1), .member-table td:nth-child(1) { width: 145px; min-width: 145px; }
+  .member-table th:nth-child(2), .member-table td:nth-child(2) { width: 165px; min-width: 165px; }
+  .member-table th:nth-child(3), .member-table td:nth-child(3) { width: 150px; min-width: 150px; }
+  .member-table th:nth-child(4), .member-table td:nth-child(4) { width: 250px; min-width: 250px; }
+  .member-table th:nth-child(5), .member-table td:nth-child(5) { width: 180px; min-width: 180px; text-align: center; }
+  .member-table td:nth-child(5) .admin-row-actions { justify-content: center; }
   .account-table { min-width: 900px; }
   .account-table th:last-child, .account-table td:last-child { min-width: 280px; }
   .account-table td:last-child .admin-row-actions { max-width: none; }
@@ -878,7 +890,7 @@
     th, td { padding: 8px 9px; font-size: 13px; }
     td input, td select { min-width: 0; width: 100%; }
     /* 成员管理与账号池保持同一套表格语义：一名成员一行，窄屏由表格容器横向滚动。 */
-    .member-table { min-width: 760px; width: 100%; border-collapse: collapse; }
+    .member-table { min-width: 890px; width: 100%; border-collapse: collapse; }
     .member-table thead { display: table-header-group; }
     .member-table tbody { display: table-row-group; }
     .member-table tbody tr { display: table-row; }
@@ -886,11 +898,12 @@
     .member-table tbody td { display: table-cell; width: auto !important; min-width: 0 !important; max-width: none; padding: 8px 9px; border-bottom: 1px solid var(--border-soft); text-align: left !important; vertical-align: middle; }
     .member-table tbody td::before { content: none; display: none; }
     .member-table tbody td:nth-child(1) { text-align: left !important; }
-    .member-table tbody td:nth-child(4) { padding-top: 8px; border-top: 0; text-align: center !important; }
+    .member-table tbody td:nth-child(5) { padding-top: 8px; border-top: 0; text-align: center !important; }
     .member-table .admin-member-account-readonly { max-width: 210px; }
     .member-table .admin-member-sub-badge { justify-content: flex-start; max-width: none; }
     .member-table .admin-member-sub-badge > span { max-width: none; overflow-wrap: normal; white-space: nowrap; text-align: left; }
     .member-table td.admin-member-actions-cell .admin-row-actions { width: max-content; max-width: none; justify-content: center; margin-inline: auto; }
+    .member-social-dialog .member-social-fields { grid-template-columns: 1fr; }
 
     /* 白名单卡片在手机端改为信息网格 + 操作栏：长 OpenID 独占一行，按钮不再挤在信息旁。 */
     .cmd-openid-card { flex-direction: column !important; align-items: stretch !important; gap: 10px !important; padding: 12px !important; }
@@ -1131,7 +1144,7 @@
   <!-- Card 2: Message 监控成员目录（姓名与账号来自官方目录） -->
   <div class="card admin-module">
     <div class="admin-module-heading">
-      <h2>👥 Message 监控成员目录 <span class="tooltip-icon" title="成员姓名、内部 ID 和 Message 账号均来自所选官方账号的成员目录；内部 ID 仅用于同步，不在此处展示。社媒账号请在动态监控页面配置。">ℹ️</span></h2>
+      <h2>👥 Message 监控成员目录 <span class="tooltip-icon" title="成员姓名、内部 ID 和 Message 账号来自官方目录；社媒账号可逐人绑定，并自动加入对应平台的监控名单。">ℹ️</span></h2>
       <div class="admin-actions">
         <button class="btn" id="btnPickMember" type="button">📋 从账号拉取成员列表</button>
         <button class="btn small" id="btnSyncSubs" type="button">🔄 刷新订阅状态</button>
@@ -1145,6 +1158,7 @@
             <th>姓名</th>
             <th>Message 账号</th>
             <th>订阅状态</th>
+            <th>社媒账号</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -1152,7 +1166,7 @@
       </table>
       </div>
     </div>
-    <p class="hint admin-note">成员只能从乃木坂46、日向坂46、樱坂46或 yodel 的 Message 账号官方目录添加；姓名与账号为只读，社媒监控请到“动态监控”配置。</p>
+    <p class="hint admin-note">成员来自官方 Message 目录，姓名与 Message 账号只读。绑定的社媒账号会加入对应平台的监控名单；平台需在“动态监控”启用，修改后点击页面底部保存。</p>
     <div class="empty" hidden="" id="memberEmpty">还没有监控成员，请从支持的 Message 账号拉取。</div>
   </div>
 </section>
@@ -1564,9 +1578,10 @@
         </label>
       </div>
       <div class="monitor-account-group">
-        <label class="field">社媒监控账号（每行一个；仅在此处配置 X 账号）
+        <label class="field">手动补充账号（每行一个）
           <textarea id="socialXAccounts" placeholder="nogizaka46&#10;sakurazaka46&#10;hinatazaka46" rows="2" spellcheck="false"></textarea>
         </label>
+        <p class="hint admin-note--flush" id="socialXAccountSources" aria-live="polite"></p>
       </div>
     </div>
   </div>
@@ -1605,9 +1620,10 @@
         </label>
       </div>
       <div class="monitor-account-group">
-        <label class="field">社媒监控账号（每行一个；仅在此处配置 Instagram 账号）
+        <label class="field">手动补充账号（每行一个）
           <textarea id="socialIgAccounts" placeholder="tomisato.nao_official&#10;nogizaka46_tv" rows="2" spellcheck="false"></textarea>
         </label>
+        <p class="hint admin-note--flush" id="socialIgAccountSources" aria-live="polite"></p>
       </div>
       <p class="hint admin-note--flush">Story 快拍另有按账号的安全限频；上面的区间只控制 Feed / Reels 主轮询。</p>
       <div class="monitor-credential-group">
@@ -1653,9 +1669,10 @@
         </label>
       </div>
       <div class="monitor-account-group">
-        <label class="field">TikTok 短视频全局补充账号
+        <label class="field">手动补充账号（每行一个）
           <textarea id="socialTiktokAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
         </label>
+        <p class="hint admin-note--flush" id="socialTiktokAccountSources" aria-live="polite"></p>
       </div>
     </div>
   </div>
@@ -1684,9 +1701,10 @@
         </label>
       </div>
       <div class="monitor-account-group">
-        <label class="field">TikTok Live 直播全局补充账号
+        <label class="field">手动补充账号（每行一个）
           <textarea id="socialLiveAccounts" placeholder="nogizaka46_official" rows="2" spellcheck="false"></textarea>
         </label>
+        <p class="hint admin-note--flush" id="socialLiveAccountSources" aria-live="polite"></p>
       </div>
     </div>
   </div>
@@ -2222,6 +2240,27 @@
   <p class="member-pick-hint" id="memberPickHint" aria-live="polite">选择团体和对应账号后点「拉取」；需要该账号凭证可用。</p>
   <div class="actions member-pick-footer">
     <button class="btn" id="memberPickClose" type="button">关闭</button>
+  </div>
+</dialog>
+<!-- 成员社媒账号绑定（沿用 monitor[].social 配置结构） -->
+<dialog id="memberSocialDialog" class="member-social-dialog" aria-labelledby="memberSocialTitle" aria-describedby="memberSocialIntro">
+  <h3 id="memberSocialTitle">绑定成员社媒账号</h3>
+  <p class="hint" id="memberSocialIntro">每位成员在每个平台绑定一个账号；TikTok 短视频和 Live 共用账号。监控开关仍在“动态监控”控制。</p>
+  <div class="member-social-fields">
+    <label class="field">X
+      <input id="memberSocialX" type="text" placeholder="账号名，不必输入 @" spellcheck="false" autocomplete="off">
+    </label>
+    <label class="field">Instagram
+      <input id="memberSocialInstagram" type="text" placeholder="账号名，不必输入 @" spellcheck="false" autocomplete="off">
+    </label>
+    <label class="field">TikTok（短视频与 Live 共用）
+      <input id="memberSocialTiktok" type="text" placeholder="账号名，不必输入 @" spellcheck="false" autocomplete="off">
+    </label>
+    <p class="hint member-social-legacy-note" id="memberSocialLegacyNote" hidden></p>
+  </div>
+  <div class="actions">
+    <button class="btn" id="memberSocialCancel" type="button">取消</button>
+    <button class="btn primary" id="memberSocialConfirm" type="button">确认修改</button>
   </div>
 </dialog>
 <!-- NapCat 高级与扩展功能弹窗 -->
@@ -4239,26 +4278,46 @@ function monitorRangeText(range, fallback) {
   return String(values[0]) + "–" + String(values[1]) + " 秒";
 }
 
-function monitorCount(values) {
-  return Array.isArray(values) ? values.filter((value) => String(value || "").trim()).length : 0;
+function socialAccountValues(values) {
+  const list = Array.isArray(values) ? values : [values];
+  return list.map((value) => String(value || "").trim().replace(/^@+/, "").trim()).filter(Boolean);
 }
 
-function instagramMonitorAccounts(platformConfig) {
-  const accounts = new Set();
-  const add = (values) => {
-    const list = Array.isArray(values) ? values : [values];
-    list.forEach((value) => {
-      const account = String(value || "").replace(/^@+/, "").trim();
-      if (account) accounts.add(account);
-    });
-  };
+function memberSocialValues(member, platformKey) {
+  const social = member?.social || {};
+  const keys = platformKey === "tiktok" || platformKey === "tiktok_live"
+    ? ["tiktok", "tiktok_live"] : [platformKey];
+  const values = keys.flatMap((key) => socialAccountValues(social[key]));
+  return [...new Map(values.map((value) => [value.toLowerCase(), value])).values()];
+}
 
-  add(platformConfig.accounts);
+function monitorAccountSources(platformKey) {
+  const platform = (config?.platforms || {})[platformKey] || {};
+  const manual = new Set(socialAccountValues(platform.accounts));
+  const bound = new Set();
   (Array.isArray(config?.monitor) ? config.monitor : []).forEach((member) => {
     const social = member?.social;
-    if (social && typeof social === "object") add(social.instagram);
+    if (social && typeof social === "object") {
+      (platformKey === "tiktok_live" ? memberSocialValues(member, platformKey)
+        : socialAccountValues(social[platformKey])).forEach((account) => bound.add(account));
+    }
   });
-  return [...accounts];
+  return { manual, bound, effective: new Set([...manual, ...bound]) };
+}
+
+function renderMonitorAccountSources() {
+  for (const [key, id] of [
+    ["x", "socialXAccountSources"],
+    ["instagram", "socialIgAccountSources"],
+    ["tiktok", "socialTiktokAccountSources"],
+    ["tiktok_live", "socialLiveAccountSources"],
+  ]) {
+    const target = $(id);
+    if (!target) continue;
+    const { manual, bound, effective } = monitorAccountSources(key);
+    target.textContent = "手动 " + manual.size + " · 成员绑定 " + bound.size +
+      " · 实际监控 " + effective.size + "（重合账号已去重）";
+  }
 }
 
 function setMonitorSummary(statusId, metricsId, enabled, metrics) {
@@ -4279,6 +4338,7 @@ function setMonitorSummary(statusId, metricsId, enabled, metrics) {
 
 function renderMonitorSummaries() {
   if (!config) return;
+  renderMonitorAccountSources();
 
   const message = config.message_monitor || {};
   const dayRange = config.day_interval || [120, 180];
@@ -4303,14 +4363,13 @@ function renderMonitorSummaries() {
   const platforms = config.platforms || {};
   const x = platforms.x || {};
   setMonitorSummary("monitorXStatus", "monitorXMetrics", !!x.enabled, [
-    "账号 " + monitorCount(x.accounts),
+    "账号 " + monitorAccountSources("x").effective.size,
     "日间 " + String(x.interval_seconds || 60) + " 秒",
     "深夜 " + String(x.night_interval_seconds || 300) + " 秒",
   ]);
 
   const instagram = platforms.instagram || {};
-  const instagramAccounts = instagramMonitorAccounts(instagram);
-  const instagramAccountCount = instagramAccounts.length;
+  const instagramAccountCount = monitorAccountSources("instagram").effective.size;
   const cookieText = igSessionConfigured === true ? "Cookies 已配置" : igSessionConfigured === false ? "Cookies 未配置" : "Cookies 检测中";
   const runtime = (latestStatusData || {}).instagram_monitor || {};
   const accountStates = Object.entries(runtime.accounts || {});
@@ -4357,13 +4416,13 @@ function renderMonitorSummaries() {
   const tiktok = platforms.tiktok || {};
   setMonitorSummary("monitorTiktokStatus", "monitorTiktokMetrics", !!tiktok.enabled, [
     "间隔 " + String(tiktok.interval_seconds || 120) + " 秒",
-    "账号 " + monitorCount(tiktok.accounts),
+    "账号 " + monitorAccountSources("tiktok").effective.size,
   ]);
 
   const live = platforms.tiktok_live || {};
   setMonitorSummary("monitorLiveStatus", "monitorLiveMetrics", !!live.enabled, [
     "探测 " + String(live.interval_seconds || 8) + " 秒",
-    "账号 " + monitorCount(live.accounts),
+    "账号 " + monitorAccountSources("tiktok_live").effective.size,
   ]);
 }
 
@@ -6757,6 +6816,82 @@ $("btnAddTGBot").addEventListener("click", () => {
 
 // ── Members ──────────────────────────────────
 // 成员姓名、成员 ID 和 Message 账号均由官方目录同步；ID 只保留在配置中供抓取/订阅使用。
+const MEMBER_SOCIAL_FIELDS = [
+  ["x", "X", "memberSocialX", "socialXAccounts"],
+  ["instagram", "IG", "memberSocialInstagram", "socialIgAccounts"],
+  ["tiktok", "TikTok", "memberSocialTiktok", "socialTiktokAccounts"],
+];
+let editingSocialMember = null;
+
+function openMemberSocialDialog(member) {
+  editingSocialMember = member;
+  $("memberSocialTitle").textContent = "绑定社媒账号 · " + (member.name || "未命名成员");
+  const legacyConflicts = [];
+  for (const [platform, label, id] of MEMBER_SOCIAL_FIELDS) {
+    const field = $(id);
+    clearAdminFieldValidation(field);
+    const values = memberSocialValues(member, platform);
+    field.value = values.length === 1 ? values[0] : "";
+    field.dataset.legacyConflict = values.length > 1 ? "true" : "";
+    if (values.length > 1) legacyConflicts.push(label + "：" + values.map((value) => "@" + value).join("、"));
+  }
+  const note = $("memberSocialLegacyNote");
+  note.hidden = !legacyConflicts.length;
+  note.textContent = legacyConflicts.length
+    ? "旧绑定包含多个账号，请在对应输入框填写要保留的一个，再确认修改。" + legacyConflicts.join("；") : "";
+  $("memberSocialDialog").showModal();
+}
+
+$("memberSocialCancel").addEventListener("click", () => $("memberSocialDialog").close());
+$("memberSocialDialog").addEventListener("close", () => { editingSocialMember = null; });
+$("memberSocialConfirm").addEventListener("click", () => {
+  const member = editingSocialMember;
+  if (!member || !(config.monitor || []).includes(member)) {
+    $("memberSocialDialog").close();
+    msg("成员目录已变化，请重新打开绑定设置", "err");
+    return;
+  }
+  const updated = member.social && typeof member.social === "object" && !Array.isArray(member.social)
+    ? { ...member.social } : {};
+  let firstInvalid = null;
+  for (const [platform, label, id, ruleId] of MEMBER_SOCIAL_FIELDS) {
+    const field = $(id);
+    clearAdminFieldValidation(field);
+    const raw = String(field.value || "").trim();
+    const values = socialAccountValues(raw);
+    const rule = ADMIN_SOCIAL_ACCOUNT_RULES[ruleId];
+    if (!raw && field.dataset.legacyConflict === "true") {
+      markAdminFieldInvalid(field, label + " 存在多个旧绑定，请填写要保留的一个账号");
+      if (!firstInvalid) firstInvalid = field;
+    }
+    for (const account of values) {
+      const identity = account.toLowerCase();
+      let error = "";
+      if (!rule.pattern.test(account)) error = label + " 账号格式不正确（" + rule.example + "）";
+      else if ((config.monitor || []).some((other) => other !== member &&
+        memberSocialValues(other, platform).some((value) => value.toLowerCase() === identity))) {
+        error = label + " 账号 " + account + " 已绑定其他成员";
+      }
+      if (error) {
+        markAdminFieldInvalid(field, error);
+        if (!firstInvalid) firstInvalid = field;
+        break;
+      }
+    }
+    if (values.length) updated[platform] = values;
+    else delete updated[platform];
+    if (platform === "tiktok") delete updated.tiktok_live;
+  }
+  if (firstInvalid) { firstInvalid.focus(); return; }
+  if (Object.keys(updated).length) member.social = updated;
+  else delete member.social;
+  $("memberSocialDialog").close();
+  markDirty();
+  renderMembers();
+  renderMonitorSummaries();
+  msg("社媒绑定已更新，请点击页面底部保存", "ok");
+});
+
 function renderMembers() {
   const tbody = $("memberRows");
   tbody.innerHTML = "";
@@ -6841,11 +6976,47 @@ function renderMembers() {
     tdAcc.appendChild(accWrap);
     tdSub.appendChild(subBadge);
 
+    const tdSocial = document.createElement("td");
+    tdSocial.className = "admin-member-social-cell";
+    tdSocial.dataset.label = "社媒账号";
+    const socialList = document.createElement("div");
+    socialList.className = "admin-member-social-list";
+    for (const [platform, label] of MEMBER_SOCIAL_FIELDS) {
+      socialAccountValues(m.social?.[platform]).forEach((account) => {
+        const item = document.createElement("span");
+        item.className = "admin-member-social-item";
+        item.textContent = label + " @" + account;
+        socialList.appendChild(item);
+      });
+    }
+    const tiktokAccounts = new Set(socialAccountValues(m.social?.tiktok).map((value) => value.toLowerCase()));
+    socialAccountValues(m.social?.tiktok_live).forEach((account) => {
+      if (tiktokAccounts.has(account.toLowerCase())) return;
+      const item = document.createElement("span");
+      item.className = "admin-member-social-item";
+      item.textContent = "Live 旧绑定 @" + account;
+      socialList.appendChild(item);
+    });
+    if (!socialList.childElementCount) {
+      const empty = document.createElement("span");
+      empty.className = "admin-member-social-empty";
+      empty.textContent = "未绑定";
+      socialList.appendChild(empty);
+    }
+    tdSocial.appendChild(socialList);
+
     const tdOps = document.createElement("td");
     tdOps.className = "admin-member-actions-cell";
     tdOps.dataset.label = "操作";
     const opsWrap = document.createElement("div");
     opsWrap.className = "admin-row-actions";
+    const editSocial = document.createElement("button");
+    editSocial.className = "btn small";
+    editSocial.type = "button";
+    editSocial.textContent = "编辑社媒";
+    editSocial.setAttribute("aria-label", "编辑「" + (m.name || "未命名成员") + "」的社媒账号");
+    editSocial.addEventListener("click", () => openMemberSocialDialog(m));
+    opsWrap.appendChild(editSocial);
     opsWrap.appendChild(mkDelBtn(async () => {
       const displayName = m.name || m.id || "未命名成员";
       if (!(await uiConfirm("确定删除监控成员「" + displayName + "」吗？",
@@ -6857,7 +7028,7 @@ function renderMembers() {
     }));
     tdOps.appendChild(opsWrap);
 
-    tr.append(tdName, tdAcc, tdSub, tdOps);
+    tr.append(tdName, tdAcc, tdSub, tdSocial, tdOps);
     tbody.appendChild(tr);
   });
   // 成员变动后同步刷新 Bot 的推送成员选择面板

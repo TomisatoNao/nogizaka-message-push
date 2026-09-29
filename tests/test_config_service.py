@@ -49,6 +49,26 @@ def test_validate_config(tmp_path: Path):
     assert any("重复" in e for e in errs)
 
 
+def test_member_social_binding_validation_preserves_manual_overlap():
+    config = json.loads(json.dumps(SAMPLE_CONFIG))
+    config["platforms"] = {"instagram": {"accounts": ["shared"]}}
+    config["monitor"][0]["social"] = {"instagram": ["@shared"]}
+    assert config_service.validate_config(config) == []
+
+    config["monitor"][1]["social"] = {"instagram": ["SHARED"]}
+    assert any("同时绑定成员" in error for error in config_service.validate_config(config))
+
+    config["monitor"][1]["social"] = {"instagram": ["valid.second", "valid.third"]}
+    assert any("只能绑定一个账号" in error for error in config_service.validate_config(config))
+
+    config["monitor"][0]["social"] = {"tiktok": ["same.user"]}
+    config["monitor"][1]["social"] = {"tiktok_live": ["same.user"]}
+    assert any("同时绑定成员" in error for error in config_service.validate_config(config))
+
+    config["monitor"][1]["social"] = {"instagram": ["bad/handle"]}
+    assert any("账号格式无效" in error for error in config_service.validate_config(config))
+
+
 def test_serialize_config():
     serialized = config_service.serialize_config(SAMPLE_CONFIG)
     assert "// ── 推送通道 ──" in serialized

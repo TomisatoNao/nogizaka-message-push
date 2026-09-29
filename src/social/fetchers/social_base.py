@@ -65,42 +65,54 @@ class SocialFetcher(BaseFetcher):
         return bool(self.cfg.get("enabled"))
 
     @property
+    def member_social_keys(self) -> tuple[str, ...]:
+        """TikTok Live 与短视频共用成员身份，同时兼容旧的 Live 绑定。"""
+        if self.platform_name == "tiktok_live":
+            return ("tiktok", "tiktok_live")
+        return (self.platform_name,)
+
+    def _member_accounts(self, member: dict) -> list[str]:
+        social = member.get("social", {})
+        if not isinstance(social, dict):
+            return []
+        accounts = []
+        for key in self.member_social_keys:
+            raw = social.get(key) or []
+            if isinstance(raw, str):
+                values = [raw]
+            elif isinstance(raw, list):
+                values = raw
+            else:
+                continue
+            for value in values:
+                account = str(value).strip().lstrip("@").strip()
+                if account and account not in accounts:
+                    accounts.append(account)
+        return accounts
+
+    @property
     def accounts(self) -> list[str]:
         """监控账号列表（结合全局平台配置与成员绑定配置，统一去掉前导 @）。"""
         accounts_set: list[str] = []
         raw = self.cfg.get("accounts") or []
         for a in raw:
-            s = str(a).lstrip("@").strip()
+            s = str(a).strip().lstrip("@").strip()
             if s and s not in accounts_set:
                 accounts_set.append(s)
 
         # 自动聚合 monitor 列表中的成员社交账号绑定
         for m in self._config.get("monitor", []):
-            soc = m.get("social", {})
-            if isinstance(soc, dict):
-                p_accs = soc.get(self.platform_name)
-                if isinstance(p_accs, str):
-                    p_accs = [p_accs]
-                if isinstance(p_accs, list):
-                    for a in p_accs:
-                        s = str(a).lstrip("@").strip()
-                        if s and s not in accounts_set:
-                            accounts_set.append(s)
+            for account in self._member_accounts(m):
+                if account not in accounts_set:
+                    accounts_set.append(account)
         return accounts_set
 
     def member_name(self, account: str) -> str | None:
         """根据社媒账号反查其归属的 monitor 成员名。若为公共账号则返回 None。"""
-        acc_clean = account.lstrip("@").strip()
+        acc_clean = account.strip().lstrip("@").strip()
         for m in self._config.get("monitor", []):
-            soc = m.get("social", {})
-            if isinstance(soc, dict):
-                p_accs = soc.get(self.platform_name)
-                if isinstance(p_accs, str):
-                    p_accs = [p_accs]
-                if isinstance(p_accs, list):
-                    cleaned = [str(x).lstrip("@").strip() for x in p_accs]
-                    if acc_clean in cleaned:
-                        return m.get("name") or acc_clean
+            if acc_clean in self._member_accounts(m):
+                return m.get("name") or acc_clean
         return None
 
     def display_name(self, account: str) -> str:

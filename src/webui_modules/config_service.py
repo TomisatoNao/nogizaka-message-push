@@ -93,6 +93,13 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
 
     accounts = raw.get("accounts", {})
     seen: set[tuple[str, str]] = set()
+    social_patterns = {
+        "x": re.compile(r"^[A-Za-z0-9_]{1,15}$"),
+        "instagram": re.compile(r"^[A-Za-z0-9._]{1,30}$"),
+        "tiktok": re.compile(r"^[A-Za-z0-9._]{1,50}$"),
+        "tiktok_live": re.compile(r"^[A-Za-z0-9._]{1,50}$"),
+    }
+    social_owners: dict[tuple[str, str], tuple[int, str]] = {}
     for i, m in enumerate(raw.get("monitor", [])):
         label = m.get("name") or f"#{i}"
         if not str(m.get("id", "")).strip():
@@ -105,6 +112,36 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
         if key in seen:
             errors.append(f"成员 {label} 重复：同一账号下 id={m.get('id')} 出现多次")
         seen.add(key)
+        social = m.get("social") or {}
+        if not isinstance(social, dict):
+            errors.append(f"成员 {label} 的社媒绑定必须是对象")
+            continue
+        for platform, pattern in social_patterns.items():
+            values = social.get(platform) or []
+            if isinstance(values, str):
+                values = [values]
+            if not isinstance(values, list):
+                errors.append(f"成员 {label} 的 {platform} 账号必须是列表或字符串")
+                continue
+            if platform != "tiktok_live" and len(values) > 1:
+                errors.append(f"成员 {label} 的 {platform} 只能绑定一个账号")
+            local_seen: set[str] = set()
+            for value in values:
+                account = str(value).strip().lstrip("@").strip()
+                identity = account.lower()
+                if not pattern.fullmatch(account):
+                    errors.append(f"成员 {label} 的 {platform} 账号格式无效: {value!r}")
+                    continue
+                if identity in local_seen:
+                    errors.append(f"成员 {label} 的 {platform} 账号重复: {account}")
+                    continue
+                local_seen.add(identity)
+                identity_platform = "tiktok" if platform == "tiktok_live" else platform
+                owner = social_owners.get((identity_platform, identity))
+                if owner is not None and owner[0] != i:
+                    errors.append(f"{identity_platform} 账号 {account} 同时绑定成员 {owner[1]} 与 {label}")
+                else:
+                    social_owners[(identity_platform, identity)] = (i, str(label))
 
     bot_names: set[str] = set()
     for b in raw.get("qq_official_bots", []):
