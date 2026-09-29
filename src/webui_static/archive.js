@@ -221,17 +221,29 @@ window.handleImgError = function(img) {
 
 let _refreshingPromise = null;
 
+async function probeCurrentAuth() {
+  const response = await fetch("/api/auth/me", { cache: "no-store" });
+  return response.json();
+}
+
 async function silentRefreshToken() {
   if (!_refreshingPromise) {
     _refreshingPromise = (async () => {
       try {
-        const resp = await fetch("/api/auth/refresh", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-        });
-        const data = await resp.json();
-        return !!(data && data.ok);
+        const attempt = async () => {
+          const me = await probeCurrentAuth();
+          if (me.user) return true; // another tab may already have refreshed
+          if (!me.refresh_available) return false;
+          const resp = await fetch("/api/auth/refresh", {
+            method: "POST", cache: "no-store",
+          });
+          if (resp.ok) return true;
+          const after = await probeCurrentAuth();
+          return !!after.user;
+        };
+        return navigator.locks?.request
+          ? await navigator.locks.request("sakamichi-auth-refresh", attempt)
+          : await attempt();
       } catch (_) {
         return false;
       } finally {
@@ -4446,7 +4458,10 @@ async function initAuth() {
   if (_authInitPromise) return _authInitPromise;
   _authInitPromise = (async () => {
     try {
-      const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+      let me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+      if (me.auth_enabled && !me.user && me.refresh_available && await silentRefreshToken()) {
+        me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+      }
       const adminLink = $("adminLink");
       if (!me.auth_enabled) { 
         window._isLoggedIn = true; 

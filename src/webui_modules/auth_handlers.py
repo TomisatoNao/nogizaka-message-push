@@ -304,11 +304,16 @@ def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
         if refresh_tk:
             access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
             refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
-            rot_user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
-                refresh_tk,
-                access_ttl_seconds=access_ttl,
-                refresh_ttl_days=refresh_days,
-            )
+            try:
+                refresh_days = _auth.refresh_token_ttl_days(refresh_tk, refresh_days)
+                rot_user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
+                    refresh_tk,
+                    access_ttl_seconds=access_ttl,
+                    refresh_ttl_days=refresh_days,
+                )
+            except sqlite3.Error:
+                send_html_prompt(handler, "认证服务暂时不可用", "请稍后重试。", 503)
+                return False
             if rot_user:
                 user = {"username": rot_user["username"], "role": rot_user["role"], "via": "refresh"}
                 handler._pending_set_cookies = [
@@ -356,6 +361,7 @@ def handle_auth_me(handler) -> None:
     archive_public = bool(getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False))
     has_u = _auth.has_users()
     user = current_user(handler) if auth_enabled else None
+    refresh_available = bool(cookie_refresh_token(handler)) if auth_enabled else False
     if not user:
         send_json(handler, {
             "ok": True,
@@ -364,6 +370,7 @@ def handle_auth_me(handler) -> None:
             "has_users": has_u,
             "user": None,
             "authenticated": False,
+            "refresh_available": refresh_available,
         }, 200)
         return
     send_json(handler, {
@@ -376,6 +383,7 @@ def handle_auth_me(handler) -> None:
         "username": user["username"],
         "role": user["role"],
         "via": user.get("via", "session"),
+        "refresh_available": refresh_available,
     }, 200)
 
 
@@ -392,7 +400,7 @@ def handle_login(handler, body: dict) -> None:
     )
     try:
         _handle_login(handler, body)
-    except (sqlite3.OperationalError, TimeoutError) as exc:
+    except (sqlite3.Error, TimeoutError) as exc:
         # 数据库锁或底层超时必须让浏览器收到明确响应，不能留下 Pending 请求。
         log_all(
             f"🚨 登录认证服务暂时不可用 | request_id={request_id} | "
@@ -461,8 +469,9 @@ def _handle_login(handler, body: dict) -> None:
     remember = remember_raw if isinstance(remember_raw, bool) else str(remember_raw).strip().lower() in {"1", "true", "yes", "on"}
     access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
     refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30))) if remember else 1
-    token = _auth.create_session(user["username"], user["role"], access_ttl)
-    refresh_token = _auth.create_refresh_token(user["username"], user["role"], ttl_days=refresh_days)
+    token, refresh_token = _auth.issue_login_tokens(
+        user["username"], user["role"], access_ttl, refresh_days,
+    )
     from src.logger import log_all
     request_id = _login_request_id(handler)
     log_all(
@@ -491,22 +500,30 @@ def handle_refresh(handler) -> None:
     body = body if isinstance(body, dict) else {}
     r_token = cookie_refresh_token(handler) or str(body.get("refresh_token", "")).strip()
     if not r_token:
+        _audit(handler, "auth.refresh", "denied", target="refresh",
+               details={"reason": "missing"})
         send_json(handler, {"ok": False, "errors": ["缺少 Refresh Token"]}, 401)
         return
 
     access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
     refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
 
-    user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
-        r_token,
-        access_ttl_seconds=access_ttl,
-        refresh_ttl_days=refresh_days,
-    )
+    try:
+        refresh_days = _auth.refresh_token_ttl_days(r_token, refresh_days)
+        user, new_access, new_refresh = _auth.verify_and_rotate_refresh_token(
+            r_token,
+            access_ttl_seconds=access_ttl,
+            refresh_ttl_days=refresh_days,
+        )
+    except sqlite3.Error:
+        _audit(handler, "auth.refresh", "error", target="refresh",
+               details={"reason": "storage_error"})
+        send_json(handler, {"ok": False, "errors": ["认证存储暂时不可用，请稍后重试"]}, 503)
+        return
     if not user:
-        handler._pending_set_cookies = [
-            _cookie(SESSION_COOKIE, "", 0),
-            _cookie(REFRESH_COOKIE, "", 0),
-        ]
+        # 另一个标签页可能刚完成轮换。迟到的旧令牌请求不得把新 Cookie 清掉。
+        _audit(handler, "auth.refresh", "denied", target="refresh",
+               details={"reason": "invalid_or_rotated"})
         send_json(handler, {"ok": False, "errors": ["刷新令牌已失效，请重新登录"]}, 401)
         return
 
@@ -514,6 +531,8 @@ def handle_refresh(handler) -> None:
         _cookie(SESSION_COOKIE, new_access, access_ttl),
         _cookie(REFRESH_COOKIE, new_refresh, refresh_days * 86400),
     ]
+    _audit(handler, "auth.refresh", "success", actor=user["username"],
+           target="refresh")
     send_json(handler, {
         "ok": True,
         "user": user,
@@ -533,7 +552,13 @@ def handle_api_token_session(handler) -> None:
         API_TOKEN_SESSION_MAX_SECONDS,
         max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600,
     )
-    token = _auth.create_session(API_TOKEN_SESSION_USER, "admin", access_ttl)
+    try:
+        token = _auth.create_session(API_TOKEN_SESSION_USER, "admin", access_ttl)
+    except sqlite3.Error:
+        _audit(handler, "auth.token_session", "error", target="token-session",
+               details={"reason": "session_storage_error"})
+        send_json(handler, {"ok": False, "errors": ["认证存储暂时不可用，请稍后重试"]}, 503)
+        return
     _audit(handler, "auth.token_session", "success", actor=API_TOKEN_SESSION_USER,
            target="token-session", details={"ttl_seconds": access_ttl})
     handler._pending_set_cookies = [_cookie(SESSION_COOKIE, token, access_ttl)]
@@ -605,8 +630,18 @@ def handle_change_password(handler) -> None:
     role = user.get("role", "viewer")
     access_ttl = max(1, int(getattr(cfg, "AUTH_SESSION_HOURS", 2))) * 3600
     refresh_days = max(1, int(getattr(cfg, "AUTH_REFRESH_DAYS", 30)))
-    new_access = _auth.create_session(username, role, access_ttl)
-    new_refresh = _auth.create_refresh_token(username, role, refresh_days)
+    try:
+        new_access, new_refresh = _auth.issue_login_tokens(
+            username, role, access_ttl, refresh_days,
+        )
+    except sqlite3.Error:
+        _audit(handler, "auth.change_password", "error", actor=username,
+               target=username, details={"reason": "session_storage_error"})
+        send_json(handler, {
+            "ok": False,
+            "errors": ["密码已修改，但新会话创建失败；请使用新密码重新登录"],
+        }, 503)
+        return
 
     handler._pending_set_cookies = [
         _cookie(SESSION_COOKIE, new_access, access_ttl),

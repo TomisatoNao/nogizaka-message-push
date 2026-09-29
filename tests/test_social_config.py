@@ -196,7 +196,7 @@ def test_ig_session_check_session_fallback_proxy(monkeypatch):
 
 def test_x_fetcher_failure_warning_rate_limiting(monkeypatch, caplog):
     import logging
-    from src.social.fetchers.x_fetcher import XFetcher
+    from src.social.fetchers.x_fetcher import TimelineUnavailable, XFetcher
 
     fetcher = XFetcher({
         "platforms": {
@@ -215,12 +215,94 @@ def test_x_fetcher_failure_warning_rate_limiting(monkeypatch, caplog):
 
     with caplog.at_level(logging.WARNING):
         # 第一次全后端失败应有 WARNING 告警
-        posts1 = fetcher._fetch_timeline("test_fail_acc")
-        assert posts1 == []
-        assert any("所有时间线后端均不可用" in record.message for record in caplog.records)
+        with pytest.raises(TimelineUnavailable):
+            fetcher._fetch_timeline("test_fail_acc")
+        assert any("时间线抓取失败" in record.message for record in caplog.records)
 
         # 紧接着第二次应受频控抑制，不重复刷屏
         caplog.clear()
-        posts2 = fetcher._fetch_timeline("test_fail_acc")
-        assert posts2 == []
-        assert not any("所有时间线后端均不可用" in record.message for record in caplog.records)
+        with pytest.raises(TimelineUnavailable):
+            fetcher._fetch_timeline("test_fail_acc")
+        assert not any("时间线抓取失败" in record.message for record in caplog.records)
+
+
+def test_x_unconfigured_api_is_not_reported_as_attempted(monkeypatch, caplog):
+    import logging
+    from src.social.fetchers.x_fetcher import TimelineUnavailable, XFetcher
+
+    fetcher = XFetcher({"platforms": {"x": {"enabled": True,
+                                              "accounts": ["demo"],
+                                              "backends": ["syndication", "apiv2"]}}})
+    monkeypatch.setattr(fetcher, "_backend_syndication",
+                        lambda _account: (_ for _ in ()).throw(RuntimeError("HTTP 451")))
+    with caplog.at_level(logging.WARNING), pytest.raises(TimelineUnavailable):
+        fetcher._fetch_timeline("demo")
+    assert "实际尝试: syndication" in caplog.text
+    assert "API v2 未配置 Bearer Token" in caplog.text
+
+
+def test_x_valid_empty_timeline_is_not_an_outage(monkeypatch):
+    from src.social.fetchers.x_fetcher import XFetcher
+
+    fetcher = XFetcher({"platforms": {"x": {"enabled": True,
+                                              "accounts": ["demo"],
+                                              "backends": ["syndication"]}}})
+    monkeypatch.setattr(fetcher, "_backend_syndication", lambda _account: [])
+    assert fetcher.fetch() == []
+    assert fetcher.discovery_status()["demo"]["state"] == "ok"
+
+
+def test_x_partial_failure_keeps_healthy_account_and_backoff(monkeypatch):
+    from src.social.fetchers.x_fetcher import TimelineUnavailable, XFetcher
+    from src.social.models import Post
+
+    fetcher = XFetcher({"platforms": {"x": {"enabled": True,
+                                              "accounts": ["bad", "good"]}}})
+    calls = []
+
+    def fake_fetch(account):
+        calls.append(account)
+        if account == "bad":
+            raise TimelineUnavailable("HTTP 451")
+        return [Post(platform="x", post_id="x_1", author="good", text="hello")]
+
+    monkeypatch.setattr(fetcher, "_fetch_account", fake_fetch)
+    assert len(fetcher.fetch()) == 1
+    assert fetcher.discovery_status()["bad"]["state"] == "failed"
+    assert fetcher.discovery_status()["good"]["state"] == "ok"
+    assert len(fetcher.fetch()) == 1
+    assert calls.count("bad") == 1  # failed account cools down; healthy one continues
+
+
+def test_x_all_failed_is_not_no_new_content(monkeypatch):
+    from src.social.fetchers.x_fetcher import TimelineUnavailable, XFetcher
+
+    fetcher = XFetcher({"platforms": {"x": {"enabled": True, "accounts": ["bad"]}}})
+    monkeypatch.setattr(fetcher, "_fetch_account",
+                        lambda _account: (_ for _ in ()).throw(TimelineUnavailable("HTTP 451")))
+    with pytest.raises(TimelineUnavailable):
+        fetcher.fetch()
+    assert fetcher.discovery_status()["bad"]["consecutive_failures"] == 1
+
+
+def test_x_recovery_marks_possible_history_gap(monkeypatch):
+    import time
+    from src.social.fetchers.x_fetcher import XFetcher, _RawTweet
+
+    fetcher = XFetcher({"platforms": {"x": {"enabled": True, "accounts": ["demo"]}}})
+    last_success = time.time() - 3600
+    fetcher._account_health["demo"] = {
+        "state": "failed", "last_success_at": last_success,
+        "next_retry_at": 0,
+    }
+    tweets = [
+        _RawTweet(tweet_id=str(i), text="post", created_ts=last_success + i + 1,
+                  author="demo", screen_name="demo")
+        for i in range(20)
+    ]
+    monkeypatch.setattr(fetcher, "_fetch_timeline", lambda _account: tweets)
+    monkeypatch.setattr(fetcher, "_bootstrap_guard", lambda *_args: False)
+    monkeypatch.setattr(fetcher, "is_sent", lambda _post_id: True)
+
+    assert fetcher.fetch() == []
+    assert fetcher.discovery_status()["demo"]["gap_risk"] is True

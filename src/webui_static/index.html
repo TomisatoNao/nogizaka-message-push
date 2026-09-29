@@ -3474,13 +3474,20 @@ async function silentRefreshAdminToken() {
   if (!_refreshingAdminPromise) {
     _refreshingAdminPromise = (async () => {
       try {
-        const resp = await fetch("/api/auth/refresh", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-        });
-        const data = await resp.json();
-        return !!(data && data.ok);
+        const attempt = async () => {
+          const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+          if (me.user) return true;
+          if (!me.refresh_available) return false;
+          const resp = await fetch("/api/auth/refresh", {
+            method: "POST", cache: "no-store",
+          });
+          if (resp.ok) return true;
+          const after = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+          return !!after.user;
+        };
+        return navigator.locks?.request
+          ? await navigator.locks.request("sakamichi-auth-refresh", attempt)
+          : await attempt();
       } catch (_) {
         return false;
       } finally {
@@ -4367,6 +4374,42 @@ function renderMonitorSummaries() {
     "日间 " + String(x.interval_seconds || 60) + " 秒",
     "深夜 " + String(x.night_interval_seconds || 300) + " 秒",
   ]);
+  const xRuntime = (latestStatusData || {}).x_monitor || {};
+  const xStates = Object.entries(xRuntime.accounts || {});
+  const xFailures = xStates.filter(([, state]) => state.state === "failed");
+  const xSuccesses = xStates.filter(([, state]) => state.state === "ok");
+  const xGaps = xStates.filter(([, state]) => state.gap_risk);
+  const xStatus = $("monitorXStatus");
+  const xMetrics = $("monitorXMetrics");
+  if (x.enabled && xStatus) {
+    let label = "待首轮检查", tone = "muted";
+    if (!monitorAccountSources("x").effective.size) label = "未配置账号";
+    else if (instagramMonitorStatusStale) { label = "状态刷新失败"; tone = "warn"; }
+    else if (xRuntime.running === false) { label = "监控服务未运行"; tone = "warn"; }
+    else if (xFailures.length === xStates.length && xStates.length) { label = "发现受阻"; tone = "err"; }
+    else if (xFailures.length) { label = "部分账号受阻"; tone = "warn"; }
+    else if (xGaps.length) { label = "可能有历史缺口"; tone = "warn"; }
+    else if (xSuccesses.length === xStates.length && xStates.length) { label = "检查正常"; tone = "ok"; }
+    xStatus.className = "admin-status-badge monitor-summary-status " + tone;
+    xStatus.textContent = label;
+    xStatus.title = [
+      ...xFailures.map(([account, state]) =>
+        "@" + account + "：" + String(state.last_error || "抓取失败").slice(0, 120)),
+      ...xGaps.map(([account]) => "@" + account + "：恢复时可见时间线已满，早期帖子可能未被发现"),
+    ].join("\n");
+    if (xMetrics && xFailures.length) {
+      const note = document.createElement("span");
+      note.className = "monitor-summary-metric";
+      note.textContent = "失败 " + xFailures.length + " 个账号 · 下次自动重试";
+      xMetrics.appendChild(note);
+    }
+    if (xMetrics && xGaps.length) {
+      const note = document.createElement("span");
+      note.className = "monitor-summary-metric";
+      note.textContent = "历史缺口风险 " + xGaps.length + " 个账号";
+      xMetrics.appendChild(note);
+    }
+  }
 
   const instagram = platforms.instagram || {};
   const instagramAccountCount = monitorAccountSources("instagram").effective.size;
@@ -8506,7 +8549,10 @@ document.addEventListener("visibilitychange", () => {
 // ── 登录状态 ─────────────────────────────────────
 (async function initAuth() {
   try {
-    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    let me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    if (me.auth_enabled && !me.user && me.refresh_available && await silentRefreshAdminToken()) {
+      me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    }
     if (me.auth_enabled && me.user) {
       $("whoami").textContent = me.user.username;
       if ($("userMenuName")) $("userMenuName").textContent = "👤 " + me.user.username;

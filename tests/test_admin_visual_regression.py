@@ -201,6 +201,102 @@ def _api_payload(path: str) -> dict:
     return {"ok": True}
 
 
+@pytest.mark.parametrize("page_name", ("archive.html", "login.html"))
+def test_expired_access_cookie_restores_with_refresh(admin_static_server, page_name):
+    playwright = pytest.importorskip("playwright.sync_api")
+    state = {"authenticated": False, "refreshes": 0}
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport=VIEWPORTS["desktop"])
+
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            if path == "/api/auth/me":
+                payload = {
+                    "ok": True, "auth_enabled": True, "archive_public": True,
+                    "has_users": True, "refresh_available": True,
+                    "user": {"username": "demo", "role": "admin"}
+                    if state["authenticated"] else None,
+                }
+            elif path == "/api/auth/refresh":
+                state["refreshes"] += 1
+                state["authenticated"] = True
+                payload = {"ok": True}
+            else:
+                payload = _api_payload(path)
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload, ensure_ascii=False))
+
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/{page_name}", wait_until="domcontentloaded")
+        if page_name == "archive.html":
+            page.wait_for_function("window._isLoggedIn === true")
+        else:
+            page.wait_for_url("**/", timeout=10000)
+        assert state["refreshes"] == 1
+        browser.close()
+
+
+@pytest.mark.parametrize("viewport_name", ("desktop", "mobile"))
+def test_x_discovery_failure_summary(admin_static_server, viewport_name):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport=VIEWPORTS[viewport_name])
+
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            payload = _api_payload(path)
+            if path == "/api/status":
+                payload["x_monitor"] = {
+                    "running": True,
+                    "accounts": {
+                        "demo_x": {"state": "failed", "consecutive_failures": 3,
+                                   "last_error": "HTTP 451"},
+                        "demo_member": {"state": "ok", "consecutive_failures": 0},
+                    },
+                }
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload, ensure_ascii=False))
+
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/#tab=social", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "document.querySelector('#monitorXStatus')?.textContent === '部分账号受阻'"
+        )
+        assert "失败 1 个账号" in page.locator("#monitorXMetrics").inner_text()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        browser.close()
+
+
+@pytest.mark.parametrize("viewport_name", ("desktop", "mobile"))
+def test_x_recovery_gap_summary(admin_static_server, viewport_name):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport=VIEWPORTS[viewport_name])
+
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            payload = _api_payload(path)
+            if path == "/api/status":
+                payload["x_monitor"] = {
+                    "running": True,
+                    "accounts": {"demo_x": {"state": "ok", "gap_risk": True}},
+                }
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload, ensure_ascii=False))
+
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/#tab=social", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "document.querySelector('#monitorXStatus')?.textContent === '可能有历史缺口'"
+        )
+        assert "历史缺口风险 1 个账号" in page.locator("#monitorXMetrics").inner_text()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        browser.close()
+
+
 @pytest.mark.parametrize("viewport_name", ("desktop", "mobile"))
 @pytest.mark.parametrize("theme", ("dark", "light"))
 def test_instagram_discovery_failure_summary_layout(admin_static_server, viewport_name, theme):

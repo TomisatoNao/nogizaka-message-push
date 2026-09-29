@@ -40,6 +40,10 @@ def _extract_frontend_api_calls() -> list[tuple[str, str, str, int]]:
                 start_idx = max(0, line_no - 1)
                 end_idx = min(len(lines), line_no + 8)
                 snippet = "\n".join(lines[start_idx:end_idx])
+                # A complete one-line fetch must not inherit method: POST from
+                # the next, unrelated request in the surrounding function.
+                if re.search(r"fetch\(\s*['\"`](/api/[^'\"`]+)['\"`]\s*,\s*\{[^{}]*\}\s*\)", line):
+                    snippet = line
 
                 method = "GET"
                 if re.search(r'method:\s*["\']POST["\']', snippet, re.I):

@@ -630,21 +630,44 @@ def create_session(username: str, role: str, ttl_seconds: int) -> str:
     expires_at = now + ttl_seconds
     with _lock:
         _load_sessions_from_db()
+        conn = get_auth_db()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO sessions (token, username, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?);",
+                (token, username, role, expires_at, now),
+            )
         _sessions[token] = {
             "username": username,
             "role": role,
             "expires_at": expires_at,
         }
-        conn = get_auth_db()
-        try:
-            with conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO sessions (token, username, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?);",
-                    (token, username, role, expires_at, now),
-                )
-        except sqlite3.Error:
-            pass
     return token
+
+
+def issue_login_tokens(username: str, role: str, access_ttl_seconds: int,
+                       refresh_ttl_days: int) -> tuple[str, str]:
+    """Persist the access/refresh pair atomically before returning either token."""
+    access = secrets.token_urlsafe(32)
+    refresh = secrets.token_urlsafe(48)
+    now = time.time()
+    access_expiry = now + access_ttl_seconds
+    refresh_expiry = now + max(1, int(refresh_ttl_days)) * 86400
+    with _lock:
+        _load_sessions_from_db()
+        conn = get_auth_db()
+        with conn:
+            conn.execute(
+                "INSERT INTO sessions (token, username, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?);",
+                (access, username, role, access_expiry, now),
+            )
+            conn.execute(
+                "INSERT INTO refresh_tokens (token, username, role, expires_at, created_at, last_used_at) "
+                "VALUES (?, ?, ?, ?, ?, ?);",
+                (refresh, username, role, refresh_expiry, now, now),
+            )
+        _sessions[access] = {"username": username, "role": role,
+                             "expires_at": access_expiry}
+    return access, refresh
 
 
 def get_session(token: str, ttl_seconds: int = 0) -> dict | None:
@@ -739,17 +762,27 @@ def create_refresh_token(username: str, role: str, ttl_days: int = 30) -> str:
     expires_at = now + (max(1, int(ttl_days)) * 86400)
     conn = get_auth_db()
     with _lock:
-        try:
-            with conn:
-                # 清理已过期的历史刷新令牌
-                conn.execute("DELETE FROM refresh_tokens WHERE expires_at <= ?;", (now,))
-                conn.execute(
-                    "INSERT INTO refresh_tokens (token, username, role, expires_at, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?);",
-                    (token, username, role, expires_at, now, now),
-                )
-        except Exception as e:
-            log_all(f"⚠️ 写入 refresh_token 异常: {e}", is_error=True)
+        with conn:
+            # 清理已过期的历史刷新令牌
+            conn.execute("DELETE FROM refresh_tokens WHERE expires_at <= ?;", (now,))
+            conn.execute(
+                "INSERT INTO refresh_tokens (token, username, role, expires_at, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?);",
+                (token, username, role, expires_at, now, now),
+            )
     return token
+
+
+def refresh_token_ttl_days(token: str, configured_days: int = 30) -> int:
+    """Preserve a short-lived login's refresh lifetime during rotation."""
+    conn = get_auth_db()
+    with _lock:
+        row = conn.execute(
+            "SELECT created_at, expires_at FROM refresh_tokens WHERE token = ?;",
+            (token,),
+        ).fetchone()
+    if row and float(row[1]) - float(row[0]) <= 86400 + 60:
+        return 1
+    return max(1, int(configured_days))
 
 
 def verify_and_rotate_refresh_token(
@@ -769,7 +802,7 @@ def verify_and_rotate_refresh_token(
     with _lock:
         try:
             cur = conn.execute(
-                "SELECT username, role, expires_at FROM refresh_tokens WHERE token = ? AND expires_at > ?;",
+                "SELECT username, role, expires_at, created_at FROM refresh_tokens WHERE token = ? AND expires_at > ?;",
                 (old_token, now),
             )
             row = cur.fetchone()
@@ -787,21 +820,33 @@ def verify_and_rotate_refresh_token(
             # 保证角色权限是最新的
             role = users[username].get("role", role)
 
-            # 1. 物理销毁旧的 Refresh Token 并原子化插入新的 Refresh Token (RTR)
+            # 物理销毁旧 Refresh Token，并原子化插入新的 Refresh Token 和会话。
             new_refresh_token = secrets.token_urlsafe(48)
-            new_refresh_expires_at = now + (max(1, int(refresh_ttl_days)) * 86400)
+            new_access_token = secrets.token_urlsafe(32)
+            # A login without "remember me" must not silently become a 30-day
+            # login on its first refresh. The original token lifetime records
+            # that choice without adding a new persistent schema field.
+            original_days = 1 if float(row[2]) - float(row[3]) <= 86400 + 60 else max(1, int(refresh_ttl_days))
+            new_refresh_expires_at = now + original_days * 86400
+            new_access_expires_at = now + access_ttl_seconds
             with conn:
                 conn.execute("DELETE FROM refresh_tokens WHERE token = ?;", (old_token,))
                 conn.execute(
                     "INSERT INTO refresh_tokens (token, username, role, expires_at, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?);",
                     (new_refresh_token, username, role, new_refresh_expires_at, now, now),
                 )
-        except Exception as e:
-            log_all(f"⚠️ 轮换 refresh_token 异常: {e}", is_error=True)
-            return None, "", ""
+                conn.execute(
+                    "INSERT INTO sessions (token, username, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?);",
+                    (new_access_token, username, role, new_access_expires_at, now),
+                )
+            _sessions[new_access_token] = {
+                "username": username, "role": role,
+                "expires_at": new_access_expires_at,
+            }
+        except sqlite3.Error as e:
+            log_all(f"⚠️ 轮换 refresh_token 数据库异常: {type(e).__name__}", is_error=True)
+            raise
 
-    # 2. 签发全新 Access Token (Session)
-    new_access_token = create_session(username, role, access_ttl_seconds)
     return {"username": username, "role": role}, new_access_token, new_refresh_token
 
 

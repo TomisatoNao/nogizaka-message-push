@@ -23,6 +23,7 @@ import math
 import time
 import os
 import re
+import concurrent.futures
 try:
     import defusedxml.ElementTree as ET  # nosec B405
 except ImportError:
@@ -35,6 +36,10 @@ from src.social.fetchers.social_base import SocialFetcher
 from src.social.models import Post
 
 log = logging.getLogger("collink")
+
+
+class TimelineUnavailable(RuntimeError):
+    """All configured timeline sources failed; this is not an empty timeline."""
 
 _JST = timezone(timedelta(hours=9))
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -235,6 +240,73 @@ class XFetcher(SocialFetcher):
                                       "Accept-Language": "ja,en;q=0.8"})
         self._uid_cache: dict[str, str] = {}
         self._last_backend_fail_warn: dict[str, float] = {}
+        self._last_backend: dict[str, str] = {}
+        self._account_health: dict[str, dict] = {}
+        self._coverage_risk: dict[str, bool] = {}
+
+    def discovery_status(self) -> dict[str, dict]:
+        """Non-secret, per-account status for diagnostics."""
+        return {account: dict(self._account_health.get(account, {"state": "pending"}))
+                for account in self.accounts}
+
+    def fetch(self) -> list[Post]:
+        """Keep failures separate from a successful poll with no new posts."""
+        accounts = self.accounts
+        if not accounts:
+            return []
+        posts: list[Post] = []
+        now = time.time()
+        due = [account for account in accounts
+               if self._account_health.get(account, {}).get("next_retry_at", 0) <= now]
+
+        def check(account: str) -> tuple[str, list[Post], str]:
+            try:
+                found = self._fetch_account(account)
+                member = self.member_name(account)
+                for post in found:
+                    if member:
+                        post.extra["member_name"] = member
+                    post.extra["account"] = account
+                return account, found, ""
+            except Exception as exc:
+                from src.logger import redact_sensitive
+                message = redact_sensitive(str(exc).replace("\n", " "))[:300]
+                return account, [], f"{type(exc).__name__}: {message}"
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(due), 8) or 1) as executor:
+            for account, found, error in executor.map(check, due):
+                previous = self._account_health.get(account, {})
+                if error:
+                    failures = int(previous.get("consecutive_failures", 0)) + 1
+                    delay = min(1800, 60 * (2 ** min(failures - 1, 5)))
+                    self._account_health[account] = {
+                        "state": "failed", "consecutive_failures": failures,
+                        "last_success_at": previous.get("last_success_at"),
+                        "last_error": error, "next_retry_at": time.time() + delay,
+                        "backend": previous.get("backend"),
+                        "gap_risk": previous.get("gap_risk", False),
+                    }
+                    continue
+                self._account_health[account] = {
+                    "state": "ok", "consecutive_failures": 0,
+                    "last_success_at": time.time(), "last_error": "",
+                    "next_retry_at": 0, "backend": self._last_backend.get(account),
+                    "gap_risk": (previous.get("gap_risk", False)
+                                 or self._coverage_risk.get(account, False)),
+                }
+                if previous.get("state") == "failed":
+                    log.info("[x] ✅ @%s 时间线抓取已恢复", account)
+                    self._last_backend_fail_warn.pop(account, None)
+                    if self._coverage_risk.get(account):
+                        log.warning("[x] ⚠️ @%s 恢复后时间线已满，历史内容可能超出可见窗口", account)
+                if found:
+                    log.info("[x] 🆕 @%s 发现 %s 条新内容", account, len(found))
+                    posts.extend(found)
+
+        if all(self._account_health.get(account, {}).get("state") == "failed"
+               for account in accounts):
+            raise TimelineUnavailable("所有 X 账号的时间线均不可用或处于退避等待")
+        return posts
 
     # ── 主流程 ───────────────────────────────────────────
 
@@ -254,6 +326,14 @@ class XFetcher(SocialFetcher):
             if t.kind == "quote" and not cfg.get("include_quotes", True):
                 continue
             filtered.append(t)
+
+        previous = self._account_health.get(account, {})
+        last_success = previous.get("last_success_at")
+        if (previous.get("state") == "failed" and last_success
+                and len(filtered) >= 20
+                and all(t.created_ts > 0 for t in filtered)
+                and min(t.created_ts for t in filtered) > last_success):
+            self._coverage_risk[account] = True
 
         # 首次运行只记录不推送
         if self._bootstrap_guard(account, [self._pid(t) for t in filtered]):
@@ -351,7 +431,11 @@ class XFetcher(SocialFetcher):
     def _fetch_timeline(self, account: str) -> list[_RawTweet]:
         backends = self.cfg.get("backends") or ["syndication", "nitter", "apiv2"]
         backend_errors: list[str] = []
+        attempted: list[str] = []
+        valid_empty = False
         for name in backends:
+            if str(name).lower() == "apiv2" and not (self.cfg.get("bearer_token") or "").strip():
+                continue
             fn = {
                 "syndication": self._backend_syndication,
                 "nitter": self._backend_nitter,
@@ -359,34 +443,42 @@ class XFetcher(SocialFetcher):
             }.get(str(name).lower())
             if fn is None:
                 continue
+            attempted.append(str(name))
             try:
                 got = fn(account)
             except Exception as e:
-                err_msg = str(e).replace("\n", " ")[:160]
+                from src.logger import redact_sensitive
+                err_msg = redact_sensitive(str(e).replace("\n", " "))[:300]
                 backend_errors.append(f"{name}: {err_msg}")
                 log.debug("[x] 后端 %s 异常: %s", name, err_msg)
                 continue
             if got:
                 log.debug("[x] 后端 %s 取得 %s 条推文", name, len(got))
+                self._last_backend[account] = str(name)
                 self._fill_missing_alts(got)
                 return got
+            valid_empty = True
+            self._last_backend[account] = str(name)
             log.debug("[x] 后端 %s 无结果，尝试下一个", name)
+
+        if valid_empty:
+            return []
 
         now = time.time()
         last_warn = self._last_backend_fail_warn.get(account, 0.0)
+        err_summary = "; ".join(backend_errors) if backend_errors else "没有已配置且可执行的后端"
         if now - last_warn >= 1800:
             self._last_backend_fail_warn[account] = now
-            err_summary = "; ".join(backend_errors) if backend_errors else "无推文返回"
             log.warning(
-                "[x] ⚠️ @%s 所有时间线后端均不可用（已尝试: %s）。错误概要: %s。"
-                "提示: syndication 接口已被官方阻断，公共 Nitter 实例受限不稳定；如需稳定抓取请在 config.json 的 platforms.x 中配置 bearer_token 或健康可用的 Nitter/RSS 实例。",
+                "[x] ⚠️ @%s 时间线抓取失败（实际尝试: %s；API v2 %s）。错误概要: %s。",
                 account,
-                ", ".join(backends),
+                ", ".join(attempted) or "无",
+                "已配置" if (self.cfg.get("bearer_token") or "").strip() else "未配置 Bearer Token",
                 err_summary,
             )
         else:
             log.debug("[x] @%s 所有后端均无结果（可能被限流或账号无公开推文）", account)
-        return []
+        raise TimelineUnavailable(err_summary)
 
     # ── 图片 alt（无障碍描述）补齐 ────────────────────────
     #
@@ -443,8 +535,10 @@ class XFetcher(SocialFetcher):
         if not m:
             raise RuntimeError("未找到 __NEXT_DATA__")
         data = json.loads(m.group(1))
-        entries = (data.get("props", {}).get("pageProps", {})
-                   .get("timeline", {}).get("entries", []) or [])
+        timeline = data.get("props", {}).get("pageProps", {}).get("timeline")
+        if not isinstance(timeline, dict) or not isinstance(timeline.get("entries"), list):
+            raise RuntimeError("时间线响应结构不完整")
+        entries = timeline["entries"]
 
         out: list[_RawTweet] = []
         for entry in entries:
@@ -523,19 +617,24 @@ class XFetcher(SocialFetcher):
             "https://nitter.perennialte.ch",
             "https://xcancel.com",
         ]
-        last_err = None
+        errors: list[str] = []
+        valid_empty = False
         for inst in instances:
             base = str(inst).rstrip("/")
             try:
                 resp = self._session.get(f"{base}/{account}/rss",
                                          timeout=self._dl.timeout)
                 if resp.status_code != 200:
-                    last_err = f"HTTP {resp.status_code}"
+                    errors.append(f"{base}: HTTP {resp.status_code}")
                     continue
                 root = ET.fromstring(resp.text)  # nosec B314
+                if root.tag.rsplit("}", 1)[-1].lower() != "rss" or root.find("channel") is None:
+                    raise RuntimeError("不是有效的 RSS 时间线")
             except Exception as e:
-                last_err = str(e)
+                errors.append(f"{base}: {str(e).replace(chr(10), ' ')[:120]}")
                 continue
+
+            valid_empty = True
 
             out: list[_RawTweet] = []
             for item in root.iterfind(".//item"):
@@ -588,8 +687,10 @@ class XFetcher(SocialFetcher):
                 ))
             if out:
                 return out
-        if last_err:
-            raise RuntimeError(f"所有 Nitter 实例均失败（最后错误: {last_err}）")
+        if valid_empty:
+            return []
+        if errors:
+            raise RuntimeError("所有 Nitter 实例均失败（" + "; ".join(errors) + "）")
         return []
 
     # 后端 3：官方 API v2（需 bearer_token）
@@ -622,6 +723,8 @@ class XFetcher(SocialFetcher):
         )
         r.raise_for_status()
         body = r.json()
+        if "data" not in body and "meta" not in body:
+            raise RuntimeError("API v2 时间线响应结构不完整")
         media_map = {m["media_key"]: m
                      for m in (body.get("includes") or {}).get("media", [])}
         ref_map = {t["id"]: t

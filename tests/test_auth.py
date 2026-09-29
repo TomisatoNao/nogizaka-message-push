@@ -298,6 +298,10 @@ def main() -> None:
                 "浏览器登录响应不得暴露会话令牌"
             admin_cookie = _cookie(h, "sakamichi_session")
             admin_refresh_cookie = _cookie(h, "sakamichi_refresh_token")
+            code, only_refresh, _ = _http("GET", base + "/api/auth/me",
+                                           headers={"Cookie": admin_refresh_cookie})
+            assert code == 200 and only_refresh["user"] is None
+            assert only_refresh["refresh_available"] is True
 
             ck = {"Cookie": admin_cookie}
             code, body, _ = _http("GET", base + "/api/config", headers=ck)
@@ -317,9 +321,10 @@ def main() -> None:
             new_refresh_cookie = _cookie(rh, "sakamichi_refresh_token")
             assert new_refresh_cookie != admin_refresh_cookie, "应轮换得到全新的 Refresh Token Cookie"
             # 旧 Refresh Token 已被轮换作废
-            code, rbody_fail, _ = _http("POST", base + "/api/auth/refresh",
-                                        headers={"Cookie": admin_refresh_cookie})
+            code, rbody_fail, stale_headers = _http("POST", base + "/api/auth/refresh",
+                                                    headers={"Cookie": admin_refresh_cookie})
             assert code == 401, "已使用的 Refresh Token 再次使用应 401"
+            assert "Set-Cookie" not in stale_headers, "迟到的旧令牌响应不能清除另一标签页的新 Cookie"
             # 新 Refresh Token 可用
             code, rbody2, _ = _http("POST", base + "/api/auth/refresh",
                                     headers={"Cookie": new_refresh_cookie})

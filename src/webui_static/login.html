@@ -411,9 +411,24 @@ function showNotice(html) {
   $("notice").innerHTML = html;
 }
 
+async function restoreLoginSession() {
+  const attempt = async () => {
+    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    if (me.user) return true;
+    if (!me.refresh_available) return false;
+    const response = await fetch("/api/auth/refresh", { method: "POST", cache: "no-store" });
+    if (response.ok) return true;
+    const after = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    return !!after.user;
+  };
+  return navigator.locks?.request
+    ? navigator.locks.request("sakamichi-auth-refresh", attempt)
+    : attempt();
+}
+
 (async function init() {
   try {
-    const me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+    let me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
     if (!me.auth_enabled) {
       $("sub").textContent = "账号系统未启用";
       showNotice("在 <code>config.json</code> 的 <code>auth.enabled</code> 打开后即可使用账号登录。" +
@@ -426,6 +441,9 @@ function showNotice(html) {
                  "<code>python tools/manage_users.py add 用户名</code><br>" +
                  "密码在命令行交互输入，不会留在历史记录里。");
       return;
+    }
+    if (!me.user && me.refresh_available && await restoreLoginSession()) {
+      me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
     }
     if (me.user) {
       location.replace(getRedirectTarget(me.user));
