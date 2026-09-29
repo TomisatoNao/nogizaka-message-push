@@ -504,11 +504,12 @@ def _extract_bilingual_pairs(html_or_text: str, media_urls: list[str] | None = N
 async def send_blog_post(post: dict) -> bool:
     """向配置的渠道推送一篇博客。
 
-    无论何种模式，第一条均统一发送博客提醒头（作者/标题/时间/链接）；
-    后续内容严格根据通道配置的 blog_card_mode 分发：
+    按通道配置的 blog_card_mode 分发博客内容。Telegram 的传统图文模式
+    将提醒头附在首组图片，正文仍单独发送；无图或提醒超出 caption 限制时
+    退回独立文字提醒。其他模式仍先发送提醒头：
     1. card_only: 提醒头 -> 精美长图卡片（极简防刷屏，坚决不发单张原图，不发正文纯文本）；
     2. card_and_images: 提醒头 -> 精美长图卡片 -> 紧随推送全量高清原始写真（方便存图）；
-    3. text_and_images: 提醒头 -> 全量高清原图 -> 中日对照正文。
+    3. text_and_images: Telegram 首组原图附提醒头 -> 后续原图 -> 中日对照正文。
     """
     import asyncio
     import json
@@ -784,9 +785,11 @@ async def send_blog_post(post: dict) -> bool:
             async def _send_tg_blog(b=bot):
                 try:
                     mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
-                    if not await b._post_message(b.target_chat, header_text):
-                        return False
-                    await asyncio.sleep(0.3)
+                    inline_header = mode == "text_and_images" and media_urls and tgbot.media_caption_fits(header_text)
+                    if not inline_header:
+                        if not await b._post_message(b.target_chat, header_text):
+                            return False
+                        await asyncio.sleep(0.3)
 
                     if mode == "card_only":
                         sent_card = False
@@ -812,7 +815,9 @@ async def send_blog_post(post: dict) -> bool:
                                 await b.send_translation_tg(pairs)
                     else:
                         if media_urls:
-                            await b.send_media_group_photos(media_urls)
+                            await b.send_media_group_photos(
+                                media_urls, caption=header_text if inline_header else ""
+                            )
                             await asyncio.sleep(0.3)
                         if pairs:
                             await b.send_translation_tg(pairs)

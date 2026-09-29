@@ -21,6 +21,7 @@ except ImportError:
 
 from src.blog_card_renderer import render_blog_card, is_playwright_available, _generate_html
 from src.notifier import send_blog_post
+from src.platforms.tgbot import TGBot, media_caption_fits
 
 
 @_async_test
@@ -122,6 +123,141 @@ async def test_notifier_card_only_routing():
         assert mock_bot.send_group_text.call_count == 1
         assert mock_bot.send_media_file.call_count == 1
         assert mock_bot.send_translation_qq.call_count == 0
+
+
+@_async_test
+async def test_tg_classic_blog_sends_header_with_first_album_then_body():
+    post = {
+        "group_key": "hinatazaka", "group_name": "日向坂46",
+        "author": "大野 愛実", "title": "写真と近況", "date": "2026.9.29 16:49",
+        "url": "https://example.com/blog/123", "images": [f"https://example.com/{i}.jpg" for i in range(12)],
+        "translation": "本文",
+    }
+    bot = TGBot(name="test", token="", target_chat="123", push_blog=True,
+                blog_card_mode="text_and_images")
+    bot._bot = MagicMock()
+    sent = []
+
+    async def send_header(chat_id, text):
+        sent.append(("header", text))
+        return True
+
+    async def send_album(**kwargs):
+        sent.append(("photos", kwargs["media"]))
+        return []
+
+    async def send_body(pairs):
+        sent.append(("body", pairs))
+        return True
+
+    bot._post_message = AsyncMock(side_effect=send_header)
+    bot._bot.send_media_group = AsyncMock(side_effect=send_album)
+    bot.send_translation_tg = AsyncMock(side_effect=send_body)
+    with patch("config.config.ENABLE_QQ_OFFICIAL_BOT", False), \
+         patch("config.config.ENABLE_NAPCAT_QQ", False), \
+         patch("config.config.ENABLE_TG_BOT", True), \
+         patch("src.platforms.tgbot.get_configured_bots", return_value=[bot]), \
+         patch("src.blog_card_renderer.render_blog_card", new_callable=AsyncMock, return_value=None), \
+         patch("src.notifier._extract_bilingual_pairs", return_value=[("原文", "译文")]):
+        assert await send_blog_post(post) is True
+
+    assert [item[0] for item in sent] == ["photos", "photos", "body"]
+    assert [len(item[1]) for item in sent[:2]] == [10, 2]
+    assert [media.media for item in sent[:2] for media in item[1]] == post["images"]
+    assert "作者：大野 愛実" in sent[0][1][0].caption
+    assert "https://example.com/blog/123" in sent[0][1][0].caption
+    assert all(media.caption is None for media in sent[1][1])
+    bot._post_message.assert_not_awaited()
+
+
+@_async_test
+async def test_tg_classic_blog_without_photos_keeps_header_before_body():
+    post = {
+        "group_key": "hinatazaka", "group_name": "日向坂46",
+        "author": "大野 愛実", "title": "文字ブログ", "date": "2026.9.29",
+        "url": "https://example.com/blog/123", "images": [], "translation": "本文",
+    }
+    bot = MagicMock()
+    bot.target_chat = "123"
+    bot.push_blog = True
+    bot.blog_filter = []
+    bot.blog_card_mode = "text_and_images"
+    sent = []
+    bot._post_message = AsyncMock(side_effect=lambda *_: sent.append("header") or True)
+    bot.send_media_group_photos = AsyncMock()
+    bot.send_translation_tg = AsyncMock(side_effect=lambda *_: sent.append("body") or True)
+    with patch("config.config.ENABLE_QQ_OFFICIAL_BOT", False), \
+         patch("config.config.ENABLE_NAPCAT_QQ", False), \
+         patch("config.config.ENABLE_TG_BOT", True), \
+         patch("src.platforms.tgbot.get_configured_bots", return_value=[bot]), \
+         patch("src.blog_card_renderer.render_blog_card", new_callable=AsyncMock, return_value=None), \
+         patch("src.notifier._extract_bilingual_pairs", return_value=[("原文", "译文")]):
+        assert await send_blog_post(post) is True
+    assert sent == ["header", "body"]
+    bot.send_media_group_photos.assert_not_called()
+
+
+@_async_test
+async def test_tg_classic_blog_long_header_falls_back_to_separate_text():
+    post = {
+        "group_key": "hinatazaka", "group_name": "日向坂46",
+        "author": "大野 愛実", "title": "标题" * 600, "date": "2026.9.29",
+        "url": "https://example.com/blog/123",
+        "images": ["https://example.com/1.jpg", "https://example.com/2.jpg"],
+        "translation": "本文",
+    }
+    bot = MagicMock()
+    bot.target_chat = "123"
+    bot.push_blog = True
+    bot.blog_filter = []
+    bot.blog_card_mode = "text_and_images"
+    sent = []
+    bot._post_message = AsyncMock(side_effect=lambda *_: sent.append("header") or True)
+    bot.send_media_group_photos = AsyncMock(
+        side_effect=lambda *_args, **kwargs: sent.append(("photos", kwargs["caption"])) or True
+    )
+    bot.send_translation_tg = AsyncMock(side_effect=lambda *_: sent.append("body") or True)
+    with patch("config.config.ENABLE_QQ_OFFICIAL_BOT", False), \
+         patch("config.config.ENABLE_NAPCAT_QQ", False), \
+         patch("config.config.ENABLE_TG_BOT", True), \
+         patch("src.platforms.tgbot.get_configured_bots", return_value=[bot]), \
+         patch("src.blog_card_renderer.render_blog_card", new_callable=AsyncMock, return_value=None), \
+         patch("src.notifier._extract_bilingual_pairs", return_value=[("原文", "译文")]):
+        assert await send_blog_post(post) is True
+    assert sent == ["header", ("photos", ""), "body"]
+
+
+@_async_test
+async def test_tg_photo_batches_keep_caption_only_on_first_ten():
+    photos = [f"https://example.com/{i}.jpg" for i in range(21)]
+    caption = "作者：A & B <test>\n链接：https://example.com/blog"
+    bot = TGBot(name="test", token="", target_chat="123")
+    bot._bot = MagicMock()
+    bot._bot.send_media_group = AsyncMock(return_value=[])
+    bot._post_media = AsyncMock(return_value=True)
+    assert media_caption_fits(caption)
+
+    assert await bot.send_media_group_photos(photos, caption=caption) is True
+    albums = [call.kwargs["media"] for call in bot._bot.send_media_group.await_args_list]
+    assert [len(album) for album in albums] == [10, 10]
+    assert albums[0][0].caption == "作者：A &amp; B &lt;test&gt;\n链接：https://example.com/blog"
+    assert all(item.caption is None for album in albums for item in album if item is not albums[0][0])
+    bot._post_media.assert_awaited_once_with("123", "image", photos[20], "")
+
+
+@_async_test
+async def test_tg_album_failure_falls_back_to_photos_with_first_caption():
+    bot = TGBot(name="test", token="", target_chat="123")
+    bot._bot = MagicMock()
+    bot._send_with_retry = AsyncMock(return_value=False)
+    bot._post_media = AsyncMock(return_value=True)
+    photos = ["https://example.com/1.jpg", "https://example.com/2.jpg"]
+
+    assert await bot.send_media_group_photos(photos, caption="博客通知") is True
+    assert [call.args for call in bot._post_media.await_args_list] == [
+        ("123", "image", photos[0], "博客通知"),
+        ("123", "image", photos[1], ""),
+    ]
 
 
 @_async_test

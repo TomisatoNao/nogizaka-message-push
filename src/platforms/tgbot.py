@@ -205,12 +205,21 @@ class TGBot:
         from telegram.constants import ParseMode
         
         batches = [photos[i:i+10] for i in range(0, len(photos), 10)]
+        safe_caption = _to_html(caption, _TELEGRAM_CAPTION_MAX) if caption else ""
         all_ok = True
         
         for bi, batch in enumerate(batches):
+            if len(batch) == 1:
+                ok = await self._post_media(
+                    self.target_chat, "image", batch[0], caption if bi == 0 else ""
+                )
+                all_ok = all_ok and ok
+                if not ok and bi == 0 and caption:
+                    await self._post_message(self.target_chat, caption)
+                continue
             media = []
             for i, url in enumerate(batch):
-                cap = caption if (bi == 0 and i == 0) else None
+                cap = safe_caption if (bi == 0 and i == 0) else None
                 pm = ParseMode.HTML if cap else None
                 media.append(InputMediaPhoto(media=url, caption=cap, parse_mode=pm))
                 
@@ -219,11 +228,16 @@ class TGBot:
 
             ok = await self._send_with_retry("Telegram 媒体组", action)
             if not ok:
-                all_ok = False
+                fallback_ok = True
                 for i, url in enumerate(batch):
                     cap = caption if (bi == 0 and i == 0) else ""
-                    await self._post_media(self.target_chat, "image", url, cap)
-            await asyncio.sleep(1.0)
+                    sent = await self._post_media(self.target_chat, "image", url, cap)
+                    fallback_ok = fallback_ok and sent
+                    if not sent and bi == 0 and i == 0 and caption:
+                        await self._post_message(self.target_chat, caption)
+                all_ok = all_ok and fallback_ok
+            if bi < len(batches) - 1:
+                await asyncio.sleep(1.0)
         return all_ok
 
     async def send_translation_tg(self, pairs: list[tuple[str, str] | str]) -> bool:
@@ -380,6 +394,11 @@ def _chain_extract(message_chain: list[dict]) -> tuple[str, list[tuple[str, str]
 
 def _escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def media_caption_fits(text: str) -> bool:
+    """提醒必须完整放进 caption；过长时由调用方改发独立文字消息。"""
+    return len(_escape_html(text)) <= _TELEGRAM_CAPTION_MAX
 
 def _to_html(text: str, limit: int) -> str:
     safe = _escape_html(text)
