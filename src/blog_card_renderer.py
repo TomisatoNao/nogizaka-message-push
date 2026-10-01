@@ -112,7 +112,7 @@ def _get_author_avatar_b64(author: str, group_key: str = "") -> str:
     return ""
 
 
-def _generate_html(post: dict, image_b64_list: list[str]) -> str:
+def _generate_html(post: dict, image_b64_list: list[str], *, mode: str = "ja-zh", export: bool = False) -> str:
     """根据博客数据与三团配置生成自适应 HTML 模板字符串（大字号排版 + 原文译文紧凑跟随 + 段落间距舒适）。"""
     group_key = post.get("group_key", "").lower()
     theme = GROUP_THEMES.get(group_key, DEFAULT_THEME)
@@ -146,6 +146,7 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
             else:
                 jp = (b.get("jp") or "").strip()
                 zh = (b.get("zh") or "").strip()
+                valid_zh = bool(zh and "[翻译失败]" not in zh)
                 if not jp and not zh:
                     continue
                 jp_escaped = html_lib.escape(jp).replace("\n", "<br>")
@@ -159,9 +160,11 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
                 )
                 block_cls = "para-block signature-block" if is_sig else "para-block"
                 elem_html = f'<div class="{block_cls}">'
-                if jp_escaped:
+                if jp_escaped and mode != "zh-only":
                     elem_html += f'<div class="jp-text">{jp_escaped}</div>'
-                if zh_escaped and "[翻译失败]" not in zh_escaped and (not is_sig or zh_escaped != jp_escaped):
+                if mode == "zh-only" and not valid_zh:
+                    elem_html += f'<div class="jp-text">{jp_escaped}</div>'
+                if mode != "ja-only" and valid_zh and (not is_sig or zh_escaped != jp_escaped):
                     elem_html += f'<div class="zh-text">{zh_escaped}</div>'
                 elem_html += '</div>'
                 body_elements.append(elem_html)
@@ -211,6 +214,11 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
                 processed_body += "\n" + "\n".join(trailing_imgs)
 
     valid_images_count = sum(1 for b in image_b64_list if b)
+    ai_badge = f'<div class="ai-badge">🤖 AI 智能双语精读对照 · {trans_model}</div>'
+    if export and mode == "ja-only":
+        ai_badge = ""
+    elif export and mode == "zh-only":
+        ai_badge = f'<div class="ai-badge">🤖 中文译文 · {trans_model}</div>'
     author_avatar_b64 = post.get("author_avatar_b64") or _get_author_avatar_b64(author, group_key)
     if author_avatar_b64:
         avatar_html = f'<img src="{author_avatar_b64}" class="author-avatar" alt="{author}"/>'
@@ -398,6 +406,13 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
     opacity: 0.92;
     letter-spacing: 0.01em;
   }}
+  .export-single-language .jp-text {{
+    color: #f8fafc;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.75;
+    opacity: 1;
+  }}
 
   .zh-text, .card-body span {{
     display: block;
@@ -481,16 +496,16 @@ def _generate_html(post: dict, image_b64_list: list[str]) -> str:
       </div>
     </div>
     <div class="blog-title">{title}</div>
-    <div class="ai-badge">🤖 AI 智能双语精读对照 · {trans_model}</div>
+    {ai_badge}
   </div>
 
-  <div class="card-body">
+  <div class="card-body{' export-single-language' if export and mode != 'ja-zh' else ''}">
     {processed_body}
   </div>
 
   <div class="card-footer">
-    <div class="footer-brand">{footer_brand_icon}坂道联合监控系统 · 自动推送归档</div>
-    <div class="footer-right">写真共 {valid_images_count} 张 · 官方原图无损呈现</div>
+    <div class="footer-brand">{footer_brand_icon}坂道联合监控系统 · {'博客卡片下载' if export else '自动推送归档'}</div>
+    <div class="footer-right">写真共 {valid_images_count} 张{' · 官方原图无损呈现' if not export else ''}</div>
   </div>
 </div>
 

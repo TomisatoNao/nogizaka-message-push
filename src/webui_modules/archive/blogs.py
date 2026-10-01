@@ -25,9 +25,21 @@ from src.webui_modules.archive.common import (
 )
 from src.audit import record_event
 from src.webui_modules.media_service import serve_file_range
+from src.webui_modules.archive import blog_card_download as _card_download
+from src.webui_modules.auth_handlers import get_client_ip
+from src.webui_modules.auth_handlers import current_user
+import src.config.config as cfg
 
 _blog_translation_locks: dict[int, threading.Lock] = {}
 _blog_translation_locks_guard = threading.Lock()
+
+
+def _guard_card_login(handler) -> bool:
+    """公开归档也不能匿名触发生成、查询任务或下载图片。"""
+    if getattr(cfg, "AUTH_ENABLED", False) and current_user(handler) is not None:
+        return True
+    _send_json_resp(handler, {"ok": False, "errors": ["未登录：下载博客卡片需要先登录账号"]}, 401)
+    return False
 
 
 def _get_db() -> sqlite3.Connection:
@@ -175,6 +187,35 @@ def _blog_list_excerpt(body_text: str, translation: str, query: str, limit: int 
 
 def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
     """处理官方博客子路由，处理则返回 True，未命中返回 False。"""
+    if sub == "blogs/card" and getattr(handler, "command", "GET") == "POST":
+        if not _guard_card_login(handler):
+            return True
+        body = read_body_json_fn()
+        if body is None:
+            return True
+        try:
+            blog_id = int(body.get("id", 0))
+            if blog_id < 1 or str(body.get("id")) != str(blog_id):
+                raise ValueError
+        except (TypeError, ValueError, AttributeError):
+            _send_json_resp(handler, {"ok": False, "errors": ["博客 ID 无效"]}, 400)
+            return True
+        mode = body.get("mode", "ja-only")
+        if mode not in _card_download.MODES:
+            _send_json_resp(handler, {"ok": False, "errors": ["不支持的卡片语言模式"]}, 400)
+            return True
+        try:
+            row = _get_db().execute("SELECT * FROM blog_posts WHERE id=?", (blog_id,)).fetchone()
+            if row is None:
+                _send_json_resp(handler, {"ok": False, "errors": ["博客不存在"]}, 404)
+                return True
+            result, code = _card_download.submit(dict(row), mode, get_client_ip(handler))
+            _send_json_resp(handler, result, code)
+        except _card_download.CardExportError as exc:
+            _send_json_resp(handler, {"ok": False, "errors": [str(exc)]}, 422)
+        except (sqlite3.Error, OSError):
+            _send_json_resp(handler, {"ok": False, "errors": ["卡片服务暂时不可用"]}, 500)
+        return True
     if sub == "blogs/archive_groups":
         handle_group_backfill(handler, guard_fn, read_body_json_fn)
         return True
@@ -185,6 +226,35 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
     def qp(key: str, default: str = "") -> str:
         return (qs.get(key) or [default])[0]
+
+    if sub == "blogs/card_status":
+        if not _guard_card_login(handler):
+            return True
+        job = _card_download.status(qp("job_id"))
+        _send_json_resp(handler, job or {"ok": False, "errors": ["卡片任务已过期，请重试"]}, 200 if job else 404)
+        return True
+
+    if sub == "blogs/card_file":
+        if not _guard_card_login(handler):
+            return True
+        path = _card_download.ready_file(qp("job_id"))
+        if path is None:
+            _send_json_resp(handler, {"ok": False, "errors": ["卡片尚未生成或已过期"]}, 404)
+            return True
+        handler.send_response(200)
+        handler.send_header("Content-Type", "image/jpeg")
+        handler.send_header("Content-Disposition", 'attachment; filename="blog-card.jpg"')
+        handler.send_header("Content-Length", str(path.stat().st_size))
+        handler.send_header("Cache-Control", "private, no-store")
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.end_headers()
+        try:
+            with path.open("rb") as source:
+                while chunk := source.read(65536):
+                    handler.wfile.write(chunk)
+        except (ConnectionError, OSError):
+            pass
+        return True
 
     # 1. 博客分组统计
     if sub == "blog_groups":
@@ -678,7 +748,6 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         try:
             current_user_fn = getattr(handler, "_current_user", None)
             user = current_user_fn() if callable(current_user_fn) else {}
-            from src.webui_modules.auth_handlers import get_client_ip
             source_ip = get_client_ip(handler)
             record_event(
                 "archive.blog_translation.delete",

@@ -2151,6 +2151,7 @@ html.view-home #messageMonthFooter { display: none !important; }
     transition: all var(--tr-fast);
     white-space: nowrap;
     box-shadow: var(--shadow-xs);
+    min-height: 36px;
   }
   .br-action-btn:hover {
     border-color: var(--accent);
@@ -2159,6 +2160,7 @@ html.view-home #messageMonthFooter { display: none !important; }
     transform: translateY(-1px);
     box-shadow: var(--shadow-sm);
   }
+  .br-action-btn[hidden] { display: none; }
   .br-action-btn.danger {
     color: var(--err);
     border-color: color-mix(in srgb, var(--err) 30%, transparent);
@@ -2192,9 +2194,11 @@ html.view-home #messageMonthFooter { display: none !important; }
   }
   @media (max-width: 768px) {
     .br-header {
-      padding: 0 10px;
+      padding: 4px 10px;
       gap: 6px;
-      height: 52px;
+      height: auto;
+      min-height: 52px;
+      flex-wrap: wrap;
     }
     .br-header-left {
       flex: none;
@@ -2211,9 +2215,11 @@ html.view-home #messageMonthFooter { display: none !important; }
       display: none;
     }
     .br-header-actions {
-      flex: 1;
+      flex: 1 1 auto;
       justify-content: flex-end;
       gap: 5px;
+      flex-wrap: wrap;
+      min-width: 0;
     }
     .br-mode-selector {
       padding: 2px;
@@ -2229,10 +2235,12 @@ html.view-home #messageMonthFooter { display: none !important; }
     .br-action-btn {
       padding: 5px 8px;
       font-size: 13px;
-      min-width: 32px;
-      height: 32px;
+      min-width: 44px;
+      height: 44px;
       justify-content: center;
     }
+    /* 已翻译状态在正文仍有模型标记；窄屏隐藏禁用按钮，避免独占第三行。 */
+    #brTranslate:disabled { display: none; }
   }
 
   .br-content { padding: 30px 20px 80px; max-width: 760px; margin: 0 auto; width: 100%; line-height: 1.8; font-size: 16px; background: var(--card); min-height: 100vh; border-left: 1px solid var(--border); border-right: 1px solid var(--border); box-shadow: var(--shadow-sm); }

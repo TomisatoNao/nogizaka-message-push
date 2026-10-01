@@ -1962,6 +1962,19 @@ let currentBlogReaderPost = null;
 let blogReaderReturnHash = null;
 let currentTransMode = "ja-zh";
 let blogReaderSavedScroll = 0;
+let blogCardDownloadAbort = null;
+
+function resetBlogCardDownloadButton() {
+  const button = $("brDownloadCard");
+  if (!button) return;
+  button.disabled = false;
+  button.innerHTML = '<span class="btn-icon">⬇️</span><span>下载卡片</span>';
+}
+
+function updateBlogCardDownloadVisibility(canDownload) {
+  const button = $("brDownloadCard");
+  if (button) button.hidden = !canDownload;
+}
 
 function restoreWindowScroll(pos) {
   if (typeof pos === "number" && pos > 0) {
@@ -2288,6 +2301,8 @@ function highlightBlogReaderSearch(scrollIntoView = true) {
 
 
 function openBlogReader(post, bodyHtml, returnHash) {
+  if (blogCardDownloadAbort) blogCardDownloadAbort.abort();
+  resetBlogCardDownloadButton();
   const readerWasHidden = $("blogReader").style.display === "none";
   if (readerWasHidden && !blogReaderSavedScroll) {
     blogReaderSavedScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
@@ -2360,6 +2375,8 @@ function openBlogReader(post, bodyHtml, returnHash) {
 }
 
 function closeBlogReader() {
+  if (blogCardDownloadAbort) blogCardDownloadAbort.abort();
+  resetBlogCardDownloadButton();
   const savedScroll = blogReaderSavedScroll;
   $("blogReader").style.display = "none";
   document.documentElement.classList.remove("modal-open");
@@ -2403,6 +2420,67 @@ if (brShareBtn) {
       });
     } else {
       customPrompt({ title: "博客分享链接", message: "请复制下方链接直接分享：", defaultValue: url, confirmText: "完成", icon: "🔗" });
+    }
+  });
+}
+
+const brDownloadCardBtn = $("brDownloadCard");
+if (brDownloadCardBtn) {
+  brDownloadCardBtn.addEventListener("click", async () => {
+    if (!currentBlogReaderPost || brDownloadCardBtn.disabled) return;
+    const blogId = currentBlogReaderPost.id;
+    const mode = hasTranslation(currentBlogReaderPost) ? currentTransMode : "ja-only";
+    const controller = new AbortController();
+    blogCardDownloadAbort = controller;
+    brDownloadCardBtn.disabled = true;
+    brDownloadCardBtn.innerHTML = '<span class="btn-icon">⏳</span><span>生成中…</span>';
+    try {
+      const request = await api("/api/archive/blogs/card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: blogId, mode }),
+        signal: controller.signal,
+      });
+      const jobId = request.job_id;
+      let state = request;
+      for (let attempt = 0; state.status !== "ready" && attempt < 75; attempt++) {
+        if (controller.signal.aborted) return;
+        if (state.status === "failed") throw new Error(state.error || "生成失败");
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        if (controller.signal.aborted) return;
+        state = await api("/api/archive/blogs/card_status?job_id=" + encodeURIComponent(jobId), {
+          signal: controller.signal,
+        });
+      }
+      if (state.status !== "ready") throw new Error("生成超时，请稍后重试");
+      const downloadPath = "/api/archive/blogs/card_file?job_id=" + encodeURIComponent(jobId);
+      let response = await fetch(downloadPath, {
+        cache: "no-store", signal: controller.signal,
+      });
+      if (response.status === 401 && await silentRefreshToken()) {
+        response = await fetch(downloadPath, { cache: "no-store", signal: controller.signal });
+      }
+      if (!response.ok || !(response.headers.get("Content-Type") || "").includes("image/jpeg")) {
+        throw new Error("卡片下载失败，请重试");
+      }
+      const blob = await response.blob();
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "blog-card-" + blogId + ".jpg";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      showToast("博客卡片已下载（一张长图）", "success");
+    } catch (error) {
+      if (!controller.signal.aborted) showToast(error.message || "卡片生成失败，请重试", "error");
+    } finally {
+      if (blogCardDownloadAbort === controller) {
+        blogCardDownloadAbort = null;
+        resetBlogCardDownloadButton();
+      }
     }
   });
 }
@@ -4452,6 +4530,7 @@ if ($("btnBlogAuthorSearchClear")) {
 
 // ── 登录状态 ─────────────────────────────────────
 window._isLoggedIn = false;
+window._canDownloadBlogCard = false;
 let _authInitPromise = null;
 
 async function initAuth() {
@@ -4462,6 +4541,8 @@ async function initAuth() {
       if (me.auth_enabled && !me.user && me.refresh_available && await silentRefreshToken()) {
         me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
       }
+      window._canDownloadBlogCard = !!(me.auth_enabled && me.user);
+      updateBlogCardDownloadVisibility(window._canDownloadBlogCard);
       const adminLink = $("adminLink");
       if (!me.auth_enabled) { 
         window._isLoggedIn = true; 

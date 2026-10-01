@@ -8,8 +8,8 @@
 <title>坂道监控 · 消息归档</title>
 <link rel="stylesheet" href="/static/theme.css?v=20260921_2">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20260921_11">
-<link rel="preload" href="/static/archive.js?v=20260929_1" as="script">
+<link rel="stylesheet" href="/static/archive.css?v=20261001_1">
+<link rel="preload" href="/static/archive.js?v=20261001_1" as="script">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -373,6 +373,10 @@
         <span class="btn-icon">🔗</span>
         <span>分享</span>
       </button>
+      <button id="brDownloadCard" class="br-action-btn" type="button" title="下载单张博客长图（阅读页注音不进入图片）" aria-label="下载博客卡片" hidden>
+        <span class="btn-icon">⬇️</span>
+        <span>下载卡片</span>
+      </button>
       <div id="brModeSelector" class="br-mode-selector" style="display:none;">
         <button type="button" class="brm-btn" data-mode="ja-zh">日中对照</button>
         <button type="button" class="brm-btn" data-mode="ja-only">日文</button>
@@ -578,7 +582,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20260929_1"></script>
+<script src="/static/archive.js?v=20261001_1"></script>
 
 </body>
 </html>
