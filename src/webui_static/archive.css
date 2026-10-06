@@ -356,32 +356,6 @@ html.view-home #messageMonthFooter { display: none !important; }
     color: var(--text);
     box-shadow: 0 1px 5px var(--accent-ring);
   }
-  .bubble .upload-badge.is-scheduled {
-    background: rgba(245, 158, 11, 0.12);
-    color: #f59e0b;
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    font-weight: 500;
-  }
-  .bubble .upload-badge.is-delayed {
-    background: rgba(14, 165, 233, 0.12);
-    color: #0284c7;
-    border: 1px solid rgba(14, 165, 233, 0.3);
-    font-weight: 500;
-  }
-  .bubble .upload-badge.is-delayed:hover {
-    border-color: #0284c7;
-    box-shadow: 0 1px 5px rgba(14, 165, 233, 0.25);
-  }
-  .bubble .upload-badge.is-inferred {
-    background: rgba(99, 102, 241, 0.12);
-    color: #6366f1;
-    border: 1px dashed rgba(99, 102, 241, 0.38);
-    font-weight: 500;
-  }
-  .bubble .upload-badge.is-inferred:hover {
-    border-color: #6366f1;
-    box-shadow: 0 1px 5px rgba(99, 102, 241, 0.25);
-  }
   .bubble .upload-badge .ub-delay {
     font-size: 10.5px;
     opacity: 0.9;

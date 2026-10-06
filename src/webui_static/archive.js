@@ -3178,137 +3178,21 @@ function renderBubble(msg, container = $("timeline")) {
   if (msg.id) b.dataset.msgId = String(msg.id);
 
   const pubTimeStr = fmtTime(msg.published_at);
-  const curGroup = (msg.group || getCurGroup() || "").toLowerCase();
-
   let uploadBadgeHtml = "";
-  if (msg.upload_at) {
-    const uDt = new Date(msg.upload_at);
-    const pDt = new Date(msg.published_at);
-    const diffSec = Math.max(0, Math.round((pDt.getTime() - uDt.getTime()) / 1000));
+  if (msg.media_url && msg.upload_at) {
+    const uDt = toJst(msg.upload_at);
+    const pDt = toJst(msg.published_at);
+    const diffSec = Math.round((pDt.getTime() - uDt.getTime()) / 1000);
     const uFormatted = fmtUploadTime(msg.upload_at, msg.published_at);
-    const durStr = fmtDelayDuration(diffSec);
-
-    const pubJst = toJst(msg.published_at);
-    const pSec = pubJst.getUTCSeconds();
-    const pMin = pubJst.getUTCMinutes();
-    const isRoundTime = (pMin === 0 || pMin === 30);
-
-    const isHinata = curGroup.includes("hinata") || (!curGroup && /^(金村|大野|佐藤|片山|坂井|下田|山下|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高橋|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test((curMember||"").replace(/[\s_　]/g, "")));
-    const isSakura = curGroup.includes("sakura") || (!curGroup && /^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test((curMember||"").replace(/[\s_　]/g, "")));
-    const isNogi = curGroup.includes("nogi") || (!curGroup && /^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test((curMember||"").replace(/[\s_　]/g, "")));
-
-    let isCronSec = false;
-    let cronName = "";
-    if (isHinata) {
-      isCronSec = (pSec === 37);
-      cronName = "日向坂:37s";
-    } else if (isSakura) {
-      isCronSec = (pSec === 9 || pSec === 28);
-      cronName = "樱坂:" + String(pSec).padStart(2, "0") + "s";
-    } else if (isNogi) {
-      isCronSec = (pSec === 45 || pSec === 7);
-      cronName = "乃木坂:" + String(pSec).padStart(2, "0") + "s";
-    } else {
-      isCronSec = (pSec === 37 || pSec === 9 || pSec === 45 || pSec === 7 || pSec === 28);
-      cronName = ":" + String(pSec).padStart(2, "0") + "s";
-    }
-
-    const isMultiDay = diffSec >= 86400; // 跨天超24小时绝对存货
-    const isCronHit = isCronSec && diffSec >= 900; // 命中本团定时管道且等待超15分钟
-    const isRoundHit = isRoundTime && (pSec === 0 || pSec === 1 || isCronSec) && diffSec >= 300; // 整点/半点投放
-
-    const isConfirmedScheduled = isMultiDay || isCronHit || isRoundHit;
-    const isDelayedReview = !isConfirmedScheduled && diffSec >= 3600; // 1小时~24小时非定时秒数放行 (STAFF审核较长)
-
-    if (isConfirmedScheduled) {
-      let reason = isMultiDay ? "跨天提前备货" : (isRoundHit ? "整点/半点 定时投放" : ("命中 " + cronName + " 定时管道"));
-      const tooltip = "⏰ 预设定时消息 (" + reason + ")\n" +
-        "📸 成员拍摄/上传 (JST): " + fmtCopyTime(msg.upload_at) + "\n" +
-        "📢 官方定时发布 (JST): " + fmtCopyTime(msg.published_at) + "\n" +
-        "⏱️ 预设等待时长: " + durStr;
-
-      uploadBadgeHtml = '<span class="upload-badge is-scheduled" title="' + esc(tooltip) + '">' +
-        '<span class="ub-icon">⏰ 预设定时</span> ' +
-        '<span class="ub-time">' + esc(uFormatted) + '</span> ' +
-        '<span class="ub-delay">(+' + esc(durStr) + ')</span>' +
-        '</span>';
-    } else if (isDelayedReview) {
-      const tooltip = "⏳ 审核流转耗时较长 (非固定定时管道秒数)\n" +
-        "📸 成员拍摄/上传 (JST): " + fmtCopyTime(msg.upload_at) + "\n" +
-        "📢 STF审核放行 (JST): " + fmtCopyTime(msg.published_at) + "\n" +
-        "⏱️ 审核流转耗时: " + durStr + "\n" +
-        "💡 说明: 发布秒数未命中固定定时管道，可能为 STAFF 会议/集中审批或高峰排队放行";
-
-      uploadBadgeHtml = '<span class="upload-badge is-delayed" title="' + esc(tooltip) + '">' +
-        '<span class="ub-icon">⏳ 审核放行</span> ' +
-        '<span class="ub-time">' + esc(uFormatted) + '</span> ' +
-        '<span class="ub-delay">(+' + esc(durStr) + ')</span>' +
-        '</span>';
-    } else {
-      const tooltip = "📤 正常即拍即发 (常规审核流转)\n" +
-        "📸 成员真实上传/拍摄于 (JST): " + fmtCopyTime(msg.upload_at) + "\n" +
-        "📢 STF审核发布 (JST): " + fmtCopyTime(msg.published_at) + "\n" +
-        "⏱️ 审核流转耗时: " + durStr;
-
-      uploadBadgeHtml = '<span class="upload-badge" title="' + esc(tooltip) + '">' +
-        '<span class="ub-icon">📤 真实上传</span> ' +
-        '<span class="ub-time">' + esc(uFormatted) + '</span> ' +
-        '<span class="ub-delay">(+' + esc(durStr) + ')</span>' +
-        '</span>';
-    }
-  } else {
-    // 纯文本消息：严格根据【当前成员所属坂道】的专属定时管道与整点特征智能推断
-    const pubJst = toJst(msg.published_at);
-    const pSec = pubJst.getUTCSeconds();
-    const pMin = pubJst.getUTCMinutes();
-    const isRoundTime = (pMin === 0 || pMin === 30);
-
-    const isHinata = curGroup.includes("hinata") || (!curGroup && /^(金村|大野|佐藤|片山|坂井|下田|山下|大田|正源司|藤嶌|渡辺|小坂|加藤|齐藤|佐佐木|東村|松田好|河田|丹生|濱岸|富田|高本|高瀬|上村ひ|高桥|森本|山口|平尾|平岡|竹内|岸|小西|清水理|宮地|石塚)/.test((curMember||"").replace(/[\s_　]/g, "")));
-    const isSakura = curGroup.includes("sakura") || (!curGroup && /^(石森|小池|小林|田村保|森田|藤吉|山崎|谷口|中川|山田|浅井|的野|上村莉|齋藤冬|菅井|土生|守屋|渡邉理|渡辺梨|井上梨|遠藤光|大園|大沼|幸阪|武元|増本|松田里|村井|村山|山下瞳|小島|向井)/.test((curMember||"").replace(/[\s_　]/g, "")));
-    const isNogi = curGroup.includes("nogi") || (!curGroup && /^(冨里|賀喜|一ノ瀬|井上和|川崎|五百城|中西|池田|奥田|菅原|小川|秋元|生田|生驹|伊藤|岩本|梅澤|遠藤さ|久保|齋藤飛|阪口|佐藤楓|柴田|白石|新内|鈴木|高山|田村真|筒井|西野|桥本|樋口|星野|松村|向井葉|山下美|弓木|与田|川端|小津)/.test((curMember||"").replace(/[\s_　]/g, "")));
-
-    let isMatch = false;
-    let pipeDesc = "";
-
-    if (isHinata) {
-      if (pSec === 37) {
-        isMatch = true;
-        pipeDesc = "日向坂:37s 管道";
-      } else if (isRoundTime && (pSec === 0 || pSec === 1)) {
-        isMatch = true;
-        pipeDesc = "整点/半点 投放";
-      }
-    } else if (isSakura) {
-      if (pSec === 9 || pSec === 28) {
-        isMatch = true;
-        pipeDesc = "樱坂:" + String(pSec).padStart(2, "0") + "s 管道";
-      } else if (isRoundTime && (pSec === 0 || pSec === 1)) {
-        isMatch = true;
-        pipeDesc = "整点/半点 投放";
-      }
-    } else if (isNogi) {
-      if (pSec === 45 || pSec === 7) {
-        isMatch = true;
-        pipeDesc = "乃木坂:" + String(pSec).padStart(2, "0") + "s 管道";
-      } else if (isRoundTime && (pSec === 0 || pSec === 1)) {
-        isMatch = true;
-        pipeDesc = "整点/半点 投放";
-      }
-    } else {
-      if (isRoundTime && (pSec === 0 || pSec === 1)) {
-        isMatch = true;
-        pipeDesc = "整点/半点 投放";
-      }
-    }
-
-    if (isMatch) {
-      const tooltip = "🤖 疑似预设定时消息\n特征：命中 " + pipeDesc + " (JST " + pubTimeStr + ")\n说明：纯文本消息无媒体上传时间戳，根据所属坂道官方分发管道特征推断";
-
-      uploadBadgeHtml = '<span class="upload-badge is-inferred" title="' + esc(tooltip) + '">' +
-        '<span class="ub-icon">⏰ 疑似定时</span> ' +
-        '<span class="ub-delay">(' + esc(pipeDesc.split(" ")[0]) + ')</span>' +
-        '</span>';
-    }
+    const durStr = Number.isFinite(diffSec) && diffSec >= 0 ? fmtDelayDuration(diffSec) : "";
+    const tooltip = "📤 媒体上传时间 (JST): " + fmtCopyTime(msg.upload_at) + "\n" +
+      "📢 消息发布时间 (JST): " + fmtCopyTime(msg.published_at) +
+      (durStr ? "\n⏱️ 上传至发布间隔: " + durStr : "");
+    uploadBadgeHtml = '<span class="upload-badge" title="' + esc(tooltip) + '">' +
+      '<span class="ub-icon">📤 真实上传</span> ' +
+      '<span class="ub-time">' + esc(uFormatted) + '</span> ' +
+      (durStr ? '<span class="ub-delay">(+' + esc(durStr) + ')</span>' : '') +
+      '</span>';
   }
 
   const hasText = Boolean((msg.text && msg.text.trim()) || (msg.translation && msg.translation.trim()));
@@ -3330,7 +3214,7 @@ function renderBubble(msg, container = $("timeline")) {
 
   let html = '<div class="msg-header">' +
     '<div class="msg-meta-left">' +
-      '<span class="pub-time" title="官方审核发布时间 (JST): ' + fmtCopyTime(msg.published_at) + '">' + pubTimeStr + '</span>' +
+      '<span class="pub-time" title="消息发布时间 (JST): ' + fmtCopyTime(msg.published_at) + '">' + pubTimeStr + '</span>' +
       '<span class="msg-type-pill type-' + esc(msg.type) + '">' + esc(msg.type) + '</span>' +
       uploadBadgeHtml +
     '</div>' +

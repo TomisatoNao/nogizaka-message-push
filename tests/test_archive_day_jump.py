@@ -58,6 +58,78 @@ def _message(message_id: str, date: str) -> dict:
     }
 
 
+def test_message_upload_badge_shows_facts_only_for_media(archive_static_server):
+    """发布时间秒数不能给纯文本贴定时标签；媒体只展示上传时间和间隔。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.route(
+            "**/api/**",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"ok":true,"members":[],"groups":[],"months":[],"days":{}}',
+            ),
+        )
+        page.goto(archive_static_server + "/archive.html", wait_until="domcontentloaded")
+        badges = page.evaluate("""() => {
+            const publishedAt = "2026-10-01T13:11:37Z"; // 22:11:37 JST，旧规则命中“疑似定时”
+            const make = (id, type, mediaUrl, uploadAt) => {
+                const host = document.createElement("div");
+                renderBubble({
+                    id, type, group: "hinata", text: "消息正文", translation: "",
+                    year: 2026, month: 10,
+                    published_at: publishedAt, upload_at: uploadAt, media_url: mediaUrl,
+                }, host);
+                const badge = host.querySelector(".upload-badge");
+                return badge ? {text: badge.textContent, title: badge.title, className: badge.className} : null;
+            };
+            return {
+                text: make(1, "text", null, null),
+                image: make(2, "picture", "/image.jpg", "2026-10-01T13:10:00Z"),
+                oldImage: make(3, "picture", "/old.jpg", "2026-09-30T13:10:00Z"),
+            };
+        }""")
+        assert badges["text"] is None
+        for name in ("image", "oldImage"):
+            badge = badges[name]
+            assert "真实上传" in badge["text"]
+            assert "媒体上传时间" in badge["title"]
+            assert "消息发布时间" in badge["title"]
+            assert "定时" not in badge["text"] + badge["title"]
+            assert "审核" not in badge["text"] + badge["title"]
+            assert badge["className"] == "upload-badge"
+
+        for theme in ("light", "dark"):
+            page.evaluate("(value) => document.documentElement.setAttribute('data-theme', value)", theme)
+            for width in (390, 1280):
+                page.set_viewport_size({"width": width, "height": 800})
+                metrics = page.evaluate("""() => {
+                    const host = document.createElement("div");
+                    host.style.width = Math.min(window.innerWidth - 32, 900) + "px";
+                    document.body.appendChild(host);
+                    renderBubble({
+                        id: 4, type: "picture", group: "hinata", text: "", translation: "",
+                        year: 2026, month: 10, published_at: "2026-10-01T13:11:37Z",
+                        upload_at: "2026-10-01T13:10:00Z", media_url: "/image.jpg",
+                    }, host);
+                    const badge = host.querySelector(".upload-badge");
+                    const bounds = badge.getBoundingClientRect();
+                    const display = getComputedStyle(badge).display;
+                    host.remove();
+                    return {display, width: bounds.width, left: bounds.left,
+                        right: bounds.right, viewport: window.innerWidth};
+                }""")
+                assert metrics["display"] in {"flex", "inline-flex"}
+                assert metrics["width"] > 0
+                assert metrics["left"] >= 0
+                assert metrics["right"] <= metrics["viewport"], (
+                    f"upload badge clipped in {theme} theme at {width}px: {metrics}"
+                )
+        browser.close()
+
+
 def test_message_day_jump_avoids_reloading_loaded_days_and_stops_at_target_page(archive_static_server):
     playwright = pytest.importorskip("playwright.sync_api")
     requests: list[dict[str, int]] = []
