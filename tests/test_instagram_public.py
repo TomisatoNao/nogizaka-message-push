@@ -372,6 +372,8 @@ def test_feed_runtime_status_distinguishes_failed_and_empty_scan(tmp_path: Path)
     get_guard().reset()
     config = {"platforms": {"instagram": {
         "enabled": True, "accounts": ["public_user"], "include_stories": False,
+        # This status-only test should not depend on the wall clock's quiet-hours window.
+        "safety": {"quiet_hours": [0, 0], "max_requests_per_hour": 100000},
         "download_dir": str(tmp_path / "media"),
     }}}
     fetcher = InstagramFetcher(config, SocialStore(str(tmp_path / "social.db")), _FeedDownloader())
