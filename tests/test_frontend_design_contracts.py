@@ -41,7 +41,6 @@ def test_frontend_pages_have_one_html_end_and_shared_theme():
     archive = (STATIC / "archive.html").read_text(encoding="utf-8")
     for control_id, label in (
         ("lbClose", "关闭图片预览"),
-        ("lbDownloadBtn", "下载高清原图"),
         ("lbPrev", "上一张图片"),
         ("lbNext", "下一张图片"),
     ):
@@ -76,9 +75,9 @@ def test_archive_cache_versions_are_synchronised():
 
     for resource in (
         "/static/archive.css?v=20261006_1",
-        "/static/archive.js?v=20261008_2",
+        "/static/archive.js?v=20261008_3",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261008_2") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261008_3") else 1)
         assert resource in perf
 
 

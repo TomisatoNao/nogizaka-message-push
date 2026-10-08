@@ -130,6 +130,53 @@ def test_message_upload_badge_shows_facts_only_for_media(archive_static_server):
         browser.close()
 
 
+def test_lightbox_has_no_download_action_and_keeps_source_action_responsive(archive_static_server):
+    """桌面/手机与浅/深主题下，灯箱保留来源跳转和关闭，不再提供下载按钮。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.route(
+            "**/api/**",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"ok":true,"members":[],"groups":[],"months":[],"days":{}}',
+            ),
+        )
+        page.goto(archive_static_server + "/archive.html", wait_until="domcontentloaded")
+        page.wait_for_function("typeof openLightbox === 'function'")
+        page.evaluate("""() => {
+            const pixel = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+            images = [{
+                url: pixel, thumbUrl: pixel, source: "message", messageId: "42",
+                memberDir: "sample-member", year: 2026, month: 9, caption: "测试图片",
+            }];
+            lbContext = "gallery";
+            openLightbox(0);
+        }""")
+
+        assert page.locator("#lbDownloadBtn").count() == 0
+        assert page.locator("#lightbox").get_attribute("aria-hidden") == "false"
+        assert page.locator("#lbSourceBtn").inner_text() == "💬 前往对应消息"
+        assert "msg_id=42" in page.locator("#lbSourceBtn").get_attribute("href")
+        assert page.locator("#lbClose").is_visible()
+
+        for theme in ("light", "dark"):
+            page.evaluate("(value) => document.documentElement.setAttribute('data-theme', value)", theme)
+            for width in (390, 1280):
+                page.set_viewport_size({"width": width, "height": 844})
+                actions = page.evaluate("""() => {
+                    const bounds = document.querySelector("#lbActions").getBoundingClientRect();
+                    return {left: bounds.left, right: bounds.right, viewport: window.innerWidth};
+                }""")
+                assert actions["left"] >= 0, f"lightbox controls clipped in {theme} at {width}px: {actions}"
+                assert actions["right"] <= actions["viewport"], (
+                    f"lightbox controls overflow in {theme} at {width}px: {actions}"
+                )
+        browser.close()
+
+
 def test_message_day_jump_avoids_reloading_loaded_days_and_stops_at_target_page(archive_static_server):
     playwright = pytest.importorskip("playwright.sync_api")
     requests: list[dict[str, int]] = []

@@ -1200,7 +1200,7 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert "查看原图" not in html
     assert 'target="_blank"' in html
     assert 'rel="noopener noreferrer"' in html
-    assert 'id="lbDownloadBtn"' in html
+    assert 'id="lbDownloadBtn"' not in html
     assert 'id="lbStatus"' in html
 
     # 2. 验证 CSS 样式契约
@@ -1231,16 +1231,9 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert 'params.set("member", item.memberDir || item.memberName);' in js
     assert '"message"));' in js
     assert '"gallery");' in js
-    assert '$("lbDownloadBtn")' in js
-    assert "async function downloadLightboxOriginal(item)" in js
-    assert 'new URL("/api/archive/download-original", window.location.href)' in js
-    assert 'parsedUrl.origin !== window.location.origin' in js
-    assert 'mode: "cors"' not in js
-    assert "const blob = await response.blob();" in js
-    assert "URL.createObjectURL(blob)" in js
-    assert "downloadLink.download = filename;" in js
-    assert 'showToast("❌ 原图下载失败，请检查网络后重试");' in js
-    assert "downloadLink.href = url;" not in js
+    assert "lbDownloadBtn" not in js
+    assert "downloadLightboxOriginal" not in js
+    assert "/api/archive/download-original" not in js
 
 
 def test_view_components_isolation_contract():

@@ -3685,7 +3685,6 @@ function openLightbox(i, opener, caption, placeholderUrl, context) {
     $("lbPrev").style.display = "none";
     $("lbNext").style.display = "none";
     syncLightboxSourceAction(null);
-    if ($("lbDownloadBtn")) $("lbDownloadBtn").style.display = "inline-flex";
     if ($("lbStatus")) $("lbStatus").style.display = "none";
     $("lightbox").classList.add("open");
     $("lightbox").setAttribute("aria-hidden", "false");
@@ -3706,11 +3705,8 @@ function openLightbox(i, opener, caption, placeholderUrl, context) {
   const targetUrl = item.url;
   const targetPlaceholder = placeholderUrl || item.thumbUrl || "";
 
-  // 1. 按页面上下文设置来源跳转与原图下载入口；来源仅在相册页新标签页打开。
+  // 1. 按页面上下文设置来源跳转；来源仅在相册页新标签页打开。
   syncLightboxSourceAction(item);
-  if ($("lbDownloadBtn")) {
-    $("lbDownloadBtn").style.display = targetUrl ? "inline-flex" : "none";
-  }
 
   $("lbImg").alt = item.caption || "归档图片";
 
@@ -4058,79 +4054,6 @@ if ($("lbActions")) {
   $("lbActions").addEventListener("click", (e) => e.stopPropagation());
 }
 
-async function downloadLightboxOriginal(item) {
-  const button = $("lbDownloadBtn");
-  const url = item ? item.url : ($("lbImg") ? $("lbImg").src : "");
-  if (!url || !button || button.disabled) return;
-
-  let objectUrl = "";
-  let filename = "photo.jpg";
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
-  button.disabled = true;
-  try {
-    const parsedUrl = new URL(url, window.location.href);
-    try {
-      filename = decodeURIComponent(parsedUrl.pathname.split("/").pop() || "photo.jpg");
-    } catch (_) {
-      filename = parsedUrl.pathname.split("/").pop() || "photo.jpg";
-    }
-    filename = filename.replace(/[\\/:*?"<>|\r\n\t]/g, "_").trim().slice(0, 180) || "photo.jpg";
-    if (item && item.caption) {
-      const safeCaption = item.caption.replace(/[\\/:*?"<>|\r\n\t]/g, "_").slice(0, 30);
-      if (safeCaption) filename = safeCaption + "_" + filename;
-    }
-
-    // 本地归档媒体同源直读；站外官方原图由后端代取，避开 CDN 的 CORS 限制。
-    let fetchUrl = parsedUrl.href;
-    if (parsedUrl.origin !== window.location.origin) {
-      const downloadUrl = new URL("/api/archive/download-original", window.location.href);
-      downloadUrl.searchParams.set("url", parsedUrl.href);
-      downloadUrl.searchParams.set("filename", filename);
-      fetchUrl = downloadUrl.href;
-    }
-    const response = await fetch(fetchUrl, {
-      credentials: "same-origin",
-      referrerPolicy: "no-referrer",
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      let message = "image request failed";
-      try {
-        const errorBody = await response.json();
-        message = (errorBody.errors || []).join("；") || message;
-      } catch (_) {}
-      throw new Error(message);
-    }
-
-    const blob = await response.blob();
-    if (!blob.size) throw new Error("empty image response");
-
-    objectUrl = URL.createObjectURL(blob);
-    const downloadLink = document.createElement("a");
-    downloadLink.href = objectUrl;
-    downloadLink.download = filename;
-    downloadLink.rel = "noopener";
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    downloadLink.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-    showToast("💾 正在下载原图: " + filename);
-  } catch (_) {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-    showToast("❌ 原图下载失败，请检查网络后重试");
-  } finally {
-    window.clearTimeout(timeoutId);
-    button.disabled = false;
-  }
-}
-
-if ($("lbDownloadBtn")) {
-  $("lbDownloadBtn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    void downloadLightboxOriginal(images[lbIndex]);
-  });
-}
 $("lbClose").addEventListener("click", closeLightbox);
 $("lbPrev").addEventListener("click", (e) => { e.stopPropagation(); lbMove(-1); });
 $("lbNext").addEventListener("click", (e) => { e.stopPropagation(); lbMove(1); });
@@ -4141,7 +4064,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") lbMove(-1);
     if (e.key === "ArrowRight") lbMove(1);
     if (e.key === "Tab") {
-      const focusable = [$("lbSourceBtn"), $("lbDownloadBtn"), $("lbClose"), $("lbPrev"), $("lbNext")].filter(el => el && el.style.display !== "none" && !el.disabled);
+      const focusable = [$("lbSourceBtn"), $("lbClose"), $("lbPrev"), $("lbNext")].filter(el => el && el.style.display !== "none" && !el.disabled);
       if (focusable.length) {
         const index = focusable.indexOf(document.activeElement);
         e.preventDefault();
