@@ -1233,7 +1233,9 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert '"gallery");' in js
     assert '$("lbDownloadBtn")' in js
     assert "async function downloadLightboxOriginal(item)" in js
-    assert 'mode: "cors"' in js
+    assert 'new URL("/api/archive/download-original", window.location.href)' in js
+    assert 'parsedUrl.origin !== window.location.origin' in js
+    assert 'mode: "cors"' not in js
     assert "const blob = await response.blob();" in js
     assert "URL.createObjectURL(blob)" in js
     assert "downloadLink.download = filename;" in js

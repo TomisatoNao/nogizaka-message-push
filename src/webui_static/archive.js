@@ -4070,17 +4070,6 @@ async function downloadLightboxOriginal(item) {
   button.disabled = true;
   try {
     const parsedUrl = new URL(url, window.location.href);
-    const response = await fetch(parsedUrl.href, {
-      mode: "cors",
-      credentials: "same-origin",
-      referrerPolicy: "no-referrer",
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error("image request failed");
-
-    const blob = await response.blob();
-    if (!blob.size) throw new Error("empty image response");
-
     try {
       filename = decodeURIComponent(parsedUrl.pathname.split("/").pop() || "photo.jpg");
     } catch (_) {
@@ -4091,6 +4080,31 @@ async function downloadLightboxOriginal(item) {
       const safeCaption = item.caption.replace(/[\\/:*?"<>|\r\n\t]/g, "_").slice(0, 30);
       if (safeCaption) filename = safeCaption + "_" + filename;
     }
+
+    // 本地归档媒体同源直读；站外官方原图由后端代取，避开 CDN 的 CORS 限制。
+    let fetchUrl = parsedUrl.href;
+    if (parsedUrl.origin !== window.location.origin) {
+      const downloadUrl = new URL("/api/archive/download-original", window.location.href);
+      downloadUrl.searchParams.set("url", parsedUrl.href);
+      downloadUrl.searchParams.set("filename", filename);
+      fetchUrl = downloadUrl.href;
+    }
+    const response = await fetch(fetchUrl, {
+      credentials: "same-origin",
+      referrerPolicy: "no-referrer",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      let message = "image request failed";
+      try {
+        const errorBody = await response.json();
+        message = (errorBody.errors || []).join("；") || message;
+      } catch (_) {}
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    if (!blob.size) throw new Error("empty image response");
 
     objectUrl = URL.createObjectURL(blob);
     const downloadLink = document.createElement("a");

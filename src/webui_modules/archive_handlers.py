@@ -50,6 +50,7 @@ from src.webui_modules.archive.home import (
 from src.webui_modules.archive.gallery import handle_gallery
 from src.webui_modules.archive.letters import handle_letters
 from src.webui_modules.archive.messages import handle_messages
+from src.webui_modules.archive.original_download import handle_original_download
 from src.webui_modules.static_handler import send_json
 
 
@@ -96,6 +97,9 @@ def warm_home_cache() -> bool:
 
 def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     """归档子路由统一派发。"""
+    if handle_original_download(handler, sub, guard_fn):
+        return
+
     # 1. 消息归档与媒体
     if handle_messages(handler, sub, guard_fn, read_body_json_fn):
         return
