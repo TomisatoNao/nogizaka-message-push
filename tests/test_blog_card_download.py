@@ -9,6 +9,7 @@ import threading
 from urllib.parse import urlsplit
 from unittest.mock import patch
 
+import httpx
 import pytest
 from PIL import Image
 
@@ -84,6 +85,64 @@ def test_card_export_rejects_missing_or_escaping_images(image_root):
         cards.prepare_card(_post(content_json=json.dumps([{"type": "img"}, {"type": "img"}])), "ja-zh")
     with pytest.raises(cards.CardExportError, match="正文过长"):
         cards.prepare_card(_post(body_html="x" * (cards.MAX_CONTENT_CHARS + 1)), "ja-only")
+
+
+def test_card_export_uses_verified_source_urls_when_local_archive_is_missing(image_root):
+    post = _post(
+        images_json='["https://cdn.hinatazaka46.com/images/recover.jpg"]',
+        image_paths_json="[]",
+    )
+    _, sources, _ = cards.prepare_card(post, "ja-only")
+    assert sources == ["https://cdn.hinatazaka46.com/images/recover.jpg"]
+
+
+def test_card_export_rejects_untrusted_remote_image_hosts(image_root):
+    post = _post(
+        images_json='["http://127.0.0.1/admin"]',
+        image_paths_json="[]",
+    )
+    with pytest.raises(cards.CardExportError, match="来源无法安全校验"):
+        cards.prepare_card(post, "ja-only")
+
+
+@pytest.mark.asyncio
+async def test_missing_archived_images_are_downloaded_from_official_cdn(tmp_path, image_root):
+    image_bytes = (image_root / "photo.jpg").read_bytes()
+    requested = []
+
+    def respond(request):
+        requested.append(str(request.url))
+        return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=image_bytes)
+
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport) as client:
+        paths = await cards._download_remote_images(
+            ["https://cdn.hinatazaka46.com/images/recover.jpg"],
+            tmp_path / "recovered",
+            "hinatazaka",
+            client=client,
+        )
+
+    assert requested == ["https://cdn.hinatazaka46.com/images/recover.jpg"]
+    assert len(paths) == 1 and paths[0].is_file()
+    with Image.open(paths[0]) as recovered:
+        assert recovered.size == (32, 24)
+
+
+@pytest.mark.asyncio
+async def test_remote_image_redirect_cannot_escape_official_domain(tmp_path):
+    def respond(_request):
+        return httpx.Response(302, headers={"Location": "http://127.0.0.1/admin"})
+
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(cards.CardExportError, match="来源无法安全校验"):
+            await cards._download_remote_images(
+                ["https://cdn.hinatazaka46.com/images/recover.jpg"],
+                tmp_path / "recovered",
+                "hinatazaka",
+                client=client,
+            )
 
 
 def test_card_cache_key_changes_with_translation_and_image(image_root):

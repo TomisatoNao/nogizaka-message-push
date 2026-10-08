@@ -11,12 +11,16 @@ from html.parser import HTMLParser
 from io import BytesIO
 import json
 from pathlib import Path
+import tempfile
 import threading
 import time
 import uuid
+from urllib.parse import urljoin, urlsplit
 
+import httpx
 from PIL import Image, UnidentifiedImageError
 
+from src.async_utils import gather_cancel_safe
 from src.blog_card_renderer import _generate_html, is_playwright_available
 
 CARD_DIR = Path("data/cache/blog_cards/downloads")
@@ -24,12 +28,25 @@ IMAGE_ROOT = Path("data/blog_images")
 TEMPLATE_VERSION = "download-v1"
 MODES = frozenset({"ja-zh", "ja-only", "zh-only"})
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
+MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024
 MAX_IMAGE_PIXELS = 30_000_000
 MAX_CARD_PIXELS = 30_000_000
 MAX_CARD_HEIGHT = 30_000
 MAX_IMAGES = 60
 MAX_CONTENT_CHARS = 2_000_000
 JOB_TTL_SECONDS = 3600
+MAX_IMAGE_REDIRECTS = 3
+
+_IMAGE_BASES = {
+    "nogizaka": "https://www.nogizaka46.com/",
+    "sakurazaka": "https://sakurazaka46.com/",
+    "hinatazaka": "https://www.hinatazaka46.com/",
+}
+_IMAGE_DOMAINS = {
+    "nogizaka": "nogizaka46.com",
+    "sakurazaka": "sakurazaka46.com",
+    "hinatazaka": "hinatazaka46.com",
+}
 
 
 class CardExportError(Exception):
@@ -112,16 +129,136 @@ def _blocks(post: dict, mode: str) -> tuple[list[dict], str]:
     return blocks, "ja-only"
 
 
-def _local_image(path_value: str) -> Path:
+def _local_image(path_value: str) -> Path | None:
     root = IMAGE_ROOT.resolve()
     candidate = Path(path_value)
     # 旧档案可能存绝对路径；也必须落在归档图片目录内。
     path = (candidate if candidate.is_absolute() else root / candidate).resolve()
-    if not path.is_relative_to(root) or not path.is_file():
-        raise CardExportError("博客图片归档不完整，请先补齐图片后重试")
+    if not path.is_relative_to(root):
+        raise CardExportError("博客图片归档不完整：本地图片路径无效")
+    if not path.is_file():
+        return None
     if path.stat().st_size > MAX_IMAGE_BYTES:
         raise CardExportError("博客中有图片过大，无法安全生成卡片")
     return path
+
+
+def _remote_image_url(group_key: str, value: str) -> str:
+    """只允许从对应坂道官方媒体域名补取归档中缺失的图片。"""
+    base = _IMAGE_BASES.get(str(group_key or "").lower())
+    if not base or not isinstance(value, str) or not value.strip() or len(value) > 2048:
+        raise CardExportError("博客图片归档不完整：远程图片来源无法安全校验")
+    try:
+        url = urljoin(base, value.strip())
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+    except ValueError as exc:
+        raise CardExportError("博客图片归档不完整：远程图片来源无法安全校验") from exc
+
+    domain = _IMAGE_DOMAINS[str(group_key).lower()]
+    official_host = host == domain or host.endswith(f".{domain}")
+    # 日向坂历史文章中仍有两张图片使用 CMS 自有域名；仅接受其官方图片目录。
+    hinata_cms_host = (
+        str(group_key).lower() == "hinatazaka"
+        and host == "smccms.jp"
+        and parsed.path.startswith("/files/14/diary/official/member/")
+    )
+    if (
+        parsed.scheme != "https"
+        or port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or not (official_host or hinata_cms_host)
+    ):
+        raise CardExportError("博客图片归档不完整：远程图片来源无法安全校验")
+    return parsed._replace(fragment="").geturl()
+
+
+async def _download_one_image(
+    client: httpx.AsyncClient,
+    url: str,
+    destination: Path,
+    group_key: str,
+    semaphore: asyncio.Semaphore,
+    byte_state: dict[str, int],
+    byte_lock: asyncio.Lock,
+) -> Path:
+    async with semaphore:
+        current_url = url
+        for redirect_count in range(MAX_IMAGE_REDIRECTS + 1):
+            temp_path = destination.with_suffix(".part")
+            try:
+                async with client.stream(
+                    "GET",
+                    current_url,
+                    headers={"Referer": _IMAGE_BASES[group_key]},
+                    timeout=httpx.Timeout(20.0, connect=5.0),
+                    follow_redirects=False,
+                ) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location or redirect_count >= MAX_IMAGE_REDIRECTS:
+                            raise CardExportError("博客图片归档不完整：官方图片源重定向异常")
+                        current_url = _remote_image_url(group_key, urljoin(current_url, location))
+                        continue
+                    if response.status_code >= 300:
+                        raise CardExportError("博客图片归档不完整：官方图片源暂时无法访问")
+                    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                    if not (content_type.startswith("image/") or content_type == "application/octet-stream"):
+                        raise CardExportError("博客图片归档不完整：官方图片源未返回图片")
+                    content_length = response.headers.get("content-length")
+                    if content_length and int(content_length) > MAX_IMAGE_BYTES:
+                        raise CardExportError("博客中有图片过大，无法安全生成卡片")
+
+                    received = 0
+                    with temp_path.open("wb") as output:
+                        async for chunk in response.aiter_bytes(64 * 1024):
+                            received += len(chunk)
+                            if received > MAX_IMAGE_BYTES:
+                                raise CardExportError("博客中有图片过大，无法安全生成卡片")
+                            async with byte_lock:
+                                if byte_state["total"] + len(chunk) > MAX_TOTAL_IMAGE_BYTES:
+                                    raise CardExportError("博客图片总量过大，无法安全生成卡片")
+                                byte_state["total"] += len(chunk)
+                            output.write(chunk)
+                    if received < 1:
+                        raise CardExportError("博客图片归档不完整：官方图片源返回了空文件")
+                    temp_path.replace(destination)
+                    return destination
+            except CardExportError:
+                raise
+            except (httpx.HTTPError, OSError, ValueError) as exc:
+                raise CardExportError("博客图片暂时无法从官方图片源恢复，请稍后重试") from exc
+            finally:
+                temp_path.unlink(missing_ok=True)
+    raise CardExportError("博客图片归档不完整：官方图片源重定向异常")
+
+
+async def _download_remote_images(
+    urls: list[str], directory: Path, group_key: str, *, client: httpx.AsyncClient | None = None,
+) -> list[Path]:
+    """把缺失图片临时下载到卡片任务目录，不修改博客归档数据库。"""
+    normalized = [_remote_image_url(group_key, url) for url in urls]
+    directory.mkdir(parents=True, exist_ok=True)
+    semaphore = asyncio.Semaphore(4)
+    byte_state = {"total": 0}
+    byte_lock = asyncio.Lock()
+
+    async def download(active_client: httpx.AsyncClient) -> list[Path]:
+        return await gather_cancel_safe([
+            _download_one_image(
+                active_client, url, directory / f"{index:03d}.img", group_key,
+                semaphore, byte_state, byte_lock,
+            )
+            for index, url in enumerate(normalized)
+        ])
+
+    if client is not None:
+        return await download(client)
+    limits = httpx.Limits(max_connections=4, max_keepalive_connections=4)
+    async with httpx.AsyncClient(follow_redirects=False, limits=limits) as active_client:
+        return await download(active_client)
 
 
 def _image_data(path: Path) -> str:
@@ -137,7 +274,7 @@ def _image_data(path: Path) -> str:
         raise CardExportError("博客图片文件损坏，无法生成完整卡片") from exc
 
 
-def prepare_card(post: dict, mode: str) -> tuple[dict, list[Path], str]:
+def prepare_card(post: dict, mode: str) -> tuple[dict, list[Path | str], str]:
     if mode not in MODES:
         raise CardExportError("不支持的卡片语言模式")
     for field in ("content_json", "body_html", "body_text"):
@@ -148,9 +285,21 @@ def prepare_card(post: dict, mode: str) -> tuple[dict, list[Path], str]:
     count = max(len(paths_raw), len(urls))
     if count > MAX_IMAGES:
         raise CardExportError("博客图片过多，无法安全生成单张卡片")
-    if count and len(paths_raw) < count:
-        raise CardExportError("博客图片归档不完整，请先补齐图片后重试")
-    paths = [_local_image(str(value)) for value in paths_raw]
+    paths: list[Path | str] = []
+    if urls:
+        # 只有 URL 与本地路径完整一一对应时才使用归档文件；旧记录缺图或
+        # 部分下载失败时，改从经过域名校验的官方媒体源重取整组图片，避免错位。
+        if len(paths_raw) == len(urls):
+            local_paths = [_local_image(str(value)) for value in paths_raw]
+            if all(path is not None for path in local_paths):
+                paths = [path for path in local_paths if path is not None]
+        if not paths:
+            paths = [_remote_image_url(post.get("group_key"), value) for value in urls]
+    elif paths_raw:
+        local_paths = [_local_image(str(value)) for value in paths_raw]
+        if any(path is None for path in local_paths):
+            raise CardExportError("博客图片归档不完整：缺少可恢复的图片文件")
+        paths = [path for path in local_paths if path is not None]
     blocks, actual_mode = _blocks(post, mode)
     if not blocks:
         raise CardExportError("博客正文为空，无法生成卡片")
@@ -172,7 +321,11 @@ def prepare_card(post: dict, mode: str) -> tuple[dict, list[Path], str]:
         "id": post.get("id"),
         "mode": actual_mode,
         "post": safe_post,
-        "images": [(str(path), path.stat().st_size, path.stat().st_mtime_ns) for path in paths],
+        "images": [
+            ("url", source) if isinstance(source, str)
+            else ("path", str(source), source.stat().st_size, source.stat().st_mtime_ns)
+            for source in paths
+        ],
     }
     key = hashlib.sha256(json.dumps(fingerprint, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     return safe_post, paths, f"{key}:{actual_mode}"
@@ -216,6 +369,21 @@ async def _render(safe_post: dict, paths: list[Path], mode: str, destination: Pa
                 tmp.unlink(missing_ok=True)
         finally:
             await browser.close()
+
+
+async def _render_with_remote_images(
+    safe_post: dict, sources: list[Path | str], mode: str, destination: Path, temp_dir: Path,
+) -> None:
+    group_key = str(safe_post.get("group_key") or "").lower()
+    remote_urls = [source for source in sources if isinstance(source, str)]
+    if not remote_urls:
+        await _render(safe_post, [source for source in sources if isinstance(source, Path)], mode, destination)
+        return
+
+    remote_paths = await _download_remote_images(remote_urls, temp_dir, group_key)
+    path_iter = iter(remote_paths)
+    resolved = [next(path_iter) if isinstance(source, str) else source for source in sources]
+    await _render(safe_post, [path for path in resolved if isinstance(path, Path)], mode, destination)
 
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="blog-card-download")
@@ -291,11 +459,16 @@ def submit(post: dict, mode: str, client_id: str) -> tuple[dict, int]:
     return {"ok": True, "status": "queued", "job_id": job_id}, 202
 
 
-def _run_job(job_id: str, post: dict, paths: list[Path], mode: str, destination: Path) -> None:
+def _run_job(job_id: str, post: dict, paths: list[Path | str], mode: str, destination: Path) -> None:
     with _lock:
         _jobs[job_id]["status"] = "rendering"
     try:
-        asyncio.run(asyncio.wait_for(_render(post, paths, mode, destination), timeout=90))
+        CARD_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="blog-card-", dir=CARD_DIR) as temp_dir:
+            asyncio.run(asyncio.wait_for(
+                _render_with_remote_images(post, paths, mode, destination, Path(temp_dir)),
+                timeout=90,
+            ))
         status, error = "ready", ""
     except CardExportError as exc:
         status, error = "failed", str(exc)
