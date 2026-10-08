@@ -229,6 +229,7 @@ def _get_gallery_total_count(
                     "j.value != ''",
                     "j.value NOT LIKE '%_pre/blog%'",
                     "j.value NOT LIKE '%img.nogizaka46.com%'",
+                    _get_blog_image_body_filter(b_cols),
                 ]
                 b_params: list[object] = []
                 if member:
@@ -280,6 +281,52 @@ def _get_blog_image_expr(cols: set[str]) -> tuple[str, str]:
     return where_expr, json_target
 
 
+def _get_blog_image_body_filter(cols: set[str], image_value: str = "j.value") -> str:
+    """仅校验日向坂图片是否属于对应正文，过滤已知历史错配图片。"""
+    if "images_json" not in cols or "body_html" not in cols:
+        return "1 = 1"
+
+    body_html = "COALESCE(p.body_html, '')"
+    normalized_body = (
+        f"replace(replace(replace(lower({body_html}), '&amp;', '&'), 'https://', '//'), 'http://', '//')"
+    )
+    normalized_image = (
+        f"replace(replace(replace(lower(CAST({image_value} AS TEXT)), '&amp;', '&'), 'https://', '//'), 'http://', '//')"
+    )
+    body_match = f"instr({normalized_body}, {normalized_image}) > 0"
+    has_article_images = f"instr(lower({body_html}), '<img') > 0"
+    is_hinata = "lower(COALESCE(p.group_key, '')) IN ('hinatazaka', 'hinatazaka46')"
+    allow_local_path_fallback = "(p.images_json IS NULL OR trim(p.images_json) = '' OR p.images_json = '[]')"
+    return (
+        f"(NOT ({is_hinata}) OR {allow_local_path_fallback} OR {body_html} = '' "
+        f"OR NOT ({has_article_images}) OR {body_match})"
+    )
+
+
+def _filter_blog_images_by_body(images: list, body_html: str, group_key: str = "") -> list:
+    """供不支持 json_each 的 SQLite 降级查询执行相同的正文关联校验。"""
+    if str(group_key or "").strip().lower() not in {"hinatazaka", "hinatazaka46"}:
+        return images
+    body = (
+        str(body_html or "").replace("&amp;", "&").lower()
+        .replace("https://", "//").replace("http://", "//")
+    )
+    if "<img" not in body:
+        return images
+
+    def _normalize(value: object) -> str:
+        return (
+            str(value or "").strip().replace("&amp;", "&").lower()
+            .replace("https://", "//").replace("http://", "//")
+        )
+
+    def _matches_body(image: object) -> bool:
+        normalized = _normalize(image)
+        return bool(normalized and normalized in body)
+
+    return [image for image in images if image and _matches_body(image)]
+
+
 def _get_blog_gallery(
     member: str = "",
     page: int = 1,
@@ -298,7 +345,8 @@ def _get_blog_gallery(
 
         cols = _blog_table_columns(blog_db)
         img_where, json_target = _get_blog_image_expr(cols)
-        where = [img_where]
+        body_filter = _get_blog_image_body_filter(cols)
+        where = [img_where, body_filter]
         params: list[object] = []
 
         if member:
@@ -438,10 +486,13 @@ def _get_blog_gallery(
                 select_cols.append("p.images_json")
             if "image_paths_json" in cols:
                 select_cols.append("p.image_paths_json")
+            if "body_html" in cols:
+                select_cols.append("p.body_html")
+            fallback_where_str = " AND ".join(item for item in where if item != body_filter)
             posts_sql = f"""
                 SELECT {', '.join(select_cols)}
                 FROM blog_posts p
-                WHERE {where_str}
+                WHERE {fallback_where_str}
                 ORDER BY p.date {order_dir}, p.id {order_dir};
             """
             rows = blog_db.execute(posts_sql, params).fetchall()
@@ -467,7 +518,15 @@ def _get_blog_gallery(
                             paths = json.loads(extra[p_idx]) if extra[p_idx] else []
                         except Exception:
                             pass
+                selected_images = isinstance(imgs, list) and bool(imgs)
+                if selected_images and "body_html" in cols:
+                    body_idx = (1 if "images_json" in cols else 0) + (1 if "image_paths_json" in cols else 0)
+                    imgs = _filter_blog_images_by_body(
+                        imgs, extra[body_idx] if body_idx < len(extra) else "", g_key
+                    )
                 source_list = imgs if (isinstance(imgs, list) and imgs) else paths if isinstance(paths, list) else []
+                if selected_images and not imgs:
+                    source_list = []
                 for idx, img_val in enumerate(source_list):
                     if not img_val:
                         continue
@@ -641,7 +700,8 @@ def _fetch_blog_gallery_photos(
 
     cols = _blog_table_columns(blog_db)
     img_where, json_target = _get_blog_image_expr(cols)
-    where = [img_where]
+    body_filter = _get_blog_image_body_filter(cols)
+    where = [img_where, body_filter]
     params: list[object] = []
 
     if member:
@@ -752,10 +812,13 @@ def _fetch_blog_gallery_photos(
             select_cols.append("p.images_json")
         if "image_paths_json" in cols:
             select_cols.append("p.image_paths_json")
+        if "body_html" in cols:
+            select_cols.append("p.body_html")
+        fallback_where_str = " AND ".join(item for item in where if item != body_filter)
         posts_sql = f"""
             SELECT {', '.join(select_cols)}
             FROM blog_posts p
-            WHERE {where_str}
+            WHERE {fallback_where_str}
             ORDER BY p.date {order_dir}, p.id {order_dir};
         """
         rows = blog_db.execute(posts_sql, params).fetchall()
@@ -777,7 +840,15 @@ def _fetch_blog_gallery_photos(
                         paths = json.loads(extra[p_idx]) if extra[p_idx] else []
                     except Exception:
                         pass
+            selected_images = isinstance(imgs, list) and bool(imgs)
+            if selected_images and "body_html" in cols:
+                body_idx = (1 if "images_json" in cols else 0) + (1 if "image_paths_json" in cols else 0)
+                imgs = _filter_blog_images_by_body(
+                    imgs, extra[body_idx] if body_idx < len(extra) else "", g_key
+                )
             source_list = imgs if (isinstance(imgs, list) and imgs) else paths if isinstance(paths, list) else []
+            if selected_images and not imgs:
+                source_list = []
             for idx, img_val in enumerate(source_list):
                 if not img_val:
                     continue
@@ -943,98 +1014,76 @@ def get_gallery_years(member: str = "", source: str = "all") -> dict:
             blog_db = get_blog_db()
             if blog_db:
                 cols = _blog_table_columns(blog_db)
+                img_where, json_target = _get_blog_image_expr(cols)
+                where = [img_where, "p.date IS NOT NULL", "LENGTH(p.date) >= 4"]
+                where_params: list[object] = []
                 if member:
                     matched_authors = _get_matching_blog_authors(blog_db, member)
-                    if matched_authors:
+                    if not matched_authors:
+                        where.append("0 = 1")
+                    else:
                         placeholders = ", ".join(["?"] * len(matched_authors))
-                        select_cols = ["p.date"]
-                        if "images_json" in cols:
-                            select_cols.append("p.images_json")
-                        if "image_paths_json" in cols:
-                            select_cols.append("p.image_paths_json")
-                        img_where, _ = _get_blog_image_expr(cols)
-                        sql = f"""
-                            SELECT {', '.join(select_cols)}
-                            FROM blog_posts p
-                            WHERE p.author IN ({placeholders})
-                              AND p.date IS NOT NULL AND LENGTH(p.date) >= 4
-                              AND {img_where};
-                        """
-                        b_posts = blog_db.execute(sql, matched_authors).fetchall()
-                        for row in b_posts:
-                            dt = row[0] or ""
-                            if len(dt) >= 4 and dt[:4].isdigit():
-                                y = int(dt[:4])
-                                if not (2010 <= y <= 2035):
-                                    continue
-                                c = 0
-                                for j_raw in row[1:]:
-                                    if j_raw:
-                                        try:
-                                            imgs = json.loads(j_raw)
-                                            if isinstance(imgs, list) and imgs:
-                                                valid_imgs = [
-                                                    img for img in imgs
-                                                    if img and "_pre/blog" not in str(img) and "img.nogizaka46.com" not in str(img)
-                                                ]
-                                                if valid_imgs:
-                                                    c = len(valid_imgs)
-                                                    break
-                                        except Exception:
-                                            pass
-                                if c > 0:
-                                    counts_by_year[y] = counts_by_year.get(y, 0) + c
-                else:
-                    img_where, json_target = _get_blog_image_expr(cols)
-                    where = [img_where, "p.date IS NOT NULL", "LENGTH(p.date) >= 4"]
-                    where_str = " AND ".join(where)
+                        where.append(f"p.author IN ({placeholders})")
+                        where_params.extend(matched_authors)
+                where_str = " AND ".join(where)
 
-                    try:
-                        sql = f"""
-                            SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
-                            FROM blog_posts p, json_each({json_target}) j
-                            WHERE {where_str} AND j.value IS NOT NULL AND j.value != ''
-                              AND j.value NOT LIKE '%_pre/blog%' AND j.value NOT LIKE '%img.nogizaka46.com%'
-                            GROUP BY y
-                            ORDER BY y DESC;
-                        """
-                        b_rows = blog_db.execute(sql).fetchall()
-                        for r in b_rows:
-                            if r[0]:
-                                y = int(r[0])
-                                if 2010 <= y <= 2035:
-                                    counts_by_year[y] = counts_by_year.get(y, 0) + int(r[1])
-                    except Exception:
-                        # 降级：若不支持 json_each
-                        select_cols = ["p.date"]
-                        if "images_json" in cols:
-                            select_cols.append("p.images_json")
-                        if "image_paths_json" in cols:
-                            select_cols.append("p.image_paths_json")
-                        b_posts = blog_db.execute(f"SELECT {', '.join(select_cols)} FROM blog_posts p WHERE {where_str};").fetchall()
-                        for row in b_posts:
-                            dt = row[0] or ""
-                            if len(dt) >= 4 and dt[:4].isdigit():
-                                y = int(dt[:4])
-                                if not (2010 <= y <= 2035):
-                                    continue
-                                c = 0
-                                for j_raw in row[1:]:
-                                    if j_raw:
-                                        try:
-                                            imgs = json.loads(j_raw)
-                                            if isinstance(imgs, list) and imgs:
-                                                valid_imgs = [
-                                                    img for img in imgs
-                                                    if img and "_pre/blog" not in str(img) and "img.nogizaka46.com" not in str(img)
-                                                ]
-                                                if valid_imgs:
-                                                    c = len(valid_imgs)
-                                                    break
-                                        except Exception:
-                                            pass
-                                if c > 0:
-                                    counts_by_year[y] = counts_by_year.get(y, 0) + c
+                try:
+                    sql = f"""
+                        SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
+                        FROM blog_posts p, json_each({json_target}) j
+                        WHERE {where_str}
+                          AND j.value IS NOT NULL AND j.value != ''
+                          AND j.value NOT LIKE '%_pre/blog%' AND j.value NOT LIKE '%img.nogizaka46.com%'
+                          AND {_get_blog_image_body_filter(cols)}
+                        GROUP BY y
+                        ORDER BY y DESC;
+                    """
+                    b_rows = blog_db.execute(sql, where_params).fetchall()
+                    for row in b_rows:
+                        if row[0]:
+                            y = int(row[0])
+                            if 2010 <= y <= 2035:
+                                counts_by_year[y] = counts_by_year.get(y, 0) + int(row[1])
+                except Exception:
+                    # 降级：若不支持 json_each，在 Python 中按同一规则校验正文 URL。
+                    select_cols = ["p.date", "p.group_key"]
+                    if "images_json" in cols:
+                        select_cols.append("p.images_json")
+                    select_cols.append(json_target)
+                    if "body_html" in cols:
+                        select_cols.append("p.body_html")
+                    b_posts = blog_db.execute(
+                        f"SELECT {', '.join(select_cols)} FROM blog_posts p WHERE {where_str};",
+                        where_params,
+                    ).fetchall()
+                    for row in b_posts:
+                        dt = row[0] or ""
+                        if len(dt) < 4 or not dt[:4].isdigit():
+                            continue
+                        y = int(dt[:4])
+                        if not (2010 <= y <= 2035):
+                            continue
+                        image_json_idx = 2 if "images_json" in cols else None
+                        gallery_images_idx = 3 if image_json_idx is not None else 2
+                        try:
+                            imgs = json.loads(row[gallery_images_idx]) if row[gallery_images_idx] else []
+                        except (TypeError, ValueError):
+                            imgs = []
+                        if not isinstance(imgs, list):
+                            continue
+                        if image_json_idx is not None and row[image_json_idx]:
+                            body_idx = gallery_images_idx + 1
+                            imgs = _filter_blog_images_by_body(
+                                imgs,
+                                row[body_idx] if "body_html" in cols else "",
+                                str(row[1] or ""),
+                            )
+                        valid_imgs = [
+                            img for img in imgs
+                            if img and "_pre/blog" not in str(img) and "img.nogizaka46.com" not in str(img)
+                        ]
+                        if valid_imgs:
+                            counts_by_year[y] = counts_by_year.get(y, 0) + len(valid_imgs)
         except Exception:
             pass
 
@@ -1120,17 +1169,19 @@ def get_gallery_members() -> dict:
                         SELECT p.group_key, p.author, COUNT(*)
                         FROM blog_posts p, json_each({json_target}) j
                         WHERE {where_expr} AND j.value IS NOT NULL AND j.value != ''
+                          AND {_get_blog_image_body_filter(b_cols)}
                         GROUP BY p.group_key, p.author;
                     """).fetchall()
                 except Exception:
-                    select_cols = ["group_key", "author"]
+                    select_cols = ["p.group_key", "p.author"]
                     if "images_json" in b_cols:
-                        select_cols.append("images_json")
-                    if "image_paths_json" in b_cols:
-                        select_cols.append("image_paths_json")
+                        select_cols.append("p.images_json")
+                    select_cols.append(json_target)
+                    if "body_html" in b_cols:
+                        select_cols.append("p.body_html")
                     b_posts = blog_db.execute(f"""
                         SELECT {', '.join(select_cols)}
-                        FROM blog_posts
+                        FROM blog_posts p
                         WHERE {where_expr};
                     """).fetchall()
                     counts_dict = {}
@@ -1139,16 +1190,21 @@ def get_gallery_members() -> dict:
                         auth = row[1]
                         if not auth:
                             continue
-                        c = 0
-                        for j_raw in row[2:]:
-                            if j_raw:
-                                try:
-                                    imgs = json.loads(j_raw)
-                                    if isinstance(imgs, list) and imgs:
-                                        c = len([img for img in imgs if img])
-                                        break
-                                except Exception:
-                                    pass
+                        try:
+                            remote_images_raw = row[2] if "images_json" in b_cols else None
+                            gallery_images_idx = 3 if "images_json" in b_cols else 2
+                            imgs = json.loads(row[gallery_images_idx]) if row[gallery_images_idx] else []
+                        except (TypeError, ValueError):
+                            remote_images_raw = None
+                            imgs = []
+                        if not isinstance(imgs, list):
+                            imgs = []
+                        if remote_images_raw and str(remote_images_raw).strip() not in {"", "[]"}:
+                            body_idx = gallery_images_idx + 1
+                            imgs = _filter_blog_images_by_body(
+                                imgs, row[body_idx] if "body_html" in b_cols else "", g_k
+                            )
+                        c = len([img for img in imgs if img])
                         counts_dict[(g_k, auth)] = counts_dict.get((g_k, auth), 0) + c
                     b_rows = [(k[0], k[1], v) for k, v in counts_dict.items()]
 

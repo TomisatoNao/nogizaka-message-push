@@ -468,6 +468,56 @@ def test_blog_gallery_remote_images_fallback(temp_archive_env, monkeypatch):
     assert len(h.payload["photos"]) == 5
 
 
+def test_blog_gallery_ignores_images_not_present_in_article_body(temp_archive_env, monkeypatch):
+    """同一张 CDN 图片误入其他作者 images_json 时，不应串入其相册或统计。"""
+    import src.webui_modules.archive.gallery as gm
+
+    target = "https://cdn.hinatazaka46.com/images/14/cc3/770c51f2220543f2d5a774d43b6b3-02.jpg"
+    shimizu_image = "https://cdn.hinatazaka46.com/images/shimizu-own.jpg"
+    blog_conn = sqlite3.connect(":memory:")
+    blog_conn.execute("""
+        CREATE TABLE blog_posts (
+            id INTEGER PRIMARY KEY,
+            group_key TEXT,
+            author TEXT,
+            title TEXT,
+            date TEXT,
+            body_html TEXT,
+            images_json TEXT,
+            image_paths_json TEXT
+        );
+    """)
+    blog_conn.executemany("""
+        INSERT INTO blog_posts
+            (id, group_key, author, title, date, body_html, images_json, image_paths_json)
+        VALUES (?, 'hinatazaka', ?, '测试博客', '2022-12-16 10:00:00', ?, ?, '[]');
+    """, [
+        (1, "清水 理央", f'<div><img src="{shimizu_image.replace("https:", "")}"></div>', json.dumps([shimizu_image, target])),
+        (2, "髙橋 未来虹", f'<div><img src="{target}"></div>', json.dumps([target])),
+    ])
+    blog_conn.commit()
+    monkeypatch.setattr("src.webui_modules.archive_handlers.get_blog_db", lambda: blog_conn)
+    gm._gallery_total_cache.clear()
+    gm._gallery_years_cache.clear()
+    gm._gallery_members_cache = None
+
+    shimizu = gm._get_blog_gallery(member="清水理央", year=2022, month=12, per_page=10)
+    takahashi = gm._get_blog_gallery(member="髙橋未来虹", year=2022, month=12, per_page=10)
+    shimizu_years = gm.get_gallery_years(member="清水理央", source="blog")
+    takahashi_years = gm.get_gallery_years(member="髙橋未来虹", source="blog")
+
+    assert shimizu["total"] == 1
+    assert [photo["url"] for photo in shimizu["photos"]] == [shimizu_image]
+    assert takahashi["total"] == 1
+    assert [photo["url"] for photo in takahashi["photos"]] == [target]
+    assert shimizu_years["total"] == 1
+    assert takahashi_years["total"] == 1
+    assert gm._get_gallery_total_count(source="blog", member="清水理央", year=2022, month=12) == 1
+    assert [photo["url"] for photo in gm._fetch_blog_gallery_photos(member="清水理央", limit=10)] == [shimizu_image]
+
+    blog_conn.close()
+
+
 def test_napcat_command_mukai_resolution(temp_archive_env, monkeypatch):
     """验证输入 /美图 向井 时精准匹配向井纯叶，且绝不误回退至群默认成员（冨里奈央）。"""
     import src.config.config as cfg

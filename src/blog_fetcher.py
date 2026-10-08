@@ -409,9 +409,8 @@ async def _process_single_post(post: dict, key: str, group_name: str,
             except Exception:
                 post["body_html"] = body
         else:
-            post["images"] = await fetch_img_fn(client, post["url"])
-            post["body"] = await hinatazaka.fetch_body(client, post["url"])
-            post["body_html"] = await hinatazaka.fetch_html(client, post["url"])
+            # 日向坂详情只请求一次，避免图片、纯文本和 HTML 来自不同页面快照。
+            post.update(await hinatazaka.fetch_article(client, post["url"]))
 
     # 下载图片到本地（并发下载）
     image_paths = []
