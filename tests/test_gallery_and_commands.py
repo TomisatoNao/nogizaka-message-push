@@ -1232,7 +1232,13 @@ def test_gallery_lightbox_source_navigation_and_actions_contract():
     assert '"message"));' in js
     assert '"gallery");' in js
     assert '$("lbDownloadBtn")' in js
-    assert 'a.download = filename;' in js
+    assert "async function downloadLightboxOriginal(item)" in js
+    assert 'mode: "cors"' in js
+    assert "const blob = await response.blob();" in js
+    assert "URL.createObjectURL(blob)" in js
+    assert "downloadLink.download = filename;" in js
+    assert 'showToast("❌ 原图下载失败，请检查网络后重试");' in js
+    assert "downloadLink.href = url;" not in js
 
 
 def test_view_components_isolation_contract():
