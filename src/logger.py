@@ -176,7 +176,18 @@ def format_httpx_error(e: Exception) -> str:
         request = None
     if request is not None:
         detail += f" | URL: {request.url}"
-    if getattr(e, "__cause__", None) is not None:
-        cause_msg = str(e.__cause__) if str(e.__cause__) else type(e.__cause__).__name__
-        detail += f" | 原因: {cause_msg}"
+    # HTTPX/httpcore 的空 ConnectError 往往多包一层；追到 TLS/DNS/系统错误，
+    # 包括库用 `raise ... from None` 隐藏的 context，避免只留下错误类别。
+    current = e
+    seen = {id(e)}
+    for _ in range(6):
+        cause = current.__cause__ or current.__context__
+        if cause is None or id(cause) in seen:
+            break
+        seen.add(id(cause))
+        cause_msg = str(cause)
+        detail += f" | 原因: {type(cause).__name__}"
+        if cause_msg:
+            detail += f": {cause_msg}"
+        current = cause
     return redact_sensitive(f"kind={classify_http_error(e)} | {detail}")

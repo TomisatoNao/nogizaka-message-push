@@ -11,6 +11,7 @@ import threading
 from collections.abc import Callable
 import httpx
 import src.config.config as cfg
+from src.proxy_transport import new_async_client
 
 log = logging.getLogger("collink")
 
@@ -144,7 +145,7 @@ def _notify_auth_rebind(client: httpx.AsyncClient) -> None:
 
 def new_general_client() -> httpx.AsyncClient:
     """启动、自愈和重置共用同一组参数，避免恢复后连接池配置漂移。"""
-    return httpx.AsyncClient(
+    return new_async_client(
         timeout=httpx.Timeout(connect=20, read=20, write=20, pool=20),
         proxy=getattr(cfg, "PROXY", "") or None,
         follow_redirects=False,
@@ -158,7 +159,7 @@ def new_auth_client() -> httpx.AsyncClient:
         concurrency = max(1, int(getattr(cfg, "TOKEN_REFRESH_CONCURRENCY", 2)))
     except (TypeError, ValueError):
         concurrency = 2
-    return httpx.AsyncClient(
+    return new_async_client(
         timeout=15,
         proxy=getattr(cfg, "PROXY", "") or None,
         follow_redirects=True,
@@ -289,7 +290,7 @@ async def get_blog_client() -> httpx.AsyncClient:
                 return _blog_client  # type: ignore[return-value]
             stale = _blog_client
             proxy_url = getattr(cfg, "PROXY", "") or None
-            _blog_client = httpx.AsyncClient(
+            _blog_client = new_async_client(
                 timeout=getattr(cfg, "TIMEOUT", 30),
                 proxy=proxy_url,
                 follow_redirects=True,

@@ -192,6 +192,20 @@ def test_redaction_applies_before_terminal_file_and_admin_log_outputs(capsys, mo
     assert "private-value" not in recent[-1]["text"]
 
 
+def test_empty_connect_error_retains_nested_tls_cause_and_redacts_secrets():
+    import ssl
+
+    tls = ssl.SSLEOFError("TLS closed https://api.test/?token=private-value")
+    core = httpx.ConnectError("")
+    core.__context__ = tls
+    outer = httpx.ConnectError("")
+    outer.__cause__ = core
+    formatted = logger.format_httpx_error(outer)
+    assert "SSLEOFError" in formatted
+    assert "TLS closed" in formatted
+    assert "private-value" not in formatted
+
+
 @pytest.mark.asyncio
 async def test_pool_timeout_does_not_reset_shared_general_client(monkeypatch):
     class BusyClient:

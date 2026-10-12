@@ -148,7 +148,13 @@ async def test_startup_and_recovery_keep_the_same_general_pool_configuration(mon
         replacement = await http_pool.reset_general_client(expected_client=startup)
         assert replacement is not startup
         assert len(constructors) == 2
-        assert constructors[0] == constructors[1]
+        def settings(kwargs):
+            return {key: value for key, value in kwargs.items() if key != "mounts"}
+
+        assert settings(constructors[0]) == settings(constructors[1])
+        from src.proxy_transport import ClosingHTTPProxyTransport
+
+        assert all(isinstance(item["mounts"]["all://"], ClosingHTTPProxyTransport) for item in constructors)
         assert replacement.timeout.pool == 20
         assert constructors[0]["limits"].max_connections == 20
         assert constructors[0]["limits"].max_keepalive_connections == 10
@@ -156,7 +162,7 @@ async def test_startup_and_recovery_keep_the_same_general_pool_configuration(mon
         await replacement.aclose()
         healed = await http_pool.get_general_client()
         assert not healed.is_closed
-        assert constructors[0] == constructors[2]
+        assert settings(constructors[0]) == settings(constructors[2])
     finally:
         await http_pool.close_all()
 

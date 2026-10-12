@@ -783,7 +783,9 @@ async def main() -> None:
 
         # 博客 http 客户端
         global _blog_client
-        _blog_client = httpx.AsyncClient(timeout=30, proxy=proxy_url, follow_redirects=True)
+        from src.proxy_transport import new_async_client
+
+        _blog_client = new_async_client(timeout=30, proxy=proxy_url, follow_redirects=True)
 
         # 连接池恢复必须同步更新所有复用普通 Client 的模块；否则只替换
         # fetcher 会让归档/翻译/标签仍握着已经损坏的旧 transport。
