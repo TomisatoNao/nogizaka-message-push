@@ -203,6 +203,16 @@ class SocialStore:
             )
             self._conn.commit()
 
+    def unconfirmed_routes(self, platform: str, item_id: str) -> set[str]:
+        """Unknown receipts are held across restart, not marked delivered."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT route_id FROM delivery_routes WHERE platform=? AND item_id=? "
+                "AND delivered_at=0 AND last_error='delivery_unconfirmed'",
+                (platform, item_id),
+            ).fetchall()
+        return {str(row['route_id']) for row in rows}
+
     # ── 首次运行标记（避免历史内容刷屏）───────────────────
 
     def is_bootstrapped(self, platform: str, account: str, kind: str = "") -> bool:

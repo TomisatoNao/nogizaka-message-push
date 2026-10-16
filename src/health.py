@@ -226,6 +226,10 @@ class HealthTracker:
                     if elapsed_ms is not None
                     else None
                 )
+            if error_code == "delivery_unconfirmed":
+                current["state"] = "unconfirmed"
+                current["last_error"] = "delivery_unconfirmed"
+                return
             if ok:
                 current["state"] = "ready"
                 current["last_error"] = None

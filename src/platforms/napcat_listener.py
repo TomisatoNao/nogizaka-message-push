@@ -517,12 +517,13 @@ class NapCatInboundListener:
         except (TypeError, ValueError):
             media_sent = 0
         completed = bool(getattr(operation, "completed", False)) and not error
-        icon = "✅" if completed else "❌"
-        status = "成功" if completed else "失败"
+        unconfirmed = getattr(delivery, "outcome", "") == "unconfirmed"
+        icon = "⚠️" if unconfirmed else "✅" if completed else "❌"
+        status = "送达未确认（禁止自动重发）" if unconfirmed else "成功" if completed else "失败"
         # 关键摘要控制在终端单行限制附近；完整 request_id/post_id 仍可从前面的
         # 社媒 DEBUG 日志按同一 request_id 查询，避免再次触发 [TRUNCATED]。
         line = (
-            f"{icon} NapCat {status} | 群{_safe_log_fragment(job.group_id, limit=16)} | "
+            f"{icon} OneBot {status} | 群{_safe_log_fragment(job.group_id, limit=16)} | "
             f"{platform}/{post_id} | 路由{success_routes}/{matched_routes} | "
             f"媒体{media_sent}/{media_total} | {max(0.0, elapsed):.1f}s | "
             f"req={_safe_log_text(request_id, limit=34)}"
@@ -530,6 +531,8 @@ class NapCatInboundListener:
         if error:
             detail = _safe_log_text(error, limit=160)
             self._emit(f"{line}\n   error={detail}", is_error=True)
+        elif unconfirmed:
+            self._emit(line, is_warning=True)
         elif completed:
             self._emit(line)
         else:
@@ -807,7 +810,8 @@ class NapCatInboundListener:
                 )
                 elapsed = time.monotonic() - started_at
                 if not getattr(operation, "completed", False):
-                    self._mark("failed")
+                    delivery = getattr(operation, "delivery", None)
+                    self._mark("unconfirmed" if getattr(delivery, "outcome", "") == "unconfirmed" else "failed")
                     self._emit_job_summary(job, request_id, operation, elapsed)
                     continue
                 self._mark("succeeded")

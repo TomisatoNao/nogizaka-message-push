@@ -17,6 +17,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from src.platforms import napcat
 from src.social.contracts import DeliveryTarget
+from src.social.errors import SocialDeliveryUnconfirmed
 from src.social.models import MediaItem
 
 
@@ -409,9 +410,10 @@ class NapCatAdapter:
                 nodes = self._forward_nodes(target, message_text, media_items)
                 if nodes is not None:
                     group_id = self._group_id(target)
-                    return bool(
-                        await napcat.send_group_forward_message(group_id, nodes)
-                    )
+                    result = await napcat.send_group_forward_message_detailed(group_id, nodes)
+                    if result.error_code == "delivery_unconfirmed":
+                        raise SocialDeliveryUnconfirmed("delivery_unconfirmed")
+                    return result.ok
                 self._log(
                     "ℹ️ NapCat 多媒体缺少有效转发身份，回退普通消息链",
                     is_debug=True,
