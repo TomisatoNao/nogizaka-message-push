@@ -75,9 +75,9 @@ def test_archive_cache_versions_are_synchronised():
 
     for resource in (
         "/static/archive.css?v=20261006_1",
-        "/static/archive.js?v=20261008_3",
+        "/static/archive.js?v=20261018_1",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261008_3") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261018_1") else 1)
         assert resource in perf
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import time as _time
+import threading
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs
 
@@ -14,6 +15,8 @@ from src.webui_modules.archive.common import _blog_media_url, _send_json_resp
 
 
 _GALLERY_JST = timezone(timedelta(hours=9))
+# Fixed stripes bound memory even when many filter combinations are requested.
+_gallery_statistics_locks = [threading.RLock() for _ in range(64)]
 
 
 def _gallery_timestamp_value(value: object, source: str = "") -> float:
@@ -301,6 +304,39 @@ def _get_blog_image_body_filter(cols: set[str], image_value: str = "j.value") ->
         f"(NOT ({is_hinata}) OR {allow_local_path_fallback} OR {body_html} = '' "
         f"OR NOT ({has_article_images}) OR {body_match})"
     )
+
+
+def _blog_count_source(cols: set[str], where: str) -> tuple[str, str]:
+    """Normalize each article once, not once per expanded photo.
+
+    MATERIALIZED is an optimization fence on SQLite >= 3.35. Callers retain
+    their per-article Python fallback for older SQLite versions.
+    """
+    _, target = _get_blog_image_expr(cols)
+    if "images_json" in cols and "body_html" in cols:
+        body = "COALESCE(p.body_html, '')"
+        bypass = (
+            "(lower(COALESCE(p.group_key, '')) NOT IN ('hinatazaka', 'hinatazaka46') "
+            "OR p.images_json IS NULL OR trim(p.images_json) = '' OR p.images_json = '[]' "
+            f"OR {body} = '' OR instr(lower({body}), '<img') = 0)"
+        )
+        normalized = (
+            f"replace(replace(replace(lower({body}), '&amp;', '&'), 'https://', '//'), 'http://', '//')"
+        )
+        image = (
+            "replace(replace(replace(lower(CAST(j.value AS TEXT)), '&amp;', '&'), "
+            "'https://', '//'), 'http://', '//')"
+        )
+        body_filter = f"(p.body_bypass OR instr(p.body_normalized, {image}) > 0)"
+    else:
+        bypass, normalized, body_filter = "1", "''", "1 = 1"
+    cte = f"""WITH gallery_posts AS MATERIALIZED (
+        SELECT p.group_key, p.author, p.date, {target} AS gallery_images,
+               {bypass} AS body_bypass,
+               CASE WHEN {bypass} THEN '' ELSE {normalized} END AS body_normalized
+        FROM blog_posts p WHERE {where}
+    ) """
+    return cte, body_filter
 
 
 def _filter_blog_images_by_body(images: list, body_html: str, group_key: str = "") -> list:
@@ -987,6 +1023,11 @@ _GALLERY_YEARS_CACHE_TTL = 300.0
 
 
 def get_gallery_years(member: str = "", source: str = "all") -> dict:
+    with _gallery_statistics_locks[hash(("years", member, source)) % 64]:
+        return _get_gallery_years_locked(member, source)
+
+
+def _get_gallery_years_locked(member: str = "", source: str = "all") -> dict:
     """获取指定成员及来源下的年份分布列表及照片统计。"""
     cache_key = (member, source)
     now = _time.monotonic()
@@ -1028,13 +1069,13 @@ def get_gallery_years(member: str = "", source: str = "all") -> dict:
                 where_str = " AND ".join(where)
 
                 try:
-                    sql = f"""
+                    cte, body_filter = _blog_count_source(cols, where_str)
+                    sql = cte + f"""
                         SELECT CAST(substr(p.date, 1, 4) AS INTEGER) AS y, COUNT(*)
-                        FROM blog_posts p, json_each({json_target}) j
-                        WHERE {where_str}
-                          AND j.value IS NOT NULL AND j.value != ''
+                        FROM gallery_posts p, json_each(p.gallery_images) j
+                        WHERE j.value IS NOT NULL AND j.value != ''
                           AND j.value NOT LIKE '%_pre/blog%' AND j.value NOT LIKE '%img.nogizaka46.com%'
-                          AND {_get_blog_image_body_filter(cols)}
+                          AND {body_filter}
                         GROUP BY y
                         ORDER BY y DESC;
                     """
@@ -1110,6 +1151,11 @@ _GALLERY_MEMBERS_CACHE_TTL = 300.0
 
 
 def get_gallery_members() -> dict:
+    with _gallery_statistics_locks[hash(("members",)) % 64]:
+        return _get_gallery_members_locked()
+
+
+def _get_gallery_members_locked() -> dict:
     """获取所有相册成员（合并含照片的消息成员与含配图的博客作者），返回归一化名册与各源照片数。"""
     global _gallery_members_cache
     now = _time.monotonic()
@@ -1165,11 +1211,12 @@ def get_gallery_members() -> dict:
                 b_cols = _blog_table_columns(blog_db)
                 where_expr, json_target = _get_blog_image_expr(b_cols)
                 try:
-                    b_rows = blog_db.execute(f"""
+                    cte, body_filter = _blog_count_source(b_cols, where_expr)
+                    b_rows = blog_db.execute(cte + f"""
                         SELECT p.group_key, p.author, COUNT(*)
-                        FROM blog_posts p, json_each({json_target}) j
-                        WHERE {where_expr} AND j.value IS NOT NULL AND j.value != ''
-                          AND {_get_blog_image_body_filter(b_cols)}
+                        FROM gallery_posts p, json_each(p.gallery_images) j
+                        WHERE j.value IS NOT NULL AND j.value != ''
+                          AND {body_filter}
                         GROUP BY p.group_key, p.author;
                     """).fetchall()
                 except Exception:

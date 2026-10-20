@@ -6424,7 +6424,10 @@ function updateGalleryMemberButtonDisplay() {
   }
 }
 
+let gallerySelectionVersion = 0;
+
 async function selectGalleryMember(mName, updateHash = true) {
+  const selectionVersion = ++gallerySelectionVersion;
   curMode = "gallery";
   hideMessageMonthFooter();
   setHtmlViewClass("gallery");
@@ -6458,11 +6461,16 @@ async function selectGalleryMember(mName, updateHash = true) {
   } else {
     renderGalleryMemberPopover();
   }
+  // Only an active year needs validation before fetching pictures. With no
+  // year selected, metadata must not add a serial round-trip to the first page.
+  const photosTask = curGalleryYear ? null : loadGalleryPhotos(true);
   await loadGalleryYears();
+  if (selectionVersion !== gallerySelectionVersion || curMode !== "gallery") return;
   if (updateHash) {
     syncGalleryHash();
   }
-  await loadGalleryPhotos(true);
+  if (photosTask) await photosTask;
+  else await loadGalleryPhotos(true);
 }
 
 function getGalleryGridCols() {
@@ -6922,9 +6930,7 @@ if ($("gallerySourceChips")) {
       chips.forEach(c => c.classList.toggle("active", c === chip));
       updateGalleryMemberButtonDisplay();
       renderGalleryMemberPopover();
-      await loadGalleryYears();
-      syncGalleryHash();
-      await loadGalleryPhotos(true);
+      await selectGalleryMember(curGalleryMember);
     });
   });
 }

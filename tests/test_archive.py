@@ -28,13 +28,21 @@ def _http(method: str, url: str, headers: dict | None = None):
 
 def main() -> None:
     import src.config.config as cfg
-    from src import archive
+    from src import archive, blog_fetcher
 
     tmpdir = Path(tempfile.mkdtemp(prefix="archive_test_"))
     orig_dir = cfg.ARCHIVE_DIR
     orig_enabled = cfg.ARCHIVE_ENABLED
     orig_media = cfg.ARCHIVE_MEDIA
     orig_auth = cfg.AUTH_ENABLED
+    orig_blog_db = blog_fetcher.BLOG_DB_PATH
+    orig_blog_images = blog_fetcher.BLOG_IMAGE_DIR
+    orig_blog_healed = blog_fetcher._blog_images_healed
+    # Home aggregation also opens the blog store. Never let an integration
+    # test scan/heal the developer's real archive or update its watermarks.
+    blog_fetcher.BLOG_DB_PATH = tmpdir / "blogs.db"
+    blog_fetcher.BLOG_IMAGE_DIR = tmpdir / "blog_images"
+    blog_fetcher._blog_images_healed = False
     archive.close_db()
     cfg.ARCHIVE_DIR = str(tmpdir)
     cfg.ARCHIVE_ENABLED = True
@@ -518,6 +526,9 @@ def main() -> None:
         cfg.ARCHIVE_ENABLED = orig_enabled
         cfg.ARCHIVE_MEDIA = orig_media
         cfg.AUTH_ENABLED = orig_auth
+        blog_fetcher.BLOG_DB_PATH = orig_blog_db
+        blog_fetcher.BLOG_IMAGE_DIR = orig_blog_images
+        blog_fetcher._blog_images_healed = orig_blog_healed
 
     print("=" * 50)
     print("🎉 全部测试通过！消息归档工作正常")
