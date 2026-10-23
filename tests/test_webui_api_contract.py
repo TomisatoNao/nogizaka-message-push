@@ -174,3 +174,18 @@ def test_contract_detector_identifies_unregistered_route():
     assert _is_route_handled("POST", "/api/system/definitely_unregistered_dummy_route") is False
     assert _is_route_handled("GET", "/api/definitely_unregistered_dummy_route") is False
 
+
+def test_frontend_archive_calls_are_registered_in_access_policy():
+    """Route reachability alone must not miss a new facade allowlist omission."""
+    from src.webui_modules.archive_handlers import _authorize_archive
+
+    for method, path, filename, line in _extract_frontend_api_calls():
+        if not path.startswith("/api/archive/"):
+            continue
+        handler = MagicMock()
+        handler.command = method
+        handler.path = path
+        assert _authorize_archive(handler, path[len("/api/archive/"):], lambda **_: True), (
+            f"{filename}:{line}: {method} {path} is missing from archive access policy"
+        )
+

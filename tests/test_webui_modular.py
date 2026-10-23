@@ -1082,6 +1082,8 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
     monkeypatch.setattr(archive_handlers, "_handle_archive_impl", fake_impl)
 
     class Handler:
+        command = "GET"
+
         def __init__(self):
             self.payload = None
 
@@ -1089,8 +1091,8 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
             self.payload = payload
 
     first, second = Handler(), Handler()
-    t1 = threading.Thread(target=archive_handlers.handle_archive, args=(first, "home", None, None))
-    t2 = threading.Thread(target=archive_handlers.handle_archive, args=(second, "home", None, None))
+    t1 = threading.Thread(target=archive_handlers.handle_archive, args=(first, "home", lambda **_: True, None))
+    t2 = threading.Thread(target=archive_handlers.handle_archive, args=(second, "home", lambda **_: True, None))
     t1.start()
     assert started.wait(1)
     t2.start()

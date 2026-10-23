@@ -85,7 +85,6 @@ def handle_letters(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
         async def _do_sync():
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                _archive.initialize(client)
                 return await _al.sync_letters_for_member(target_mem, client)
 
         try:

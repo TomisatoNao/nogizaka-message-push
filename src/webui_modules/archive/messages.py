@@ -623,7 +623,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
     # 8. 消息媒体流服务
     if sub.startswith("media/"):
-        rest = unquote(sub[len("media/"):])
+        rest = unquote(sub[len("media/"):]).replace("\\", "/")
         raw_member, _, rel = rest.partition("/")
         member = _archive.member_dir_name(raw_member) if raw_member else ""
         if not member or member not in _archive.list_members() or not rel:
@@ -634,6 +634,11 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         if member_root not in full.parents:
             _send_json_resp(handler, {"ok": False, "errors": ["非法路径"]}, 403)
             return True
+        # Classify the resolved resource, not the URL spelling. Letter originals,
+        # metadata and thumbnails must have the same permissions as their list.
+        is_letter = full.relative_to(member_root).parts[0].casefold() == "letters"
+        if is_letter and not guard_fn(need_admin=True):
+            return True
         if not full.is_file():
             _send_json_resp(handler, {"ok": False, "errors": ["媒体不存在"]}, 404)
             return True
@@ -642,10 +647,13 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             thumb_path = get_or_create_thumbnail(full)
             if thumb_path and thumb_path.is_file():
                 is_public = bool(getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False))
-                thumb_cc = "public, max-age=31536000, immutable" if is_public else "private, max-age=86400"
+                thumb_cc = (
+                    "private, no-store" if is_letter else
+                    "public, max-age=31536000, immutable" if is_public else "private, max-age=86400"
+                )
                 serve_file_range(handler, thumb_path, cache_control=thumb_cc)
                 return True
-        serve_file_range(handler, full, cache_control="private, no-cache")
+        serve_file_range(handler, full, cache_control="private, no-store" if is_letter else "private, no-cache")
         return True
 
     # 9. 后台历史消息全量回填
@@ -656,7 +664,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
     # 10. 失败媒体重试下载
     if sub == "retry_download":
-        if not guard_fn(need_admin=False):
+        if not guard_fn(need_admin=True):
             return True
         raw_m = qp("member")
         member = _archive.member_dir_name(raw_m) if raw_m else ""

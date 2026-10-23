@@ -16,7 +16,8 @@ from src import archive
 @pytest.mark.asyncio
 async def test_letter_archiving_and_queries(tmp_path):
     orig_dir = cfg.ARCHIVE_DIR
-    archive._sqlite_conn = None
+    # Reset both the thread-local connection and schema flag when changing stores.
+    archive.close_db()
     cfg.ARCHIVE_DIR = str(tmp_path)
 
     try:
