@@ -13,6 +13,8 @@ from src.webui_modules.static_handler import send_json
 
 BLOG_IMAGE_DIR = Path("data/blog_images")
 _blog_db_local = threading.local()
+# Compatibility export for archive_handlers; message writes now use archive's
+# cross-process month lock instead of this process-local lock.
 _archive_write_lock = threading.Lock()
 ARCHIVE_TYPES = frozenset({"text", "picture", "image", "video", "voice"})
 
