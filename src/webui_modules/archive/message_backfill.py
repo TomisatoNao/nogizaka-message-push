@@ -21,17 +21,25 @@ _ACTIVE_BACKFILL_REQ_ID: str | None = None
 
 
 def _is_active_proc_running() -> bool:
-    global _ACTIVE_BACKFILL_PROC
+    """Called under _BACKFILL_LOCK; uncertain state must not allow another job."""
+    global _ACTIVE_BACKFILL_PROC, _ACTIVE_BACKFILL_REQ_ID
     if _ACTIVE_BACKFILL_PROC is None:
         return False
     poll_fn = getattr(_ACTIVE_BACKFILL_PROC, "poll", None)
     if callable(poll_fn):
-        return poll_fn() is None
-    return False
+        try:
+            if poll_fn() is not None:
+                _ACTIVE_BACKFILL_PROC = None
+                _ACTIVE_BACKFILL_REQ_ID = None
+                return False
+        except (OSError, ValueError):
+            pass
+    return True
 
 
 def _collect_output(process, request_id: str) -> None:
     global _ACTIVE_BACKFILL_PROC, _ACTIVE_BACKFILL_REQ_ID
+    finished = False
     try:
         if process.stdout is not None:
             with process.stdout:
@@ -39,12 +47,15 @@ def _collect_output(process, request_id: str) -> None:
                     if line.strip():
                         log_all(f"[消息回填] request_id={request_id} | {line.strip()}")
         code = process.wait()
+        finished = True
         log_all(f"[消息回填] 进程结束 | request_id={request_id} | exit_code={code}", is_error=code != 0)
     except (OSError, ValueError) as exc:
         log_all(f"[消息回填] 日志读取失败 | request_id={request_id} | error={exc}", is_error=True)
     finally:
         with _BACKFILL_LOCK:
-            if _ACTIVE_BACKFILL_PROC is process:
+            # Pipe errors do not prove that the child exited. Keep ownership;
+            # the next request can poll it without allowing overlapping work.
+            if finished and _ACTIVE_BACKFILL_PROC is process:
                 _ACTIVE_BACKFILL_PROC = None
                 _ACTIVE_BACKFILL_REQ_ID = None
 
@@ -81,19 +92,6 @@ def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
         _send_json_resp(handler, {"ok": False, "msg": "from_date 格式必须为 YYYY-MM-DD（例如 2023-01-01）"}, 400)
         return
 
-    with _BACKFILL_LOCK:
-        if _is_active_proc_running():
-            _send_json_resp(
-                handler,
-                {
-                    "ok": False,
-                    "msg": "已有消息回填任务正在执行中，请等待其完成或在系统日志中查看进度",
-                    "request_id": _ACTIVE_BACKFILL_REQ_ID,
-                },
-                409,
-            )
-            return
-
     request_id = uuid.uuid4().hex[:12]
     script = _ROOT / "tools" / "backfill_archive.py"
     if not script.is_file():
@@ -112,24 +110,37 @@ def handle_message_backfill(handler, guard_fn, read_body_json_fn) -> None:
     if reset:
         command.append("--reset")
 
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=str(_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except OSError as exc:
-        log_all(f"[消息回填] 启动失败 | request_id={request_id} | error={exc}", is_error=True)
-        _send_json_resp(handler, {"ok": False, "msg": "启动回填任务失败，请查看系统日志", "request_id": request_id}, 500)
-        return
-
+    # Keep checking, spawning and registration atomic within this WebUI process.
     with _BACKFILL_LOCK:
+        if _is_active_proc_running():
+            _send_json_resp(
+                handler,
+                {
+                    "ok": False,
+                    "msg": "已有消息回填任务正在执行中，请等待其完成或在系统日志中查看进度",
+                    "request_id": _ACTIVE_BACKFILL_REQ_ID,
+                },
+                409,
+            )
+            return
+
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as exc:
+            log_all(f"[消息回填] 启动失败 | request_id={request_id} | error={exc}", is_error=True)
+            _send_json_resp(handler, {"ok": False, "msg": "启动回填任务失败，请查看系统日志", "request_id": request_id}, 500)
+            return
+
         _ACTIVE_BACKFILL_PROC = process
         _ACTIVE_BACKFILL_REQ_ID = request_id
 

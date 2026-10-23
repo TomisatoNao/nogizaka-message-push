@@ -598,8 +598,6 @@ class _Handler(BaseHTTPRequestHandler):
 
         # 5. 归档与媒体
         if path.startswith("/api/archive/"):
-            if not self._guard(need_admin=False):
-                return
             sub = path[len("/api/archive/"):]
             _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
@@ -610,15 +608,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/media/"):
-            if not self._guard(need_admin=False):
-                return
             sub = "media/" + path[len("/media/"):]
             _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
 
         if path.startswith("/blog_media/"):
-            if not self._guard(need_admin=False):
-                return
             sub = "blog_media/" + path[len("/blog_media/"):]
             _mod_handle_archive(self, sub, self._guard, self._read_body_json)
             return
@@ -1005,6 +999,10 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_origin():
             return
         path = self.path.split("?", 1)[0]
+        if path.startswith("/api/archive/"):
+            sub = path[len("/api/archive/"):]
+            _mod_handle_archive(self, sub, self._guard, self._read_body_json)
+            return
         if path in ("/api/users", "/api/auth/users"):
             body = self._read_body_json() or {}
             handle_users_write(self, body, "POST")

@@ -56,7 +56,8 @@ def test_message_backfill_reaches_existing_tool(monkeypatch, member, expected_ar
     assert handler.code == 202
     assert handler.payload["ok"] is True
     assert handler.payload["request_id"]
-    assert guard_calls == [{"need_admin": True}]
+    # Dispatch policy and the independently callable business handler both guard.
+    assert guard_calls == [{"need_admin": True}, {"need_admin": True}]
 
     command = calls[0][0][0]
     assert command[:2] == [message_backfill.sys.executable, "-u"]
@@ -153,11 +154,15 @@ def test_progress_and_exit_status_reach_system_logs(monkeypatch, exit_code):
     logs = []
     monkeypatch.setattr(message_backfill, "log_all", lambda text, **kw: logs.append((text, kw)))
     process = SimpleNamespace(stdout=io.StringIO("\n正在同步历史消息 💌\n"), wait=lambda: exit_code)
+    message_backfill._ACTIVE_BACKFILL_PROC = process
+    message_backfill._ACTIVE_BACKFILL_REQ_ID = "trace456"
     message_backfill._collect_output(process, "trace456")
     assert len(logs) == 2
     assert "正在同步历史消息 💌" in logs[0][0]
     assert all("request_id=trace456" in text for text, _ in logs)
     assert logs[-1][1]["is_error"] == (exit_code != 0)
+    assert message_backfill._ACTIVE_BACKFILL_PROC is None
+    assert message_backfill._ACTIVE_BACKFILL_REQ_ID is None
 
 
 def test_real_background_process_forwards_unicode_progress(monkeypatch, tmp_path):
@@ -182,3 +187,124 @@ def test_real_background_process_forwards_unicode_progress(monkeypatch, tmp_path
     assert any("消息回填进度 💌" in line for line in logs)
     assert any("冨里 奈央" in line and "--reset" in line for line in logs)
     assert "exit_code=0" in logs[-1]
+
+
+def test_concurrent_requests_cannot_both_spawn(monkeypatch):
+    real_thread = threading.Thread
+    lock = threading.Lock()
+    spawning = threading.Event()
+    second_attempt = threading.Event()
+    release_spawn = threading.Event()
+    calls, responses, errors = [], [], []
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread().name == "request-two":
+                second_attempt.set()
+            lock.acquire()
+
+        def __exit__(self, *_):
+            lock.release()
+
+    def spawn(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            spawning.set()
+            assert release_spawn.wait(5)
+        return SimpleNamespace(pid=123, poll=lambda: None)
+
+    def request():
+        try:
+            responses.append(invoke({"member": "fixture"}))
+        except BaseException as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(message_backfill, "_BACKFILL_LOCK", ObservedLock())
+    monkeypatch.setattr(message_backfill.subprocess, "Popen", spawn)
+    monkeypatch.setattr(message_backfill.threading, "Thread", lambda **_: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(message_backfill, "log_all", lambda *a, **kw: None)
+    first = real_thread(target=request, name="request-one")
+    second = real_thread(target=request, name="request-two")
+    first.start()
+    try:
+        assert spawning.wait(5)
+        second.start()
+        assert second_attempt.wait(5)
+    finally:
+        release_spawn.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert not errors
+    assert len(calls) == 1
+    assert sorted(h.code for h in responses) == [202, 409]
+    assert responses[0].payload["request_id"] == responses[1].payload["request_id"]
+
+
+def test_spawn_failure_releases_slot_for_retry(monkeypatch):
+    attempts = []
+
+    def spawn(*args, **kwargs):
+        attempts.append(args)
+        if len(attempts) == 1:
+            raise OSError("fixture failure")
+        return SimpleNamespace(pid=123, poll=lambda: None)
+
+    monkeypatch.setattr(message_backfill.subprocess, "Popen", spawn)
+    monkeypatch.setattr(message_backfill.threading, "Thread", lambda **_: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(message_backfill, "log_all", lambda *a, **kw: None)
+    assert invoke({}).code == 500
+    assert message_backfill._ACTIVE_BACKFILL_PROC is None
+    assert invoke({}).code == 202
+    assert invoke({}).code == 409
+    assert len(attempts) == 2
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_finished_process_allows_restart_and_old_collector_preserves_new_task(monkeypatch, exit_code):
+    old = SimpleNamespace(stdout=None, poll=lambda: exit_code, wait=lambda: exit_code)
+    message_backfill._ACTIVE_BACKFILL_PROC = old
+    message_backfill._ACTIVE_BACKFILL_REQ_ID = "old"
+    new = SimpleNamespace(pid=456, poll=lambda: None)
+    monkeypatch.setattr(message_backfill.subprocess, "Popen", lambda *a, **kw: new)
+    monkeypatch.setattr(message_backfill.threading, "Thread", lambda **_: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(message_backfill, "log_all", lambda *a, **kw: None)
+    result = invoke({})
+    assert result.code == 202
+    message_backfill._collect_output(old, "old")
+    assert message_backfill._ACTIVE_BACKFILL_PROC is new
+    assert message_backfill._ACTIVE_BACKFILL_REQ_ID == result.payload["request_id"]
+
+
+def test_log_read_failure_does_not_release_running_process(monkeypatch):
+    class BrokenOutput:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def __iter__(self):
+            raise OSError("fixture pipe failure")
+
+    process = SimpleNamespace(stdout=BrokenOutput(), poll=lambda: None)
+    message_backfill._ACTIVE_BACKFILL_PROC = process
+    message_backfill._ACTIVE_BACKFILL_REQ_ID = "running"
+    monkeypatch.setattr(message_backfill, "log_all", lambda *a, **kw: None)
+    message_backfill._collect_output(process, "running")
+    assert message_backfill._ACTIVE_BACKFILL_PROC is process
+    assert invoke({}).code == 409
+
+
+@pytest.mark.parametrize("error", [OSError, ValueError])
+def test_unknown_process_status_blocks_another_spawn(monkeypatch, error):
+    def broken_poll():
+        raise error("fixture status unavailable")
+
+    message_backfill._ACTIVE_BACKFILL_PROC = SimpleNamespace(poll=broken_poll)
+    message_backfill._ACTIVE_BACKFILL_REQ_ID = "uncertain"
+    monkeypatch.setattr(message_backfill.subprocess, "Popen", lambda *a, **kw: pytest.fail("Duplicate spawn"))
+    result = invoke({})
+    assert result.code == 409
+    assert result.payload["request_id"] == "uncertain"

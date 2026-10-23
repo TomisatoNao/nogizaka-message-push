@@ -1153,7 +1153,10 @@ def _member_letters_dir(m_name: str) -> Path:
     return d
 
 
-async def archive_single_letter(member_name: str, letter: dict, headers: dict | None = None) -> dict:
+async def archive_single_letter(
+    member_name: str, letter: dict, headers: dict | None = None, *,
+    client: httpx.AsyncClient | None = None, semaphore: asyncio.Semaphore | None = None,
+) -> dict:
     """归档单封粉丝信件：下载高清信纸卡片、持久化至 SQLite letters 表和本地文件。"""
     letter_id = letter.get("id")
     if not letter_id or not member_name:
@@ -1181,12 +1184,18 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
             if target_path.exists() and target_path.stat().st_size > 0:
                 local_file = f"{m_dir}/letters/{target_path.name}"
             else:
-                client = _media_client
-                sem = _media_sem if _media_sem is not None else asyncio.Semaphore(3)
+                # An explicitly supplied client belongs to the caller's loop;
+                # never pair it with the monitor's cross-loop semaphore.
+                download_client = client if client is not None else _media_client
+                sem = semaphore
+                if sem is None:
+                    sem = _media_sem if client is None and _media_sem is not None else asyncio.Semaphore(3)
                 async with sem:
                     try:
-                        if client is not None and not client.is_closed:
-                            resp = await client.get(file_url, headers=headers, timeout=30.0)
+                        if download_client is not None:
+                            if download_client.is_closed:
+                                raise RuntimeError("Provided letter download client is closed")
+                            resp = await download_client.get(file_url, headers=headers, timeout=30.0)
                         else:
                             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as temp_c:
                                 resp = await temp_c.get(file_url, headers=headers)
@@ -1226,12 +1235,17 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
     return res
 
 
-async def archive_letters_batch(member_name: str, letters: list[dict], headers: dict | None = None) -> list[dict]:
+async def archive_letters_batch(
+    member_name: str, letters: list[dict], headers: dict | None = None, *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
     """批量归档信件列表，并发下载信纸原图并更新本地 letters.json 汇总与 SQLite。"""
     if not member_name or not letters:
         return []
 
-    tasks = [archive_single_letter(member_name, l_item, headers=headers) for l_item in letters]
+    sem = _media_sem if client is None and _media_sem is not None else asyncio.Semaphore(3)
+    tasks = [archive_single_letter(member_name, l_item, headers=headers, client=client, semaphore=sem)
+             for l_item in letters]
     results = await gather_cancel_safe(tasks, cleanup_timeout=5.0)
 
     # 按照 created_at DESC 排序整理

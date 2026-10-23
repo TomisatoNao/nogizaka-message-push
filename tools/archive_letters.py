@@ -194,11 +194,11 @@ async def sync_letters_for_member(member: dict, client: httpx.AsyncClient) -> tu
 
     if not new_letters:
         log_all(f"✉️ [信件同步] {m_name}: 信件已是最新（共 {len(letters)} 封，无新增）", is_debug=True)
-        archived = await archive.archive_letters_batch(m_name, letters, headers=headers)
+        archived = await archive.archive_letters_batch(m_name, letters, headers=headers, client=client)
         return (len(archived), 0)
 
     log_all(f"✉️ [信件同步] {m_name}: 发现 {len(new_letters)} 封新信件（总计 {len(letters)} 封），正在下载信纸原图并入库归档...")
-    archived = await archive.archive_letters_batch(m_name, letters, headers=headers)
+    archived = await archive.archive_letters_batch(m_name, letters, headers=headers, client=client)
     log_all(f"✅ [信件同步] {m_name}: 成功同步 {len(new_letters)} 封新信件（总计 {len(archived)} 封）！")
     return (len(archived), len(new_letters))
 
@@ -234,7 +234,6 @@ async def main():
     total_synced = 0
     total_new = 0
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        archive.initialize(client)
         for member in members_to_sync:
             tot, nw = await sync_letters_for_member(member, client)
             total_synced += tot

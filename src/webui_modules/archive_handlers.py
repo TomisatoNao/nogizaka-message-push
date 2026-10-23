@@ -57,8 +57,52 @@ def get_blog_db() -> sqlite3.Connection:
     return _common.get_blog_db()
 
 
+# All HTTP methods share this allowlist. Subhandlers retain their resource and
+# account-specific checks; a new route must declare its contract here first.
+_READ_ROUTES = frozenset({
+    "home", "members", "months", "messages", "calendar", "search",
+    "messages/interactions", "messages/starred", "blog_groups", "blog_calendar",
+    "blog_authors", "blogs", "blogs/card_status", "blogs/card_file",
+    "gallery", "gallery_members", "gallery_years",
+})
+_ADMIN_POST_ROUTES = frozenset({
+    "tags", "retry_download", "messages/backfill", "letters_sync", "letters/favorite",
+    "blogs/archive_groups", "blogs/archive_member", "blogs/translate", "blogs/delete_translation",
+})
+_READER_POST_ROUTES = frozenset({
+    "message/interaction", "message/star", "blogs/card", "blogs/furigana",
+})
+
+
+def _authorize_archive(handler, sub: str, guard_fn) -> bool:
+    if sub == "avatar":
+        # Public roster artwork is also used by the login/admin pages.
+        method = "GET"
+        need_admin = None if handler.path.startswith("/avatar/") else False
+    elif sub == "letters":
+        method, need_admin = "GET", True
+    elif sub in _ADMIN_POST_ROUTES:
+        method, need_admin = "POST", True
+    elif sub in _READER_POST_ROUTES:
+        method, need_admin = "POST", False
+    elif sub in _READ_ROUTES or sub.startswith(("media/", "blog_media/")):
+        method, need_admin = "GET", False
+    else:
+        _send_json_resp(handler, {"ok": False, "errors": ["未知路径"]}, 404)
+        return False
+    if need_admin is not None and not guard_fn(need_admin=need_admin):
+        return False
+    if handler.command != method:
+        handler._pending_headers = [*getattr(handler, "_pending_headers", []), ("Allow", method)]
+        _send_json_resp(handler, {"ok": False, "errors": [f"请使用 {method} 请求"]}, 405)
+        return False
+    return True
+
+
 def handle_archive(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     """归档路由入口；首页聚合请求使用单飞缓存避免并发重复计算。"""
+    if not _authorize_archive(handler, sub, guard_fn):
+        return
     if sub == "home":
         cache_key = _home._home_cache_key_for_request()
         cached = _home._acquire_home_cache(cache_key)
@@ -77,6 +121,7 @@ def warm_home_cache() -> bool:
     """后台预热首页聚合缓存；失败不影响 WebUI 启动。"""
     class _WarmupHandler:
         path = "/api/archive/home"
+        command = "GET"
         headers = {}
         _pending_headers = []
         _pending_set_cookies = []
