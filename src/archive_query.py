@@ -141,7 +141,7 @@ def list_members() -> list[str]:
     root = _get_archive_root()
     if not root.is_dir():
         return []
-    return sorted(d.name for d in root.iterdir() if d.is_dir())
+    return sorted(d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
 
 
 def _month_count(json_path: Path) -> int:
