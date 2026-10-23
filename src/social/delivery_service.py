@@ -22,7 +22,7 @@ from src.social.adapters import (
     QQOfficialAdapter,
 )
 from src.social.contracts import DeliveryResult, DeliveryTarget
-from src.social.errors import SocialDeliveryError
+from src.social.errors import SocialDeliveryError, SocialDeliveryUnconfirmed
 from src.social.models import MediaItem, Post
 from src.social.route_planner import PlannedRoute, RoutePlanner
 from src.social.settings import RuntimeConfig
@@ -58,6 +58,10 @@ class SocialStoreDeliveryState:
 
     def delivered_routes(self, platform: str, item_id: str) -> set[str]:
         return set(self._store.delivered_routes(platform, item_id))
+
+    def unconfirmed_routes(self, platform: str, item_id: str) -> set[str]:
+        method = getattr(self._store, "unconfirmed_routes", None)
+        return set(method(platform, item_id)) if callable(method) else set()
 
     def mark_route_result(
         self,
@@ -247,6 +251,12 @@ class DeliveryService:
                 is_error=not attempt.ok,
             )
             return attempt
+        except SocialDeliveryUnconfirmed:
+            self._log(
+                f"⚠️ [社媒推送] 路由送达未确认 | {context} | 禁止自动重发",
+                is_warning=True,
+            )
+            return _RouteAttempt(route.route_id, False, "delivery_unconfirmed")
         except asyncio.TimeoutError:
             if getattr(route.target, "channel", "") == "napcat":
                 try:
@@ -276,8 +286,10 @@ class DeliveryService:
         delivered_routes: set[str],
         *,
         persist: bool = True,
+        unconfirmed_routes: set[str] | None = None,
     ) -> DeliveryResult:
-        pending = [route for route in routes if route.route_id not in delivered_routes]
+        held = (unconfirmed_routes or set()) & {route.route_id for route in routes}
+        pending = [route for route in routes if route.route_id not in delivered_routes | held]
         skipped_routes = len(routes) - len(pending)
         attempts = await asyncio.gather(
             *(
@@ -286,7 +298,7 @@ class DeliveryService:
             )
         )
 
-        errors: list[str] = []
+        errors: list[str] = [f"{route_id}: delivery_unconfirmed" for route_id in sorted(held)]
         for attempt in attempts:
             if attempt.error:
                 errors.append(f"{attempt.route_id}: {attempt.error}")
@@ -318,9 +330,12 @@ class DeliveryService:
         matched_routes = len(routes)
         attempted_routes = len(attempts)
         success_routes = sum(attempt.ok for attempt in attempts)
-        failed_routes = attempted_routes - success_routes
+        uncertain_count = len(held) + sum(a.error == "delivery_unconfirmed" for a in attempts)
+        failed_routes = sum(not a.ok and a.error != "delivery_unconfirmed" for a in attempts)
         if matched_routes == 0:
             outcome = "no_route"
+        elif uncertain_count:
+            outcome = "unconfirmed"
         elif attempted_routes == 0 and skipped_routes == matched_routes:
             outcome = "already_delivered"
         elif failed_routes == 0:
@@ -331,7 +346,7 @@ class DeliveryService:
             outcome = "failed"
 
         media_total = len(post.media)
-        media_sent = media_total if (success_routes > 0 or not pending) else 0
+        media_sent = media_total if (success_routes > 0 or (not pending and not held)) else 0
         return DeliveryResult(
             outcome=outcome,
             matched_routes=matched_routes,
@@ -355,7 +370,8 @@ class DeliveryService:
                 route_id, _, detail = error.partition(": ")
                 self._log(
                     f"⚠️ [社媒推送] {error} | {context} | route_id={route_id or '-'}",
-                    is_error=True,
+                    is_error=detail != "delivery_unconfirmed",
+                    is_warning=detail == "delivery_unconfirmed",
                 )
 
         if result.outcome == "no_route":
@@ -375,6 +391,13 @@ class DeliveryService:
                 f"✅ [社媒推送] {post.platform} 动态已分发 | 路由成功 "
                 f"{result.success_routes}/{result.matched_routes} | {post_ref} | {context}",
                 is_debug=True,
+            )
+        elif result.outcome == "unconfirmed":
+            self._log(
+                f"⚠️ [社媒推送] {post.platform} 动态送达未确认 | "
+                f"已确认路由 {result.success_routes}/{result.matched_routes} | "
+                f"不确定路由禁止自动重发 | {context}",
+                is_warning=True,
             )
         elif result.outcome == "partial":
             self._log(
@@ -420,6 +443,10 @@ class DeliveryService:
                     full_text,
                     routes,
                     delivered_routes,
+                    unconfirmed_routes=(
+                        self._state.unconfirmed_routes(post.platform.lower(), post.post_id)
+                        if isinstance(self._state, SocialStoreDeliveryState) else set()
+                    ),
                 )
             )
         except SocialDeliveryError:

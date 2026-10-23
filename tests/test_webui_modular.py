@@ -311,8 +311,8 @@ def test_monitor_schedule_frontend_contract_and_responsive_project_containers():
         assert project_start >= 0
         assert html.index(f'id="{account_id}"') < html.index('</div>\n      </div>', project_start)
     assert "告警重复通知冷却" in html
-    assert "QQ / NapCat 发送节流间隔" in html
-    assert "NapCat 单路发送超时" in html
+    assert "QQ / OneBot 发送节流间隔" in html
+    assert "OneBot 单路发送超时" in html
 
 
 def test_admin_frontend_validation_contract():
@@ -475,15 +475,17 @@ def test_admin_modules_share_grouped_responsive_layout_contract():
 
 
 def test_napcat_endpoint_fields_share_aligned_responsive_group():
-    """NapCat 基地址、Token 和媒体地址使用紧凑的响应式端点组。"""
+    """OneBot 文案中立，历史 ID 与响应式端点布局保持兼容。"""
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
 
     assert 'class="napcat-endpoint-grid"' in html
     assert "napcat-endpoint-note" in html
-    assert 'class="field">NapCat API 地址' in html
+    assert 'class="field">OneBot API 地址' in html
     assert 'id="napcatApiToken"' in html
     assert 'class="field">媒体访问基地址（可选）' in html
-    assert "NapCat 不在本机时填写媒体地址；共享文件系统可留空。" in html
+    assert "网关不在本机且不共享媒体文件时，填写网关可访问的媒体地址。" in html
+    assert "OneBot 网关接入与更换说明" in html
+    assert "共用一套 OneBot v11 配置，可连接 NapCat、SnowLuma" in html
     assert "跨容器或跨主机时必须填写 NapCat 可访问的媒体地址" not in html
     assert ".napcat-endpoint-grid { display: grid; grid-template-columns: repeat(3" in html
     assert ".napcat-endpoint-grid { grid-template-columns: repeat(2" in html
@@ -1080,6 +1082,8 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
     monkeypatch.setattr(archive_handlers, "_handle_archive_impl", fake_impl)
 
     class Handler:
+        command = "GET"
+
         def __init__(self):
             self.payload = None
 
@@ -1087,8 +1091,8 @@ def test_archive_home_cache_is_single_flight(monkeypatch):
             self.payload = payload
 
     first, second = Handler(), Handler()
-    t1 = threading.Thread(target=archive_handlers.handle_archive, args=(first, "home", None, None))
-    t2 = threading.Thread(target=archive_handlers.handle_archive, args=(second, "home", None, None))
+    t1 = threading.Thread(target=archive_handlers.handle_archive, args=(first, "home", lambda **_: True, None))
+    t2 = threading.Thread(target=archive_handlers.handle_archive, args=(second, "home", lambda **_: True, None))
     t1.start()
     assert started.wait(1)
     t2.start()
@@ -1165,10 +1169,10 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20261008_3" in html
-    assert "/static/archive.css?v=20261006_1" in html
-    assert "/static/archive.js?v=20261008_3" in perf
-    assert "/static/archive.css?v=20261006_1" in perf
+    assert "/static/archive.js?v=20261023_1" in html
+    assert "/static/archive.css?v=20261023_1" in html
+    assert "/static/archive.js?v=20261023_1" in perf
+    assert "/static/archive.css?v=20261023_1" in perf
 
 
 def test_archive_day_jump_loads_only_missing_pages_and_invalidates_old_jumps():

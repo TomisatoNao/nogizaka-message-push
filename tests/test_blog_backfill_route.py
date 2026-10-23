@@ -62,7 +62,8 @@ def test_member_backfill_reaches_existing_tool(monkeypatch, url, translate):
     assert handler.code == 202
     assert handler.payload["ok"] is True
     assert handler.payload["request_id"]
-    assert guard_calls == [{"need_admin": True}]
+    # Dispatch policy and the independently callable business handler both guard.
+    assert guard_calls == [{"need_admin": True}, {"need_admin": True}]
     command = calls[0][0][0]
     assert command[:2] == [blog_backfill.sys.executable, "-u"]
     assert command[2].endswith("archive_member.py")

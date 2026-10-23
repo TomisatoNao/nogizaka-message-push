@@ -5947,7 +5947,11 @@ async function loadLetters(mName) {
       } catch (_) {}
 
       const imgUrl = letter.media_url || letter.file_url || letter.thumbnail_url || "";
-      const favHTML = letter.is_favorite ? '<span class="letter-fav-star" title="已收藏">★</span>' : '';
+      const isFavorite = Boolean(letter.is_favorite);
+      const favHTML = '<button type="button" class="letter-fav-toggle' + (isFavorite ? ' active' : '') + '"' +
+        ' aria-label="' + (isFavorite ? '取消信件收藏' : '收藏信件') + '"' +
+        ' aria-pressed="' + isFavorite + '" title="' + (isFavorite ? '取消收藏' : '收藏') + '">' +
+        '<span class="letter-fav-star" aria-hidden="true">' + (isFavorite ? '★' : '☆') + '</span></button>';
       
       const textContent = letter.text || "(无正文文字)";
       const textLen = (letter.text || "").length;
@@ -5983,10 +5987,48 @@ async function loadLetters(mName) {
         });
       }
 
+      const favoriteButton = card.querySelector(".letter-fav-toggle");
+      if (favoriteButton) {
+        favoriteButton.addEventListener("click", () => toggleLetterFavorite(letter, favoriteButton, mName));
+      }
+
       cardsBox.appendChild(card);
     });
   } catch (err) {
     cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);">加载异常：' + esc(err) + '</div>';
+  }
+}
+
+async function toggleLetterFavorite(letter, button, memberName) {
+  if (button.disabled) return;
+  const currentValue = Boolean(letter.is_favorite);
+  const nextValue = !currentValue;
+  const star = button.querySelector(".letter-fav-star");
+  const applyState = (value) => {
+    letter.is_favorite = value;
+    button.classList.toggle("active", value);
+    button.setAttribute("aria-pressed", String(value));
+    button.setAttribute("aria-label", value ? "取消信件收藏" : "收藏信件");
+    button.title = value ? "取消收藏" : "收藏";
+    if (star) star.textContent = value ? "★" : "☆";
+  };
+
+  button.disabled = true;
+  applyState(nextValue);
+  try {
+    const result = await api("/api/archive/letters/favorite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: letter.id, member: memberName, is_favorite: nextValue }),
+    });
+    if (!result || !result.ok) throw new Error("收藏状态未能保存");
+    applyState(Boolean(result.is_favorite));
+    showToast(nextValue ? "★ 已收藏信件" : "已取消信件收藏", "success");
+  } catch (error) {
+    applyState(currentValue);
+    showToast("操作失败：" + (error.message || error), "error");
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -6125,9 +6167,9 @@ if ($("btnSyncLetters")) {
       });
       if (resp.ok) {
         if (resp.new > 0) {
-          showToast(`信件同步完成！新增 ${resp.new} 封新信件（总计 ${resp.total || 0} 封）。`, "success");
+          showToast("信件同步完成！新增 " + resp.new + " 封新信件（总计 " + (resp.total || 0) + " 封）。" + (resp.media_failed ? "其中 " + resp.media_failed + " 张信纸图片下载失败，再次同步可重试。" : ""), resp.media_failed ? "info" : "success");
         } else {
-          showToast(`信件已是最新（共 ${resp.total || 0} 封），无新增信件。`, "info");
+          showToast("信件已是最新（共 " + (resp.total || 0) + " 封），无新增信件。" + (resp.media_failed ? "其中 " + resp.media_failed + " 张信纸图片下载失败，再次同步可重试。" : ""), "info");
         }
         await loadLetters(curLetterMember);
       } else {
@@ -6424,7 +6466,10 @@ function updateGalleryMemberButtonDisplay() {
   }
 }
 
+let gallerySelectionVersion = 0;
+
 async function selectGalleryMember(mName, updateHash = true) {
+  const selectionVersion = ++gallerySelectionVersion;
   curMode = "gallery";
   hideMessageMonthFooter();
   setHtmlViewClass("gallery");
@@ -6458,11 +6503,16 @@ async function selectGalleryMember(mName, updateHash = true) {
   } else {
     renderGalleryMemberPopover();
   }
+  // Only an active year needs validation before fetching pictures. With no
+  // year selected, metadata must not add a serial round-trip to the first page.
+  const photosTask = curGalleryYear ? null : loadGalleryPhotos(true);
   await loadGalleryYears();
+  if (selectionVersion !== gallerySelectionVersion || curMode !== "gallery") return;
   if (updateHash) {
     syncGalleryHash();
   }
-  await loadGalleryPhotos(true);
+  if (photosTask) await photosTask;
+  else await loadGalleryPhotos(true);
 }
 
 function getGalleryGridCols() {
@@ -6922,9 +6972,7 @@ if ($("gallerySourceChips")) {
       chips.forEach(c => c.classList.toggle("active", c === chip));
       updateGalleryMemberButtonDisplay();
       renderGalleryMemberPopover();
-      await loadGalleryYears();
-      syncGalleryHash();
-      await loadGalleryPhotos(true);
+      await selectGalleryMember(curGalleryMember);
     });
   });
 }

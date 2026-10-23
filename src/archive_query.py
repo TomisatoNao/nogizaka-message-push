@@ -40,19 +40,36 @@ def _get_has_fts5() -> bool:
 
 def get_existing_letter_ids(member_dir: str) -> set[int]:
     """获取指定成员已归档的所有信件 ID 集合。"""
-    conn = _get_init_db()
-    if conn:
+    result: set[int] = set()
+    for item in get_archive_letters(member_dir):
         try:
-            rows = conn.execute("SELECT id FROM letters WHERE member_dir = ?;", (member_dir,)).fetchall()
-            return {int(r[0]) for r in rows}
-        except (sqlite3.Error, ValueError) as ex:
-            log_all(f"⚠️ 查询信件 ID 集合异常: {ex}", is_debug=True)
-    letters = get_archive_letters(member_dir)
-    return {int(item.get("id")) for item in letters if item.get("id")}
+            if item.get("id") is not None:
+                result.add(int(item["id"]))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _get_legacy_letter_rows(member_dir: str) -> list[dict]:
+    """读取历史 JSON 信件列表；无效或不可读文件按空列表处理。"""
+    json_path = _get_archive_root() / member_dir / "letters" / "letters.json"
+    if not json_path.exists():
+        return []
+    try:
+        with json_path.open("r", encoding="utf-8") as f:
+            rows = json.load(f)
+        if not isinstance(rows, list):
+            return []
+        return [dict(item) for item in rows if isinstance(item, dict) and item.get("id") is not None]
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as ex:
+        log_all(f"⚠️ 读取 letters.json 异常 ({member_dir}): {ex}", is_debug=True)
+        return []
 
 
 def get_archive_letters(member_dir: str) -> list[dict]:
-    """从 SQLite 获取指定成员已归档的所有粉丝信件（新在前）。"""
+    """合并 SQLite 和历史 JSON 中的信件记录（数据库字段优先，新在前）。"""
+    by_id = {str(item["id"]): item for item in _get_legacy_letter_rows(member_dir)}
+
     conn = _get_init_db()
     if conn:
         try:
@@ -62,53 +79,51 @@ def get_archive_letters(member_dir: str) -> list[dict]:
                 WHERE member_dir = ?
                 ORDER BY created_at DESC;
             """, (member_dir,)).fetchall()
-            if rows:
-                out = []
-                for r in rows:
-                    out.append({
-                        "id": r[0],
-                        "group_id": r[1],
-                        "member_name": r[2],
-                        "member_dir": r[3],
-                        "created_at": r[4],
-                        "updated_at": r[5],
-                        "text": r[6],
-                        "file_url": r[7],
-                        "local_file": r[8],
-                        "thumbnail_url": r[9],
-                        "is_favorite": bool(r[10]),
-                    })
-                return out
+            for r in rows:
+                item = by_id.setdefault(str(r[0]), {})
+                item.update({
+                    "id": r[0],
+                    "group_id": r[1],
+                    "member_name": r[2],
+                    "member_dir": r[3],
+                    "created_at": r[4],
+                    "updated_at": r[5],
+                    "text": r[6],
+                    "file_url": r[7],
+                    "local_file": r[8],
+                    "thumbnail_url": r[9],
+                    "is_favorite": bool(r[10]),
+                })
         except Exception as ex:
             log_all(f"⚠️ 从 SQLite 读取信件失败 ({member_dir}): {ex}", is_debug=True)
 
-    # 兜底：从 letters.json 读取
-    json_path = _get_archive_root() / member_dir / "letters" / "letters.json"
-    if json_path.exists():
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError, ValueError) as ex:
-            log_all(f"⚠️ 读取 letters.json 异常 ({member_dir}): {ex}", is_debug=True)
-    return []
+    return sorted(
+        by_id.values(),
+        key=lambda item: item.get("created_at") or item.get("updated_at") or "",
+        reverse=True,
+    )
+
+
+def get_archive_letter_member_dir(letter_id: int | str) -> str:
+    """按信件 ID 查询成员目录，供兼容旧收藏请求体省略 member 的情况。"""
+    conn = _get_init_db()
+    if not conn:
+        return ""
+    try:
+        row = conn.execute("SELECT member_dir FROM letters WHERE id = ?;", (letter_id,)).fetchone()
+        return str(row[0]) if row and row[0] else ""
+    except sqlite3.Error as ex:
+        log_all(f"⚠️ 查询信件成员目录失败 ({letter_id}): {ex}", is_debug=True)
+        return ""
 
 
 def get_letters_count(member_dir: str) -> int:
-    """获取指定成员已归档的信件数量。"""
-    conn = _get_init_db()
-    if conn:
-        try:
-            row = conn.execute("SELECT COUNT(*) FROM letters WHERE member_dir = ?;", (member_dir,)).fetchone()
-            if row:
-                return row[0]
-        except sqlite3.Error as ex:
-            log_all(f"⚠️ 查询信件数量异常: {ex}", is_debug=True)
-    letters = get_archive_letters(member_dir)
-    return len(letters)
+    """返回 SQLite 与历史 JSON 合并去重后的信件数量。"""
+    return len(get_archive_letters(member_dir))
 
 
 def get_letters_counts(member_dirs: list[str] | tuple[str, ...]) -> dict[str, int]:
-    """批量返回成员信件归档数量，避免成员选择器逐项查询数据库。"""
+    """批量合并 SQLite 与历史 JSON 的信件 ID，避免遗漏旧归档或重复计数。"""
     names = [str(name) for name in member_dirs if name]
     if not names:
         return {}
@@ -117,11 +132,18 @@ def get_letters_counts(member_dirs: list[str] | tuple[str, ...]) -> dict[str, in
         try:
             placeholders = ",".join("?" for _ in names)
             rows = conn.execute(
-                f"SELECT member_dir, COUNT(*) FROM letters WHERE member_dir IN ({placeholders}) GROUP BY member_dir",
+                f"SELECT member_dir, id FROM letters WHERE member_dir IN ({placeholders})",
                 names,
             ).fetchall()
-            counts = {str(row[0]): int(row[1] or 0) for row in rows}
-            return {name: counts.get(name, 0) for name in names}
+            ids_by_member = {name: set() for name in names}
+            for member_dir, letter_id in rows:
+                if letter_id is not None:
+                    ids_by_member.setdefault(str(member_dir), set()).add(str(letter_id))
+            for name in names:
+                ids_by_member.setdefault(name, set()).update(
+                    str(item["id"]) for item in _get_legacy_letter_rows(name)
+                )
+            return {name: len(ids_by_member.get(name, set())) for name in names}
         except sqlite3.Error as ex:
             log_all(f"⚠️ 批量查询信件数量异常: {ex}", is_debug=True)
     return {name: get_letters_count(name) for name in names}
@@ -141,7 +163,7 @@ def list_members() -> list[str]:
     root = _get_archive_root()
     if not root.is_dir():
         return []
-    return sorted(d.name for d in root.iterdir() if d.is_dir())
+    return sorted(d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
 
 
 def _month_count(json_path: Path) -> int:

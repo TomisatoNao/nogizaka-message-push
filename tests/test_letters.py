@@ -16,7 +16,8 @@ from src import archive
 @pytest.mark.asyncio
 async def test_letter_archiving_and_queries(tmp_path):
     orig_dir = cfg.ARCHIVE_DIR
-    archive._sqlite_conn = None
+    # Reset both the thread-local connection and schema flag when changing stores.
+    archive.close_db()
     cfg.ARCHIVE_DIR = str(tmp_path)
 
     try:
@@ -32,9 +33,9 @@ async def test_letter_archiving_and_queries(tmp_path):
         letter_img_dir = tmp_path / m_dir / "letters"
         letter_img_dir.mkdir(parents=True, exist_ok=True)
         fake_card1 = letter_img_dir / "20260425_152512_1404518.jpg"
-        fake_card1.write_bytes(b"FAKE_LETTER_CARD_BYTES_12345")
+        fake_card1.write_bytes(b"\xff\xd8FAKE_LETTER_CARD_BYTES_12345\xff\xd9")
         fake_card2 = letter_img_dir / "20251128_210424_1235103.jpg"
-        fake_card2.write_bytes(b"FAKE_LETTER_CARD_BYTES_67890")
+        fake_card2.write_bytes(b"\xff\xd8FAKE_LETTER_CARD_BYTES_67890\xff\xd9")
 
         test_letters = [
             {
@@ -88,6 +89,12 @@ async def test_letter_archiving_and_queries(tmp_path):
         assert json_file.exists()
         disk_data = json.loads(json_file.read_text(encoding="utf-8"))
         assert len(disk_data) == 2
+
+        legacy_only = {"id": 999999, "created_at": "2025-01-01T00:00:00Z", "text": "legacy"}
+        json_file.write_text(json.dumps([*disk_data, legacy_only], ensure_ascii=False), encoding="utf-8")
+        assert len(archive.get_archive_letters(m_dir)) == 3
+        assert archive.get_letters_count(m_dir) == 3
+        assert archive.get_letters_counts([m_dir])[m_dir] == 3
 
     finally:
         cfg.ARCHIVE_DIR = orig_dir
@@ -157,7 +164,7 @@ def test_webui_letters_sync_api_routing(monkeypatch=None):
     import src.archive as arc
 
     async def mock_sync(target_mem, client):
-        return (3, 1)
+        return (3, 1, 2)
 
     orig_sync = getattr(al, "sync_letters_for_member", None)
     orig_init = getattr(arc, "initialize", None)
@@ -186,6 +193,7 @@ def test_webui_letters_sync_api_routing(monkeypatch=None):
         assert data.get("ok") is True
         assert data.get("total") == 3
         assert data.get("new") == 1
+        assert data.get("media_failed") == 2
     finally:
         if monkeypatch is None:
             if orig_sync:
@@ -220,3 +228,136 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+@pytest.fixture
+def isolated_letter_archive(monkeypatch, tmp_path):
+    archive.close_db()
+    monkeypatch.setattr(cfg, "ARCHIVE_DIR", str(tmp_path))
+    monkeypatch.setattr(archive, "_sqlite_conn", None)
+    monkeypatch.setattr(archive, "_schema_initialized", False)
+    yield tmp_path
+    archive.close_db()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_letter_batches_merge_json_and_sqlite(isolated_letter_archive):
+    older = {"id": 501, "created_at": "2026-10-20T00:00:00Z", "text": "older"}
+    newer = {"id": 502, "created_at": "2026-10-21T00:00:00Z", "text": "newer"}
+    member_dir = archive.member_dir_name("fixture")
+    letters_dir = isolated_letter_archive / member_dir / "letters"
+    letters_dir.mkdir(parents=True)
+    (letters_dir / "letters.json").write_text(json.dumps([older]), encoding="utf-8")
+
+    await asyncio.gather(
+        archive.archive_letters_batch("fixture", [older]),
+        archive.archive_letters_batch("fixture", [newer]),
+    )
+
+    assert {item["id"] for item in archive.get_archive_letters(member_dir)} == {501, 502}
+    disk = json.loads((letters_dir / "letters.json").read_text(encoding="utf-8"))
+    assert {item["id"] for item in disk} == {501, 502}
+
+
+def test_legacy_json_letters_are_visible_and_count_as_existing(isolated_letter_archive):
+    member_dir = archive.member_dir_name("fixture")
+    letters_dir = isolated_letter_archive / member_dir / "letters"
+    letters_dir.mkdir(parents=True)
+    (letters_dir / "letters.json").write_text(
+        json.dumps([{"id": 601, "created_at": "2026-10-20T00:00:00Z", "text": "legacy"}]),
+        encoding="utf-8",
+    )
+
+    assert archive.get_existing_letter_ids(member_dir) == {601}
+    assert archive.get_archive_letters(member_dir)[0]["text"] == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_letter_database_failure_is_reported(isolated_letter_archive, monkeypatch):
+    monkeypatch.setattr(archive, "init_db", lambda: None)
+
+    with pytest.raises(RuntimeError, match="无法初始化信件归档数据库"):
+        await archive.archive_letters_batch(
+            "fixture", [{"id": 701, "created_at": "2026-10-20T00:00:00Z"}]
+        )
+
+
+def test_letter_media_atomic_replace_cleans_temp_after_failure(isolated_letter_archive, monkeypatch):
+    target = isolated_letter_archive / "fixture" / "letters" / "card.jpg"
+    original_replace = archive.os.replace
+
+    def fail_replace(*_args, **_kwargs):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(archive.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        archive._atomic_write_bytes(target, b"\xff\xd8image\xff\xd9")
+    assert not target.exists()
+    assert not list(target.parent.glob(".card.jpg.*.tmp"))
+    monkeypatch.setattr(archive.os, "replace", original_replace)
+
+
+@pytest.mark.asyncio
+async def test_fetch_member_letters_propagates_initial_http_failure():
+    import tools.archive_letters as al
+    from unittest.mock import AsyncMock, MagicMock
+
+    member = {"name": "fixture", "m_name": "fixture", "m_id": "55", "account_id": "test_fetch_failure"}
+    al.ACCOUNT_CREDS["test_fetch_failure"] = {"access_token": "fake_token"}
+    cfg.ACCOUNTS["test_fetch_failure"] = {"group_type": "nogizaka46"}
+    response = MagicMock(status_code=503, text="upstream unavailable")
+    client = AsyncMock()
+    client.get.return_value = response
+
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        await al.fetch_member_letters(member, client)
+
+
+@pytest.mark.asyncio
+async def test_fetch_member_letters_treats_pagination_404_as_end_of_history():
+    import tools.archive_letters as al
+    from unittest.mock import AsyncMock, MagicMock
+
+    member = {"name": "fixture", "m_name": "fixture", "m_id": "55", "account_id": "test_page_not_found"}
+    al.ACCOUNT_CREDS["test_page_not_found"] = {"access_token": "fake_token"}
+    cfg.ACCOUNTS["test_page_not_found"] = {"group_type": "nogizaka46"}
+    first_page = [
+        {"id": i + 1, "created_at": f"2026-01-01T00:{i:02d}:00Z"}
+        for i in range(100)
+    ]
+
+    async def respond(url, *args, **kwargs):
+        if url.endswith("?count=100"):
+            return MagicMock(status_code=200, json=lambda: {"letters": first_page})
+        return MagicMock(status_code=404, text="no earlier page")
+
+    client = AsyncMock()
+    client.get.side_effect = respond
+
+    result = await al.fetch_member_letters(member, client)
+    assert len(result) == 100
+
+
+@pytest.mark.asyncio
+async def test_fetch_member_letters_propagates_saturated_page_failure():
+    import tools.archive_letters as al
+    from unittest.mock import AsyncMock, MagicMock
+
+    member = {"name": "fixture", "m_name": "fixture", "m_id": "55", "account_id": "test_page_failure"}
+    al.ACCOUNT_CREDS["test_page_failure"] = {"access_token": "fake_token"}
+    cfg.ACCOUNTS["test_page_failure"] = {"group_type": "nogizaka46"}
+    first_page = [
+        {"id": i + 1, "created_at": f"2026-01-01T00:{i:02d}:00Z"}
+        for i in range(100)
+    ]
+
+    async def respond(url, *args, **kwargs):
+        if url.endswith("?count=100"):
+            return MagicMock(status_code=200, json=lambda: {"letters": first_page})
+        return MagicMock(status_code=503, text="upstream unavailable")
+
+    client = AsyncMock()
+    client.get.side_effect = respond
+
+    with pytest.raises(RuntimeError, match="分页请求失败"):
+        await al.fetch_member_letters(member, client)

@@ -42,9 +42,14 @@ class SocialDeliveryError(SocialError):
     """投递服务或全部目标投递失败。"""
 
 
+class SocialDeliveryUnconfirmed(SocialDeliveryError):
+    """Request submitted, receipt unknown; never blindly retry this route."""
+
+
 __all__ = [
     "SocialAuthRequired",
     "SocialDeliveryError",
+    "SocialDeliveryUnconfirmed",
     "SocialDownloadError",
     "SocialError",
     "SocialParseError",

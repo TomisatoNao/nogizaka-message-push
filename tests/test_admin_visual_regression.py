@@ -680,7 +680,7 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         }"""
                     )
                     assert len(napcat["rects"]) == 3
-                    assert napcat["noteText"] == "NapCat 不在本机时填写媒体地址；共享文件系统可留空。"
+                    assert napcat["noteText"] == "网关不在本机且不共享媒体文件时，填写网关可访问的媒体地址。"
                     assert napcat["gridRight"] <= metrics["viewportWidth"] + 1
                     if viewport_name == "mobile":
                         assert len(napcat["columns"].split()) == 1
@@ -1110,6 +1110,50 @@ def _open_admin_page(playwright, admin_static_server, route_handler, *, tab: str
     page.route("**/api/**", route_handler)
     page.goto(f"{admin_static_server}/#tab={tab}", wait_until="domcontentloaded")
     return browser, context, page
+
+
+@pytest.mark.parametrize(
+    "viewport_name,theme", [("desktop", "dark"), ("desktop", "light"), ("mobile", "dark"), ("mobile", "light")]
+)
+def test_onebot_gateway_copy_preserves_single_config_contract(admin_static_server, viewport_name, theme, tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+
+        def handle_api(route):
+            assert route.request.method == "GET", "Copy-only check must never save or send"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(_api_payload(urlsplit(route.request.url).path), ensure_ascii=False),
+            )
+
+        browser, context, page = _open_admin_page(p, admin_static_server, handle_api, tab="channels")
+        try:
+            page.set_viewport_size(VIEWPORTS[viewport_name])
+            page.evaluate(
+                "theme => { localStorage.setItem('sakamichiTheme', theme); document.documentElement.dataset.theme = theme; }",
+                theme,
+            )
+            page.locator('.nav-tab[data-tab="channels"]').click()
+            heading = page.get_by_role("heading", name="OneBot 群推送路由", exact=False)
+            heading.wait_for(state="visible")
+            page.locator("#napcatApi").wait_for(state="visible")
+            assert page.locator("#napcatApi").input_value() == "http://napcat:3000"
+            assert page.locator("#napcatApiToken").count() == 1
+            assert page.locator("#napcatMediaBaseUrl").count() == 1
+            help_section = page.locator("details").filter(has=page.get_by_text("OneBot 网关接入与更换说明", exact=True))
+            assert not help_section.evaluate("node => node.open")
+            help_section.locator("summary").click()
+            assert "NapCat、SnowLuma" in help_section.inner_text()
+            assert "不会自动登录" in help_section.inner_text()
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            page.screenshot(path=str(tmp_path / f"onebot-{viewport_name}-{theme}.png"), full_page=True)
+            page.locator("#btnNapcatAdvanced").click()
+            assert "OneBot 高级与扩展功能" in page.locator("#napcatAdvancedDialogTitle").inner_text()
+            assert page.locator("#inboundEventPath").input_value() == "/api/napcat/events"
+        finally:
+            context.close()
+            browser.close()
 
 
 def test_member_social_bindings_edit_and_account_sources(admin_static_server):

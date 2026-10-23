@@ -159,6 +159,18 @@ def get_auth_db() -> sqlite3.Connection:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_fav ON user_message_interactions(username, is_favorite, updated_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_like ON user_message_interactions(username, is_liked, updated_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_member ON user_message_interactions(username, member_dir);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_letter_favorites (
+                username TEXT NOT NULL,
+                member_dir TEXT NOT NULL,
+                letter_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, member_dir, letter_id)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_letter_fav ON user_letter_favorites(username, member_dir);")
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
@@ -522,6 +534,7 @@ def delete_user(username: str) -> tuple[bool, str]:
         try:
             with conn:
                 conn.execute("DELETE FROM user_message_interactions WHERE username = ?;", (username,))
+                conn.execute("DELETE FROM user_letter_favorites WHERE username = ?;", (username,))
         except sqlite3.Error:
             pass
     return True, f"已删除用户: {username}"
@@ -1095,5 +1108,60 @@ def get_user_favorite_message_ids(
             return {str(r[0]) for r in cur.fetchall()}
         except Exception as e:
             log_all(f"⚠️ 获取用户收藏消息 ID 集合失败 ({username}): {e}", is_error=True)
+            return set()
+
+
+def set_user_letter_favorite(
+    username: str,
+    member_dir: str,
+    letter_id: str | int,
+    value: bool = True,
+) -> dict:
+    """设置或取消当前用户对指定成员信件的收藏。"""
+    clean_id = str(letter_id or "").strip()
+    if not username or not member_dir or not clean_id:
+        return {"ok": False, "error": "缺少 username、member_dir 或 letter_id"}
+
+    now = time.time()
+    conn = get_auth_db()
+    with _lock:
+        try:
+            with conn:
+                if value:
+                    conn.execute(
+                        """
+                        INSERT INTO user_letter_favorites
+                        (username, member_dir, letter_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(username, member_dir, letter_id)
+                        DO UPDATE SET updated_at = excluded.updated_at;
+                        """,
+                        (username, member_dir, clean_id, now, now),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM user_letter_favorites WHERE username = ? AND member_dir = ? AND letter_id = ?;",
+                        (username, member_dir, clean_id),
+                    )
+            return {"ok": True, "letter_id": clean_id, "is_favorite": bool(value)}
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ 更新用户信件收藏失败 ({username}, {member_dir}/{clean_id}): {exc}", is_error=True)
+            return {"ok": False, "error": str(exc)}
+
+
+def get_user_favorite_letter_ids(username: str, member_dir: str) -> set[str]:
+    """获取指定用户在指定成员下收藏的信件 ID。"""
+    if not username or not member_dir:
+        return set()
+    conn = get_auth_db()
+    with _lock:
+        try:
+            rows = conn.execute(
+                "SELECT letter_id FROM user_letter_favorites WHERE username = ? AND member_dir = ?;",
+                (username, member_dir),
+            ).fetchall()
+            return {str(row[0]) for row in rows}
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ 读取用户信件收藏失败 ({username}, {member_dir}): {exc}", is_error=True)
             return set()
 

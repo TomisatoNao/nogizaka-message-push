@@ -43,9 +43,17 @@ def test_release_deployer_rejects_mutable_or_shell_unsafe_tags():
 
 def test_release_deployer_contains_health_check_and_rollback_without_passwords():
     source = (ROOT / "tools" / "deploy_release.py").read_text(encoding="utf-8")
-    assert "rollback" in deploy_release.REMOTE_DEPLOY_SCRIPT
-    assert "${DOCKER_BIN}-compose" in deploy_release.REMOTE_DEPLOY_SCRIPT
-    assert "nogizaka-message-push:latest" in deploy_release.REMOTE_DEPLOY_SCRIPT
+    remote_script = deploy_release.REMOTE_DEPLOY_SCRIPT
+    assert "rollback" in remote_script
+    assert "${DOCKER_BIN}-compose" in remote_script
+    assert "CURRENT_IMAGE_ID" in remote_script
+    assert "RESTORED_IMAGE_ID" in remote_script
+    assert r"grep -Eq '^(sha-[0-9a-f]{7,40}|v[0-9]+\.[0-9]+\.[0-9]+" in remote_script
+    assert "unsupported Compose interpolation variables" in remote_script
+    assert "COMPOSE_BACKUP=.deploy-compose.previous" in remote_script
+    assert "unset APP_IMAGE_TAG WEB_ADMIN_BIND NAPCAT_EVENT_BIND" in remote_script
+    assert "sed -i.bak" not in remote_script
+    assert 'cp "$ENV_FILE"' not in remote_script
     assert "/api/health/status" in source
     assert "NAS_PASS" not in source
     assert "password=" not in source

@@ -13,6 +13,7 @@ import pytest
 import src.config.config as cfg
 from src import archive as _archive
 from src import auth as _auth
+from src.webui_modules.archive.letters import handle_letters
 from src.webui_modules.archive.messages import handle_messages
 
 
@@ -163,6 +164,7 @@ def test_user_delete_cascade_cleanup():
     user = "temp_user"
     _auth.add_user(user, "password123", role="viewer")
     _auth.set_user_message_interaction(user, "msg_del_test", action="favorite", value=True)
+    _auth.set_user_letter_favorite(user, "nao", 7001, value=True)
 
     records = _auth.get_user_message_interactions(user, ["msg_del_test"])
     assert "msg_del_test" in records
@@ -174,6 +176,7 @@ def test_user_delete_cascade_cleanup():
     # 互动数据应被清理
     records_after = _auth.get_user_message_interactions(user, ["msg_del_test"])
     assert records_after == {}
+    assert _auth.get_user_favorite_letter_ids(user, "nao") == set()
 
 
 class _MockHandler:
@@ -254,6 +257,64 @@ def test_api_logged_in_interaction(monkeypatch):
     assert list_data["total"] == 1
     assert list_data["messages"][0]["id"] == "msg_auth_1"
     assert list_data["messages"][0]["is_favorite"] is True
+
+
+def test_letter_favorites_are_per_user_and_survive_archive_sync(monkeypatch):
+    """信件收藏按账号隔离，列表状态来自用户库而非同步覆盖的归档字段。"""
+    monkeypatch.setattr(cfg, "AUTH_ENABLED", True)
+    monkeypatch.setattr(_archive, "get_archive_letters", lambda _member: [{
+        "id": 7001,
+        "member_name": "fixture",
+        "member_dir": "fixture",
+        "created_at": "2026-10-20T00:00:00Z",
+        "text": "test letter",
+        "is_favorite": True,
+    }])
+    monkeypatch.setattr(_archive, "infer_member_group", lambda _member: "nogizaka46")
+
+    alice = "letter_admin_alice"
+    bob = "letter_admin_bob"
+    _auth.add_user(alice, "secret_pwd", role="admin")
+    _auth.add_user(bob, "secret_pwd", role="admin")
+    alice_cookie = {"Cookie": f"sakamichi_session={_auth.create_session(alice, 'admin', 7200)}"}
+    bob_cookie = {"Cookie": f"sakamichi_session={_auth.create_session(bob, 'admin', 7200)}"}
+
+    set_handler = _MockHandler("/api/archive/letters/favorite", headers=alice_cookie)
+    body = {"id": 7001, "member": "fixture", "is_favorite": True}
+    assert handle_letters(set_handler, "letters/favorite", lambda **_: True, lambda: body)
+    assert set_handler._response_code == 200
+    assert set_handler.get_json_response()["is_favorite"] is True
+
+    alice_list = _MockHandler("/api/archive/letters?member=fixture", headers=alice_cookie)
+    bob_list = _MockHandler("/api/archive/letters?member=fixture", headers=bob_cookie)
+    handle_letters(alice_list, "letters", lambda **_: True, lambda: {})
+    handle_letters(bob_list, "letters", lambda **_: True, lambda: {})
+    assert alice_list.get_json_response()["letters"][0]["is_favorite"] is True
+    assert bob_list.get_json_response()["letters"][0]["is_favorite"] is False
+
+    sync_handler = _MockHandler("/api/archive/letters/favorite", headers=alice_cookie)
+    unset_body = {"id": 7001, "member": "fixture", "is_favorite": False}
+    handle_letters(sync_handler, "letters/favorite", lambda **_: True, lambda: unset_body)
+    assert sync_handler.get_json_response()["is_favorite"] is False
+    assert _auth.get_user_favorite_letter_ids(alice, "fixture") == set()
+
+
+@pytest.mark.parametrize("body,code", [
+    ({"id": "bad", "member": "fixture", "is_favorite": True}, 400),
+    ({"id": 7001, "member": "fixture", "is_favorite": "false"}, 400),
+    ({"id": 7002, "member": "fixture", "is_favorite": True}, 404),
+    ({"id": 7001, "member": [], "is_favorite": True}, 400),
+    ({"id": 7001, "member": {"name": "fixture"}, "is_favorite": True}, 400),
+])
+def test_letter_favorite_rejects_invalid_requests(monkeypatch, body, code):
+    monkeypatch.setattr(cfg, "AUTH_ENABLED", True)
+    _auth.add_user("letter_validation_admin", "secret_pwd", role="admin")
+    cookie = {"Cookie": f"sakamichi_session={_auth.create_session('letter_validation_admin', 'admin', 7200)}"}
+    monkeypatch.setattr(_archive, "get_archive_letters", lambda _member: [{"id": 7001}])
+    handler = _MockHandler("/api/archive/letters/favorite", headers=cookie)
+
+    assert handle_letters(handler, "letters/favorite", lambda **_: True, lambda: body)
+    assert handler._response_code == code
 
 
 def test_api_messages_includes_interaction_flags(monkeypatch, tmp_path):

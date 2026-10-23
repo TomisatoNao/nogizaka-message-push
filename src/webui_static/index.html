@@ -37,7 +37,7 @@
   .admin-control-group,
   .admin-data-group,
   .admin-account-group { min-width: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--card-soft) 48%, transparent); }
-  /* NapCat 端点采用“基地址 + 独立 Token + 媒体地址”三列结构，
+  /* OneBot 端点采用“基地址 + 独立 Token + 媒体地址”三列结构，
      发送动作由业务层按需拼接，避免把接口路径和密钥重复写进 URL。 */
   .napcat-endpoint-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; align-items: start; min-width: 0; }
   .napcat-endpoint-grid > .field,
@@ -45,7 +45,7 @@
   .napcat-endpoint-grid input[type=password] { font-family: var(--mono); letter-spacing: .03em; }
   .napcat-endpoint-note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; }
   .napcat-forward-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 18px; margin-top: 10px; min-width: 0; }
-  /* NapCat 高级与扩展功能状态条：状态只读，详情统一从表头入口打开。 */
+  /* OneBot 高级与扩展功能状态条：状态只读，详情统一从表头入口打开。 */
   .napcat-advanced-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--card-soft) 72%, transparent); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
   .napcat-advanced-status { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .napcat-status-pill { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-soft); background: var(--field); color: var(--muted); user-select: none; }
@@ -68,7 +68,7 @@
   .napcat-dialog-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin: 0; padding: 12px 22px 14px; border-top: 1px solid var(--border-soft); background: var(--card-soft); }
   .napcat-advanced-dialog > .napcat-dialog-actions { margin-top: 0; }
 
-  /* NapCat 详情表单使用与系统设置相同的紧凑网格，避免每个字段独占一整行。 */
+  /* OneBot 详情表单使用与系统设置相同的紧凑网格，避免每个字段独占一整行。 */
   .napcat-inbound-grid,
   .ai-chat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; min-width: 0; }
   .napcat-inbound-grid > *,
@@ -1070,7 +1070,7 @@
       </div>
     </div>
     <div id="stNapcatHealth" class="napcat-health" role="status" aria-live="polite">
-      🐱 NapCat 状态：等待探测结果…
+      🐱 OneBot 状态：等待探测结果…
     </div>
     <div id="stDeliveryBacklog" class="delivery-backlog" role="status" aria-live="polite">
       🧭 路由补偿：暂无待处理数据
@@ -1176,12 +1176,12 @@
   <div class="card admin-module">
     <h2>🌐 全局推送通道总开关</h2>
     <div class="admin-control-group admin-channel-switches" id="channelSwitches" role="group" aria-label="全局推送通道"></div>
-    <p class="hint admin-note">普通配置和 Bot 凭证统一点页面底部保存；账号、CPA、NapCat 事件 Token 等独立凭证在弹窗提交后立即写入。</p>
+    <p class="hint admin-note">普通配置和 Bot 凭证统一点页面底部保存；账号、CPA、OneBot 事件 Token 等独立凭证在弹窗提交后立即写入。</p>
     <details class="admin-status-details push-channel-help">
       <summary>查看说明</summary>
       <div class="admin-note">
         <p>全局开关只控制通道是否参与自动推送；每个 Bot 或群组的订阅与过滤规则在对应行单独设置。</p>
-        <p>普通配置和 Bot 凭证会一次性提交；账号、CPA、Cookies 与 NapCat 事件 Token 等独立凭证在各自弹窗提交后立即写入。</p>
+        <p>普通配置和 Bot 凭证会一次性提交；账号、CPA、Cookies 与 OneBot 事件 Token 等独立凭证在各自弹窗提交后立即写入。</p>
       </div>
     </details>
   </div>
@@ -1234,21 +1234,21 @@
     </div>
   </div>
 
-  <!-- Block 3: NapCat 路由模块 -->
+  <!-- Block 3: OneBot 路由模块 -->
   <div class="card admin-module">
     <div class="admin-module-heading">
-      <h2>🐱 NapCat 群推送路由 (独立解耦)</h2>
+      <h2>🐱 OneBot 群推送路由 (独立解耦)</h2>
       <div class="admin-actions">
         <button class="btn" id="btnNapcatAdvanced" type="button" title="配置入站群消息解析、美图指令与 AI 拟人群聊">⚙️ 高级与扩展功能</button>
-        <button class="btn" id="btnAddNapcat" type="button" title="新建路由默认不订阅任何内容，请按需增量勾选">➕ 添加 NapCat 路由</button>
+        <button class="btn" id="btnAddNapcat" type="button" title="新建路由默认不订阅任何内容，请按需增量勾选">➕ 添加 OneBot 路由</button>
       </div>
     </div>
     <div class="admin-account-group napcat-endpoint-group">
       <div class="napcat-endpoint-grid">
-        <label class="field">NapCat API 地址（基地址）
+        <label class="field">OneBot API 地址（基地址）
           <input id="napcatApi" autocomplete="url" placeholder="例如: http://127.0.0.1:3000" type="url"/>
         </label>
-        <label class="field">NapCat 访问密钥（可选）
+        <label class="field">OneBot 访问密钥（可选）
           <input id="napcatApiToken" autocomplete="new-password" placeholder="填写 OneBot access_token" type="password"/>
         </label>
         <label class="field">媒体访问基地址（可选）
@@ -1263,7 +1263,15 @@
           <input id="napcatForwardUserId" placeholder="例如: 10001 (留空默认成员ID+偏移)" type="number"/>
         </label>
       </div>
-      <p class="hint napcat-endpoint-note">NapCat 不在本机时填写媒体地址；共享文件系统可留空。</p>
+      <p class="hint napcat-endpoint-note">网关不在本机且不共享媒体文件时，填写网关可访问的媒体地址。</p>
+      <details class="admin-status-details">
+        <summary>OneBot 网关接入与更换说明</summary>
+        <div class="admin-data-group">
+          <p>共用一套 OneBot v11 配置，可连接 NapCat、SnowLuma 等兼容网关；媒体、合并转发和扩展能力以实际网关验证结果为准。</p>
+          <p>更换时先暂停 QQ 投递并停用旧网关的对应账号和事件回传，再配置新网关的 API 地址、访问密钥、媒体地址及事件回传。确认发送与入站连接均正常后恢复投递；不要让两个网关同时登录同一个 QQ 账号。</p>
+          <p>本页保存仅更新应用配置，不会自动登录、启动或停止外部网关，也不保证无中断切换。历史配置键、环境变量和事件路径保留 napcat 命名以兼容现有部署。</p>
+        </div>
+      </details>
       <p class="hint admin-note">多媒体合并转发卡片支持全局自定义展示昵称与 QQ 头像（各群亦可单独覆盖）。</p>
       <div class="napcat-advanced-bar">
         <div class="napcat-advanced-status">
@@ -1278,7 +1286,7 @@
         <table>
           <thead>
             <tr>
-              <th>NapCat 群号</th>
+              <th>OneBot 群号</th>
               <th>群备注</th>
               <th>订阅与过滤规则</th>
               <th>操作</th>
@@ -1457,7 +1465,7 @@
           <input type="checkbox" name="toolSocialChannel" value="qq_official" checked /> 🤖 QQ 官方机器人
         </label>
         <label class="admin-social-channel-option">
-          <input type="checkbox" name="toolSocialChannel" value="napcat" checked /> 🐾 NapCat QQ 群
+          <input type="checkbox" name="toolSocialChannel" value="napcat" checked /> 🐾 OneBot QQ 群
         </label>
         <label class="admin-social-channel-option">
           <input type="checkbox" name="toolSocialChannel" value="tg" checked /> ✈️ Telegram
@@ -1717,7 +1725,7 @@
 
   <div class="card admin-module system-settings-card">
     <h2>🚦 发送与告警参数</h2>
-    <div class="settings-scope-note">这些参数只影响告警通知、QQ/NapCat 发送节流和单路超时，不改变任何内容监控的抓取频率。监控时段与轮询间隔请在“动态监控”页面配置。</div>
+    <div class="settings-scope-note">这些参数只影响告警通知、QQ/OneBot 发送节流和单路超时，不改变任何内容监控的抓取频率。监控时段与轮询间隔请在“动态监控”页面配置。</div>
     <div class="admin-settings-group settings-group channels" aria-labelledby="deliverySettingsTitle">
       <div class="admin-settings-title settings-group-title" id="deliverySettingsTitle">
         <span>告警与发送通道</span><span class="settings-group-badge">不控制抓取频率</span>
@@ -1727,12 +1735,12 @@
           告警重复通知冷却（秒）
           <input id="alertCooldown" min="0" type="number"/>
         </label>
-        <label class="field" title="官方 QQ Bot 和 NapCat 发送请求的节流间隔，不影响抓取频率。">
-          QQ / NapCat 发送节流间隔（秒）
+        <label class="field" title="官方 QQ Bot 和 OneBot 发送请求的节流间隔，不影响抓取频率。">
+          QQ / OneBot 发送节流间隔（秒）
           <input id="qqSendInterval" min="0" step="0.1" type="number"/>
         </label>
-        <label class="field" title="单个 NapCat 路由一次发送（含有限重试）的最大等待时间。">
-          NapCat 单路发送超时（秒）
+        <label class="field" title="单个 OneBot 路由一次发送（含有限重试）的最大等待时间。">
+          OneBot 单路发送超时（秒）
           <input id="napcatSendTimeout" max="300" min="1" type="number"/>
         </label>
       </div>
@@ -2263,11 +2271,11 @@
     <button class="btn primary" id="memberSocialConfirm" type="button">确认修改</button>
   </div>
 </dialog>
-<!-- NapCat 高级与扩展功能弹窗 -->
+<!-- OneBot 高级与扩展功能弹窗 -->
 <dialog id="napcatAdvancedDialog" class="napcat-advanced-dialog" aria-labelledby="napcatAdvancedDialogTitle">
   <div class="napcat-dialog-header">
     <div>
-      <h3 id="napcatAdvancedDialogTitle">🐱 NapCat 高级与扩展功能</h3>
+      <h3 id="napcatAdvancedDialogTitle">🐱 OneBot 高级与扩展功能</h3>
   <p>配置入站解析、美图指令与 AI 群聊；修改后由底部保存栏统一保存。</p>
     </div>
     <button class="btn small" type="button" data-napcat-dialog-close>关闭</button>
@@ -2299,7 +2307,7 @@
         <div class="napcat-inbound-grid">
           <label class="field">上报协议方式
             <select id="inboundTransport">
-              <option value="http_post">HTTP POST (NapCat 主动推送)</option>
+              <option value="http_post">HTTP POST (OneBot 主动推送)</option>
               <option value="reverse_ws">Reverse WebSocket (反向 WS 连接)</option>
             </select>
           </label>
@@ -2316,7 +2324,7 @@
 
         <div class="admin-credential-list admin-credential-list--bordered">
           <div class="admin-credential-row">
-            <span class="admin-credential-name">NapCat 事件上报 Token (.env)</span>
+            <span class="admin-credential-name">OneBot 事件上报 Token (.env)</span>
             <span id="napcatEventTokenStatus"></span>
             <button class="btn small" id="btnFillNapcatEventToken" type="button">填写</button>
             <button class="btn small danger" id="btnClearNapcatEventToken" type="button" hidden>清空</button>
@@ -2327,7 +2335,7 @@
           <div class="napcat-group-policy-heading">
             <label class="field">入站解析生效群范围
               <select id="inboundGroupScope">
-                <option value="routes">所有已配置的 NapCat 群</option>
+                <option value="routes">所有已配置的 OneBot 群</option>
                 <option value="selected">仅选中的群</option>
                 <option value="none">不处理任何群</option>
               </select>
@@ -2338,7 +2346,7 @@
             </div>
           </div>
           <div id="inboundAllowedGroupsWrap" class="ai-chat-groups-wrap" aria-label="入站解析生效群"></div>
-          <p class="napcat-group-policy-hint">仅对主界面「NapCat 群推送路由」中已配置的群生效；选择“仅选中的群”时，未勾选的群不会解析社媒链接，也不会产生回复。</p>
+          <p class="napcat-group-policy-hint">仅对主界面「OneBot 群推送路由」中已配置的群生效；选择“仅选中的群”时，未勾选的群不会解析社媒链接，也不会产生回复。</p>
         </div>
 
         <div class="napcat-inbound-switches">
@@ -2362,7 +2370,7 @@
         </div>
 
         <p class="hint admin-note">
-          💡 NapCat Web 侧可在「网络配置」添加 HTTP POST 上报或反向 WS，指向本服务（如 <code>http://&lt;本机IP&gt;:46047/api/napcat/events</code>）。仅在主界面路由列表中配置了的 QQ 群才解析链接。
+          💡 在网关管理界面配置 HTTP POST 上报或反向 WS，指向本服务（如 <code>http://&lt;本机IP&gt;:46047/api/napcat/events</code>），并使用相同的事件 Token。仅在主界面路由列表中配置了的 QQ 群才解析链接；历史事件路径保持不变。
         </p>
       </div>
     </div>
@@ -2383,7 +2391,7 @@
           <div class="napcat-group-policy-heading">
             <label class="field">美图指令生效群范围
               <select id="photoGroupScope">
-                <option value="routes">所有已配置的 NapCat 群</option>
+                <option value="routes">所有已配置的 OneBot 群</option>
                 <option value="selected">仅选中的群</option>
                 <option value="none">不响应任何群</option>
               </select>
@@ -2406,7 +2414,7 @@
           </label>
         </div>
 
-        <p class="hint admin-note">支持 <code>/抽张美图</code>、<code>/抽美图</code>、<code>/随机美图</code>、<code>/美图</code>、<code>/pic</code> 和 <code>/photo</code>；未指定成员时沿用当前群路由的成员绑定规则。此功能依赖「入站解析」页的 NapCat 入站监听开关。</p>
+        <p class="hint admin-note">支持 <code>/抽张美图</code>、<code>/抽美图</code>、<code>/随机美图</code>、<code>/美图</code>、<code>/pic</code> 和 <code>/photo</code>；未指定成员时沿用当前群路由的成员绑定规则。此功能依赖「入站解析」页的 OneBot 入站监听开关。</p>
       </div>
     </div>
 
@@ -2556,7 +2564,7 @@
     </div>
 
     <div id="subNapcatForwardWrap" style="display: none;">
-      <div style="font-weight: bold; font-size: 13px; color: var(--accent); margin-bottom: 6px;">4. 合并转发卡片定制（可选，NapCat 专属覆盖）</div>
+      <div style="font-weight: bold; font-size: 13px; color: var(--accent); margin-bottom: 6px;">4. 合并转发卡片定制（可选，OneBot 专属覆盖）</div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
         <label class="field">转发卡片昵称（覆盖全局）
           <input id="subForwardNickname" placeholder="留空使用全局配置或成员名" type="text" style="margin-top:3px;"/>
@@ -2566,7 +2574,7 @@
         </label>
       </div>
       <div class="hint admin-note" style="margin-top:4px;">
-        仅在该群通过 NapCat 合并转发节点推送多媒体/长消息时覆盖全局昵称与头像 QQ 号。
+        仅在该群通过 OneBot 合并转发节点推送多媒体/长消息时覆盖全局昵称与头像 QQ 号。
       </div>
     </div>
   </div>
@@ -2674,7 +2682,7 @@
 </dialog>
 <dialog class="dialog" id="dialog-napcat" aria-labelledby="napcatDialogTitle">
 <div class="dialog-content">
-<h3 id="napcatDialogTitle" style="margin-top:0">配置 NapCat 路由</h3>
+<h3 id="napcatDialogTitle" style="margin-top:0">配置 OneBot 路由</h3>
 <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 16px;">
 <label class="field">QQ 群号
           <input id="ncGroup" placeholder="12345678" type="number"/>
@@ -2723,7 +2731,7 @@ const secretsWritten = new Set();
 try { localStorage.removeItem("webAdminToken"); } catch (_) {}
 
 const $ = (id) => document.getElementById(id);
-const CHANNELS = [["napcat", "NapCat QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
+const CHANNELS = [["napcat", "OneBot QQ"], ["tg", "Telegram Bot"], ["qq_official", "QQ 官方 Bot"]];
 
 let baseline = "";   // 最近一次加载/保存时的配置快照（JSON 串）
 
@@ -3060,13 +3068,13 @@ const ADMIN_NUMBER_RULES = Object.freeze({
   socialTiktokInterval: { label: "TikTok 间隔", min: 30, integer: true },
   socialLiveInterval: { label: "TikTok Live 探测间隔", min: 5, integer: true },
   alertCooldown: { label: "告警重复通知冷却", min: 0, integer: true },
-  qqSendInterval: { label: "QQ / NapCat 发送节流间隔", min: 0, step: 0.1, integer: false },
-  napcatSendTimeout: { label: "NapCat 单路发送超时", min: 1, max: 300, integer: true },
+  qqSendInterval: { label: "QQ / OneBot 发送节流间隔", min: 0, step: 0.1, integer: false },
+  napcatSendTimeout: { label: "OneBot 单路发送超时", min: 1, max: 300, integer: true },
   geminiMinInterval: { label: "AI 调用限速间隔", min: 0, step: 0.5, integer: false },
   translateTimeout: { label: "翻译单次超时", min: 1, integer: true },
   summaryHour: { label: "每日摘要时间", min: 0, max: 23, integer: true },
   webAdminPort: { label: "Web 管理端口", min: 1, max: 65535, integer: true },
-  inboundPort: { label: "NapCat 入站监听端口", min: 1, max: 65535, integer: true },
+  inboundPort: { label: "OneBot 入站监听端口", min: 1, max: 65535, integer: true },
   inboundMaxLinks: { label: "入站单条消息最大链接数", min: 1, max: 4, integer: true },
   inboundWorkers: { label: "入站 Worker 线程数", min: 1, max: 8, integer: true },
   inboundCooldown: { label: "入站用户冷却间隔", min: 0, integer: true },
@@ -3203,7 +3211,7 @@ function validateAdminSingleLine(id, label, maxLength, errors) {
   validateAdminSingleLineElement($(id), label, maxLength, errors);
 }
 
-// NapCat 旧版配置曾把动作路径和 access_token 一起写进一个 URL。管理端
+// OneBot 旧版配置曾把动作路径和 access_token 一起写进一个 URL。管理端
 // 读取时做一次无损拆分，保存时只写入基地址与独立 Token。
 function splitNapcatApiValue(raw) {
   const value = String(raw ?? "").trim();
@@ -3308,11 +3316,11 @@ function validateAdminConfig() {
   const addTextError = (id, message) => adminValidationError(errors, $(id), message);
   const napcatApi = $("napcatApi")?.value.trim() || "";
   if (napcatApi && !validNapcatBaseUrl(napcatApi)) {
-    addTextError("napcatApi", "NapCat API 基地址必须是有效的 http(s) 链接，且不能包含接口路径、查询参数或密钥");
+    addTextError("napcatApi", "OneBot API 基地址必须是有效的 http(s) 链接，且不能包含接口路径、查询参数或密钥");
   }
   const napcatToken = $("napcatApiToken")?.value || "";
   if (napcatToken && !validNapcatToken(napcatToken)) {
-    addTextError("napcatApiToken", "NapCat 访问密钥不能包含空格/换行，且最多 512 个字符");
+    addTextError("napcatApiToken", "OneBot 访问密钥不能包含空格/换行，且最多 512 个字符");
   }
   const mediaBase = $("napcatMediaBaseUrl")?.value.trim() || "";
   if (mediaBase && !validAdminUrl(mediaBase, { allowRelative: true })) {
@@ -3350,7 +3358,7 @@ function validateAdminConfig() {
   for (const [selector, label] of [
     ["#qqBotRows input.admin-table-input--remark", "QQ Bot 备注"],
     ["#tgBotRows input.admin-table-input--tg-remark", "TG Bot 备注"],
-    ["#napcatRows input.admin-table-input--napcat-remark", "NapCat 群备注"],
+    ["#napcatRows input.admin-table-input--napcat-remark", "OneBot 群备注"],
   ]) {
     document.querySelectorAll(selector).forEach((element) =>
       validateAdminSingleLineElement(element, label, 128, errors));
@@ -3419,15 +3427,15 @@ function validateAdminConfig() {
   });
 
   const napcatRoutes = config?.napcat_routes;
-  if (napcatRoutes !== undefined && !Array.isArray(napcatRoutes)) errors.push("NapCat 路由列表必须是数组");
+  if (napcatRoutes !== undefined && !Array.isArray(napcatRoutes)) errors.push("OneBot 路由列表必须是数组");
   (Array.isArray(napcatRoutes) ? napcatRoutes : []).forEach((route, index) => {
     const raw = String(route?.group_id ?? "").trim();
     if (!/^\d+$/.test(raw) || Number(raw) <= 0) {
       const input = document.querySelectorAll("#napcatRows .admin-table-input--napcat-id")[index];
-      adminValidationError(errors, input, "NapCat 群号必须是正整数");
+      adminValidationError(errors, input, "OneBot 群号必须是正整数");
     }
     if (route?.remark && (String(route.remark).length > 128 || /[\r\n\u0000-\u001f\u007f]/.test(String(route.remark)))) {
-      adminValidationError(errors, document.querySelectorAll("#napcatRows .admin-table-input--napcat-remark")[index], "NapCat 群备注不能换行或包含控制字符，且最多 128 个字符");
+      adminValidationError(errors, document.querySelectorAll("#napcatRows .admin-table-input--napcat-remark")[index], "OneBot 群备注不能换行或包含控制字符，且最多 128 个字符");
     }
   });
   const tgBots = config?.tg_bots;
@@ -3899,6 +3907,7 @@ async function fetchStatus() {
     };
     const sendLabels = {
       ready: "发送正常",
+      unconfirmed: "已提交，送达未确认（禁止自动重发）",
       degraded: "发送受限（熔断/等待恢复）",
       failed: "最近发送失败",
       unknown: "尚未发生真实发送",
@@ -3914,7 +3923,7 @@ async function fetchStatus() {
       details.push("连续失败 " + Number(send.consecutive_failures) + " 次");
     if (Number.isFinite(Number(send.last_elapsed_ms)))
       details.push("最近耗时 " + Math.round(Number(send.last_elapsed_ms)) + "ms");
-    napcatHealth.textContent = "🐱 NapCat：API " + apiText + " · QQ 会话 " + sessionText +
+    napcatHealth.textContent = "🐱 OneBot：API " + apiText + " · QQ 会话 " + sessionText +
       " · 实际发送 " + sendText + (details.length ? "（" + details.join(" · ") + "）" : "");
     const tone = send.state === "ready" && session.state === "online" ? "ok" :
       send.state === "failed" || session.state === "unreachable" || session.state === "auth_failed" ? "err" : "warn";
@@ -4139,7 +4148,7 @@ function testPushPrefill(channel) {
       }
     }
   } else if (channel === "napcat") {
-    $("testPushTargetHint").textContent = "NapCat 路由组";
+    $("testPushTargetHint").textContent = "OneBot 路由组";
     const routes = config.napcat_routes || [];
     for (const r of routes) {
       const opt = document.createElement("option");
@@ -4164,11 +4173,11 @@ function buildDeliveryDiagnosticSummary() {
   const backlog = data.delivery_backlog || {};
   const monitor = data.monitor || {};
   return [
-    "Sakamichi NapCat 投递诊断摘要",
+    "Sakamichi OneBot 投递诊断摘要",
     "时间: " + new Date().toISOString(),
     "启动状态: " + String((data.startup || {}).state || "unknown"),
     "监控: " + String(monitor.monitor_reason || "unknown"),
-    "NapCat API: " + (session.api_reachable === true ? "reachable" : session.api_reachable === false ? "unreachable" : "unknown"),
+    "OneBot API: " + (session.api_reachable === true ? "reachable" : session.api_reachable === false ? "unreachable" : "unknown"),
     "QQ 会话: " + String(session.state || "unknown"),
     "实际发送: " + String(send.state || "unknown"),
     "最近错误: " + String(send.last_error || "none"),
@@ -4204,7 +4213,7 @@ $("btnTestPush").addEventListener("click", () => {
   const ch = (config.channels || {});
   const enabled = [];
   if (ch.tg) enabled.push(["tg", "Telegram"]);
-  if (ch.napcat) enabled.push(["napcat", "NapCat QQ"]);
+  if (ch.napcat) enabled.push(["napcat", "OneBot QQ"]);
   if (ch.qq_official) enabled.push(["qq_official", "QQ 官方 Bot"]);
   if (!enabled.length) { uiAlert("没有已启用的可测试通道，先在「基本设置」打开通道开关。"); return; }
   chipGroup("testPushChannel", enabled, enabled[0][0]);
@@ -4519,7 +4528,7 @@ function renderGeneral() {
   if ($("napcatForwardNickname")) $("napcatForwardNickname").value = config.napcat_forward_nickname || "";
   if ($("napcatForwardUserId")) $("napcatForwardUserId").value = config.napcat_forward_user_id ?? "";
 
-  // NapCat Inbound
+  // OneBot Inbound
   const inbound = config.napcat_inbound || {};
   if ($("inboundOn")) $("inboundOn").checked = !!inbound.enabled;
   if ($("inboundTransport")) $("inboundTransport").value = inbound.transport || "http_post";
@@ -4533,14 +4542,14 @@ function renderGeneral() {
   if ($("inboundWorkers")) $("inboundWorkers").value = inbound.workers ?? 2;
   if ($("inboundCooldown")) $("inboundCooldown").value = inbound.cooldown_seconds ?? 10;
 
-  // NapCat Photo Commands
+  // OneBot Photo Commands
   const photo = config.napcat_photo || {};
   if ($("photoCommandOn")) $("photoCommandOn").checked = photo.enabled !== false;
   if ($("photoGroupScope")) $("photoGroupScope").value = photo.group_scope || (Array.isArray(photo.allowed_groups) && photo.allowed_groups.length ? "selected" : "routes");
   if ($("photoCooldownUser")) $("photoCooldownUser").value = photo.cooldown_user_seconds ?? 8;
   if ($("photoCooldownGroup")) $("photoCooldownGroup").value = photo.cooldown_group_seconds ?? 4;
 
-  // NapCat AI Chat
+  // OneBot AI Chat
   const aiChat = config.napcat_ai_chat || {};
   if ($("aiChatOn")) $("aiChatOn").checked = !!aiChat.enabled;
   if ($("aiChatBaseUrl")) $("aiChatBaseUrl").value = aiChat.cpa_base_url || "";
@@ -4715,7 +4724,7 @@ function renderNapcatFeatureGroups(feature, selectedGroups) {
   const selected = new Set((Array.isArray(selectedGroups) ? selectedGroups : []).map(String));
   const groups = getNapcatRouteGroups();
   if (!groups.length) {
-    wrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">暂无 NapCat 群路由，请先在上方「NapCat 群推送路由」添加路由</span>';
+    wrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">暂无 OneBot 群路由，请先在上方「OneBot 群推送路由」添加路由</span>';
     return;
   }
   const inputClass = feature === "photo" ? "photo-group-chk" : "inbound-group-chk";
@@ -4752,7 +4761,7 @@ function renderAiChatAllowedGroups() {
   const routes = config.napcat_routes || [];
   const selected = new Set((config.napcat_ai_chat?.allowed_groups || []).map(String));
   if (routes.length === 0) {
-    allowedWrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">暂无 NapCat 群路由，请先在上方「NapCat 群推送路由」添加路由</span>';
+    allowedWrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">暂无 OneBot 群路由，请先在上方「OneBot 群推送路由」添加路由</span>';
     return;
   }
   let validCount = 0;
@@ -4773,7 +4782,7 @@ function renderAiChatAllowedGroups() {
     allowedWrap.appendChild(label);
   });
   if (validCount === 0) {
-    allowedWrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">NapCat 路由群号未填写，填写群号后在此勾选</span>';
+    allowedWrap.innerHTML = '<span style="color:var(--muted); font-size:12px;">OneBot 路由群号未填写，填写群号后在此勾选</span>';
   }
 }
 
@@ -5349,7 +5358,7 @@ function openSecretDialog(title, hint, fields, account, opts) {
   if ($("secretSmartFeedback")) $("secretSmartFeedback").textContent = "";
   if ($("secretSmartBox")) {
     $("secretSmartBox").open = false;
-    // 仅账号 Token/Cookie 支持 signin cURL 智能解析；CPA、NapCat
+    // 仅账号 Token/Cookie 支持 signin cURL 智能解析；CPA、OneBot
     // 事件 Token 等独立密钥不应出现无关的 DevTools/Cookie 教程。
     $("secretSmartBox").hidden = !showSmartParse;
   }
@@ -5749,11 +5758,11 @@ if ($("btnClearCpaKey")) $("btnClearCpaKey").addEventListener("click", () => cle
 
 if ($("btnFillNapcatEventToken")) {
   $("btnFillNapcatEventToken").addEventListener("click", () => openSecretDialog(
-    "填写 NapCat 事件上报 Token", "保存并热重载后立即生效（用于校验 NapCat HTTP POST / 反向 WS 传来的 X-OneBot-Token / Authorization）。",
+    "填写 OneBot 事件上报 Token", "保存并热重载后立即生效（用于校验 OneBot HTTP POST / 反向 WS 传来的 X-OneBot-Token / Authorization）。",
     [{ env: "NAPCAT_EVENT_TOKEN", label: "Event Token", required: true, placeholder: "OneBot 上报 Token",
-       help: "需与 NapCat / OneBot 端配置的 access_token / secret 保持一致。" }], null));
+       help: "需与网关端配置的 access_token / secret 保持一致。" }], null));
 }
-if ($("btnClearNapcatEventToken")) $("btnClearNapcatEventToken").addEventListener("click", () => clearEnvSecret("NAPCAT_EVENT_TOKEN", "NapCat 事件上报 Token"));
+if ($("btnClearNapcatEventToken")) $("btnClearNapcatEventToken").addEventListener("click", () => clearEnvSecret("NAPCAT_EVENT_TOKEN", "OneBot 事件上报 Token"));
 
 if ($("btnResetAiPrompt")) {
   $("btnResetAiPrompt").addEventListener("click", async () => {
@@ -6304,7 +6313,7 @@ $("accSave").addEventListener("click", async () => {
 });
 
 
-// ── Channels (NapCat & TG) ──────────────────────────────
+// ── Channels (OneBot & TG) ──────────────────────────────
 
 // ── Member Selector Dialog ──────────────────────
 let _currentMemberSelectCallback = null;
@@ -6501,7 +6510,7 @@ function openChannelSubDialog(item, title, onSave) {
   $("subSocialFilter").value = (item.social_filter || []).join(", ");
   $("subBlogCardMode").value = item.blog_card_mode || "card_and_images";
 
-  const isNapcat = Boolean(item && (item.group_id !== undefined || (title && title.includes("NapCat"))));
+  const isNapcat = Boolean(item && (item.group_id !== undefined || (title && (title.includes("NapCat") || title.includes("OneBot")))));
   const fwdWrap = $("subNapcatForwardWrap");
   if (fwdWrap) fwdWrap.style.display = isNapcat ? "block" : "none";
   if ($("subForwardNickname")) $("subForwardNickname").value = item.forward_nickname || "";
@@ -6690,7 +6699,7 @@ function renderNapcat() {
     const tdSub = document.createElement("td");
     const rLabel = r.remark ? `${r.remark} (${r.group_id || '#' + (idx + 1)})` : (r.group_id || "#" + (idx + 1));
     tdSub.appendChild(renderSubSummary(r, () => {
-      openChannelSubDialog(r, "NapCat 群: " + rLabel, renderNapcat);
+      openChannelSubDialog(r, "OneBot 群: " + rLabel, renderNapcat);
     }));
 
     const tdAct = document.createElement("td");
@@ -8729,7 +8738,7 @@ function renderSocialPushTargets() {
     });
   }
 
-  // 2. NapCat QQ
+  // 2. OneBot QQ
   if (enable_nap) {
     const routes = config.napcat_routes || [];
     routes.forEach(r => {
@@ -8739,14 +8748,14 @@ function renderSocialPushTargets() {
         const display = remark ? `${remark} (${gid})` : `QQ群 ${gid}`;
         targets.push({
           id: `napcat:${gid}`,
-          name: `🐾 NapCat · ${display}`,
+          name: `🐾 OneBot · ${display}`,
         });
       }
     });
     if (routes.length === 0) {
       targets.push({
         id: "napcat",
-        name: "🐾 NapCat QQ 群广播",
+        name: "🐾 OneBot QQ 群广播",
       });
     }
   }
@@ -8890,7 +8899,7 @@ $("botSubClose").addEventListener("click", () => {
   $("botSubscribeDialog").close();
 });
 
-// ── NapCat 高级与扩展功能弹窗与状态交互 ──
+// ── OneBot 高级与扩展功能弹窗与状态交互 ──
 function updateNapcatAdvancedStatus() {
   const inPill = $("napcatInboundPill");
   const photoPill = $("napcatPhotoPill");

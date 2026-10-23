@@ -157,6 +157,11 @@ class NapCatSendGate:
                 else None
             )
 
+        if outcome.error_code == "delivery_unconfirmed":
+            self._last_error = "delivery_unconfirmed"
+            # Accepted does not mean confirmed. Do not increment failure streak
+            # or clear an existing circuit based on an uncertain receipt.
+            return
         if outcome.ok:
             self._last_error = None
             self._last_success_at = time.monotonic()
@@ -698,8 +703,8 @@ async def _post_payload_detailed(
                     # 读取超时时请求体已经交给 NapCat，实际群消息很可能已
                     # 发出。合并转发没有幂等键，重试只会产生重复卡片。
                     log_all(
-                        "⚠️ NapCat 合并转发回包超时；请求已提交，不再重试，"
-                        "按已接收处理以避免重复消息 | "
+                        "⚠️ OneBot 合并转发回包超时；请求已提交，送达未确认，"
+                        "禁止自动重试以避免重复消息 | "
                         f"{_safe_excerpt(format_httpx_error(e))}",
                         is_warning=True,
                     )
@@ -760,16 +765,17 @@ async def _post_message_detailed(
     )
 
 
-async def _send_payload(
+async def _send_payload_detailed(
     group_id: int,
     payload: Mapping[str, object],
     action: str,
     max_retries: int = 3,
-) -> bool:
+) -> NapCatSendOutcome:
     """在账号级发送门闩内执行任意 OneBot action。"""
 
     started = time.monotonic()
     async with _send_gate:
+        gate_wait_ms = (time.monotonic() - started) * 1000
         if _send_gate.is_blocked():
             if _send_gate.should_log_skip():
                 snapshot = _send_gate.snapshot()
@@ -792,7 +798,8 @@ async def _send_payload(
                 (time.monotonic() - started) * 1000,
                 attempted=False,
             )
-            return False
+            return outcome
+        http_started = time.monotonic()
         outcome = await _post_payload_detailed(
             group_id,
             payload,
@@ -802,13 +809,30 @@ async def _send_payload(
         elapsed_ms = (time.monotonic() - started) * 1000
         _send_gate.record(outcome, target=group_id, elapsed_ms=elapsed_ms)
         _record_send_health(outcome, group_id, elapsed_ms)
+        log_all(
+            f"⏱️ OneBot 动作完成 | action={action} | "
+            f"gate_wait_ms={gate_wait_ms:.0f} | "
+            f"request_ms={(time.monotonic() - http_started) * 1000:.0f} | "
+            f"outcome={outcome.error_code or ('confirmed' if outcome.ok else 'failed')}",
+            is_debug=True,
+        )
         if not outcome.ok:
             log_all(
                 f"❌ QQ {('合并转发' if action == 'send_group_forward_msg' else '消息')}"
                 f"发送彻底失败 | error_code={outcome.error_code}",
                 is_error=True,
             )
-        return outcome.ok
+        return outcome
+
+
+async def _send_payload(
+    group_id: int,
+    payload: Mapping[str, object],
+    action: str,
+    max_retries: int = 3,
+) -> bool:
+    """Legacy accepted/not-accepted API; new forward callers use detailed result."""
+    return (await _send_payload_detailed(group_id, payload, action, max_retries)).ok
 
 
 async def _post_message(group_id: int, message_chain: list[dict], max_retries: int) -> bool:
@@ -876,6 +900,14 @@ async def send_group_forward_message(
     messages: list[dict],
     max_retries: int = 1,
 ) -> bool:
+    return (await send_group_forward_message_detailed(group_id, messages, max_retries)).ok
+
+
+async def send_group_forward_message_detailed(
+    group_id: int,
+    messages: list[dict],
+    max_retries: int = 1,
+) -> NapCatSendOutcome:
     """以 OneBot 合并转发卡片发送多个消息节点。
 
     ``send_group_forward_msg`` 会把多个节点折叠成一条群消息，适合
@@ -886,13 +918,13 @@ async def send_group_forward_message(
     """
 
     if not isinstance(messages, list) or not messages:
-        return False
+        return NapCatSendOutcome(False, "empty_message")
     log_all(
         f"📦 NapCat 合并转发 | 群{group_id} | 节点{len(messages)} | "
         "按 1 条群消息投递",
         is_debug=True,
     )
-    return await _send_payload(
+    return await _send_payload_detailed(
         group_id,
         {"messages": messages},
         "send_group_forward_msg",
@@ -908,6 +940,7 @@ __all__ = [
     "initialize",
     "record_send_timeout",
     "send_group_forward_message",
+    "send_group_forward_message_detailed",
     "send_qq_message",
     "set_session_state",
     "strip_internal_keys",

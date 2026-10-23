@@ -17,15 +17,21 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack, contextmanager
+import hashlib
 import json
 import os
 import re
 import sqlite3
+import stat
+import tempfile
 import threading
+import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
+import portalocker
 
 import src.config.config as cfg
 from src.logger import log_all
@@ -34,6 +40,7 @@ from src.archive_query import (
     _day_cache,
     _jst_date,
     _month_count,
+    get_archive_letter_member_dir,
     day_counts,
     get_archive_letters,
     get_existing_letter_ids,
@@ -62,6 +69,7 @@ __all__ = [
     "day_counts",
     "extract_upload_time",
     "find_media_bytes_by_url",
+    "get_archive_letter_member_dir",
     "get_archive_letters",
     "get_db_path",
     "get_existing_letter_ids",
@@ -114,7 +122,6 @@ _MEDIA_TYPES = {"image", "picture", "video", "voice"}
 # ---- 模块级状态 ----
 _media_client: httpx.AsyncClient | None = None
 _media_sem: asyncio.Semaphore | None = None
-_write_locks: dict[str, asyncio.Lock] = {}
 _bg_tasks: set = set()
 
 _local_storage = threading.local()
@@ -125,6 +132,22 @@ _has_fts5: bool = False
 # 归档 JSON 中的自定义标签由管理端直接编辑。索引版本用于在升级后只做一次
 # 全量重建，补齐旧版本已经保存到 JSON、但尚未写入 SQLite/FTS 的标签。
 _MESSAGE_INDEX_VERSION = 2
+
+
+class ArchiveWriteError(RuntimeError):
+    """归档月文件或对应索引无法安全更新。"""
+
+
+class ArchiveWriteLockTimeout(ArchiveWriteError):
+    """等待归档月锁超时，可在稍后重试。"""
+
+
+class ArchiveIndexSyncError(ArchiveWriteError):
+    """JSON 已保存，但 SQLite 搜索索引尚未同步。"""
+
+
+class ArchiveDataError(ArchiveWriteError):
+    """归档月 JSON 不可读取或结构不符合预期。"""
 
 
 def get_db_path() -> Path:
@@ -333,11 +356,114 @@ def set_timeline_watermark(group_type: str, m_id: str, last_time: str) -> None:
         log_all(f"⚠️ 保存时间戳水位线失败 ({group_type}_{m_id}): {e}", is_debug=True)
 
 
-def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dict]) -> None:
-    """同步一组消息至 SQLite 数据库与 FTS 索引。"""
-    conn = init_db()
-    if not conn or not msgs:
+def _messages_index_dirty_path() -> Path:
+    return archive_root() / ".messages-index-dirty"
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist directory entry changes on POSIX filesystems such as the NAS Btrfs volume."""
+    if os.name == "nt":
         return
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _mkdir_durable(path: Path) -> None:
+    """Create missing directories and persist their entries up to the existing parent."""
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        missing.append(cursor)
+        if cursor.parent == cursor:
+            break
+        cursor = cursor.parent
+    path.mkdir(parents=True, exist_ok=True)
+    if missing and os.name != "nt":
+        for directory in missing:
+            _fsync_directory(directory)
+        _fsync_directory(cursor)
+
+
+def _mark_messages_index_dirty() -> bool:
+    marker = _messages_index_dirty_path()
+    try:
+        archive_root().mkdir(parents=True, exist_ok=True)
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _fsync_directory(marker.parent)
+        return True
+    except OSError as exc:
+        log_all(f"⚠️ 无法标记归档索引待修复: {type(exc).__name__}", is_error=True)
+        return False
+
+
+def _clear_messages_index_dirty() -> bool:
+    marker = _messages_index_dirty_path()
+    try:
+        marker.unlink(missing_ok=True)
+        _fsync_directory(marker.parent)
+        return True
+    except OSError as exc:
+        log_all(f"⚠️ 归档索引已同步，但待修复标记无法清除: {type(exc).__name__}", is_error=True)
+        return False
+
+
+def _messages_index_lock_path() -> Path:
+    return archive_root() / ".locks" / "messages-index.lock"
+
+
+@contextmanager
+def _locked_file(path: Path, *, timeout: float = 15):
+    """Acquire a persistent cross-process lock without masking body errors."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = portalocker.Lock(
+        path,
+        mode="a",
+        timeout=timeout,
+        check_interval=0.05,
+        flags=portalocker.LockFlags.EXCLUSIVE | portalocker.LockFlags.NON_BLOCKING,
+    )
+    try:
+        lock.acquire()
+    except portalocker.exceptions.AlreadyLocked as exc:
+        raise ArchiveWriteLockTimeout(f"等待归档锁超时: {path.name}") from exc
+    except portalocker.exceptions.LockException as exc:
+        raise ArchiveWriteError(f"归档文件锁不可用: {type(exc).__name__}") from exc
+    except OSError as exc:
+        raise ArchiveWriteError(f"归档文件锁不可用: {type(exc).__name__}") from exc
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+@contextmanager
+def _locked_months(m_name: str, months: set[tuple[int, int]]):
+    """Acquire month locks in stable path order; callers hold the index lock first."""
+    paths = sorted(
+        {_month_lock_path(m_name, year, month) for year, month in months},
+        key=lambda path: str(path),
+    )
+    with ExitStack() as stack:
+        for path in paths:
+            stack.enter_context(_locked_file(path))
+        yield
+
+
+def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dict]) -> bool:
+    """同步一组消息至 SQLite 数据库与 FTS 索引。"""
+    if not msgs:
+        return True
+    conn = init_db()
+    if not conn:
+        _mark_messages_index_dirty()
+        return False
     m_dir = member_dir_name(member_name)
     rows = []
     fts_rows = []
@@ -358,6 +484,9 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
         if _has_fts5:
             fts_rows.append((rid, m_dir, member_name, txt, trans, tags))
 
+    if not rows:
+        return True
+
     try:
         with conn:
             conn.executemany("""
@@ -365,6 +494,13 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     member_name=excluded.member_name,
+                    member_dir=excluded.member_dir,
+                    year=excluded.year,
+                    month=excluded.month,
+                    type=excluded.type,
+                    published_at=excluded.published_at,
+                    updated_at=excluded.updated_at,
+                    text=excluded.text,
                     translation=excluded.translation,
                     tags=excluded.tags,
                     local_file=excluded.local_file,
@@ -378,6 +514,9 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
                 """, fts_rows)
     except Exception as e:
         log_all(f"⚠️ SQLite 保存消息数据失败: {e}", is_error=True)
+        _mark_messages_index_dirty()
+        return False
+    return True
 
 
 def sync_all_to_sqlite(force: bool = False) -> int:
@@ -390,7 +529,18 @@ def sync_all_to_sqlite(force: bool = False) -> int:
     if not conn:
         return 0
 
-    if not force:
+    try:
+        with _locked_file(_messages_index_lock_path(), timeout=120):
+            return _sync_all_to_sqlite_locked(root, conn, force=force)
+    except ArchiveWriteError as exc:
+        log_all(f"⚠️ SQLite 归档全量同步等待写锁失败: {type(exc).__name__}", is_error=True)
+        return 0
+
+
+def _sync_all_to_sqlite_locked(root: Path, conn: sqlite3.Connection, *, force: bool) -> int:
+    """Rebuild the message index while holding the global message-write lock."""
+    dirty_marker = _messages_index_dirty_path()
+    if not force and not dirty_marker.exists():
         try:
             row = conn.execute("SELECT COUNT(*) FROM messages;").fetchone()
             version_row = conn.execute(
@@ -408,10 +558,12 @@ def sync_all_to_sqlite(force: bool = False) -> int:
         except Exception:  # nosec B110
             pass
 
+    if not _mark_messages_index_dirty():
+        return 0
     all_rows = []
     fts_rows = []
     for member_dir in root.iterdir():
-        if not member_dir.is_dir():
+        if not member_dir.is_dir() or member_dir.name.startswith("."):
             continue
         m_name = member_dir.name
         m_dirname = member_dir_name(m_name)
@@ -430,6 +582,8 @@ def sync_all_to_sqlite(force: bool = False) -> int:
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
                         msgs = json.load(f)
+                    if not isinstance(msgs, list) or any(not isinstance(msg, dict) for msg in msgs):
+                        raise ValueError("归档 JSON 结构无效")
                     for msg in msgs:
                         rid = str(msg.get("id", ""))
                         if not rid:
@@ -448,22 +602,33 @@ def sync_all_to_sqlite(force: bool = False) -> int:
                             fts_rows.append((rid, m_dirname, m_name, txt, trans, tags))
                 except Exception as e:
                     log_all(f"⚠️ 无法同步归档 {json_path}: {e}", is_error=True)
+                    return 0
 
     try:
         with conn:
+            # JSON 归档是权威数据；删除旧索引行可清理已从 JSON 移除的记录。
+            conn.execute("DELETE FROM messages;")
+            if _has_fts5:
+                conn.execute("DELETE FROM messages_fts;")
             if all_rows:
                 conn.executemany("""
                     INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, updated_at, text, translation, tags, local_file, raw_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         member_name=excluded.member_name,
+                        member_dir=excluded.member_dir,
+                        year=excluded.year,
+                        month=excluded.month,
+                        type=excluded.type,
+                        published_at=excluded.published_at,
+                        updated_at=excluded.updated_at,
+                        text=excluded.text,
                         translation=excluded.translation,
                         tags=excluded.tags,
                         local_file=excluded.local_file,
                         raw_json=excluded.raw_json;
                 """, all_rows)
                 if _has_fts5 and fts_rows:
-                    conn.executemany("DELETE FROM messages_fts WHERE id = ?;", [(r[0],) for r in fts_rows])
                     conn.executemany("""
                         INSERT INTO messages_fts (id, member_dir, member_name, text, translation, tags)
                         VALUES (?, ?, ?, ?, ?, ?);
@@ -476,6 +641,10 @@ def sync_all_to_sqlite(force: bool = False) -> int:
             )
     except Exception as e:
         log_all(f"⚠️ SQLite 批量全量保存失败: {e}", is_error=True)
+        _mark_messages_index_dirty()
+        return 0
+
+    _clear_messages_index_dirty()
 
     log_all(f"💾 SQLite 归档全量同步完成，共计同步 {len(all_rows)} 条记录")
     return len(all_rows)
@@ -710,32 +879,178 @@ def load_messages_by_ids(m_name: str | None, message_ids: list[str] | set[str] |
     return records
 
 
-def _sync_write_json(tmp_path: Path, json_path: Path, data: list[dict]) -> None:
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, json_path)
+def _month_lock_path(m_name: str, year: int, month: int) -> Path:
+    """Return a stable sidecar path shared by every writer of one archive month."""
+    root = archive_root()
+    key = f"{member_dir_name(m_name)}\0{year:04d}\0{month:02d}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return root / ".locks" / f"{digest}.lock"
+
+
+def _load_month_for_write(m_name: str, year: int, month: int) -> tuple[Path, list[dict]]:
+    """Read a month without treating corruption or I/O errors as an empty archive."""
+    member_root = _member_root(m_name)
+    candidates = [
+        member_root / f"{year:04d}" / f"{month:02d}" / "messages.json",
+        member_root / f"{year:04d}" / str(month) / "messages.json",
+    ]
+    for json_path in dict.fromkeys(candidates):
+        try:
+            with json_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ArchiveDataError(f"无法安全读取归档文件 {json_path}: {type(exc).__name__}") from exc
+        if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+            raise ArchiveDataError(f"归档文件结构无效，拒绝覆盖: {json_path}")
+        return json_path, data
+    return candidates[0], []
+
+
+def _atomic_write_json(json_path: Path, data: list[dict]) -> None:
+    """Write JSON through a unique same-directory file, then atomically replace."""
+    _mkdir_durable(json_path.parent)
+    try:
+        mode = stat.S_IMODE(json_path.stat().st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{json_path.name}.", suffix=".tmp", dir=json_path.parent
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, json_path)
+        _fsync_directory(json_path.parent)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write media through a same-directory temporary file and atomic replace."""
+    _mkdir_durable(path.parent)
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _is_complete_letter_jpeg(path: Path) -> bool:
+    """Reject the truncated JPEGs left by pre-atomic letter downloads."""
+    try:
+        if path.stat().st_size < 4:
+            return False
+        with path.open("rb") as f:
+            if f.read(2) != b"\xff\xd8":
+                return False
+            f.seek(-2, os.SEEK_END)
+            return f.read(2) == b"\xff\xd9"
+    except OSError:
+        return False
+
+
+def _is_complete_letter_jpeg_bytes(data: bytes) -> bool:
+    """Check JPEG start/end markers before accepting an official letter card."""
+    return len(data) >= 4 and data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
+
+
+def _archive_letters_by_id(letters: list[dict]) -> dict[str, dict]:
+    """Index letter records by ID while keeping JSON-only legacy metadata."""
+    result: dict[str, dict] = {}
+    for item in letters:
+        if isinstance(item, dict) and item.get("id") is not None:
+            result[str(item["id"])] = dict(item)
+    return result
+
+
+def _merge_month_records(
+    m_name: str,
+    year: int,
+    month: int,
+    records: list[dict],
+    *,
+    require_existing: bool = False,
+) -> list[dict]:
+    """Serialize month read/merge/write across threads and processes.
+
+    Records are merged by string ID while holding a persistent sidecar lock. The
+    sidecar is intentionally never removed: unlinking it could let two writers
+    lock different inodes for the same month.
+    """
+    updates: list[dict] = []
+    for record in records:
+        if not isinstance(record, dict) or not str(record.get("id", "")):
+            continue
+        updates.append(dict(record))
+    if not updates:
+        return []
+
+    lock_path = _month_lock_path(m_name, year, month)
+    try:
+        with _locked_file(_messages_index_lock_path(), timeout=60):
+            dirty_was_present = _messages_index_dirty_path().exists()
+            with _locked_file(lock_path):
+                json_path, existing = _load_month_for_write(m_name, year, month)
+                by_id = {str(item.get("id", "")): item for item in existing}
+                update_ids: list[str] = []
+                seen_update_ids: set[str] = set()
+                for record in updates:
+                    rid = str(record["id"])
+                    if rid not in by_id:
+                        if require_existing:
+                            return []
+                        by_id[rid] = {}
+                    if rid not in seen_update_ids:
+                        update_ids.append(rid)
+                        seen_update_ids.add(rid)
+                    merged = {**by_id[rid], **record}
+                    merged.pop("_download_failed", None)
+                    if record.get("_download_failed"):
+                        merged["_download_failed"] = True
+                    by_id[rid] = merged
+
+                merged_updates = [by_id[rid] for rid in dict.fromkeys(update_ids)]
+                out = sorted(by_id.values(), key=lambda item: item.get("updated_at", ""))
+                if not _mark_messages_index_dirty():
+                    raise ArchiveWriteError("无法建立索引恢复标记，拒绝修改归档")
+                _atomic_write_json(json_path, out)
+                if not _save_msgs_to_sqlite(m_name, year, month, merged_updates):
+                    raise ArchiveIndexSyncError("JSON 已保存，SQLite 索引待修复")
+                if not dirty_was_present:
+                    _clear_messages_index_dirty()
+                return merged_updates
+    except OSError as exc:
+        raise ArchiveWriteError(f"归档文件写入失败: {type(exc).__name__}") from exc
 
 
 async def _merge_write(m_name: str, dt: datetime, record: dict) -> None:
     """把单条记录按 id 合并进当月 messages.json（新字段覆盖旧字段）。"""
-    key = f"{member_dir_name(m_name)}/{dt.year:04d}/{dt.month:02d}"
-    lock = _write_locks.setdefault(key, asyncio.Lock())
-    async with lock:
-        month_path = _month_dir(m_name, dt)
-        month_path.mkdir(parents=True, exist_ok=True)
-        msgs = load_month(m_name, dt.year, dt.month)
-        by_id = {str(m.get("id", "")): m for m in msgs}
-        rid = str(record.get("id", ""))
-        merged = {**by_id.get(rid, {}), **record}
-        merged.pop("_download_failed", None)
-        if record.get("_download_failed"):
-            merged["_download_failed"] = True
-        by_id[rid] = merged
-        out = sorted(by_id.values(), key=lambda m: m.get("updated_at", ""))
-        json_path = month_path / "messages.json"
-        tmp = json_path.with_suffix(".json.tmp")
-        await asyncio.to_thread(_sync_write_json, tmp, json_path, out)
-        _save_msgs_to_sqlite(m_name, dt.year, dt.month, [merged])
+    await asyncio.to_thread(_merge_month_records, m_name, dt.year, dt.month, [record])
 
 
 
@@ -816,6 +1131,28 @@ def find_media_bytes_by_url(m_name: str, file_url: str) -> bytes | None:
     return None
 
 
+def _media_headers_for_message(m_name: str, msg: dict) -> dict[str, str] | None:
+    """Resolve account authentication for a private source media URL."""
+    try:
+        from src.config.credentials import get_source_headers_for_account
+
+        account_id = msg.get("account_id", "")
+        group_type = msg.get("group_type", "")
+        if not account_id or not group_type:
+            from src.config.config import MONITOR_LIST
+
+            for monitor in MONITOR_LIST:
+                if monitor.get("m_name") == m_name or monitor.get("name") == m_name:
+                    account_id = account_id or monitor.get("account_id", "")
+                    group_type = group_type or monitor.get("group_type", "")
+                    break
+        if account_id and group_type:
+            return get_source_headers_for_account(account_id, group_type)
+    except Exception:  # nosec B110
+        pass
+    return None
+
+
 async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[str, str] | None = None) -> dict:
     """下载消息媒体，返回带 _local_file / _download_failed 字段的增量记录。"""
     file_url = msg.get("file", "")
@@ -823,7 +1160,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
     msg_id = str(msg.get("id", "0"))
     ts = dt.strftime("%Y%m%d_%H%M%S")
     dest_dir = _month_dir(m_name, dt) / _media_subdir(msg.get("type", ""))
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    _mkdir_durable(dest_dir)
     member_root = _member_root(m_name)
 
     # 已有本地文件（按 时间戳_id 前缀匹配，扩展名无关）→ 检查大小后直接复用
@@ -839,7 +1176,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
             except OSError:
                 pass
 
-    tmp_path = dest_dir / f"{ts}_{msg_id}.tmp"
+    tmp_path = dest_dir / f".{ts}_{hashlib.sha256(msg_id.encode('utf-8')).hexdigest()[:16]}-{uuid.uuid4().hex}.tmp"
     ok = False
     used_url = file_url
     if _media_sem is None:
@@ -847,21 +1184,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
 
     # 自动解析账号凭据 headers（私有媒体资源需附带鉴权请求头）
     if not headers:
-        try:
-            from src.config.credentials import get_source_headers_for_account
-            account_id = msg.get("account_id", "")
-            group_type = msg.get("group_type", "")
-            if not account_id or not group_type:
-                from src.config.config import MONITOR_LIST
-                for m in MONITOR_LIST:
-                    if m.get("m_name") == m_name or m.get("name") == m_name:
-                        account_id = account_id or m.get("account_id", "")
-                        group_type = group_type or m.get("group_type", "")
-                        break
-            if account_id and group_type:
-                headers = get_source_headers_for_account(account_id, group_type)
-        except Exception:  # nosec B110
-            pass
+        headers = _media_headers_for_message(m_name, msg)
 
     # 优先下载主媒体文件；主文件失效/404 时若为图片且有缩略图则回退
     candidate_urls = [u for u in [file_url, thumb_url] if u]
@@ -885,6 +1208,8 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
                         if resp.status_code == 200 and resp.content:
                             with open(tmp_path, "wb") as f:
                                 f.write(resp.content)
+                                f.flush()
+                                os.fsync(f.fileno())
                             if tmp_path.exists() and tmp_path.stat().st_size > 0:
                                 ok = True
                                 used_url = u
@@ -919,6 +1244,7 @@ async def _download_media(m_name: str, dt: datetime, msg: dict, headers: dict[st
         ext = _guess_extension(used_url, _sniff_content_type(tmp_path, str(msg.get("type", ""))))
         final_path = dest_dir / f"{ts}_{msg_id}{ext}"
         os.replace(tmp_path, final_path)
+        _fsync_directory(final_path.parent)
     except asyncio.CancelledError:
         try:
             tmp_path.unlink(missing_ok=True)
@@ -1084,25 +1410,7 @@ async def archive_messages_batch(
         month_groups.setdefault(ym, []).append(updated_msg)
 
     for (year, month), batch in month_groups.items():
-        key = f"{member_dir_name(m_name)}/{year:04d}/{month:02d}"
-        lock = _write_locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            month_path = _member_root(m_name) / f"{year:04d}" / f"{month:02d}"
-            month_path.mkdir(parents=True, exist_ok=True)
-            existing_msgs = load_month(m_name, year, month)
-            by_id = {str(m.get("id", "")): m for m in existing_msgs}
-            for rec in batch:
-                rid = str(rec.get("id", ""))
-                merged = {**by_id.get(rid, {}), **rec}
-                merged.pop("_download_failed", None)
-                if rec.get("_download_failed"):
-                    merged["_download_failed"] = True
-                by_id[rid] = merged
-            out = sorted(by_id.values(), key=lambda m: m.get("updated_at", ""))
-            json_path = month_path / "messages.json"
-            tmp = json_path.with_suffix(".json.tmp")
-            await asyncio.to_thread(_sync_write_json, tmp, json_path, out)
-            _save_msgs_to_sqlite(m_name, year, month, batch)
+        await asyncio.to_thread(_merge_month_records, m_name, year, month, batch)
 
     # 4. 触发打标与更新缓存集合
     new_count = 0
@@ -1149,11 +1457,14 @@ async def wait_pending(timeout: float = 60) -> None:
 # ──────────────────────────────────────────────
 def _member_letters_dir(m_name: str) -> Path:
     d = _member_root(m_name) / "letters"
-    d.mkdir(parents=True, exist_ok=True)
+    _mkdir_durable(d)
     return d
 
 
-async def archive_single_letter(member_name: str, letter: dict, headers: dict | None = None) -> dict:
+async def archive_single_letter(
+    member_name: str, letter: dict, headers: dict | None = None, *,
+    client: httpx.AsyncClient | None = None, semaphore: asyncio.Semaphore | None = None,
+) -> dict:
     """归档单封粉丝信件：下载高清信纸卡片、持久化至 SQLite letters 表和本地文件。"""
     letter_id = letter.get("id")
     if not letter_id or not member_name:
@@ -1171,29 +1482,37 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
 
     # 尝试解析时间并下载信纸原图卡片
     local_file = ""
-    if file_url:
+    if file_url or created_at:
         try:
             dt = parse_jst_datetime(created_at) if created_at else datetime.now(JST_TZ)
             time_prefix = dt.strftime("%Y%m%d_%H%M%S")
             letters_dir = _member_letters_dir(member_name)
             target_path = letters_dir / f"{time_prefix}_{letter_id}.jpg"
-            
-            if target_path.exists() and target_path.stat().st_size > 0:
+
+            if _is_complete_letter_jpeg(target_path):
                 local_file = f"{m_dir}/letters/{target_path.name}"
-            else:
-                client = _media_client
-                sem = _media_sem if _media_sem is not None else asyncio.Semaphore(3)
+            elif file_url:
+                # An explicitly supplied client belongs to the caller's loop;
+                # never pair it with the monitor's cross-loop semaphore.
+                download_client = client if client is not None else _media_client
+                sem = semaphore
+                if sem is None:
+                    sem = _media_sem if client is None and _media_sem is not None else asyncio.Semaphore(3)
                 async with sem:
                     try:
-                        if client is not None and not client.is_closed:
-                            resp = await client.get(file_url, headers=headers, timeout=30.0)
+                        if download_client is not None:
+                            if download_client.is_closed:
+                                raise RuntimeError("Provided letter download client is closed")
+                            resp = await download_client.get(file_url, headers=headers, timeout=30.0)
                         else:
                             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as temp_c:
                                 resp = await temp_c.get(file_url, headers=headers)
-                        if resp.status_code == 200 and len(resp.content) > 0:
-                            target_path.write_bytes(resp.content)
+                        if resp.status_code == 200 and _is_complete_letter_jpeg_bytes(resp.content):
+                            _atomic_write_bytes(target_path, resp.content)
                             local_file = f"{m_dir}/letters/{target_path.name}"
                             log_all(f"✉️ [信件归档] 成功保存信件卡片: {m_dir}/letters/{target_path.name} ({len(resp.content)/1024:.1f} KB)", is_debug=True)
+                        elif resp.status_code == 200:
+                            raise ValueError("下载内容不是完整的 JPEG 图片")
                     except Exception as ex:
                         log_all(f"⚠️ [信件归档] 下载信件卡片失败 (ID: {letter_id}): {ex}", is_debug=True)
         except Exception as ex:
@@ -1201,37 +1520,52 @@ async def archive_single_letter(member_name: str, letter: dict, headers: dict | 
 
     # 写入/更新 SQLite
     conn = init_db()
-    if conn:
-        try:
-            with conn:
-                conn.execute("""
-                    INSERT INTO letters (id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        group_id=excluded.group_id,
-                        updated_at=excluded.updated_at,
-                        text=excluded.text,
-                        file_url=excluded.file_url,
-                        local_file=COALESCE(NULLIF(excluded.local_file, ''), letters.local_file),
-                        thumbnail_url=excluded.thumbnail_url,
-                        is_favorite=excluded.is_favorite,
-                        raw_json=excluded.raw_json;
-                """, (letter_id, group_id, member_name, m_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json))
-        except Exception as ex:
-            log_all(f"⚠️ 保存信件到 SQLite 失败 (ID: {letter_id}): {ex}", is_debug=True)
+    if not conn:
+        raise RuntimeError(f"无法初始化信件归档数据库 (ID: {letter_id})")
+    try:
+        with conn:
+            conn.execute("""
+                INSERT INTO letters (id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    group_id=excluded.group_id,
+                    member_name=excluded.member_name,
+                    member_dir=excluded.member_dir,
+                    created_at=excluded.created_at,
+                    updated_at=excluded.updated_at,
+                    text=excluded.text,
+                    file_url=excluded.file_url,
+                    local_file=CASE
+                        WHEN excluded.local_file != '' THEN excluded.local_file
+                        WHEN excluded.file_url != '' THEN ''
+                        ELSE letters.local_file
+                    END,
+                    thumbnail_url=excluded.thumbnail_url,
+                    is_favorite=excluded.is_favorite,
+                    raw_json=excluded.raw_json;
+            """, (letter_id, group_id, member_name, m_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json))
+    except Exception as ex:
+        log_all(f"⚠️ 保存信件到 SQLite 失败 (ID: {letter_id}): {ex}", is_error=True)
+        raise
 
     res = dict(letter)
     if local_file:
         res["local_file"] = local_file
+    res["_media_download_failed"] = bool(file_url and not local_file)
     return res
 
 
-async def archive_letters_batch(member_name: str, letters: list[dict], headers: dict | None = None) -> list[dict]:
+async def archive_letters_batch(
+    member_name: str, letters: list[dict], headers: dict | None = None, *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
     """批量归档信件列表，并发下载信纸原图并更新本地 letters.json 汇总与 SQLite。"""
     if not member_name or not letters:
         return []
 
-    tasks = [archive_single_letter(member_name, l_item, headers=headers) for l_item in letters]
+    sem = _media_sem if client is None and _media_sem is not None else asyncio.Semaphore(3)
+    tasks = [archive_single_letter(member_name, l_item, headers=headers, client=client, semaphore=sem)
+             for l_item in letters]
     results = await gather_cancel_safe(tasks, cleanup_timeout=5.0)
 
     # 按照 created_at DESC 排序整理
@@ -1241,14 +1575,25 @@ async def archive_letters_batch(member_name: str, letters: list[dict], headers: 
         reverse=True
     )
 
-    # 同步写入/更新本地 letters/letters.json
-    try:
-        letters_dir = _member_letters_dir(member_name)
-        json_path = letters_dir / "letters.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(sorted_results, f, ensure_ascii=False, indent=2)
-    except Exception as ex:
-        log_all(f"⚠️ 保存 letters.json 失败 ({member_name}): {ex}", is_debug=True)
+    # 锁内重新读取并合并数据库与旧 JSON，避免并发同步用较旧批次覆盖新信件。
+    m_dir = member_dir_name(member_name)
+    letters_dir = _member_letters_dir(member_name)
+    json_path = letters_dir / "letters.json"
+    member_lock = archive_root() / ".locks" / f"letters-{m_dir}.lock"
+    with _locked_file(member_lock, timeout=120):
+        stored = _archive_letters_by_id(get_archive_letters(m_dir))
+        for item in sorted_results:
+            if item.get("id") is None:
+                continue
+            key = str(item["id"])
+            current = stored.setdefault(key, {})
+            current.update({key: value for key, value in item.items() if key != "_media_download_failed"})
+        merged = sorted(
+            stored.values(),
+            key=lambda item: item.get("created_at") or item.get("updated_at") or "",
+            reverse=True,
+        )
+        _atomic_write_json(json_path, merged)
 
     return sorted_results
 
@@ -1262,117 +1607,132 @@ def realign_archive_timezones(force: bool = False) -> int:
         return 0
 
     marker_file = root / ".timezone_realigned"
-    if not force and marker_file.exists():
-        return 0
-
-    realigned_count = 0
-    # 扫描所有 member_dir
-    for member_path in sorted(root.iterdir()):
-        if not member_path.is_dir():
-            continue
-        m_dir = member_path.name
-        # 遍历所有 messages.json
-        for json_file in list(member_path.glob("[0-9]*/[0-9]*/messages.json")):
-            try:
-                cur_month_str = json_file.parent.name
-                cur_year_str = json_file.parent.parent.name
-                cur_year = int(cur_year_str)
-                cur_month = int(cur_month_str)
-            except ValueError:
-                continue
-
-            try:
-                with open(json_file, "r", encoding="utf-8") as f:
-                    msgs = json.load(f)
-            except Exception:  # nosec B112
-                continue
-
-            if not isinstance(msgs, list):
-                continue
-
-            stay_msgs = []
-            moved_records = []  # [(target_year, target_month, msg), ...]
-
-            for m in msgs:
-                pub_str = m.get("published_at") or m.get("updated_at") or ""
-                try:
-                    dt = parse_jst_datetime(pub_str)
-                except Exception:
-                    stay_msgs.append(m)
-                    continue
-
-                if dt.year == cur_year and dt.month == cur_month:
-                    stay_msgs.append(m)
-                else:
-                    moved_records.append((dt.year, dt.month, m))
-
-            if not moved_records:
-                continue
-
-            # 1. 更新当前月的 messages.json
-            with open(json_file, "w", encoding="utf-8") as f:
-                json.dump(stay_msgs, f, ensure_ascii=False, indent=2)
-
-            # 2. 移动错位消息及其关联的媒体文件到正确的目标月份
-            for t_year, t_month, m in moved_records:
-                target_month_dir = member_path / f"{t_year:04d}" / f"{t_month:02d}"
-                target_month_dir.mkdir(parents=True, exist_ok=True)
-                target_json = target_month_dir / "messages.json"
-
-                # 处理本地媒体文件移动
-                old_local = m.get("_local_file")
-                if old_local:
-                    old_path = member_path / old_local
-                    if old_path.exists():
-                        media_sub = _media_subdir(m.get("type", ""))
-                        new_media_dir = target_month_dir / media_sub
-                        new_media_dir.mkdir(parents=True, exist_ok=True)
-                        new_file_path = new_media_dir / old_path.name
-                        if not new_file_path.exists():
-                            try:
-                                import shutil
-                                shutil.move(str(old_path), str(new_file_path))
-                            except Exception:  # nosec B110
-                                pass
-                        new_rel = new_file_path.relative_to(member_path).as_posix()
-                        m["_local_file"] = new_rel
-
-                # 追加/合并进目标月份的 messages.json
-                target_msgs = []
-                if target_json.exists():
-                    try:
-                        with open(target_json, "r", encoding="utf-8") as f:
-                            target_msgs = json.load(f)
-                    except Exception:
-                        target_msgs = []
-                by_id = {str(item.get("id", "")): item for item in target_msgs}
-                by_id[str(m.get("id", ""))] = m
-                final_target_msgs = sorted(by_id.values(), key=lambda x: x.get("updated_at", ""))
-                with open(target_json, "w", encoding="utf-8") as f:
-                    json.dump(final_target_msgs, f, ensure_ascii=False, indent=2)
-
-                # 更新 SQLite 数据库中的 year 和 month
-                _save_msgs_to_sqlite(m_dir, t_year, t_month, [m])
-                realigned_count += 1
-
-            # 3. 如果当前月已变为空，删除旧空目录
-            if not stay_msgs:
-                try:
-                    json_file.unlink(missing_ok=True)
-                    json_file.parent.rmdir()
-                    # 如果年目录也空了，清理年目录
-                    year_dir = member_path / cur_year_str
-                    if year_dir.exists() and not any(year_dir.iterdir()):
-                        year_dir.rmdir()
-                except Exception:  # nosec B110
-                    pass
-
-    # 清空 day_cache 缓存以保证最新
-    _day_cache.clear()
     try:
-        marker_file.touch(exist_ok=True)
-    except Exception:  # nosec B110
-        pass
+        with _locked_file(_messages_index_lock_path(), timeout=120):
+            if not force and marker_file.exists():
+                return 0
+
+            dirty_marker = _messages_index_dirty_path()
+            dirty_was_present = dirty_marker.exists()
+            dirty_marked = False
+            realigned_count = 0
+            for member_path in sorted(root.iterdir()):
+                if not member_path.is_dir() or member_path.name.startswith("."):
+                    continue
+                m_dir = member_path.name
+                processed_months: set[tuple[int, int]] = set()
+                json_files = sorted(member_path.glob("[0-9]*/[0-9]*/messages.json"))
+                for json_file in json_files:
+                    try:
+                        cur_year = int(json_file.parent.parent.name)
+                        cur_month = int(json_file.parent.name)
+                    except ValueError:
+                        continue
+                    source_month = (cur_year, cur_month)
+                    if source_month in processed_months:
+                        continue
+                    processed_months.add(source_month)
+
+                    source_path, msgs = _load_month_for_write(m_dir, cur_year, cur_month)
+                    stay_msgs: list[dict] = []
+                    moved_records: list[tuple[int, int, dict]] = []
+                    for message in msgs:
+                        published_at = message.get("published_at") or message.get("updated_at") or ""
+                        try:
+                            dt = parse_jst_datetime(published_at)
+                        except Exception:
+                            stay_msgs.append(message)
+                            continue
+                        if (dt.year, dt.month) == source_month:
+                            stay_msgs.append(message)
+                        else:
+                            moved_records.append((dt.year, dt.month, dict(message)))
+
+                    if not moved_records:
+                        continue
+
+                    target_months = {(year, month) for year, month, _ in moved_records}
+                    with _locked_months(m_dir, target_months | {source_month}):
+                        # Re-read after all relevant month locks are held.
+                        source_path, msgs = _load_month_for_write(m_dir, cur_year, cur_month)
+                        stay_msgs = []
+                        moved_records = []
+                        for message in msgs:
+                            published_at = message.get("published_at") or message.get("updated_at") or ""
+                            try:
+                                dt = parse_jst_datetime(published_at)
+                            except Exception:
+                                stay_msgs.append(message)
+                                continue
+                            if (dt.year, dt.month) == source_month:
+                                stay_msgs.append(message)
+                            else:
+                                moved_records.append((dt.year, dt.month, dict(message)))
+                        if not moved_records:
+                            continue
+
+                        if not dirty_marked:
+                            if not _mark_messages_index_dirty():
+                                raise ArchiveWriteError("无法建立索引恢复标记，拒绝迁移归档")
+                            dirty_marked = True
+
+                        target_groups: dict[tuple[int, int], list[dict]] = {}
+                        for target_year, target_month, message in moved_records:
+                            target_month_dir = member_path / f"{target_year:04d}" / f"{target_month:02d}"
+                            local_file = message.get("_local_file")
+                            if local_file:
+                                old_path = member_path / local_file
+                                new_path = target_month_dir / _media_subdir(message.get("type", "")) / Path(local_file).name
+                                if old_path.exists() and old_path != new_path:
+                                    _mkdir_durable(new_path.parent)
+                                    if not new_path.exists():
+                                        import shutil
+                                        shutil.move(str(old_path), str(new_path))
+                                        _fsync_directory(old_path.parent)
+                                        _fsync_directory(new_path.parent)
+                                if new_path.is_file():
+                                    message["_local_file"] = new_path.relative_to(member_path).as_posix()
+                            target_groups.setdefault((target_year, target_month), []).append(message)
+
+                        # Write destinations first. A restart can safely merge these by ID again.
+                        for (target_year, target_month), records in target_groups.items():
+                            target_path, target_msgs = _load_month_for_write(m_dir, target_year, target_month)
+                            by_id = {str(item.get("id", "")): item for item in target_msgs}
+                            for record in records:
+                                rid = str(record.get("id", ""))
+                                if rid:
+                                    by_id[rid] = {**by_id.get(rid, {}), **record}
+                            _atomic_write_json(
+                                target_path,
+                                sorted(by_id.values(), key=lambda item: item.get("updated_at", "")),
+                            )
+
+                        # Remove moved messages only after every destination is durable.
+                        _atomic_write_json(source_path, stay_msgs)
+                        if not stay_msgs:
+                            source_path.unlink(missing_ok=True)
+                            try:
+                                source_path.parent.rmdir()
+                                year_dir = source_path.parent.parent
+                                if year_dir.exists() and not any(year_dir.iterdir()):
+                                    year_dir.rmdir()
+                            except OSError:
+                                pass
+
+                        for (target_year, target_month), records in target_groups.items():
+                            if not _save_msgs_to_sqlite(m_dir, target_year, target_month, records):
+                                raise ArchiveIndexSyncError("时区迁移已写入 JSON，SQLite 索引待修复")
+                        realigned_count += len(moved_records)
+
+            if dirty_marked and not dirty_was_present:
+                _clear_messages_index_dirty()
+            _day_cache.clear()
+            marker_file.touch(exist_ok=True)
+    except ArchiveWriteError:
+        raise
+    except OSError as exc:
+        raise ArchiveWriteError(f"时区迁移写入失败: {type(exc).__name__}") from exc
+
     if realigned_count > 0:
         log_all(f"🕒 历史归档时区自动自愈完成：已纠正 {realigned_count} 条跨月时区错位消息至 JST 年月")
     return realigned_count

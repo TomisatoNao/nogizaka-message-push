@@ -60,7 +60,7 @@ async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[
 
     if not account_id or account_id not in ACCOUNT_CREDS:
         log_all(f"⚠️ 未找到可用账号凭证: {account_id}", is_error=True)
-        return []
+        raise RuntimeError(f"未找到可用账号凭证: {account_id}")
 
     acc_cfg = cfg.ACCOUNTS.get(account_id, {})
     group_type = acc_cfg.get("group_type", "nogizaka46")
@@ -77,18 +77,16 @@ async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[
         if resp.status_code == 404:
             log_all(f"ℹ️ [{m_name}] 该成员无信件历史或接口不支持 (404)", is_debug=True)
             return []
-        elif resp.status_code == 200:
-            data = resp.json()
-            raw_list = data.get("letters", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            for item in raw_list:
-                if isinstance(item, dict) and item.get("id"):
-                    all_letters_map[int(item["id"])] = item
-        else:
-            log_all(f"⚠️ [{m_name}] 获取信件失败: HTTP {resp.status_code} {resp.text[:100]}", is_error=True)
-            return []
+        if resp.status_code != 200:
+            raise RuntimeError(f"获取信件失败: HTTP {resp.status_code} {resp.text[:100]}")
+        data = resp.json()
+        raw_list = data.get("letters", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        for item in raw_list:
+            if isinstance(item, dict) and item.get("id"):
+                all_letters_map[int(item["id"])] = item
     except Exception as e:
         log_all(f"⚠️ [{m_name}] 请求信件异常: {e}", is_error=True)
-        return []
+        raise RuntimeError(f"请求信件失败: {e}") from e
 
     if not all_letters_map:
         return []
@@ -119,12 +117,15 @@ async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[
         params_to_try.append(f"?count={PAGE_SIZE}&offset={len(all_letters_map)}")
 
         new_found_in_page = 0
+        page_request_succeeded = False
+        page_errors = []
         for p_query in params_to_try:
             try:
                 p_resp = await client.get(f"{base_url}{p_query}", headers=headers, timeout=20.0)
                 if p_resp.status_code == 200:
                     p_data = p_resp.json()
                     p_list = p_data.get("letters", []) if isinstance(p_data, dict) else (p_data if isinstance(p_data, list) else [])
+                    page_request_succeeded = True
                     for item in p_list:
                         if isinstance(item, dict) and item.get("id"):
                             lid = int(item["id"])
@@ -133,10 +134,18 @@ async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[
                                 new_found_in_page += 1
                     if new_found_in_page > 0:
                         break
-            except Exception:
-                pass
+                elif p_resp.status_code == 404:
+                    # 首屏已证明该接口可用；部分服务会用 404 表示游标之前没有结果。
+                    page_request_succeeded = True
+                else:
+                    page_errors.append(f"HTTP {p_resp.status_code}")
+            except Exception as ex:
+                page_errors.append(str(ex))
 
         if new_found_in_page == 0:
+            if len(all_letters_map) >= PAGE_SIZE and not page_request_succeeded:
+                details = "; ".join(page_errors[:3]) or "没有有效分页响应"
+                raise RuntimeError(f"信件分页请求失败（已获取 {len(all_letters_map)} 封）: {details}")
             break
 
         await asyncio.sleep(0.3)
@@ -175,8 +184,8 @@ async def fetch_member_letters(member: dict, client: httpx.AsyncClient) -> list[
     )
 
 
-async def sync_letters_for_member(member: dict, client: httpx.AsyncClient) -> tuple[int, int]:
-    """同步成员信件：返回 (total_count, new_count)。"""
+async def sync_letters_for_member(member: dict, client: httpx.AsyncClient) -> tuple[int, int, int]:
+    """同步成员信件：返回 (total_count, new_count, media_failure_count)。"""
     m_name = member.get("m_name") or member.get("name", "")
     account_id = member.get("account_id") or member.get("account", "")
     acc_cfg = cfg.ACCOUNTS.get(account_id, {})
@@ -186,7 +195,7 @@ async def sync_letters_for_member(member: dict, client: httpx.AsyncClient) -> tu
     letters = await fetch_member_letters(member, client)
     if not letters:
         log_all(f"✉️ [信件同步] {m_name}: 未获取到信件或当前无信件", is_debug=True)
-        return (0, 0)
+        return (0, 0, 0)
 
     m_dir = archive.member_dir_name(m_name)
     existing_ids = archive.get_existing_letter_ids(m_dir)
@@ -194,13 +203,13 @@ async def sync_letters_for_member(member: dict, client: httpx.AsyncClient) -> tu
 
     if not new_letters:
         log_all(f"✉️ [信件同步] {m_name}: 信件已是最新（共 {len(letters)} 封，无新增）", is_debug=True)
-        archived = await archive.archive_letters_batch(m_name, letters, headers=headers)
-        return (len(archived), 0)
-
-    log_all(f"✉️ [信件同步] {m_name}: 发现 {len(new_letters)} 封新信件（总计 {len(letters)} 封），正在下载信纸原图并入库归档...")
-    archived = await archive.archive_letters_batch(m_name, letters, headers=headers)
-    log_all(f"✅ [信件同步] {m_name}: 成功同步 {len(new_letters)} 封新信件（总计 {len(archived)} 封）！")
-    return (len(archived), len(new_letters))
+    else:
+        log_all(f"✉️ [信件同步] {m_name}: 发现 {len(new_letters)} 封新信件（总计 {len(letters)} 封），正在下载信纸原图并入库归档...")
+    archived = await archive.archive_letters_batch(m_name, letters, headers=headers, client=client)
+    media_failed = sum(bool(item.get("_media_download_failed")) for item in archived)
+    if new_letters:
+        log_all(f"✅ [信件同步] {m_name}: 成功同步 {len(new_letters)} 封新信件（总计 {len(archived)} 封，图片下载失败 {media_failed} 封）！")
+    return (len(archived), len(new_letters), media_failed)
 
 
 async def main():
@@ -233,15 +242,18 @@ async def main():
 
     total_synced = 0
     total_new = 0
+    total_media_failed = 0
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        archive.initialize(client)
         for member in members_to_sync:
-            tot, nw = await sync_letters_for_member(member, client)
+            tot, nw, media_failed = await sync_letters_for_member(member, client)
+            total_media_failed += media_failed
             total_synced += tot
             total_new += nw
 
     print("=" * 60)
     print(f"🎉 归档任务完成！共处理 {total_synced} 封信件（新增 {total_new} 封）。")
+    if total_media_failed:
+        print(f"⚠️ {total_media_failed} 封信件图片下载失败，可再次运行同步重试。")
     print("=" * 60)
 
 
