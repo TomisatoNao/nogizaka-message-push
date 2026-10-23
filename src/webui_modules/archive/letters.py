@@ -11,7 +11,18 @@ from urllib.parse import parse_qs
 import src.config.config as cfg
 import httpx
 from src import archive as _archive
+from src import auth as _auth
 from src.webui_modules.archive.common import _send_json_resp
+from src.webui_modules.auth_handlers import current_user
+
+
+def _letter_actor(handler) -> str:
+    user = current_user(handler)
+    if user and user.get("username"):
+        return str(user["username"])
+    if not getattr(cfg, "AUTH_ENABLED", False):
+        return "local"
+    return ""
 
 
 def handle_letters(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
@@ -31,6 +42,8 @@ def handle_letters(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             _send_json_resp(handler, {"ok": False, "errors": ["缺少成员参数 member"]}, 400)
             return True
         letters = _archive.get_archive_letters(member)
+        username = _letter_actor(handler)
+        favorite_ids = _auth.get_user_favorite_letter_ids(username, member) if username else set()
         grp = _archive.infer_member_group(member)
         slim = []
         for item in letters:
@@ -52,7 +65,7 @@ def handle_letters(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 "file_url": item.get("file_url"),
                 "media_url": media_url,
                 "thumbnail_url": item.get("thumbnail_url"),
-                "is_favorite": bool(item.get("is_favorite")),
+                "is_favorite": str(item.get("id")) in favorite_ids,
             })
         _send_json_resp(handler, {"ok": True, "member": member, "group": grp, "total": len(slim), "letters": slim})
         return True
@@ -95,10 +108,10 @@ def handle_letters(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
             if _loop and _loop.is_running():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                    tot, nw = _pool.submit(asyncio.run, _do_sync()).result(timeout=60)
+                    tot, nw, media_failed = _pool.submit(asyncio.run, _do_sync()).result(timeout=60)
             else:
-                tot, nw = asyncio.run(_do_sync())
-            _send_json_resp(handler, {"ok": True, "member": member, "total": tot, "new": nw, "count": tot})
+                tot, nw, media_failed = asyncio.run(_do_sync())
+            _send_json_resp(handler, {"ok": True, "member": member, "total": tot, "new": nw, "count": tot, "media_failed": media_failed})
         except Exception as e:
             _send_json_resp(handler, {"ok": False, "errors": [f"同步信件异常: {e}"]}, 500)
         return True
@@ -108,13 +121,52 @@ def handle_letters(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         if not guard_fn(need_admin=True):
             return True
         body = read_body_json_fn() or {}
-        letter_id = body.get("id")
-        is_fav = bool(body.get("is_favorite", False))
-        if not letter_id:
+        if not isinstance(body, dict):
+            _send_json_resp(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+            return True
+        raw_id = body.get("id")
+        if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)):
+            raw_id = None
+        try:
+            letter_id = int(str(raw_id).strip()) if raw_id is not None else 0
+        except (TypeError, ValueError):
+            letter_id = 0
+        if letter_id <= 0:
             _send_json_resp(handler, {"ok": False, "errors": ["缺少 letter id"]}, 400)
             return True
-        _archive.set_letter_favorite(int(letter_id), is_fav)
-        _send_json_resp(handler, {"ok": True, "id": int(letter_id), "is_favorite": is_fav})
+        is_fav = body.get("is_favorite")
+        if not isinstance(is_fav, bool):
+            _send_json_resp(handler, {"ok": False, "errors": ["is_favorite 必须是布尔值"]}, 400)
+            return True
+
+        raw_member = body.get("member")
+        if raw_member is None or raw_member == "":
+            raw_member = qp("member")
+        if raw_member is not None and not isinstance(raw_member, str):
+            _send_json_resp(handler, {"ok": False, "errors": ["member 必须是字符串"]}, 400)
+            return True
+        raw_member = raw_member.strip() if isinstance(raw_member, str) else ""
+        member = _archive.member_dir_name(raw_member) if raw_member else _archive.get_archive_letter_member_dir(letter_id)
+        if not member:
+            _send_json_resp(handler, {"ok": False, "errors": ["未找到信件"]}, 404)
+            return True
+        exists = any(
+            str(item.get("id")) == str(letter_id)
+            for item in _archive.get_archive_letters(member)
+        )
+        if not exists:
+            _send_json_resp(handler, {"ok": False, "errors": ["未找到信件"]}, 404)
+            return True
+
+        username = _letter_actor(handler)
+        if not username:
+            _send_json_resp(handler, {"ok": False, "errors": ["请先登录账号后再收藏信件"]}, 401)
+            return True
+        result = _auth.set_user_letter_favorite(username, member, letter_id, is_fav)
+        if not result.get("ok"):
+            _send_json_resp(handler, {"ok": False, "errors": [result.get("error", "操作失败")]}, 500)
+            return True
+        _send_json_resp(handler, {"ok": True, "id": letter_id, "is_favorite": is_fav})
         return True
 
     return False

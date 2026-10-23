@@ -44,7 +44,7 @@ async def test_batch_uses_owned_client_and_local_concurrency(isolated_archive):
         seen.append(request.headers["Authorization"])
         await asyncio.sleep(0)
         active -= 1
-        return httpx.Response(200, content=b"fixture-image")
+        return httpx.Response(200, content=b"\xff\xd8fixture-image\xff\xd9")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         result = await archive.archive_letters_batch(
@@ -83,6 +83,7 @@ async def test_closed_explicit_client_does_not_create_fallback(isolated_archive,
     result = await archive.archive_single_letter("fixture", letter(1), client=closed_client)
 
     assert "local_file" not in result
+    assert result["_media_download_failed"] is True
     closed_client.get.assert_not_called()
 
 
@@ -93,7 +94,7 @@ def test_web_sync_closes_own_client_without_reinitializing(monkeypatch, isolated
     clients = []
 
     def make_client(**kwargs):
-        client = real_client(transport=httpx.MockTransport(lambda _: httpx.Response(200, content=b"image")), **kwargs)
+        client = real_client(transport=httpx.MockTransport(lambda _: httpx.Response(200, content=b"\xff\xd8image\xff\xd9")), **kwargs)
         clients.append(client)
         return client
 
@@ -113,3 +114,22 @@ def test_web_sync_closes_own_client_without_reinitializing(monkeypatch, isolated
     assert archive._media_client is background
     assert archive._media_sem is background_sem
     archive.sync_all_to_sqlite.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_nonempty_truncated_letter_image_is_downloaded_again(isolated_archive):
+    member_dir = archive.member_dir_name("fixture")
+    image_dir = archive.archive_root() / member_dir / "letters"
+    image_dir.mkdir(parents=True)
+    target = image_dir / f"{archive.parse_jst_datetime(letter(9)['created_at']).strftime('%Y%m%d_%H%M%S')}_9.jpg"
+    target.write_bytes(b"\xff\xd8truncated")
+    replacement = b"\xff\xd8complete-image\xff\xd9"
+
+    async def respond(_request):
+        return httpx.Response(200, content=replacement)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        archived = await archive.archive_single_letter("fixture", letter(9), client=client)
+
+    assert target.read_bytes() == replacement
+    assert archived["local_file"].endswith("_9.jpg")

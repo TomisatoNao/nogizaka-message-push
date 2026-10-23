@@ -40,6 +40,7 @@ from src.archive_query import (
     _day_cache,
     _jst_date,
     _month_count,
+    get_archive_letter_member_dir,
     day_counts,
     get_archive_letters,
     get_existing_letter_ids,
@@ -68,6 +69,7 @@ __all__ = [
     "day_counts",
     "extract_upload_time",
     "find_media_bytes_by_url",
+    "get_archive_letter_member_dir",
     "get_archive_letters",
     "get_db_path",
     "get_existing_letter_ids",
@@ -933,6 +935,59 @@ def _atomic_write_json(json_path: Path, data: list[dict]) -> None:
         raise
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write media through a same-directory temporary file and atomic replace."""
+    _mkdir_durable(path.parent)
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _is_complete_letter_jpeg(path: Path) -> bool:
+    """Reject the truncated JPEGs left by pre-atomic letter downloads."""
+    try:
+        if path.stat().st_size < 4:
+            return False
+        with path.open("rb") as f:
+            if f.read(2) != b"\xff\xd8":
+                return False
+            f.seek(-2, os.SEEK_END)
+            return f.read(2) == b"\xff\xd9"
+    except OSError:
+        return False
+
+
+def _is_complete_letter_jpeg_bytes(data: bytes) -> bool:
+    """Check JPEG start/end markers before accepting an official letter card."""
+    return len(data) >= 4 and data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
+
+
+def _archive_letters_by_id(letters: list[dict]) -> dict[str, dict]:
+    """Index letter records by ID while keeping JSON-only legacy metadata."""
+    result: dict[str, dict] = {}
+    for item in letters:
+        if isinstance(item, dict) and item.get("id") is not None:
+            result[str(item["id"])] = dict(item)
+    return result
+
+
 def _merge_month_records(
     m_name: str,
     year: int,
@@ -1402,7 +1457,7 @@ async def wait_pending(timeout: float = 60) -> None:
 # ──────────────────────────────────────────────
 def _member_letters_dir(m_name: str) -> Path:
     d = _member_root(m_name) / "letters"
-    d.mkdir(parents=True, exist_ok=True)
+    _mkdir_durable(d)
     return d
 
 
@@ -1427,16 +1482,16 @@ async def archive_single_letter(
 
     # 尝试解析时间并下载信纸原图卡片
     local_file = ""
-    if file_url:
+    if file_url or created_at:
         try:
             dt = parse_jst_datetime(created_at) if created_at else datetime.now(JST_TZ)
             time_prefix = dt.strftime("%Y%m%d_%H%M%S")
             letters_dir = _member_letters_dir(member_name)
             target_path = letters_dir / f"{time_prefix}_{letter_id}.jpg"
-            
-            if target_path.exists() and target_path.stat().st_size > 0:
+
+            if _is_complete_letter_jpeg(target_path):
                 local_file = f"{m_dir}/letters/{target_path.name}"
-            else:
+            elif file_url:
                 # An explicitly supplied client belongs to the caller's loop;
                 # never pair it with the monitor's cross-loop semaphore.
                 download_client = client if client is not None else _media_client
@@ -1452,10 +1507,12 @@ async def archive_single_letter(
                         else:
                             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as temp_c:
                                 resp = await temp_c.get(file_url, headers=headers)
-                        if resp.status_code == 200 and len(resp.content) > 0:
-                            target_path.write_bytes(resp.content)
+                        if resp.status_code == 200 and _is_complete_letter_jpeg_bytes(resp.content):
+                            _atomic_write_bytes(target_path, resp.content)
                             local_file = f"{m_dir}/letters/{target_path.name}"
                             log_all(f"✉️ [信件归档] 成功保存信件卡片: {m_dir}/letters/{target_path.name} ({len(resp.content)/1024:.1f} KB)", is_debug=True)
+                        elif resp.status_code == 200:
+                            raise ValueError("下载内容不是完整的 JPEG 图片")
                     except Exception as ex:
                         log_all(f"⚠️ [信件归档] 下载信件卡片失败 (ID: {letter_id}): {ex}", is_debug=True)
         except Exception as ex:
@@ -1463,28 +1520,38 @@ async def archive_single_letter(
 
     # 写入/更新 SQLite
     conn = init_db()
-    if conn:
-        try:
-            with conn:
-                conn.execute("""
-                    INSERT INTO letters (id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        group_id=excluded.group_id,
-                        updated_at=excluded.updated_at,
-                        text=excluded.text,
-                        file_url=excluded.file_url,
-                        local_file=COALESCE(NULLIF(excluded.local_file, ''), letters.local_file),
-                        thumbnail_url=excluded.thumbnail_url,
-                        is_favorite=excluded.is_favorite,
-                        raw_json=excluded.raw_json;
-                """, (letter_id, group_id, member_name, m_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json))
-        except Exception as ex:
-            log_all(f"⚠️ 保存信件到 SQLite 失败 (ID: {letter_id}): {ex}", is_debug=True)
+    if not conn:
+        raise RuntimeError(f"无法初始化信件归档数据库 (ID: {letter_id})")
+    try:
+        with conn:
+            conn.execute("""
+                INSERT INTO letters (id, group_id, member_name, member_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    group_id=excluded.group_id,
+                    member_name=excluded.member_name,
+                    member_dir=excluded.member_dir,
+                    created_at=excluded.created_at,
+                    updated_at=excluded.updated_at,
+                    text=excluded.text,
+                    file_url=excluded.file_url,
+                    local_file=CASE
+                        WHEN excluded.local_file != '' THEN excluded.local_file
+                        WHEN excluded.file_url != '' THEN ''
+                        ELSE letters.local_file
+                    END,
+                    thumbnail_url=excluded.thumbnail_url,
+                    is_favorite=excluded.is_favorite,
+                    raw_json=excluded.raw_json;
+            """, (letter_id, group_id, member_name, m_dir, created_at, updated_at, text, file_url, local_file, thumbnail_url, is_favorite, raw_json))
+    except Exception as ex:
+        log_all(f"⚠️ 保存信件到 SQLite 失败 (ID: {letter_id}): {ex}", is_error=True)
+        raise
 
     res = dict(letter)
     if local_file:
         res["local_file"] = local_file
+    res["_media_download_failed"] = bool(file_url and not local_file)
     return res
 
 
@@ -1508,14 +1575,25 @@ async def archive_letters_batch(
         reverse=True
     )
 
-    # 同步写入/更新本地 letters/letters.json
-    try:
-        letters_dir = _member_letters_dir(member_name)
-        json_path = letters_dir / "letters.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(sorted_results, f, ensure_ascii=False, indent=2)
-    except Exception as ex:
-        log_all(f"⚠️ 保存 letters.json 失败 ({member_name}): {ex}", is_debug=True)
+    # 锁内重新读取并合并数据库与旧 JSON，避免并发同步用较旧批次覆盖新信件。
+    m_dir = member_dir_name(member_name)
+    letters_dir = _member_letters_dir(member_name)
+    json_path = letters_dir / "letters.json"
+    member_lock = archive_root() / ".locks" / f"letters-{m_dir}.lock"
+    with _locked_file(member_lock, timeout=120):
+        stored = _archive_letters_by_id(get_archive_letters(m_dir))
+        for item in sorted_results:
+            if item.get("id") is None:
+                continue
+            key = str(item["id"])
+            current = stored.setdefault(key, {})
+            current.update({key: value for key, value in item.items() if key != "_media_download_failed"})
+        merged = sorted(
+            stored.values(),
+            key=lambda item: item.get("created_at") or item.get("updated_at") or "",
+            reverse=True,
+        )
+        _atomic_write_json(json_path, merged)
 
     return sorted_results
 
