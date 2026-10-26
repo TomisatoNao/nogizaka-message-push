@@ -135,7 +135,7 @@ async function scenario(year, stale = false) {
  const elem = () => ({style:{},classList:{remove(){}},closest(){return null}});
  const context = {
   gallerySelectionVersion:0,curMode:'',curGalleryMember:'',curGalleryYear:year,
-  galleryMembers:[{}],localStorage:{setItem(){}},$:elem,
+  galleryMembers:[{}],localStorage:{setItem(){}},archiveStorageSet(){},$:elem,
   document:{querySelector:elem},hideMessageMonthFooter(){},setHtmlViewClass(){},
   updateGalleryMemberButtonDisplay(){},syncGallerySourceChips(){},syncGallerySortButton(){},
   syncGalleryLayoutToggle(){},syncNavTabs(){},renderGalleryMemberPopover(){},

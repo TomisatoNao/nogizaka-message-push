@@ -71,11 +71,14 @@ def test_on_config_reload_reloads_components_and_schedules_listener_sync(monkeyp
     monkeypatch.setattr("src.platforms.tgbot.initialize", lambda: reloaded.append("tgbot"))
     monkeypatch.setattr("src.platforms.qq_official.reload", lambda: reloaded.append("qq_official"))
     monkeypatch.setattr("src.social.manager.reload_social_service", lambda: reloaded.append("social"))
+    monkeypatch.setattr(app.cfg, "ENABLE_TG_BOT", True)
+    monkeypatch.setattr(app.cfg, "QQ_OFFICIAL_BOTS", [{"app_id": "test"}])
+    monkeypatch.setattr(app, "get_social_service", lambda: object())
 
     mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
     mock_loop.is_closed.return_value = False
     scheduled_callbacks: list = []
-    mock_loop.call_soon_threadsafe.side_effect = lambda fn: scheduled_callbacks.append(fn)
+    mock_loop.call_soon_threadsafe.side_effect = lambda fn, *_args: scheduled_callbacks.append(fn)
 
     app.set_main_loop(mock_loop)
     try:
@@ -105,6 +108,9 @@ def test_on_config_reload_isolates_subsystem_errors(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("src.platforms.tgbot.initialize", failing_tgbot)
     monkeypatch.setattr("src.platforms.qq_official.reload", lambda: reloaded.append("qq_official"))
     monkeypatch.setattr("src.social.manager.reload_social_service", lambda: reloaded.append("social"))
+    monkeypatch.setattr(app.cfg, "ENABLE_TG_BOT", True)
+    monkeypatch.setattr(app.cfg, "QQ_OFFICIAL_BOTS", [{"app_id": "test"}])
+    monkeypatch.setattr(app, "get_social_service", lambda: object())
 
     # 不会抛出异常中断
     app._on_config_reload(success=True)

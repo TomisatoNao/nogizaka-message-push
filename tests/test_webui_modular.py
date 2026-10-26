@@ -174,7 +174,7 @@ def test_test_push_normalizes_legacy_official_channel():
 def test_admin_frontend_config_and_dark_select_contracts():
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
     assert "const configLabel =" in html
-    assert 'msg("已载入 " + configLabel, "ok")' in html
+    assert '"已载入 " + configLabel' in html
     assert 'opt.style.color = "#000"' not in html
     assert 'channel === "qq_official" || channel === "official"' in html
     assert 'enabled.push(["qq_official", "QQ 官方 Bot"])' in html
@@ -1440,8 +1440,8 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260921_2" in archive
-    assert "/static/theme.css?v=20260921_2" in admin
+    assert "/static/theme.css?v=20261026_1" in archive
+    assert "/static/theme.css?v=20261026_1" in admin
 
 def test_mobile_header_2row_layout_and_actions_guard():
     theme = (_ROOT / "src" / "webui_static" / "theme.css").read_text(encoding="utf-8")
