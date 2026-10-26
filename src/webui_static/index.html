@@ -579,24 +579,202 @@
     font-size: 13px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
   footer.savebar .msg.ok { color: var(--ok); }
   footer.savebar .msg.err { color: var(--err); }
-  .config-save-outcome { width: min(1600px, calc(100% - 32px)); margin: 16px auto 0; padding: 14px 16px;
-    display: grid; gap: 10px; min-width: 0; border: 1px solid var(--border-soft); border-radius: var(--radius);
-    background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); scroll-margin-top: 76px; }
+  /* 保存与生效结果浮动提示卡 */
+  .config-save-outcome {
+    position: fixed;
+    top: 72px;
+    right: 24px;
+    left: auto;
+    width: min(440px, calc(100vw - 32px));
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    z-index: 950;
+    margin: 0;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card-solid);
+    color: var(--text);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    animation: saveOutcomeFlyIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
   .config-save-outcome[hidden] { display: none; }
-  .config-save-outcome-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; min-width: 0; }
-  .config-save-states { display: flex; flex: 1 1 400px; flex-wrap: wrap; gap: 6px 12px; min-width: 0; font-size: 12.5px; font-weight: 600; }
-  .config-save-state.ok, .config-save-component-status.ok { color: var(--ok); }
-  .config-save-state.warn, .config-save-component-status.warn { color: var(--warn); }
-  .config-save-state.err, .config-save-component-status.err { color: var(--err); }
-  .config-save-next, .config-save-application { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-  .config-save-next { max-width: 100ch; }
-  .config-save-detail { min-width: 0; border-top: 1px solid var(--border-soft); }
+  @keyframes saveOutcomeFlyIn {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes saveOutcomePulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); }
+  }
+  .config-save-outcome.pulse {
+    animation: saveOutcomePulse 0.3s ease-in-out;
+  }
+  .config-save-outcome-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 2px;
+    flex: 0 0 auto;
+  }
+  .config-save-outcome-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .config-save-outcome-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .config-save-outcome-actions .btn {
+    padding: 3px 8px;
+    font-size: 11.5px;
+    min-height: 28px;
+    height: 28px;
+  }
+  .config-save-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all var(--tr);
+  }
+  .config-save-close:hover {
+    background: var(--card-soft);
+    color: var(--text);
+    border-color: var(--border-soft);
+  }
+  .config-save-states {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    min-width: 0;
+    width: 100%;
+  }
+  .config-save-state {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill, 999px);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    height: auto;
+    border: 1px solid transparent;
+  }
+  .config-save-state.ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+  }
+  .config-save-state.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  }
+  .config-save-state.err {
+    background: var(--err-soft);
+    color: var(--err);
+    border-color: color-mix(in srgb, var(--err) 30%, transparent);
+  }
+  .config-save-detail {
+    display: block;
+    flex: 0 0 auto;
+    min-width: 0;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 2px;
+  }
   .config-save-detail[hidden] { display: none; }
-  .config-save-detail > summary { display: flex; align-items: center; min-height: 44px; color: var(--accent);
-    cursor: pointer; font-size: 13px; font-weight: 600; }
-  .config-save-application { display: grid; gap: 4px; min-width: 0; padding: 0 0 8px 18px; }
-  .config-save-application-title { color: var(--text); font-weight: 650; }
-  .config-save-component { display: flex; flex-wrap: wrap; gap: 4px 8px; min-width: 0; overflow-wrap: anywhere; }
+  .config-save-detail > summary {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    user-select: none;
+  }
+  .config-save-application {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    padding: 8px 12px 10px;
+    background: var(--card-soft);
+    border-radius: var(--radius-sm);
+    margin-top: 4px;
+  }
+  .config-save-application-title {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 650;
+    margin-bottom: 2px;
+  }
+  .config-save-component {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .config-save-component-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .config-save-component-status.ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 25%, transparent);
+  }
+  .config-save-component-status.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 25%, transparent);
+  }
+  .config-save-component-status.err {
+    background: var(--err-soft);
+    color: var(--err);
+    border-color: color-mix(in srgb, var(--err) 25%, transparent);
+  }
+  .config-save-next {
+    margin: 0;
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.45;
+    flex: 0 0 auto;
+  }
   textarea#rawJson { min-height: 420px; font-family: Consolas, Menlo, monospace; font-size: 13px;
                      white-space: pre; }
   dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card);
@@ -969,10 +1147,17 @@
     #btnViewSaveOutcome { grid-column: 1 / -1; }
     footer.savebar .btn { min-height: 44px; padding: 6px 8px; font-size: 12px; }
     footer.savebar .msg { max-width: 100%; width: 100%; text-align: center; font-size: 11.5px; }
-    .config-save-outcome { width: calc(100% - 24px); padding: 12px; gap: 8px; }
-    .config-save-outcome-heading { align-items: flex-start; }
-    .config-save-states { flex-basis: 100%; gap: 5px 9px; }
-    .config-save-component { gap: 3px 6px; }
+    .config-save-outcome {
+      top: 96px;
+      left: 12px;
+      right: 12px;
+      width: auto;
+      max-height: calc(100vh - 180px);
+      padding: 14px 14px;
+      gap: 9px;
+      border-radius: var(--radius-md, 12px);
+    }
+    .config-save-states { gap: 5px 6px; }
 
     textarea#rawJson { min-height: 46vh; }
     #logView { height: 58vh; font-size: 12px; }
@@ -1031,9 +1216,16 @@
 </header>
 <section class="config-save-outcome" id="saveOutcome" aria-live="polite" tabindex="-1" hidden>
   <div class="config-save-outcome-heading">
-    <div class="config-save-states" id="saveOutcomeStates"></div>
-    <button class="btn" id="btnRetryReload" type="button" hidden>↻ 刷新组件状态</button>
+    <div class="config-save-outcome-title">
+      <span class="icon">💾</span>
+      <span>保存与生效结果</span>
+    </div>
+    <div class="config-save-outcome-actions">
+      <button class="btn small" id="btnRetryReload" type="button" hidden>↻ 刷新组件状态</button>
+      <button class="config-save-close" id="btnCloseSaveOutcome" type="button" aria-label="关闭结果提示" title="关闭通知">✕</button>
+    </div>
   </div>
+  <div class="config-save-states" id="saveOutcomeStates"></div>
   <details class="config-save-detail" id="configSaveDisclosure" hidden>
     <summary>查看组件重配详情</summary>
     <div class="config-save-application" id="configApplicationDetail" hidden></div>
@@ -9275,13 +9467,17 @@ $("btnRetryReload")?.addEventListener("click", () => {
   if ($("btnRetryReload").dataset.action === "reload") retrySavedConfigReload();
   else refreshConfigApplicationStatus();
 });
+$("btnCloseSaveOutcome")?.addEventListener("click", () => {
+  const outcome = $("saveOutcome");
+  if (outcome) outcome.hidden = true;
+});
 $("btnViewSaveOutcome")?.addEventListener("click", () => {
   const outcome = $("saveOutcome");
-  if (!outcome || outcome.hidden) return;
-  outcome.scrollIntoView({
-    behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-    block: "start",
-  });
+  if (!outcome) return;
+  outcome.hidden = false;
+  outcome.classList.remove("pulse");
+  void outcome.offsetWidth;
+  outcome.classList.add("pulse");
   outcome.focus({ preventScroll: true });
 });
 $("btnRestart").addEventListener("click", async () => {
