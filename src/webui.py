@@ -1073,7 +1073,7 @@ class _Handler(BaseHTTPRequestHandler):
                         env_path=ENV_PATH,
                     )
                 except ValueError as e:
-                    self._send_json({"ok": False, "errors": [f"组合提交失败: {type(e).__name__}"]}, 400)
+                    self._send_json({"ok": False, "errors": [f"组合提交失败: {e}"]}, 400)
                     return
                 except Exception as e:
                     self._send_json({"ok": False, "errors": [f"组合提交失败: {type(e).__name__}"]}, 500)
