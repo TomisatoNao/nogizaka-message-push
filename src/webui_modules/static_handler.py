@@ -29,6 +29,9 @@ _STATIC_MIME = {
     "theme.js": "application/javascript",
     "archive.css": "text/css",
     "archive.js": "application/javascript",
+    "admin_tasks.js": "application/javascript",
+    "admin_route_diagnostics.js": "application/javascript",
+    "admin_route_diagnostics.css": "text/css",
     "admin_icon.svg": "image/svg+xml",
     "archive_icon.svg": "image/svg+xml",
 }

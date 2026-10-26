@@ -23,6 +23,24 @@ from src.webui_modules import (  # noqa: E402
 def test_static_handler_mime():
     assert "theme.css" in static_handler._STATIC_MIME
     assert static_handler._STATIC_MIME["theme.css"] == "text/css"
+    # B5/B6 任务中心与路由诊断前端资源必须能被静态服务提供。
+    for name, ctype in (
+        ("admin_tasks.js", "application/javascript"),
+        ("admin_route_diagnostics.js", "application/javascript"),
+        ("admin_route_diagnostics.css", "text/css"),
+    ):
+        assert static_handler._STATIC_MIME.get(name) == ctype, f"{name} 未登记到 _STATIC_MIME"
+
+def test_static_handler_serves_all_referenced_assets():
+    """页面引用的每个 .js/.css 静态资源都必须登记在 MIME 白名单里，否则会 404。"""
+    import re
+    static_root = _ROOT / "src" / "webui_static"
+    referenced: set[str] = set()
+    for page in ("index.html", "archive.html"):
+        text = (static_root / page).read_text(encoding="utf-8")
+        referenced.update(re.findall(r"/static/([\w.\-]+\.(?:js|css))\?v=", text))
+    missing = sorted(name for name in referenced if name not in static_handler._STATIC_MIME)
+    assert not missing, f"页面引用了未登记到 _STATIC_MIME 的静态资源：{missing}"
 
 
 class _ResponseHandler:
