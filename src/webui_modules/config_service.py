@@ -6,13 +6,16 @@ src/webui_modules/config_service.py — Web 管理端配置校验、序列化、
 """
 
 from datetime import datetime
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import sqlite3
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SCHEMA_PATH = _BASE_DIR / "config" / "config.schema.json"
@@ -22,6 +25,16 @@ DEFAULT_ENV_PATH = _BASE_DIR / ".env"
 CONFIG_PATH = DEFAULT_CONFIG_PATH
 SCHEMA_PATH = DEFAULT_SCHEMA_PATH
 ENV_PATH = DEFAULT_ENV_PATH
+
+# Revision values are process-scoped opaque tokens. HMAC keeps configuration and
+# credential bytes out of responses and prevents the token becoming an offline
+# guessing oracle for low-entropy secret values.
+_REVISION_KEY = secrets.token_bytes(32)
+_PREVIEW_SECRET_KEY_RE = re.compile(
+    r"(?:^|[_-])(?:token|secret|cookie|password|passwd|passphrase|api[_-]?key|"
+    r"authorization|credential|session(?:id|[_-]?id)?)(?:$|[_-])",
+    re.IGNORECASE,
+)
 
 
 def _get_config_path(custom: Path | None = None) -> Path:
@@ -40,6 +53,203 @@ def _get_env_path(custom: Path | None = None) -> Path:
     if custom is not None:
         return custom
     return ENV_PATH
+
+
+def config_state_revision(
+    config_path: Path | None = None,
+    env_path: Path | None = None,
+) -> str:
+    """Return an opaque revision covering config, managed secrets, and IG cookies.
+
+    Including .env makes a staged config/secret commit stale when another
+    management request changes credentials after the browser loaded the form.
+    The Instagram cookie store contributes only its non-sensitive version marker,
+    never cookie values. Missing files have distinct markers from empty files.
+    """
+    parts = bytearray(b"webui-config-state-v1\0")
+    for label, path in ((b"config\0", _get_config_path(config_path)),
+                         (b"env\0", _get_env_path(env_path))):
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError:
+            content = None
+        parts.extend(label)
+        if content is None:
+            parts.extend(b"missing\0")
+        else:
+            parts.extend(b"present\0")
+            parts.extend(len(content).to_bytes(8, "big"))
+            parts.extend(content)
+    from src.social import ig_session
+
+    cookie_db = Path(ig_session.DB_PATH)
+    cookie_marker = (
+        ("present", str(cookie_db.resolve()), ig_session.cookie_store_version())
+        if cookie_db.exists()
+        else ("missing", str(cookie_db.resolve()))
+    )
+    parts.extend(b"instagram-cookie-store\0")
+    parts.extend(json.dumps(cookie_marker, separators=(",", ":"), ensure_ascii=True).encode("ascii"))
+    parts.extend(b"\0")
+    return hmac.new(_REVISION_KEY, bytes(parts), hashlib.sha256).hexdigest()
+
+
+def _is_secret_preview_value(key: str, value) -> bool:
+    if _PREVIEW_SECRET_KEY_RE.search(key) or key.casefold() in {"napcat_api", "proxy", "http_proxy", "https_proxy"}:
+        return True
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.username or parsed.password:
+            return True
+        return any(_PREVIEW_SECRET_KEY_RE.search(name) for name, _ in parse_qsl(parsed.query))
+    except ValueError:
+        return False
+
+
+def redact_config_preview(raw: dict) -> dict:
+    """Copy a config for read-only history preview with secret values removed."""
+
+    def redact(value):
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                key_text = str(key)
+                result[key] = "[redacted]" if _is_secret_preview_value(key_text, item) else redact(item)
+            return result
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        return value
+
+    return redact(raw)
+
+
+def redact_config_error_messages(errors: list[str], *sources: object) -> list[str]:
+    """Remove serialized secret-bearing config values from validation errors."""
+    fragments: set[str] = set()
+
+    def collect(value) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if _is_secret_preview_value(str(key), item):
+                    try:
+                        fragments.add(repr(item))
+                        fragments.add(json.dumps(item, ensure_ascii=False))
+                    except (TypeError, ValueError):
+                        pass
+                else:
+                    collect(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    for source in sources:
+        collect(source)
+
+    replacements = sorted((item for item in fragments if item), key=len, reverse=True)
+    redacted = []
+    for error in errors:
+        message = str(error)
+        for fragment in replacements:
+            message = message.replace(fragment, "[redacted]")
+        redacted.append(message)
+    return redacted
+
+
+def config_preview_diff(current: dict, target: dict) -> dict:
+    """Return nested change paths and kinds without including config values."""
+    changes: dict[str, dict[str, str]] = {}
+
+    def stable_item_key(root: str, item: object) -> tuple[str, ...] | None:
+        if not isinstance(item, dict):
+            return None
+        if root == "monitor" and item.get("account") is not None and item.get("id") is not None:
+            return ("member", str(item["account"]), str(item["id"]))
+        if root in {"qq_official_bots", "tg_bots"} and item.get("name") is not None:
+            return ("name", str(item["name"]))
+        if root == "napcat_routes" and item.get("group_id") is not None:
+            return ("group", str(item["group_id"]))
+        for name in ("id", "name", "group_id"):
+            if item.get(name) is not None:
+                return (name, str(item[name]))
+        return None
+
+    def add(path: tuple[str, ...], kind: str) -> None:
+        if not path:
+            return
+        root = path[0]
+        path_text = ".".join(path)
+        changes.setdefault(root, {})[path_text] = kind
+
+    def walk(before: object, after: object, path: tuple[str, ...], before_exists=True, after_exists=True) -> None:
+        if before_exists == after_exists and (not before_exists or before == after):
+            return
+        if not before_exists:
+            add(path, "added")
+            return
+        if not after_exists:
+            add(path, "removed")
+            return
+
+        if isinstance(before, dict) and isinstance(after, dict):
+            keys = sorted(set(before) | set(after), key=lambda item: str(item))
+            if not keys:
+                add(path, "changed")
+                return
+            for key in keys:
+                key_text = str(key)
+                walk(
+                    before.get(key), after.get(key), path + (key_text,),
+                    key in before, key in after,
+                )
+            return
+
+        if isinstance(before, list) and isinstance(after, list):
+            root = path[0] if path else ""
+            all_items = [*before, *after]
+            keys_before = [stable_item_key(root, item) for item in before]
+            keys_after = [stable_item_key(root, item) for item in after]
+            keyed = (
+                all(not isinstance(item, dict) or key is not None
+                    for item, key in zip(all_items, keys_before + keys_after))
+                and all(key is not None for key in keys_before + keys_after)
+                and len(set(keys_before)) == len(keys_before)
+                and len(set(keys_after)) == len(keys_after)
+            )
+            if not keyed:
+                add(path, "changed")
+                return
+
+            before_map = dict(zip(keys_before, before))
+            after_map = dict(zip(keys_after, after))
+            before_common = [key for key in keys_before if key in after_map]
+            after_common = [key for key in keys_after if key in before_map]
+            if before_common != after_common:
+                add(path + ("[顺序]",), "changed")
+            item_path = path + ("[项目]",)
+            for key in keys_before:
+                if key not in after_map:
+                    add(item_path, "removed")
+                else:
+                    walk(before_map[key], after_map[key], item_path)
+            if any(key not in before_map for key in keys_after):
+                add(item_path, "added")
+            return
+
+        add(path, "changed")
+
+    walk(current, target, (), True, True)
+    groups = []
+    for root in sorted(changes):
+        groups.append({
+            "label": root,
+            "changes": [
+                {"path": path, "kind": kind}
+                for path, kind in sorted(changes[root].items())
+            ],
+        })
+    return {"groups": groups}
 
 
 # ================================================================
@@ -301,19 +511,45 @@ def save_config(raw: dict, path: Path | None = None) -> None:
     from src.logger import log_all
 
     target_path = _get_config_path(path)
+    text = serialize_config(raw)
+    before_config = target_path.read_bytes() if target_path.exists() else None
+    history_dir = _history_dir(target_path)
+    history_dir_existed = history_dir.exists()
+    history_before = {
+        entry: entry.read_bytes()
+        for entry in history_dir.glob("config-*.json")
+    } if history_dir_existed else {}
+
+    def restore_history() -> None:
+        try:
+            if history_dir.exists():
+                for entry in history_dir.glob("config-*.json"):
+                    entry.unlink(missing_ok=True)
+            if history_before:
+                history_dir.mkdir(parents=True, exist_ok=True)
+                for entry, content in history_before.items():
+                    entry.write_bytes(content)
+            elif not history_dir_existed and history_dir.exists():
+                history_dir.rmdir()
+        except OSError as exc:
+            log_all(f"🚨 配置历史回滚失败 ({type(exc).__name__})", is_error=True)
+
     try:
         _snapshot_config(target_path)
     except OSError as e:
-        log_all(f"⚠️ 配置历史快照失败（继续保存）: {e}", is_error=True)
-    text = serialize_config(raw)
+        restore_history()
+        log_all(f"⚠️ 配置历史快照失败（继续保存）: {type(e).__name__}", is_error=True)
+
+    tmp = target_path.with_suffix(".json.tmp")
     try:
-        tmp = target_path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         os.replace(tmp, target_path)
-    except OSError:
-        with open(target_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+    except Exception:
+        _restore_file_bytes(target_path, before_config)
+        restore_history()
+        raise
+    finally:
         try:
             tmp.unlink(missing_ok=True)
         except OSError:
@@ -329,18 +565,92 @@ def set_on_reload_callback(cb) -> None:
 
 
 def _trigger_reload() -> bool:
-    """写回后触发进程内热重载（测试中可 monkeypatch 掉）。"""
-    from src.config.config import reload as _reload
-    from src.logger import log_all
+    """Compatibility wrapper returning only whether the config facade loaded."""
+    return _trigger_reload_report()["reloaded"]
 
-    ok = _reload()
+
+def _trigger_reload_report() -> dict:
+    """Reload the config facade and report callback dispatch separately.
+
+    The callback may schedule asynchronous component work and can swallow its
+    own failures. A normal return therefore means only that dispatch completed;
+    it does not verify that every runtime component applied the new settings.
+    """
+    import inspect
+
+    from src.logger import log_all
+    from src.webui_modules.reload_status import (
+        create_reload_report,
+        get_reload_report,
+        mark_pending_unconfirmed,
+        record_config_load,
+        record_reload_callback,
+    )
+
+    reload_id = create_reload_report()
+
+    try:
+        from src.config.config import reload as _reload
+        loaded = bool(_reload())
+    except Exception as exc:
+        loaded = False
+        log_all(
+            f"🚨 网页管理端配置 facade 重载异常 ({type(exc).__name__})",
+            is_error=True,
+        )
+    record_config_load(reload_id, loaded)
+
     cb = _on_reload_cb
-    if cb is not None:
+    if cb is None:
+        components = "unavailable"
+        callback_status = "unavailable" if loaded else "not_scheduled"
+    else:
         try:
-            cb(ok)
-        except Exception as e:
-            log_all(f"🚨 网页管理端 on_reload 回调异常: {e}", is_error=True)
-    return ok
+            signature = inspect.signature(cb)
+            signature.bind(loaded, reload_id=reload_id)
+            supports_reload_id = True
+        except (TypeError, ValueError):
+            supports_reload_id = False
+        try:
+            if supports_reload_id:
+                cb(loaded, reload_id=reload_id)
+            else:
+                cb(loaded)
+        except Exception as exc:
+            components = "dispatch_failed"
+            callback_status = "dispatch_failed"
+            log_all(
+                f"🚨 网页管理端 on_reload 回调派发异常 ({type(exc).__name__})",
+                is_error=True,
+            )
+        else:
+            components = "pending" if loaded else "not_scheduled"
+            callback_status = "dispatched" if loaded else "not_scheduled"
+    record_reload_callback(
+        reload_id,
+        callback_status,
+        reason_code=(
+            "callback_unavailable" if callback_status == "unavailable"
+            else "callback_dispatch_failed" if callback_status == "dispatch_failed"
+            else None
+        ),
+    )
+    if loaded and cb is not None and callback_status == "dispatched" and not supports_reload_id:
+        # Legacy callbacks remain callable, but provide no way to correlate
+        # component acknowledgements with this reload.
+        mark_pending_unconfirmed(
+            reload_id, reason_code="component_confirmation_unavailable",
+        )
+
+    return {
+        "reloaded": loaded,
+        "reload": {
+            "id": reload_id,
+            "config": "loaded" if loaded else "failed",
+            "components": components,
+            "application": get_reload_report(reload_id),
+        },
+    }
 
 
 # ================================================================
@@ -408,16 +718,16 @@ def update_env_file(values: dict[str, str], path: Path | None = None,
     for key, val in remaining.items():
         lines.append(f"{key}={_quote_env(val)}")
     content = "\n".join(lines) + "\n"
+    tmp = target_path.with_suffix(target_path.suffix + ".tmp")
     try:
-        tmp = target_path.with_suffix(target_path.suffix + ".tmp")
         tmp.write_text(content, encoding="utf-8")
         os.replace(tmp, target_path)
-    except OSError:
-        target_path.write_text(content, encoding="utf-8")
+    except Exception:
         try:
             tmp.unlink(missing_ok=True)
         except OSError:
             pass
+        raise
     try:
         os.chmod(target_path, 0o600)
     except OSError:

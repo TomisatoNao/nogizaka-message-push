@@ -417,7 +417,8 @@ def day_counts(
 
 
 def search(member_dir: str, query: str, type_filter: set[str] | None = None,
-           limit: int = 500, order: str = "desc") -> list[dict]:
+           limit: int = 500, order: str = "desc",
+           id_filter: set[str] | None = None) -> list[dict]:
     """跨月搜索：优先使用 SQLite 原生 SQL 子串匹配，无 DB 或被 mock 时降级为 JSON 遍历。
     原文与译文都参与匹配，空格分词取 AND 语义。
     返回附加 _year/_month 字段的消息列表，最多 limit 条。
@@ -427,6 +428,8 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
     """
     terms = [t.lower() for t in query.split() if t.strip()]
     if not terms:
+        return []
+    if id_filter is not None and not id_filter:
         return []
     if order not in {"asc", "desc"}:
         order = "desc"
@@ -482,23 +485,43 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
 
                     direction = "ASC" if order == "asc" else "DESC"
                     sql = f"""
-                        SELECT raw_json, year, month
+                        SELECT id, raw_json, year, month
                         FROM messages
                         WHERE {' AND '.join(where_clauses)}
                         ORDER BY updated_at {direction}, id {direction}
-                        LIMIT ?
                     """
-                    params.append(limit)
+                    if id_filter is None:
+                        sql += " LIMIT ?"
+                        params.append(limit)
 
                     cursor = conn.cursor()
                     cursor.execute(sql, params)
                     results = []
-                    for raw, yr, mo in cursor.fetchall():
-                        try:
-                            msg = json.loads(raw)
-                            results.append({**msg, "_year": yr, "_month": mo})
-                        except (ValueError, TypeError):
-                            continue
+                    if id_filter is None:
+                        for _msg_id, raw, yr, mo in cursor.fetchall():
+                            try:
+                                msg = json.loads(raw)
+                                results.append({**msg, "_year": yr, "_month": mo})
+                            except (ValueError, TypeError):
+                                continue
+                    else:
+                        # Apply personal favorite filtering before the API's 500-result
+                        # cap. Stream in bounded batches instead of building a potentially
+                        # huge SQL IN clause or materializing every search hit at once.
+                        while True:
+                            batch = cursor.fetchmany(256)
+                            if not batch:
+                                break
+                            for msg_id, raw, yr, mo in batch:
+                                if str(msg_id) not in id_filter:
+                                    continue
+                                try:
+                                    msg = json.loads(raw)
+                                except (ValueError, TypeError):
+                                    continue
+                                results.append({**msg, "_year": yr, "_month": mo})
+                                if len(results) >= limit:
+                                    return results
                     return results
             except Exception as e:
                 log_all(f"⚠️ SQLite 搜索异常，降级回 JSON 文件匹配: {e}", is_debug=True)
@@ -515,6 +538,10 @@ def search(member_dir: str, query: str, type_filter: set[str] | None = None,
         msgs = load_month_fn(member_dir, m["year"], m["month"])
         iterable = msgs if order == "asc" else reversed(msgs)
         for msg in iterable:
+            if id_filter is not None:
+                msg_id = msg.get("id")
+                if msg_id is None or str(msg_id) not in id_filter:
+                    continue
             if type_filter and msg.get("type") not in type_filter:
                 continue
             haystack = "\n".join([

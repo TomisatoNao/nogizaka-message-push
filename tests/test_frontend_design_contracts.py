@@ -74,10 +74,10 @@ def test_archive_cache_versions_are_synchronised():
     perf = (ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
 
     for resource in (
-        "/static/archive.css?v=20261023_1",
-        "/static/archive.js?v=20261023_1",
+        "/static/archive.css?v=20261026_1",
+        "/static/archive.js?v=20261026_2",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261023_1") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261026_2") else 1)
         assert resource in perf
 
 
@@ -124,8 +124,8 @@ def test_member_popovers_support_shared_collapsible_saka_groups():
     styles = (STATIC / "archive.css").read_text(encoding="utf-8")
     assert 'const POPOVER_GROUP_STATE_KEY = "archive_popover_collapsed_groups_v1";' in script
     assert "const collapsedPopoverGroups = loadCollapsedPopoverGroups();" in script
-    assert "sessionStorage.getItem(POPOVER_GROUP_STATE_KEY)" in script
-    assert "sessionStorage.setItem(POPOVER_GROUP_STATE_KEY" in script
+    assert 'archiveStorageGet("sessionStorage", POPOVER_GROUP_STATE_KEY)' in script
+    assert 'archiveStorageSet("sessionStorage", POPOVER_GROUP_STATE_KEY' in script
     assert "function expandPopoverGroups(scope)" in script
     assert "function createPopoverGroupHeader(group, count, onToggle, options = {})" in script
     assert "const searchExpanded = Boolean(options.forceExpanded);" in script

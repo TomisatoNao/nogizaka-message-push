@@ -11,6 +11,7 @@ src/webui_modules/archive_handlers.py — WebUI 归档数据路由与业务处�
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 from src.audit import record_event
@@ -65,9 +66,11 @@ _READ_ROUTES = frozenset({
     "blog_authors", "blogs", "blogs/card_status", "blogs/card_file",
     "gallery", "gallery_members", "gallery_years",
 })
+_ADMIN_GET_ROUTES = frozenset({"integrity"})
 _ADMIN_POST_ROUTES = frozenset({
     "tags", "retry_download", "messages/backfill", "letters_sync", "letters/favorite",
     "blogs/archive_groups", "blogs/archive_member", "blogs/translate", "blogs/delete_translation",
+    "integrity/check",
 })
 _READER_POST_ROUTES = frozenset({
     "message/interaction", "message/star", "blogs/card", "blogs/furigana",
@@ -75,6 +78,12 @@ _READER_POST_ROUTES = frozenset({
 
 
 def _authorize_archive(handler, sub: str, guard_fn) -> bool:
+    if sub == "tasks" or sub.startswith("tasks/"):
+        from src.webui_modules.archive.task_routes import authorize_archive_task_route
+
+        task_authorized = authorize_archive_task_route(handler, sub, guard_fn)
+        if task_authorized is not None:
+            return task_authorized
     if sub == "avatar":
         # Public roster artwork is also used by the login/admin pages.
         method = "GET"
@@ -83,6 +92,8 @@ def _authorize_archive(handler, sub: str, guard_fn) -> bool:
         method, need_admin = "GET", True
     elif sub in _ADMIN_POST_ROUTES:
         method, need_admin = "POST", True
+    elif sub in _ADMIN_GET_ROUTES:
+        method, need_admin = "GET", True
     elif sub in _READER_POST_ROUTES:
         method, need_admin = "POST", False
     elif sub in _READ_ROUTES or sub.startswith(("media/", "blog_media/")):
@@ -141,6 +152,58 @@ def warm_home_cache() -> bool:
 
 def _handle_archive_impl(handler, sub: str, guard_fn, read_body_json_fn) -> None:
     """归档子路由统一派发。"""
+    if sub == "tasks" or sub.startswith("tasks/"):
+        from src.webui_modules.archive.task_routes import handle_archive_tasks
+
+        handle_archive_tasks(handler, sub)
+        return
+
+    if sub == "integrity":
+        from src.webui_modules.archive.integrity import get_integrity_overview
+
+        try:
+            overview = get_integrity_overview()
+        except (OSError, sqlite3.Error) as exc:
+            logging.getLogger(__name__).warning(
+                "archive_integrity_overview_failure exception_type=%s",
+                type(exc).__name__,
+            )
+            _send_json_resp(handler, {
+                "ok": False,
+                "msg": "归档完整性状态暂时不可用，请查看服务端日志",
+            }, 503)
+            return
+        _send_json_resp(handler, overview)
+        return
+
+    if sub == "integrity/check":
+        from src.webui_modules.archive.integrity import start_integrity_check
+
+        try:
+            task, created = start_integrity_check()
+        except (OSError, sqlite3.Error) as exc:
+            logging.getLogger(__name__).warning(
+                "archive_integrity_check_storage_failure exception_type=%s",
+                type(exc).__name__,
+            )
+            _send_json_resp(handler, {
+                "ok": False,
+                "msg": "无法读取或写入归档完整性任务状态，请查看服务端日志",
+            }, 503)
+            return
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "archive_integrity_check_start_failure exception_type=%s",
+                type(exc).__name__,
+            )
+            _send_json_resp(handler, {
+                "ok": False,
+                "msg": "无法启动归档完整性检查，请查看服务端日志",
+            }, 500)
+            return
+        _send_json_resp(handler, {"ok": True, "task": task}, 202 if created else 200)
+        return
+
     # 1. 消息归档与媒体
     if handle_messages(handler, sub, guard_fn, read_body_json_fn):
         return

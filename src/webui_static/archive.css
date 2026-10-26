@@ -607,6 +607,16 @@ html.view-home #messageMonthFooter { display: none !important; }
     flex-direction: column;
     gap: 32px;
   }
+  .portal-cache-notice {
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    background: var(--card-soft);
+    color: var(--muted);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  .portal-cache-notice[hidden] { display: none; }
   /* 1. Portal Hero 顶级数字看板 */
   .portal-hero {
     background: var(--card);

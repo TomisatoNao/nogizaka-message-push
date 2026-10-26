@@ -756,3 +756,336 @@ dialog {
   .card:hover,
   .theme-ready .card:hover { transform: translateY(-1px); }
 }
+
+
+/* ── 管理端归档任务列表（共享主题组件） ─────────────────── */
+.admin-task-list {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.admin-task-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--card-soft) 48%, transparent);
+}
+.admin-task-card[open] {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+}
+.admin-task-summary {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) minmax(100px, 1fr) minmax(140px, 1fr) minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 68px;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  list-style: none;
+}
+.admin-task-card > summary::-webkit-details-marker { display: none; }
+.admin-task-card > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: var(--focus-ring);
+}
+.admin-task-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.admin-task-kind {
+  min-width: 0;
+  color: var(--text-strong);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.admin-task-status-badge.running {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.admin-task-meta {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.admin-task-meta-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.admin-task-meta-value {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.admin-task-chevron {
+  color: var(--muted);
+  font-size: var(--text-lg);
+  transition: transform var(--tr-fast);
+}
+.admin-task-card[open] .admin-task-chevron { transform: rotate(180deg); }
+.admin-task-detail {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.admin-task-detail > p,
+.admin-task-id { margin: 0; }
+.admin-task-top-error {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--err) 24%, var(--border-soft));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--err) 8%, var(--card-soft));
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.admin-task-id code,
+.admin-task-item-key,
+.admin-task-error-code { font-family: var(--mono); overflow-wrap: anywhere; }
+.admin-task-detail-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.admin-task-detail-status.is-error,
+.admin-task-top-error,
+.admin-task-error-message,
+.admin-task-retry-feedback.is-error { color: var(--err); }
+.admin-task-items {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.admin-task-item {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--card-soft);
+}
+.admin-task-item-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.admin-task-item-type {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.admin-task-item-key {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.admin-task-item-meta,
+.admin-task-error-code,
+.admin-task-error-message { margin: var(--space-2) 0 0; }
+.admin-task-error-code {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.admin-task-error-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.admin-task-interrupted-note {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 9%, var(--card-soft));
+  line-height: 1.6;
+}
+.admin-task-actions { justify-content: flex-start; }
+.admin-task-actions .btn { min-height: 40px; }
+.admin-task-actions .admin-task-retry[hidden] { display: none; }
+.admin-task-retry-feedback {
+  margin: 0;
+  color: var(--ok);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .admin-task-summary {
+    grid-template-columns: minmax(130px, 1.1fr) minmax(100px, .9fr) minmax(135px, 1fr) auto;
+  }
+  .admin-task-time { grid-column: 1 / 3; }
+}
+
+@media (max-width: 640px) {
+  .admin-task-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    min-height: 0;
+    padding: var(--space-3);
+  }
+  .admin-task-main,
+  .admin-task-time { grid-column: 1 / -1; }
+  .admin-task-phase,
+  .admin-task-progress { grid-column: 1; }
+  .admin-task-time { padding-top: var(--space-2); border-top: 1px solid var(--border-soft); }
+  .admin-task-chevron { grid-column: 2; grid-row: 1; justify-self: end; }
+  .admin-task-detail { padding: var(--space-3); }
+  .admin-task-actions { align-items: stretch; }
+  .admin-task-actions .btn { min-height: 44px; }
+  .admin-module .admin-actions .admin-task-refresh { min-height: 44px; }
+}
+
+/* ── 管理端归档完整性检查面板 ─────────────────────────── */
+.admin-integrity-panel {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.admin-integrity-actions .btn { min-height: 40px; }
+.admin-integrity-status { margin: 0; }
+.admin-integrity-status.is-error { color: var(--err); }
+.admin-integrity-status.is-warn { color: var(--warn); }
+.admin-integrity-status.is-ok { color: var(--ok); }
+.admin-integrity-status.is-running { color: var(--accent); }
+.admin-integrity-activity {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--card-soft);
+}
+.admin-integrity-activity[hidden] { display: none; }
+.admin-integrity-progress-heading,
+.admin-integrity-result-summary,
+.admin-integrity-check-heading,
+.admin-integrity-issue-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.admin-integrity-progress-heading { justify-content: space-between; }
+.admin-integrity-progress-heading > strong { color: var(--text-strong); }
+.admin-integrity-progress {
+  display: block;
+  width: 100%;
+  height: 12px;
+  accent-color: var(--accent);
+}
+.admin-integrity-task-id,
+.admin-integrity-stale-note { margin: 0; overflow-wrap: anywhere; }
+.admin-integrity-stale-note {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--warn) 34%, var(--border-soft));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 9%, var(--card-soft));
+  color: var(--text);
+  line-height: 1.6;
+}
+.admin-integrity-report {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.admin-integrity-result-summary { gap: var(--space-3); }
+.admin-integrity-timestamps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.admin-integrity-section {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.admin-integrity-section > h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-md);
+}
+.admin-integrity-check-list,
+.admin-integrity-issue-list {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.admin-integrity-check,
+.admin-integrity-issue {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--card-soft);
+}
+.admin-integrity-check-heading > strong,
+.admin-integrity-issue-heading > strong {
+  min-width: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.admin-integrity-check-heading .admin-status-badge { margin-left: auto; }
+.admin-integrity-check-code,
+.admin-integrity-issue-heading code {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.admin-integrity-check-counts,
+.admin-integrity-issue-location,
+.admin-integrity-manual-note,
+.admin-integrity-omitted,
+.admin-integrity-empty,
+.admin-integrity-unavailable {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.admin-integrity-issue-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 40px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.admin-integrity-scope-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--muted);
+  line-height: 1.6;
+}
+.admin-integrity-unavailable { color: var(--err); }
+
+@media (max-width: 640px) {
+  .admin-integrity-actions { width: 100%; align-items: stretch; }
+  .admin-integrity-actions .btn { flex: 1 1 150px; min-height: 44px; }
+  .admin-integrity-activity { padding: var(--space-3); }
+  .admin-integrity-progress-heading { align-items: flex-start; flex-direction: column; }
+  .admin-integrity-issue-link { min-height: 44px; }
+}

@@ -85,10 +85,21 @@ def env_status(raw_config: dict | None = None) -> dict:
     return status
 
 
+def handle_route_diagnostics(handler) -> None:
+    """GET /api/route-diagnostics returns read-only route diagnostics."""
+    from src.route_diagnostics import diagnose_monitored_members
+
+    send_json(handler, {"ok": True, "diagnostics": diagnose_monitored_members()})
+
+
 def handle_status(handler, on_poll_cb=None) -> None:
     """GET /api/status 运行状态快照。"""
     from src.health import get_tracker
+    from src.webui_modules.reload_status import get_reload_report
+
+    reload_ids = parse_qs(handler.path.partition("?")[2]).get("reload_id", [])
     snap = get_tracker().snapshot()
+    snap["config_application"] = get_reload_report(reload_ids[0] if reload_ids else None)
     try:
         from src.social.manager import get_instagram_monitor_status, get_x_monitor_status
         snap["instagram_monitor"] = get_instagram_monitor_status()

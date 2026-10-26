@@ -498,20 +498,30 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 return True
             wanted = {"picture", "image"} if type_filter in ("picture", "image") else {type_filter}
 
-        hits = _archive.search(member, query, type_filter=wanted, order=order)
-
         fav_raw = qp("favorite")
         is_fav = fav_raw.lower() in {"1", "true", "yes"} if fav_raw else False
         req_user = current_user(handler)
         if not req_user and not getattr(cfg, "AUTH_ENABLED", False):
             req_user = {"username": "local", "role": "admin"}
 
+        fav_ids = None
         if is_fav:
             if req_user and req_user.get("username"):
-                fav_ids = _auth.get_user_favorite_message_ids(req_user["username"], member)
-                hits = [m for m in hits if str(m.get("id")) in fav_ids]
+                fav_ids = {
+                    str(message_id)
+                    for message_id in _auth.get_user_favorite_message_ids(req_user["username"], member)
+                }
             else:
-                hits = []
+                fav_ids = set()
+
+        # Filter a user's favorites inside the bounded search, before the 500-hit cap.
+        # An empty favorite set cannot produce results, so avoid opening/searching the archive.
+        hits = (
+            _archive.search(member, query, type_filter=wanted, order=order, id_filter=fav_ids)
+            if fav_ids is not None and fav_ids
+            else [] if fav_ids is not None
+            else _archive.search(member, query, type_filter=wanted, order=order)
+        )
 
         show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
         grp = _archive.infer_member_group(member)

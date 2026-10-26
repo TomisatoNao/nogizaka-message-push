@@ -25,7 +25,22 @@ VIEWPORTS = {
     "tablet": {"width": 768, "height": 1000},
     "mobile": {"width": 390, "height": 844},
 }
-TABS = ("status", "monitors", "channels", "social", "system", "users", "advanced")
+TABS = ("status", "monitors", "channels", "social", "system", "users", "tasks", "advanced")
+
+
+def _admin_snapshot_update_tabs() -> set[str]:
+    return {
+        value.strip()
+        for value in os.environ.get("UPDATE_ADMIN_SNAPSHOT_TABS", "").split(",")
+        if value.strip()
+    }
+
+
+def _should_update_admin_snapshot(tab: str) -> bool:
+    if os.environ.get("UPDATE_ADMIN_SNAPSHOTS") != "1":
+        return False
+    selected_tabs = _admin_snapshot_update_tabs()
+    return not selected_tabs or tab in selected_tabs
 
 
 class _StaticHandler(SimpleHTTPRequestHandler):
@@ -130,6 +145,7 @@ def _api_payload(path: str) -> dict:
     if path == "/api/config":
         return {
             "ok": True,
+            "revision": "a" * 64,
             "config": _fixture_config(),
             "cred_status": {"demo_main": {"ok": True}},
             "qq_bot_status": [],
@@ -176,6 +192,51 @@ def _api_payload(path: str) -> dict:
             "delivery_backlog": {"routes": 0, "messages": 0, "members": 0},
             "errors": [],
             "embedded": False,
+        }
+    if path == "/api/route-diagnostics":
+        return {"ok": True, "diagnostics": []}
+    if path == "/api/archive/tasks":
+        return {"ok": True, "tasks": []}
+    if path.startswith("/api/archive/tasks/"):
+        task_id = path.split("/")[4]
+        if path.endswith("/retry"):
+            return {"ok": True, "task_id": task_id, "request_id": "visual-fixture"}
+        return {
+            "ok": True,
+            "task": {
+                "id": task_id,
+                "kind": "message_backfill",
+                "status": "completed",
+                "scope": "members",
+                "phase": "completed",
+                "done": 0,
+                "total": 0,
+                "failure_count": 0,
+                "error": "",
+                "created_at": "2026-10-26T00:00:00+00:00",
+                "updated_at": "2026-10-26T00:00:00+00:00",
+                "heartbeat_stale": False,
+            },
+            "items": [],
+            "retry_supported": False,
+        }
+    if path == "/api/archive/integrity":
+        return {"ok": True, "latest_report": None, "current_task": None}
+    if path == "/api/archive/integrity/check":
+        return {
+            "ok": True,
+            "task": {
+                "id": "visual-integrity-task",
+                "kind": "archive_integrity",
+                "scope": "archive",
+                "status": "queued",
+                "phase": "queued",
+                "done": 0,
+                "total": 0,
+                "failure_count": 0,
+                "heartbeat_stale": False,
+                "report": None,
+            },
         }
     if path == "/api/system/storage":
         return {
@@ -429,8 +490,18 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
             page.locator("#tab-status.active .admin-module").first.wait_for(state="visible", timeout=10000)
             page.wait_for_timeout(150)
 
-            for tab in TABS:
+            selected_update_tabs = _admin_snapshot_update_tabs()
+            tabs_to_capture = (
+                tuple(tab for tab in TABS if tab in selected_update_tabs)
+                if os.environ.get("UPDATE_ADMIN_SNAPSHOTS") == "1" and selected_update_tabs
+                else TABS
+            )
+            for tab in tabs_to_capture:
                 if tab != "status":
+                    # 每次从导航起点切换，避免移动端滚动位置依赖前一个页签，导致快照漂移。
+                    page.evaluate(
+                        "() => { const tabs = document.querySelector('.header-nav .nav-tabs'); if (tabs) tabs.scrollLeft = 0; }"
+                    )
                     page.locator(f'.nav-tab[data-tab="{tab}"]').click()
                     page.locator(f"#tab-{tab}.active .admin-module").first.wait_for(state="visible", timeout=10000)
                     page.wait_for_timeout(100)
@@ -455,6 +526,30 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                 assert metrics["modules"]
                 assert metrics["tableScrollContainers"] >= (1 if tab in {"status", "monitors", "channels", "users", "advanced"} else 0)
                 if tab == "status":
+                    page.wait_for_function(
+                        "() => !document.getElementById('routeDiagnosticsPanel')?.hidden "
+                        "&& document.getElementById('routeDiagnosticsStatus')?.textContent.includes('当前没有可诊断的监控成员')",
+                        timeout=5000,
+                    )
+                    route_layout = page.evaluate(
+                        """() => {
+                            const panel = document.querySelector('#routeDiagnosticsPanel');
+                            const box = panel?.getBoundingClientRect();
+                            return {
+                                hidden: !panel || panel.hidden,
+                                status: document.querySelector('#routeDiagnosticsStatus')?.textContent || '',
+                                listEmpty: (document.querySelector('#routeDiagnosticsMembers')?.children.length || 0) === 0,
+                                left: box?.left || 0,
+                                right: box?.right || 0,
+                                width: box?.width || 0,
+                            };
+                        }"""
+                    )
+                    assert route_layout["hidden"] is False
+                    assert route_layout["listEmpty"] is True
+                    assert route_layout["width"] > 0
+                    assert route_layout["left"] >= 0
+                    assert route_layout["right"] <= metrics["viewportWidth"] + 1
                     assert len(metrics["startupItems"]) == 3
                     assert metrics["startupItems"][0] <= (300 if viewport_name != "mobile" else metrics["viewportWidth"])
                     # 存储卡片的容量、项目数和清理动作必须是稳定的语义行；
@@ -499,6 +594,52 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         assert card["cleanInActions"] is True
                         assert all(card["cleanRowsOverlap"])
                         assert card["right"] <= metrics["viewportWidth"] + 1
+                elif tab == "tasks":
+                    page.wait_for_function(
+                        "() => document.getElementById('archiveTaskNotice')?.textContent.includes('没有最近的归档任务') "
+                        "&& document.getElementById('archiveIntegrityStatus')?.textContent.includes('尚无历史完整性报告')",
+                        timeout=5000,
+                    )
+                    task_layout = page.evaluate(
+                        """() => {
+                            const taskPanel = document.querySelector('#tab-tasks');
+                            const taskList = document.querySelector('#archiveTaskList');
+                            const integrity = document.querySelector('#archiveIntegrityPanel');
+                            const rect = (el) => {
+                                const box = el?.getBoundingClientRect();
+                                return {left: box?.left || 0, right: box?.right || 0, width: box?.width || 0};
+                            };
+                            return {
+                                active: taskPanel?.classList.contains('active') === true,
+                                hidden: taskPanel?.hidden !== false,
+                                notice: document.querySelector('#archiveTaskNotice')?.textContent || '',
+                                integrityStatus: document.querySelector('#archiveIntegrityStatus')?.textContent || '',
+                                taskCount: taskList?.querySelectorAll('.admin-task-card').length || 0,
+                                taskBox: rect(taskList),
+                                integrityBox: rect(integrity),
+                                integrityReportText: document.querySelector('#archiveIntegrityReport')?.textContent || '',
+                                buttons: [...document.querySelectorAll('#btnRefreshArchiveTasks, #btnRunArchiveIntegrity, #btnRefreshArchiveIntegrity')]
+                                    .map((button) => {
+                                        const box = button.getBoundingClientRect();
+                                        return {height: box.height, left: box.left, right: box.right};
+                                    }),
+                            };
+                        }"""
+                    )
+                    assert task_layout["active"] is True
+                    assert task_layout["hidden"] is False
+                    assert "没有最近的归档任务" in task_layout["notice"]
+                    assert "尚无历史完整性报告" in task_layout["integrityStatus"]
+                    assert task_layout["taskCount"] == 0
+                    assert "尚未执行过完整性检查" in task_layout["integrityReportText"]
+                    for panel in (task_layout["taskBox"], task_layout["integrityBox"]):
+                        assert panel["width"] > 0
+                        assert panel["left"] >= 0
+                        assert panel["right"] <= metrics["viewportWidth"] + 1
+                    assert len(task_layout["buttons"]) == 3
+                    for button in task_layout["buttons"]:
+                        assert button["left"] >= 0
+                        assert button["right"] <= metrics["viewportWidth"] + 1
                 elif tab == "monitors":
                     page.wait_for_function(
                         "() => document.querySelectorAll('#memberRows tr').length >= 1",
@@ -846,9 +987,12 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                     # 桌面端额外拦截一次保存请求，确认弹窗表单仍序列化为原有配置结构。
                     if viewport_name == "desktop":
                         page.locator("#btnSave").click()
+                        page.locator("#confirmTitle").wait_for(state="visible")
+                        page.locator("#confirmYes").click()
                         page.wait_for_timeout(150)
                         assert save_payloads
                         payload = save_payloads[-1]
+                        assert payload["expected_revision"] == "a" * 64
                         expected_top_level = {
                             "accounts", "monitor", "channels", "day_interval", "night_interval",
                             "monitor_schedule", "message_monitor", "blog_monitor", "platforms",
@@ -857,6 +1001,8 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         assert {"x", "instagram", "tiktok", "tiktok_live"} <= set(payload["platforms"])
                         assert {"interval_range_seconds", "night_interval_range_seconds"} <= set(payload["platforms"]["instagram"])
                         page.locator("#btnReloadFile").click()
+                        if page.locator("#confirmDialog").is_visible():
+                            page.locator("#confirmYes").click()
                         x_interval.wait_for(state="attached")
                         page.wait_for_function(
                             "(value) => document.querySelector('#socialXInterval')?.value === value",
@@ -901,7 +1047,7 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                         }"""
                     )
                     page.screenshot(path=str(actual), full_page=False)
-                if os.environ.get("UPDATE_ADMIN_SNAPSHOTS") == "1":
+                if _should_update_admin_snapshot(tab):
                     baseline.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(actual, baseline)
                 elif not baseline.exists():
@@ -1109,6 +1255,10 @@ def _open_admin_page(playwright, admin_static_server, route_handler, *, tab: str
     page = context.new_page()
     page.route("**/api/**", route_handler)
     page.goto(f"{admin_static_server}/#tab={tab}", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "typeof configRevision === 'string' && configRevision.length === 64 && !configRevisionStale",
+        timeout=10000,
+    )
     return browser, context, page
 
 
@@ -1215,6 +1365,8 @@ def test_member_social_bindings_edit_and_account_sources(admin_static_server):
             assert "成员绑定 1" in page.locator("#socialLiveAccountSources").inner_text()
             page.locator("#monitorLiveDialog [data-monitor-dialog-close]").last.click()
             page.locator("#btnSave").click()
+            page.locator("#confirmTitle").wait_for(state="visible")
+            page.locator("#confirmYes").click()
             page.wait_for_function("document.querySelector('#saveMsg').textContent.includes('已保存')")
             assert len(saved) == 1
             assert saved[0]["monitor"][0]["social"]["instagram"] == ["new.member"]
@@ -1231,6 +1383,8 @@ def test_member_social_bindings_edit_and_account_sources(admin_static_server):
             page.locator("#memberSocialConfirm").click()
             assert "未绑定" in first.locator(".admin-member-social-cell").inner_text()
             page.locator("#btnSave").click()
+            page.locator("#confirmTitle").wait_for(state="visible")
+            page.locator("#confirmYes").click()
             page.wait_for_function("document.querySelector('#saveMsg').textContent.includes('已保存')")
             assert len(saved) == 2
             assert saved[1]["monitor"][0].get("social") is None
@@ -1380,6 +1534,8 @@ def test_admin_config_save_keeps_edits_made_while_request_is_pending(admin_stati
 
             save_button = page.locator("#btnSave")
             save_button.click()
+            page.locator("#confirmTitle").wait_for(state="visible")
+            page.locator("#confirmYes").click()
             page.wait_for_function("window.__heldApiWrites?.length === 1", timeout=5000)
             assert save_button.is_disabled()
             page.locator('[data-monitor-dialog-target="monitorXDialog"]').first.click()
@@ -1390,14 +1546,97 @@ def test_admin_config_save_keeps_edits_made_while_request_is_pending(admin_stati
 
             saved_payload = page.evaluate("JSON.parse(window.__heldApiWrites[0].body)")
             assert saved_payload["platforms"]["x"]["interval_seconds"] == 61
-            page.evaluate("window.__heldApiWrites[0].release({ok: true, reloaded: true, cred_status: {}})")
+            assert saved_payload["expected_revision"] == "a" * 64
+            page.evaluate("window.__heldApiWrites[0].release({ok: true, saved: true, revision: 'b'.repeat(64), reloaded: true, reload: {id: 'fixture-reload', config: 'loaded', components: 'unavailable', application: {id: 'fixture-reload', state: 'unconfirmed', components: {}}}, cred_status: {}})")
             page.wait_for_function("!document.getElementById('btnSave').disabled", timeout=5000)
             page.locator("footer.savebar.show").wait_for(state="visible", timeout=5000)
+            assert page.locator("#saveOutcome").is_visible()
+            assert "已保存" in page.locator("#saveOutcomeStates").inner_text()
+            assert "配置已加载" in page.locator("#saveOutcomeStates").inner_text()
             assert "新修改尚未保存" in page.locator("#saveMsg").inner_text()
             assert interval.input_value() == "62"
 
             context.close()
             browser.close()
+    except Exception as exc:
+        if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
+            pytest.skip(f"Playwright Chromium 不可用：{exc}")
+        raise
+
+
+@pytest.mark.parametrize(
+    "viewport_name,theme", [("desktop", "light"), ("desktop", "dark"), ("mobile", "light"), ("mobile", "dark")]
+)
+def test_admin_config_revision_conflict_keeps_local_draft(
+    admin_static_server, viewport_name, theme,
+):
+    """Revision conflicts show a value-free preview and keep the local draft editable."""
+    playwright = pytest.importorskip("playwright.sync_api")
+    try:
+        with playwright.sync_playwright() as p:
+            conflict_requests = []
+
+            def handle_api(route):
+                path = urlsplit(route.request.url).path
+                if path == "/api/config" and route.request.method == "PUT":
+                    conflict_requests.append(json.loads(route.request.post_data or "{}"))
+                    route.fulfill(
+                        status=409,
+                        content_type="application/json; charset=utf-8",
+                        body=json.dumps({
+                            "ok": False,
+                            "error": "revision_conflict",
+                            "revision": "b" * 64,
+                            "message": "配置或凭据已变化，请重新载入并合并草稿后再保存。",
+                        }, ensure_ascii=False),
+                    )
+                    return
+                route.fulfill(
+                    status=200,
+                    content_type="application/json; charset=utf-8",
+                    body=json.dumps(_api_payload(path), ensure_ascii=False),
+                )
+
+            browser, context, page = _open_admin_page(
+                p, admin_static_server, handle_api, tab="social",
+            )
+            try:
+                page.set_viewport_size(VIEWPORTS[viewport_name])
+                page.evaluate(
+                    "theme => { localStorage.setItem('sakamichiTheme', theme); document.documentElement.dataset.theme = theme; }",
+                    theme,
+                )
+                page.locator('[data-monitor-dialog-target="monitorXDialog"]').first.click()
+                interval = page.locator("#socialXInterval")
+                interval.wait_for(state="visible", timeout=10000)
+                interval.fill("61")
+                page.locator("#monitorXDialog [data-monitor-dialog-close]").last.click()
+                page.locator("footer.savebar.show").wait_for(state="visible", timeout=5000)
+                page.wait_for_function("!document.getElementById('btnSave').disabled", timeout=5000)
+                page.locator("#btnSave").click()
+                page.locator("#confirmTitle").wait_for(state="visible")
+                assert page.locator("#confirmTitle").inner_text() == "保存前检查"
+                preview = page.locator("#confirmBody").inner_text()
+                assert "fixture-token" not in preview
+                assert "只显示分组和字段类型" in preview
+                page.locator("#confirmYes").click()
+
+                page.wait_for_function("document.getElementById('confirmDialog').open && document.getElementById('confirmTitle').textContent.includes('配置已在其他地方更新')")
+                assert len(conflict_requests) == 1
+                assert conflict_requests[0]["expected_revision"] == "a" * 64
+                page.locator("#confirmNo").click()
+
+                outcome = page.locator("#saveOutcome")
+                outcome.wait_for(state="visible", timeout=5000)
+                assert "本次未提交" in page.locator("#saveOutcomeStates").inner_text()
+                assert "页面草稿已保留" in page.locator("#saveOutcomeStates").inner_text()
+                assert interval.input_value() == "61"
+                assert page.locator("#btnSave").is_disabled()
+                assert page.locator("#btnReloadFile").inner_text() == "载入最新版并合并草稿"
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+            finally:
+                context.close()
+                browser.close()
     except Exception as exc:
         if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
             pytest.skip(f"Playwright Chromium 不可用：{exc}")
@@ -1442,9 +1681,12 @@ def test_admin_secret_dialog_locks_context_during_save(admin_static_server):
 
             request_body = page.evaluate("JSON.parse(window.__heldApiWrites[0].body)")
             assert request_body["values"] == {"GEMINI_API_KEY": "fixture-cpa-key"}
+            assert request_body["expected_revision"] == "a" * 64
             page.evaluate(
-                "window.__heldApiWrites[0].release({ok: true, updated: ['GEMINI_API_KEY'], "
-                "env_status: {GEMINI_API_KEY: true}, reloaded: true})"
+                "window.__heldApiWrites[0].release({ok: true, saved: true, revision: 'b'.repeat(64), "
+                "updated: ['GEMINI_API_KEY'], env_status: {GEMINI_API_KEY: true}, reloaded: true, "
+                "reload: {id: 'fixture-reload', config: 'loaded', components: 'unavailable', "
+                "application: {id: 'fixture-reload', state: 'unconfirmed', components: {}}}})"
             )
             page.wait_for_selector("#secretDialog", state="hidden", timeout=5000)
 

@@ -31,6 +31,15 @@ from src.sources.sakurazaka import _parse_date as sakura_parse_date  # noqa: E40
 from src.sources.nogizaka import _parse_jsonp as nogi_parse_jsonp  # noqa: E402
 from src import translator  # noqa: E402
 
+_TASK_ID: str | None = None
+_TASK_ERROR = ""
+
+
+def _task_fail(error: object) -> None:
+    global _TASK_ERROR
+    if not _TASK_ERROR:
+        _TASK_ERROR = str(error)[:4000]
+
 def safe_log(msg: str):
     """防止 Windows 命令行编码造成的 Print 崩溃"""
     try:
@@ -160,6 +169,7 @@ async def archive_nogizaka(client: httpx.AsyncClient, db: sqlite3.Connection, ct
             r = await client.get(url, headers=headers, timeout=25.0)
             if r.status_code != 200:
                 safe_log(f"⚠️ API 返回 HTTP {r.status_code}，停止列表拉取")
+                _task_fail(f"乃木坂列表 API HTTP {r.status_code}")
                 break
             
             data = nogi_parse_jsonp(r.text)
@@ -208,6 +218,7 @@ async def archive_nogizaka(client: httpx.AsyncClient, db: sqlite3.Connection, ct
             await asyncio.sleep(0.3)
         except Exception as e:
             safe_log(f"💥 获取列表失败: {e}")
+            _task_fail(f"获取乃木坂列表失败: {type(e).__name__}: {e}")
             break
 
     await _process_and_save_posts(client, db, "nogizaka", all_posts, translate=translate)
@@ -228,6 +239,7 @@ async def archive_sakurazaka(client: httpx.AsyncClient, db: sqlite3.Connection, 
             r.encoding = "utf-8"
             if r.status_code != 200:
                 safe_log(f"⚠️ 列表页 {page} 返回 HTTP {r.status_code}，停止列表拉取")
+                _task_fail(f"樱坂列表页 {page} HTTP {r.status_code}")
                 break
             
             soup = BeautifulSoup(r.text, "html.parser")
@@ -268,6 +280,7 @@ async def archive_sakurazaka(client: httpx.AsyncClient, db: sqlite3.Connection, 
             await asyncio.sleep(0.3)
         except Exception as e:
             safe_log(f"💥 抓取列表页 {page} 失败: {e}")
+            _task_fail(f"抓取樱坂列表页 {page} 失败: {type(e).__name__}: {e}")
             break
 
     safe_log(f"🔎 正在逐篇解析 {len(all_posts)} 篇博客的详情正文与原图链接...")
@@ -315,6 +328,7 @@ async def archive_sakurazaka(client: httpx.AsyncClient, db: sqlite3.Connection, 
             })
         except Exception as e:
             safe_log(f"⚠️ 解析详情页失败 ({post_url}): {e}")
+            _task_fail(f"解析博客详情失败 ({post_url}): {type(e).__name__}: {e}")
             
     await _process_and_save_posts(client, db, "sakurazaka", detail_posts, translate=translate)
 
@@ -333,6 +347,7 @@ async def archive_hinatazaka(client: httpx.AsyncClient, db: sqlite3.Connection, 
             r = await client.get(url, timeout=25.0)
             if r.status_code != 200:
                 safe_log(f"⚠️ 列表页 {page} 返回 HTTP {r.status_code}，停止列表拉取")
+                _task_fail(f"日向坂列表页 {page} HTTP {r.status_code}")
                 break
             
             soup = BeautifulSoup(r.text, "html.parser")
@@ -393,6 +408,7 @@ async def archive_hinatazaka(client: httpx.AsyncClient, db: sqlite3.Connection, 
             await asyncio.sleep(0.3)
         except Exception as e:
             safe_log(f"💥 抓取列表页 {page} 失败: {e}")
+            _task_fail(f"抓取日向坂列表页 {page} 失败: {type(e).__name__}: {e}")
             break
 
     await _process_and_save_posts(client, db, "hinatazaka", all_posts, translate=translate)
@@ -452,41 +468,119 @@ async def _process_and_save_posts(client: httpx.AsyncClient, db: sqlite3.Connect
             safe_log(f"   ✅ [保存成功] 含 {len(p.get('images', []))} 张图片" + (" (含 AI 双语译文)" if trans_result else ""))
         except Exception as e:
             safe_log(f"   ❌ 保存失败: {e}")
+            _task_fail(f"保存博客失败 ({post_url}): {type(e).__name__}: {e}")
         
         await asyncio.sleep(0.2)
         
     safe_log(f"\n🎉 归档任务完成！成功保存 {saved_count} 篇，跳过已有 {skipped_count} 篇。\n")
 
 async def main():
+    global _TASK_ID
     parser = argparse.ArgumentParser(description="坂道系列 (乃木坂46 / 樱坂46 / 日向坂46) 成员博客通用全量归档工具")
     parser.add_argument("target", nargs="?", help="官方博客列表页 / 详情页 URL 或成员 ct 编号")
     parser.add_argument("--group", choices=["nogizaka", "sakurazaka", "hinatazaka"], help="团体名称 (nogizaka / sakurazaka / hinatazaka)")
     parser.add_argument("--ct", help="成员 ct 代码 (例如 48017 / 59 / 12)")
     parser.add_argument("--translate", action="store_true", help="是否同时调用 Gemini 进行 AI 中日双语翻译 (默认关闭，仅归档正文与图片)")
+    parser.add_argument("--task-id", default="", help=argparse.SUPPRESS)
     
     args = parser.parse_args()
     
-    db = init_blog_db()
-    async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=30.0) as client:
-        group_key, ct, single_url = await resolve_target(client, args.target, args.group, args.ct)
-        
-        if ct:
-            if group_key == "nogizaka":
-                await archive_nogizaka(client, db, ct, translate=args.translate)
-            elif group_key == "sakurazaka":
-                await archive_sakurazaka(client, db, ct, translate=args.translate)
-            elif group_key == "hinatazaka":
-                await archive_hinatazaka(client, db, ct, translate=args.translate)
+    task_store = None
+    heartbeat_stop = None
+    task_error = ""
+    retry_task_item = None
+    item_key = args.target or "unresolved"
+    if args.task_id:
+        from src import archive_tasks as task_store
+
+        _TASK_ID = args.task_id
+        task_store.mark_task_running(_TASK_ID)
+        heartbeat_stop = task_store.start_heartbeat(_TASK_ID)
+    db = None
+    try:
+        db = init_blog_db()
+        async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (Windows NT; Win64; x64)"}, timeout=30.0) as client:
+            group_key, ct, single_url = await resolve_target(client, args.target, args.group, args.ct)
+            if ct:
+                member_key = f"{group_key}:{ct}"
+                member_label = f"{group_key} ct={ct}"
+            elif single_url:
+                member_key = f"{group_key}:{single_url}"
+                member_label = f"{group_key} single post"
             else:
-                safe_log(f"❌ 不支持的团体类型: {group_key}")
-        elif single_url:
-            await archive_single_post(client, db, group_key, single_url, translate=args.translate)
-        else:
-            safe_log("❌ 请输入正确的博客列表页 / 详情页 URL 或 --ct 编号！示例：")
-            safe_log("  python tools/archive_member.py \"https://sakurazaka46.com/s/s46/diary/detail/70526?ima=0000&cd=blog\"")
-            sys.exit(1)
-            
-    db.close()
+                member_key = f"{args.group or 'unknown'}:{args.ct or args.target or 'missing'}"
+                member_label = "unresolved blog member"
+
+            retry_items = task_store.get_items(_TASK_ID, status="queued") if task_store and _TASK_ID else []
+            member_item = next((item for item in retry_items if item.get("type") == "member"), None)
+            retry_task_item = next((item for item in retry_items if item.get("type") == "task"), None)
+            item_key = str((member_item or {}).get("key") or member_key)
+            item_attempt = int((member_item or {}).get("attempt") or 1)
+            if task_store and _TASK_ID:
+                if retry_task_item:
+                    task_store.set_item(
+                        _TASK_ID, "task", str(retry_task_item.get("key") or "execution"), "running",
+                        attempt=int(retry_task_item.get("attempt") or 1),
+                        payload=retry_task_item.get("payload", {}),
+                    )
+                task_store.set_item(
+                    _TASK_ID, "member", item_key, "running", attempt=item_attempt,
+                    payload={"group": group_key, "ct": ct or "", "label": member_label},
+                )
+                task_store.set_progress(_TASK_ID, "member_archive", 0, 1)
+
+            if ct:
+                if group_key == "nogizaka":
+                    await archive_nogizaka(client, db, ct, translate=args.translate)
+                elif group_key == "sakurazaka":
+                    await archive_sakurazaka(client, db, ct, translate=args.translate)
+                elif group_key == "hinatazaka":
+                    await archive_hinatazaka(client, db, ct, translate=args.translate)
+                else:
+                    task_error = f"不支持的团体类型: {group_key}"
+            elif single_url:
+                await archive_single_post(client, db, group_key, single_url, translate=args.translate)
+            else:
+                task_error = "请输入正确的博客列表页 / 详情页 URL 或 --ct 编号"
+                safe_log(f"❌ {task_error}")
+            task_error = task_error or _TASK_ERROR
+            if task_store and _TASK_ID:
+                task_store.set_item(
+                    _TASK_ID, "member", item_key,
+                    "failed" if task_error else "completed", attempt=item_attempt,
+                    error=task_error, payload={"group": group_key, "ct": ct or "", "label": member_label},
+                )
+                task_store.set_progress(_TASK_ID, "member_archive", 1, 1)
+                if retry_task_item:
+                    task_store.set_item(
+                        _TASK_ID, "task", str(retry_task_item.get("key") or "execution"),
+                        "failed" if task_error else "completed",
+                        attempt=int(retry_task_item.get("attempt") or 1),
+                        error=task_error,
+                        payload=retry_task_item.get("payload", {}),
+                    )
+    except Exception as exc:  # noqa: BLE001 - keep a durable per-member failure
+        task_error = f"{type(exc).__name__}: {exc}"
+        _task_fail(task_error)
+        if task_store and _TASK_ID:
+            task_store.set_item(
+                _TASK_ID, "member", str(item_key), "failed", error=task_error,
+                payload={"label": "unresolved blog member"},
+            )
+            if retry_task_item:
+                task_store.set_item(
+                    _TASK_ID, "task", str(retry_task_item.get("key") or "execution"), "failed",
+                    attempt=int(retry_task_item.get("attempt") or 1), error=task_error,
+                    payload=retry_task_item.get("payload", {}),
+                )
+        raise
+    finally:
+        if db is not None:
+            db.close()
+        if task_store and _TASK_ID:
+            task_store.finish_task(_TASK_ID, error=task_error)
+        if heartbeat_stop:
+            heartbeat_stop.set()
 
 if __name__ == "__main__":
     asyncio.run(main())

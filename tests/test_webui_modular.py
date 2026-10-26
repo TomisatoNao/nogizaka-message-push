@@ -1169,10 +1169,10 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20261023_1" in html
-    assert "/static/archive.css?v=20261023_1" in html
-    assert "/static/archive.js?v=20261023_1" in perf
-    assert "/static/archive.css?v=20261023_1" in perf
+    assert "/static/archive.js?v=20261026_2" in html
+    assert "/static/archive.css?v=20261026_1" in html
+    assert "/static/archive.js?v=20261026_2" in perf
+    assert "/static/archive.css?v=20261026_1" in perf
 
 
 def test_archive_day_jump_loads_only_missing_pages_and_invalidates_old_jumps():
@@ -1593,7 +1593,7 @@ def test_archive_message_order_controls_and_route_state():
     script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     assert 'let messageOrder' in script
-    assert 'localStorage.getItem("archive_message_order")' in script
+    assert 'archiveStorageGet("localStorage", "archive_message_order")' in script
     assert '&order=" + messageOrder' in script
     assert 'p.set("order", messageOrder)' in script
     assert 'setMessageOrder(requestedOrder' in script
