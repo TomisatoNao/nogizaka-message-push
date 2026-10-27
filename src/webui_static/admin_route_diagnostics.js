@@ -161,42 +161,44 @@
     const heading = element("div", "admin-route-channel-heading");
     heading.append(element("h4", "", channelLabel(channel)));
 
-    const configuredCount = countValue(summary && summary.configured_route_count, channelRoutes.length);
     const matched = channelRoutes.filter((r) => r && r.status === "applicable");
-    const unmatched = channelRoutes.filter((r) => !r || r.status !== "applicable");
     const applicableCount = matched.length;
 
     const enabled = summary && summary.enabled !== false;
-    heading.append(element("span", "admin-route-channel-count", enabled
-      ? `${applicableCount} / ${configuredCount} 条符合条件`
-      : "通道已关闭"));
+    let countBadgeText = "通道已关闭";
+    if (enabled) {
+      countBadgeText = applicableCount > 0 ? `${applicableCount} 处生效目标` : "无匹配目标";
+    }
+    const countBadge = element("span", "admin-route-channel-count" + (applicableCount > 0 ? " has-targets" : " is-empty"), countBadgeText);
+    heading.append(countBadge);
     card.append(heading);
 
-    if (!channelRoutes.length) {
-      card.append(element("p", "admin-route-empty", "当前没有已配置的推送路由。"));
-      const reasons = summary && Array.isArray(summary.reasons) ? summary.reasons : [];
-      const labels = reasons.map(reasonLabel).filter(Boolean);
-      if (labels.length) card.append(element("p", "admin-route-channel-reasons", labels.join("；")));
+    if (!enabled) {
+      card.classList.add("is-disabled");
+      card.append(element("p", "admin-route-empty", "推送通道已在系统配置中停用。"));
       return card;
     }
 
-    // 1. 优先展示符合条件的有效分支
-    if (matched.length) {
-      const matchedList = element("ul", "admin-route-list");
-      matched.forEach((route, idx) => matchedList.append(routeItem(route, idx + 1)));
-      card.append(matchedList);
+    if (!channelRoutes.length) {
+      card.classList.add("is-empty");
+      card.append(element("p", "admin-route-empty", "当前通道尚未配置任何机器人或群。"));
+      return card;
     }
 
-    // 2. 将未匹配/停用/未使用的分支折叠聚合，避免 18 条分支撑爆整行
-    if (unmatched.length) {
-      const details = element("details", "admin-route-unmatched-details");
-      const sumNode = element("summary", "admin-route-unmatched-summary",
-        `其他未匹配/未配置分支 (${unmatched.length}) ▾`);
-      details.append(sumNode);
-      const unmatchedList = element("ul", "admin-route-list");
-      unmatched.forEach((route, idx) => unmatchedList.append(routeItem(route, matched.length + idx + 1)));
-      details.append(unmatchedList);
-      card.append(details);
+    // 核心呈现：仅展示该通道下实际推送到哪些渠道/机器人目标
+    if (matched.length) {
+      const matchedList = element("ul", "admin-route-targets-list");
+      matched.forEach((route, idx) => {
+        const item = element("li", "admin-route-target-item");
+        const icon = element("span", "admin-route-target-icon", "✓");
+        const name = element("span", "admin-route-target-name", formatRouteLabel(route, idx + 1));
+        item.append(icon, name);
+        matchedList.append(item);
+      });
+      card.append(matchedList);
+    } else {
+      card.classList.add("is-empty");
+      card.append(element("p", "admin-route-empty", "该通道无匹配当前成员的推送目标"));
     }
 
     return card;
@@ -319,10 +321,18 @@
       if (tabChannels) tabChannels.click();
     });
     metaBar.append(gotoChannelsBtn);
-
     body.append(metaBar);
 
-    // 通道卡片三列网格
+    // 需处理警告提醒（缺账号或零推送目标）
+    if (!info.hasAccount) {
+      body.append(element("div", "admin-route-warning-banner is-err",
+        "⚠️ 抓取账号未关联：当前成员缺少已配置的抓取账号，无法正常抓取与推送消息。"));
+    } else if (info.isNoApplicableRoute) {
+      body.append(element("div", "admin-route-warning-banner",
+        "⚠️ 当前成员尚未匹配到任何推送目标（消息产生时将不会向外推送），请在「推送通道设置」中调整成员过滤或目标群。"));
+    }
+
+    // 通道卡片三列网格（仅呈现实际推送到哪些渠道）
     const channelGrid = element("div", "admin-route-channel-grid");
     CHANNEL_ORDER.forEach((channel) => {
       const channelSummary = summaries.find((item) => item && item.channel === channel);
@@ -330,6 +340,19 @@
       channelGrid.append(channelCard(channel, channelSummary, channelRoutes));
     });
     body.append(channelGrid);
+
+    // 技术排错折叠区：单次统一折叠在最下方，默认完全收起，正常使用视线内 0 噪音
+    const allUnmatched = info.routes.filter((route) => !route || route.status !== "applicable");
+    if (allUnmatched.length) {
+      const details = element("details", "admin-route-unmatched-details");
+      const sumNode = element("summary", "admin-route-unmatched-summary",
+        `排错参考：查看未生效的分支与未满足原因 (${allUnmatched.length}) ▾`);
+      details.append(sumNode);
+      const unmatchedList = element("ul", "admin-route-list");
+      allUnmatched.forEach((route, idx) => unmatchedList.append(routeItem(route, idx + 1)));
+      details.append(unmatchedList);
+      body.append(details);
+    }
 
     card.append(body);
 
