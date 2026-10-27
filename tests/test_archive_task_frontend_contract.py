@@ -45,3 +45,29 @@ def test_admin_task_center_resumes_persisted_tasks_after_page_reload():
     assert 'const canRetry = isTerminalTask(task) && state.retrySupported === true;' in script
     assert '|| state.retrySupported !== true' in script
     assert '当前没有可安全重试的项' in script
+
+
+def test_admin_message_backfill_dialog_member_picker_contract():
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "admin_tasks.js").read_text(encoding="utf-8")
+    theme = (STATIC / "theme.css").read_text(encoding="utf-8")
+
+    # Contract 1: index.html exposes dialog structure with selection summary
+    assert 'id="archiveMsgMemberList"' in page
+    assert 'id="archiveMsgSelectionSummary"' in page
+    assert 'class="bm-member-selection-summary"' in page
+    assert 'id="btnArchiveMsgSelectAll"' in page
+    assert 'id="btnArchiveMsgClear"' in page
+    assert "window.config = data.config;" in page
+
+    # Contract 2: theme.css provides shared token for member selection summary
+    assert ".bm-member-selection-summary" in theme
+
+    # Contract 3: admin_tasks.js loads from /api/archive/members with group labels
+    assert '"/api/archive/members"' in script
+    assert "BACKFILL_GROUP_LABELS" in script
+    assert "bm-member-option" in script
+    assert "bm-member-option-name" in script
+    assert "bm-member-option-group" in script
+    assert "syncMessageMemberSelection" in script
+    assert "fetchBackfillMembers" in script

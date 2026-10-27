@@ -1549,40 +1549,101 @@
     const msgMemberList = document.getElementById("archiveMsgMemberList");
     const msgSelectAll = document.getElementById("btnArchiveMsgSelectAll");
     const msgClear = document.getElementById("btnArchiveMsgClear");
+    const msgSelectionSummary = document.getElementById("archiveMsgSelectionSummary");
     const msgDateRow = document.getElementById("archiveMsgDateRow");
     const msgStartDate = document.getElementById("archiveMsgStartDate");
     const msgDialogError = document.getElementById("archiveMsgDialogError");
     const btnConfirmMsg = document.getElementById("btnConfirmArchiveMessage");
 
-    function renderMessageMembers() {
+    const BACKFILL_GROUP_LABELS = {
+      nogizaka46: "乃木坂",
+      nogizaka: "乃木坂",
+      hinatazaka46: "日向坂",
+      hinatazaka: "日向坂",
+      sakurazaka46: "樱坂",
+      sakurazaka: "樱坂",
+      yodel: "yodel",
+    };
+
+    async function fetchBackfillMembers() {
+      try {
+        const res = await api("/api/archive/members");
+        if (res && res.ok && Array.isArray(res.monitor_members) && res.monitor_members.length > 0) {
+          return res.monitor_members;
+        }
+      } catch (_) {}
+
+      let monitors = Array.isArray(window.config && window.config.monitor) ? window.config.monitor : null;
+      if (!monitors) {
+        try {
+          const cfgRes = await api("/api/config");
+          if (cfgRes && cfgRes.config && Array.isArray(cfgRes.config.monitor)) {
+            monitors = cfgRes.config.monitor;
+            window.config = cfgRes.config;
+          }
+        } catch (_) {}
+      }
+
+      if (Array.isArray(monitors) && monitors.length > 0) {
+        return monitors.map((m) => {
+          const name = String(m.name || m.id || "").trim();
+          const acc = String(m.account || "").toLowerCase();
+          const grp = acc.includes("nogi") ? "nogizaka46" : acc.includes("sakura") ? "sakurazaka46" : acc.includes("hinata") ? "hinatazaka46" : "yodel";
+          return { name, display: name, group: grp };
+        }).filter((m) => Boolean(m.name));
+      }
+
+      return [];
+    }
+
+    function syncMessageMemberSelection() {
       if (!msgMemberList) return;
-      const monitors = Array.isArray(window.config && window.config.monitor) ? window.config.monitor : [];
-      if (!monitors.length) {
-        msgMemberList.innerHTML = '<p class="admin-note">暂无监控中的成员，可直接提交以回填全部成员。</p>';
+      const checkboxes = Array.from(msgMemberList.querySelectorAll('input[type="checkbox"]'));
+      const checked = checkboxes.filter((cb) => cb.checked);
+      checkboxes.forEach((cb) => {
+        cb.closest(".bm-member-option")?.classList.toggle("selected", cb.checked);
+      });
+      if (msgSelectionSummary) {
+        msgSelectionSummary.textContent = checked.length
+          ? `已选择 ${checked.length} 位成员`
+          : "未选择：全部监控成员";
+      }
+    }
+
+    async function renderMessageMembers() {
+      if (!msgMemberList) return;
+      msgMemberList.innerHTML = '<p class="admin-note">正在加载监控成员列表...</p>';
+      const members = await fetchBackfillMembers();
+      if (!members.length) {
+        msgMemberList.innerHTML = '<div class="bm-member-empty">暂无当前监控成员；请先在管理端配置 Message 监控成员。</div>';
+        syncMessageMemberSelection();
         return;
       }
       msgMemberList.replaceChildren();
-      monitors.forEach((m) => {
+      members.forEach((m) => {
         const label = document.createElement("label");
         label.className = "bm-member-option";
         const input = document.createElement("input");
         input.type = "checkbox";
         input.name = "archiveMsgMember";
-        input.value = m.name || m.id;
-        const acc = String(m.account || "").toLowerCase();
-        const icon = acc.includes("nogi") ? "💜" : acc.includes("sakura") ? "🌸" : acc.includes("hinata") ? "☀️" : "👤";
-        const text = document.createElement("span");
-        text.className = "bm-member-option-name";
-        text.textContent = `${icon} ${m.name || m.id}`;
-        label.append(input, text);
-        input.addEventListener("change", () => label.classList.toggle("selected", input.checked));
+        input.value = m.name;
+        input.setAttribute("aria-label", `选择 ${m.display || m.name}`);
+        const name = document.createElement("span");
+        name.className = "bm-member-option-name";
+        name.textContent = m.display || m.name;
+        const group = document.createElement("span");
+        group.className = "bm-member-option-group";
+        group.textContent = BACKFILL_GROUP_LABELS[m.group] || m.group || "成员";
+        label.append(input, name, group);
+        input.addEventListener("change", syncMessageMemberSelection);
         msgMemberList.append(label);
       });
+      syncMessageMemberSelection();
     }
 
     if (btnLaunchMessageBackfill) {
       btnLaunchMessageBackfill.addEventListener("click", () => {
-        renderMessageMembers();
+        void renderMessageMembers();
         if (msgDialogError) msgDialogError.hidden = true;
         if (msgDateRow) msgDateRow.hidden = true;
         const defaultRadio = dialogArchiveMessage.querySelector('input[name="archiveMsgMode"][value="incremental"]');
@@ -1596,8 +1657,8 @@
       msgSelectAll.addEventListener("click", () => {
         msgMemberList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
           cb.checked = true;
-          cb.closest(".archive-member-chip")?.classList.add("selected");
         });
+        syncMessageMemberSelection();
       });
     }
 
@@ -1605,8 +1666,8 @@
       msgClear.addEventListener("click", () => {
         msgMemberList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
           cb.checked = false;
-          cb.closest(".archive-member-chip")?.classList.remove("selected");
         });
+        syncMessageMemberSelection();
       });
     }
 

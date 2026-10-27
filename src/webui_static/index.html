@@ -3088,6 +3088,7 @@
       <div class="bm-member-options" id="archiveMsgMemberList">
         <p class="admin-note">正在加载监控成员列表...</p>
       </div>
+      <div id="archiveMsgSelectionSummary" class="bm-member-selection-summary">未选择：全部监控成员</div>
     </div>
 
     <div class="bm-mode-group">
@@ -4552,6 +4553,7 @@ async function loadConfig() {
   try {
     const data = await api("/api/config", { cache: "no-store" });
     config = data.config;
+    window.config = data.config;
     configRevision = typeof data.revision === "string" && data.revision.trim() ? data.revision : null;
     secretRevision = configRevision;
     configRevisionStale = !configRevision;

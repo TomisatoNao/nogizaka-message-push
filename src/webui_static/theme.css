@@ -1306,6 +1306,12 @@ dialog.archive-dialog::backdrop {
   font-size: 12.5px;
   text-align: center;
 }
+.bm-member-selection-summary {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
 
 .bm-mode-group {
   margin-bottom: 16px;
