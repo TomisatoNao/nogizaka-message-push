@@ -12,9 +12,11 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import sqlite3
 from urllib.parse import parse_qs, urlsplit
 import uuid
 
+from src import archive_tasks
 from src.logger import log_all
 from src.webui_modules.archive.common import _send_json_resp
 
@@ -99,6 +101,7 @@ def _collect_output(process, request_id: str) -> None:
                     if line.strip():
                         log_all(f"[博客回填] request_id={request_id} | {line.strip()}")
         code = process.wait()
+        archive_tasks.finalize_after_process_exit(request_id, code)
         log_all(f"[博客回填] 进程结束 | request_id={request_id} | exit_code={code}", is_error=code != 0)
     except (OSError, ValueError) as exc:
         log_all(f"[博客回填] 日志读取失败 | request_id={request_id} | error={exc}", is_error=True)
@@ -108,13 +111,24 @@ def _collect_output(process, request_id: str) -> None:
                 _clear_active_locked()
 
 
-def _start_process(handler, command: list[str], request_id: str, kind: str, *, label: str) -> bool:
+def _start_process(
+    handler,
+    command: list[str],
+    request_id: str,
+    kind: str,
+    *,
+    label: str,
+    params: dict,
+    task_precreated: bool = False,
+) -> bool:
     """在共享锁内启动后台归档进程并注册清理线程。"""
     global _ACTIVE_BACKFILL_PROC, _ACTIVE_BACKFILL_REQ_ID, _ACTIVE_BACKFILL_KIND
     with _BACKFILL_LOCK:
         active = _active_task_locked()
         if active:
             active_id, active_kind = active
+            if task_precreated:
+                archive_tasks.fail_to_start(request_id, "已有博客归档进程仍在运行")
             _send_json_resp(handler, {
                 "ok": False,
                 "msg": "已有博客归档任务正在运行，请等待完成后再试",
@@ -125,8 +139,32 @@ def _start_process(handler, command: list[str], request_id: str, kind: str, *, l
 
         script = Path(command[2])
         if not script.is_file():
+            if task_precreated:
+                archive_tasks.fail_to_start(request_id, "服务器缺少博客归档工具")
             _send_json_resp(handler, {"ok": False, "msg": "服务器缺少博客归档工具，请检查部署文件"}, 503)
             return False
+        if not task_precreated:
+            try:
+                archive_tasks.create_task(request_id, "blog_backfill", params)
+            except archive_tasks.ActiveTaskExists as exc:
+                _send_json_resp(handler, {
+                    "ok": False,
+                    "msg": "已有博客归档任务正在运行，请等待完成后再试",
+                    "request_id": exc.task_id,
+                    "task_id": exc.task_id,
+                }, 409)
+                return False
+            except (OSError, sqlite3.Error):
+                _send_json_resp(handler, {"ok": False, "msg": "归档任务存储暂时不可用，请查看服务端日志"}, 503)
+                return False
+        if "--task-id" not in command:
+            task_id_args = ["--task-id", request_id]
+            try:
+                download_option = command.index("--download-images")
+            except ValueError:
+                command.extend(task_id_args)
+            else:
+                command[download_option:download_option] = task_id_args
         try:
             process = subprocess.Popen(
                 command, cwd=str(_ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -135,15 +173,17 @@ def _start_process(handler, command: list[str], request_id: str, kind: str, *, l
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except OSError as exc:
+            archive_tasks.fail_to_start(request_id, str(exc))
             log_all(f"[博客回填] 启动失败 | request_id={request_id} | error={exc}", is_error=True)
             _send_json_resp(handler, {
-                "ok": False, "msg": "启动归档任务失败，请查看系统日志", "request_id": request_id,
+                "ok": False, "msg": "启动归档任务失败，请查看系统日志", "request_id": request_id, "task_id": request_id,
             }, 500)
             return False
 
         _ACTIVE_BACKFILL_PROC = process
         _ACTIVE_BACKFILL_REQ_ID = request_id
         _ACTIVE_BACKFILL_KIND = kind
+        archive_tasks.mark_task_running(request_id, process.pid)
         log_all(
             f"[博客回填] 已启动 | request_id={request_id} | task={kind} | "
             f"pid={process.pid} | {label}"
@@ -153,8 +193,8 @@ def _start_process(handler, command: list[str], request_id: str, kind: str, *, l
             name=f"blog-backfill-{request_id}",
         ).start()
     _send_json_resp(handler, {
-        "ok": True, "msg": "已启动后台博客归档任务，可在管理后台系统日志中查看进度。",
-        "request_id": request_id,
+        "ok": True, "msg": "已启动后台博客归档任务，可在归档任务中心查看进度。",
+        "request_id": request_id, "task_id": request_id,
     }, 202)
     return True
 
@@ -188,6 +228,7 @@ def handle_member_backfill(handler, guard_fn, read_body_json_fn) -> None:
     _start_process(
         handler, command, request_id, "member_url",
         label=f"translate={translate}",
+        params={"kind": "member_url", "url": url.strip(), "translate": translate},
     )
 
 
@@ -222,4 +263,79 @@ def handle_group_backfill(handler, guard_fn, read_body_json_fn) -> None:
     _start_process(
         handler, command, request_id, "groups",
         label=f"groups={','.join(groups)} | translate=false | download_images=true",
+        params={"kind": "groups", "groups": groups, "download_images": True},
+    )
+
+
+def retry_blog_task(handler, parent_task_id: str) -> None:
+    """Create one child task from failed blog items and relaunch its worker."""
+    global _ACTIVE_BACKFILL_PROC, _ACTIVE_BACKFILL_REQ_ID, _ACTIVE_BACKFILL_KIND
+    with _BACKFILL_LOCK:
+        active = _active_task_locked()
+        if active:
+            active_id, active_kind = active
+            _send_json_resp(handler, {
+                "ok": False,
+                "msg": "已有博客归档任务正在运行，请等待完成后再重试",
+                "request_id": active_id,
+                "task_id": active_id,
+                "task": active_kind,
+            }, 409)
+            return
+        request_id = archive_tasks.new_task_id()
+        try:
+            task, _items = archive_tasks.create_retry_task(parent_task_id, request_id)
+        except archive_tasks.TaskNotFound:
+            _send_json_resp(handler, {"ok": False, "msg": "归档任务不存在"}, 404)
+            return
+        except archive_tasks.NoFailedItems:
+            _send_json_resp(handler, {"ok": False, "msg": "该任务没有可重试的失败项"}, 409)
+            return
+        except archive_tasks.RetryAlreadyCreated as exc:
+            _send_json_resp(handler, {
+                "ok": False,
+                "msg": "该任务已创建过重试任务，请打开最新重试任务继续处理失败项",
+                "request_id": exc.task_id,
+                "task_id": exc.task_id,
+            }, 409)
+            return
+        except archive_tasks.ActiveTaskExists as exc:
+            _send_json_resp(handler, {
+                "ok": False,
+                "msg": "已有博客归档任务正在运行，请等待完成后再重试",
+                "request_id": exc.task_id,
+                "task_id": exc.task_id,
+            }, 409)
+            return
+        except archive_tasks.TaskNotRetryable:
+            _send_json_resp(handler, {"ok": False, "msg": "此任务类型不支持失败项重试"}, 400)
+            return
+
+    params = task.get("params", {})
+    if params.get("kind") == "member_url":
+        script = _ROOT / "tools" / "archive_member.py"
+        command = [sys.executable, "-u", str(script), str(params.get("url") or "")]
+        if params.get("translate") is True:
+            command.append("--translate")
+        label = "failed member retry"
+        kind = "member_url"
+    else:
+        script = _ROOT / "tools" / "backfill_blogs.py"
+        command = [sys.executable, "-u", str(script)]
+        for group in params.get("groups", []):
+            if group in BLOG_GROUP_KEYS:
+                command.extend(["--group", group])
+        if params.get("download_images") is True:
+            command.append("--download-images")
+        label = f"failed group items | parent={parent_task_id}"
+        kind = "groups"
+    command.extend(["--task-id", request_id])
+    _start_process(
+        handler,
+        command,
+        request_id,
+        kind,
+        label=label,
+        params=params,
+        task_precreated=True,
     )

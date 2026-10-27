@@ -167,7 +167,7 @@ def _save_progress(progress: dict) -> None:
 async def backfill_member(client: httpx.AsyncClient, member: dict,
                           start_from: str, progress: dict,
                           reset_cursor: bool = False,
-                          user_specified_start: bool = False) -> None:
+                          user_specified_start: bool = False) -> str:
     import time
     m_name = member["m_name"]
     account_id = member["account_id"]
@@ -179,7 +179,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
     ok, reason = validate_account_cred(account_id)
     if not ok:
         print(f"  ✗ 跳过 {m_name}：账号 {account_id} 凭证不可用（{reason}）")
-        return
+        return f"账号 {account_id} 凭证不可用：{reason}"
 
     archived_ids, failed_ids = archive.load_archived_ids(m_name)
     saved_cursor = None if reset_cursor else (progress.get(key) or progress.get(legacy_key))
@@ -225,6 +225,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
     MAX_RETRIES = 3
     last_token_check = 0.0
     zero_new_streak = 0
+    task_error = ""
 
     while True:
         # Token 检查限频：每隔 5 分钟或首页检查一次，避免每页刷屏日志
@@ -240,6 +241,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             retries_net += 1
             pacer.on_error()
             if retries_net > MAX_RETRIES:
+                task_error = f"连续网络请求失败达 {MAX_RETRIES} 次 ({type(e).__name__}: {e})"
                 print(f"  ✗ 连续网络请求失败达 {MAX_RETRIES} 次 ({type(e).__name__}: {e})，跳过 {m_name}")
                 break
             print(f"  ✗ 请求失败: {type(e).__name__}: {e}，{pacer.delay:.0f}s 后重试 ({retries_net}/{MAX_RETRIES})")
@@ -249,12 +251,14 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
         if resp.status_code == 401:
             retries_401 += 1
             if retries_401 > 1:
+                task_error = f"账号 {account_id} 凭证续期后仍返回 HTTP 401"
                 print(f"  ✗ 账号 {account_id} 凭证续期后仍返回 HTTP 401，跳过 {m_name}")
                 break
             print(f"  🔄 凭证过期 (401)，尝试续期账号 {account_id}…")
             refreshed = await proactive_refresh_if_expiring(account_id, 0)
             last_token_check = time.time()
             if not refreshed:
+                task_error = f"账号 {account_id} 续期失败"
                 print(f"  ✗ 账号 {account_id} 续期失败，跳过 {m_name}")
                 break
             await asyncio.sleep(2)
@@ -264,6 +268,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             retries_429 += 1
             pacer.on_error(rate_limited=True)
             if retries_429 > MAX_RETRIES:
+                task_error = f"连续触发 429 限流达 {MAX_RETRIES} 次"
                 print(f"  ⏳ 连续触发 429 限流达 {MAX_RETRIES} 次，暂停跳过 {m_name}")
                 break
             print(f"  ⏳ 被限流 (429)，退避 {pacer.delay:.0f}s ({retries_429}/{MAX_RETRIES})…")
@@ -271,6 +276,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             continue
 
         if resp.status_code in (400, 403, 404):
+            task_error = f"遇到不可恢复错误 HTTP {resp.status_code}: {resp.text[:120]}"
             print(f"  ✗ 遇到不可恢复错误 HTTP {resp.status_code}: {resp.text[:120]}，跳过 {m_name}")
             break
 
@@ -278,6 +284,7 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
             retries_net += 1
             pacer.on_error()
             if retries_net > MAX_RETRIES:
+                task_error = f"连续异常状态码 HTTP {resp.status_code}"
                 print(f"  ✗ 连续异常状态码 HTTP {resp.status_code}，跳过 {m_name}")
                 break
             print(f"  ✗ HTTP {resp.status_code}: {resp.text[:120]}，{pacer.delay:.0f}s 后重试 ({retries_net}/{MAX_RETRIES})")
@@ -327,7 +334,76 @@ async def backfill_member(client: httpx.AsyncClient, member: dict,
     if legacy_key in progress and legacy_key != key:
         progress.pop(legacy_key, None)
     _save_progress(progress)
-    print(f"  ✅ {m_name} 完成，本次新归档 {total_new} 条")
+    if task_error:
+        print(f"  ⚠️ {m_name} 处理结束但存在失败：{task_error}")
+    else:
+        print(f"  ✅ {m_name} 完成，本次新归档 {total_new} 条")
+    return task_error
+
+
+def _member_task_key(member: dict) -> str:
+    return f"{member.get('account_id', '')}:{member.get('group_type', '')}:{member.get('m_id', '')}"
+
+
+def _member_task_payload(member: dict) -> dict:
+    return {
+        "member_key": _member_task_key(member),
+        "member_name": member.get("m_name") or member.get("name") or "",
+        "account_id": member.get("account_id") or "",
+        "group_type": member.get("group_type") or "",
+        "m_id": member.get("m_id") or "",
+    }
+
+
+async def _retry_media_items(member: dict, items: list[dict], task_store, task_id: str) -> None:
+    from src import archive
+
+    member_name = member.get("m_name") or member.get("name") or ""
+    archived_ids, _ = archive.load_archived_ids(member_name)
+    for item in items:
+        payload = item.get("payload", {})
+        message_id = str(payload.get("message_id") or "")
+        key = str(item.get("key") or "")
+        attempt = int(item.get("attempt") or 1)
+        if not message_id:
+            task_store.set_item(task_id, "media", key, "failed", attempt=attempt, error="媒体失败项缺少 message_id", payload=payload)
+            continue
+        task_store.set_item(task_id, "media", key, "running", attempt=attempt, payload=payload)
+        records = archive.load_messages_by_ids(member_name, [message_id])
+        if not records:
+            task_store.set_item(task_id, "media", key, "failed", attempt=attempt, error="归档记录不存在，无法重试媒体", payload=payload)
+            continue
+        for record in records:
+            record.setdefault("account_id", member.get("account_id", ""))
+            record.setdefault("group_type", member.get("group_type", ""))
+        try:
+            await archive.archive_messages_batch(
+                member, records, archived_ids=archived_ids, failed_ids={message_id},
+            )
+            _, remaining_failed = archive.load_archived_ids(member_name)
+            if message_id in remaining_failed:
+                task_store.set_item(task_id, "media", key, "failed", attempt=attempt, error="媒体下载仍失败", payload=payload)
+            else:
+                task_store.set_item(task_id, "media", key, "completed", attempt=attempt, payload=payload)
+        except Exception as exc:  # noqa: BLE001 - failed media remains independently retryable
+            task_store.set_item(
+                task_id, "media", key, "failed", attempt=attempt,
+                error=f"{type(exc).__name__}: {exc}", payload=payload,
+            )
+
+
+def _record_failed_media(member: dict, task_store, task_id: str) -> None:
+    from src import archive
+
+    member_name = member.get("m_name") or member.get("name") or ""
+    _, failed_ids = archive.load_archived_ids(member_name)
+    member_payload = _member_task_payload(member)
+    for message_id in sorted(failed_ids):
+        key = f"{member_payload['member_key']}:{message_id}"
+        task_store.set_item(
+            task_id, "media", key, "failed", error="媒体下载失败",
+            payload={**member_payload, "message_id": message_id},
+        )
 
 
 async def main() -> None:
@@ -336,8 +412,33 @@ async def main() -> None:
         print(__doc__)
         return
 
+    task_id = None
+    if "--task-id" in args:
+        task_index = args.index("--task-id")
+        if task_index + 1 < len(args):
+            task_id = args[task_index + 1]
+            args = args[:task_index] + args[task_index + 2:]
     force = "--force" in args
     args = [a for a in args if a != "--force"]
+
+    task_store = None
+    heartbeat_stop = None
+    retry_items: list[dict] = []
+    retry_task_item = None
+    if task_id:
+        from src import archive_tasks as task_store
+
+        task_store.mark_task_running(task_id)
+        heartbeat_stop = task_store.start_heartbeat(task_id)
+        retry_items = task_store.get_items(task_id, status="queued")
+        retry_task_item = next((item for item in retry_items if item.get("type") == "task"), None)
+        retry_items = [item for item in retry_items if item.get("type") in {"member", "media"}]
+        if retry_task_item:
+            task_store.set_item(
+                task_id, "task", str(retry_task_item.get("key") or "execution"), "running",
+                attempt=int(retry_task_item.get("attempt") or 1),
+                payload=retry_task_item.get("payload", {}),
+            )
 
     reset = "--reset" in args
     args = [a for a in args if a != "--reset"]
@@ -354,6 +455,10 @@ async def main() -> None:
         print("🚫 检测到主程序正在运行（网页管理端端口已被监听）。")
         print("   两个进程同时刷新同一账号的 Token 会让其中一个凭证作废，导致推送中断。")
         print("   请先停止主程序再回填；确认无冲突可加 --force 跳过此检查。")
+        if task_store and task_id:
+            task_store.finish_task(task_id, error="检测到主程序正在运行，拒绝启动消息回填")
+            if heartbeat_stop:
+                heartbeat_stop.set()
         return
 
     init_loggers()
@@ -369,10 +474,20 @@ async def main() -> None:
             or m["m_id"] in wanted_raw
             or m["m_name"].replace(" ", "").replace("　", "").replace("_", "") in wanted_norm
         ]
-        if not targets:
-            print(f"未在 monitor 里找到：{'、'.join(args)}")
-            print(f"可选成员：{'、'.join(m['m_name'] for m in cfg.MONITOR_LIST)}")
-            return
+    if retry_items:
+        from src.webui_modules.archive.task_retry import filter_message_targets
+
+        targets = filter_message_targets(targets, retry_items, _member_task_key)
+    if not targets:
+        message = f"未在 monitor 里找到：{'、'.join(args)}" if args else "失败项对应的成员已不在 monitor 列表中"
+        print(message)
+        print(f"可选成员：{'、'.join(m['m_name'] for m in cfg.MONITOR_LIST)}")
+        if task_store and task_id:
+            task_store.set_item(task_id, "member", "unresolved", "failed", error=message)
+            task_store.finish_task(task_id)
+            if heartbeat_stop:
+                heartbeat_stop.set()
+        return
 
     if not cfg.ARCHIVE_ENABLED:
         print("⚠️ config.json 的 archive.enabled 是关闭的——回填仍会写入归档目录，"
@@ -385,19 +500,80 @@ async def main() -> None:
     archive.initialize(client)
     tagger.initialize(client)
     progress = _load_progress()
+    task_error = ""
     try:
-        for member in targets:      # 串行：避免同账号并发
-            await backfill_member(
-                client,
-                member,
-                start_from,
-                progress,
-                reset_cursor=reset,
-                user_specified_start=user_specified_start,
+        for index, member in enumerate(targets, start=1):      # 串行：避免同账号并发
+            member_key = _member_task_key(member)
+            member_payload = _member_task_payload(member)
+            retry_member = next(
+                (item for item in retry_items if item.get("type") == "member" and item.get("key") == member_key),
+                None,
             )
+            media_items = [
+                item for item in retry_items
+                if item.get("type") == "media" and item.get("payload", {}).get("member_key") == member_key
+            ]
+            item_attempt = int((retry_member or {}).get("attempt") or 1)
+            media_only_retry = bool(retry_items and not retry_member)
+            if task_store and task_id and not media_only_retry:
+                task_store.set_item(
+                    task_id, "member", member_key, "running", attempt=item_attempt,
+                    payload=member_payload,
+                )
+                task_store.set_progress(task_id, f"member:{member['m_name']}", index - 1, len(targets))
+            try:
+                if media_items:
+                    await _retry_media_items(member, media_items, task_store, task_id)
+                if media_only_retry:
+                    if task_store and task_id:
+                        task_store.set_progress(task_id, f"media:{member['m_name']}", index, len(targets))
+                    continue
+                error = await backfill_member(
+                    client,
+                    member,
+                    start_from,
+                    progress,
+                    reset_cursor=reset,
+                    user_specified_start=user_specified_start,
+                )
+                if task_store and task_id:
+                    task_store.set_item(
+                        task_id, "member", member_key, "failed" if error else "completed",
+                        attempt=item_attempt, error=error, payload=member_payload,
+                    )
+                    _record_failed_media(member, task_store, task_id)
+            except Exception as exc:  # noqa: BLE001 - keep other selected members running
+                error = f"{type(exc).__name__}: {exc}"
+                print(f"  ✗ {member['m_name']} 回填异常: {error}")
+                if task_store and task_id:
+                    task_store.set_item(
+                        task_id, "member", member_key, "failed", attempt=item_attempt,
+                        error=error, payload=member_payload,
+                    )
+            if task_store and task_id:
+                task_store.set_progress(task_id, f"member:{member['m_name']}", index, len(targets))
         await tagger.wait_pending(timeout=10)
+        if task_store and task_id and retry_task_item:
+            task_store.set_item(
+                task_id, "task", str(retry_task_item.get("key") or "execution"), "completed",
+                attempt=int(retry_task_item.get("attempt") or 1),
+                payload=retry_task_item.get("payload", {}),
+            )
+    except Exception as exc:  # noqa: BLE001 - persist unexpected worker failure
+        task_error = f"{type(exc).__name__}: {exc}"
+        if task_store and task_id and retry_task_item:
+            task_store.set_item(
+                task_id, "task", str(retry_task_item.get("key") or "execution"), "failed",
+                attempt=int(retry_task_item.get("attempt") or 1), error=task_error,
+                payload=retry_task_item.get("payload", {}),
+            )
+        raise
     finally:
         await client.aclose()
+        if task_store and task_id:
+            task_store.finish_task(task_id, error=task_error)
+        if heartbeat_stop:
+            heartbeat_stop.set()
     log_all("历史回填完成", is_debug=True)
     print("═══ 全部完成 ═══")
 

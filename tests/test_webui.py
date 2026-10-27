@@ -8,6 +8,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -38,6 +39,19 @@ SAMPLE = {
 
 def _http(method: str, url: str, body: dict | None = None, headers: dict | None = None):
     """返回 (status_code, parsed_json | raw_text)。4xx/5xx 也解析 body。"""
+    if method in ("PUT", "POST") and (body is None or (isinstance(body, dict) and "expected_revision" not in body)):
+        endpoint = urlsplit(url).path
+        if endpoint in ("/api/config", "/api/config/commit", "/api/secrets", "/api/config/restore", "/api/config/rollback", "/api/social/ig_session", "/api/social/ig_session/clear"):
+            try:
+                base_url = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
+                rev_req = urllib.request.Request(f"{base_url}/api/config", headers=headers or {})
+                with urllib.request.urlopen(rev_req, timeout=5) as rev_resp:
+                    rev_data = json.loads(rev_resp.read().decode("utf-8"))
+                    if isinstance(rev_data, dict) and rev_data.get("revision"):
+                        body = dict(body or {})
+                        body["expected_revision"] = rev_data["revision"]
+            except Exception:
+                pass
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     if data is not None:
@@ -225,13 +239,19 @@ def main() -> None:
     reload_calls = []
     rotate_calls = []
     restart_calls = []
+    import src.config.config as cfg
+    orig_auth_enabled = cfg.AUTH_ENABLED
+    orig_cfg_path = getattr(cfg, "_CONFIG_PATH", None)
+    cfg._CONFIG_PATH = tmp_config
+    cfg.AUTH_ENABLED = False
     webui.CONFIG_PATH = tmp_config
     webui.ENV_PATH = Path(tmpdir) / ".env"
     webui._trigger_reload = lambda: (reload_calls.append(1), True)[1]
+    webui.set_on_reload_callback(lambda *a, **k: reload_calls.append(1))
     webui._rotate_account_creds = lambda acc: rotate_calls.append(acc)
     os.environ.pop("WEB_ADMIN_TOKEN", None)
 
-    server = webui.start_webui(host="127.0.0.1", port=0)
+    server = webui.start_webui(host="127.0.0.1", port=0, on_reload=lambda *a, **k: reload_calls.append(1))
     assert server is not None, "服务应能在临时端口启动"
     base = f"http://127.0.0.1:{server.server_address[1]}"
 
@@ -512,8 +532,11 @@ def main() -> None:
         assert code == 200 and len(data["history"]) >= 2, f"两次成功 PUT 应产生 ≥2 份快照: {data}"
         newest = data["history"][0]["name"]
         code, data = _http("GET", base + "/api/config/history?name=" + newest)
-        assert code == 200 and data["ok"] and json5.loads(data["content"]) == new_cfg, \
-            "查看快照应返回可解析的原始内容"
+        assert code == 200 and data["ok"] and data.get("content_redacted") is True, \
+            "查看快照应返回脱敏内容"
+        parsed_preview = json5.loads(data["content"])
+        assert parsed_preview.get("napcat_api") == "[redacted]"
+        assert parsed_preview.get("monitor") == new_cfg["monitor"]
         code, data = _http("GET", base + "/api/config/history?name=../evil.json")
         assert code == 400, "查看接口也应拒绝路径穿越名"
         code, data = _http("POST", base + "/api/config/restore", body={"name": newest})
@@ -547,6 +570,9 @@ def main() -> None:
         code, data = _http("GET", base + "/api/unknown_endpoint")
         assert code == 404 and not data["ok"], f"API 404 应返回 JSON 错误，实际 {code}"
     finally:
+        cfg.AUTH_ENABLED = orig_auth_enabled
+        if orig_cfg_path is not None:
+            cfg._CONFIG_PATH = orig_cfg_path
         for key in ("WEB_ADMIN_TOKEN", "HINATA_SHARED_TOKEN", "HINATA_SHARED_COOKIE"):
             os.environ.pop(key, None)
         server.shutdown()
@@ -558,6 +584,7 @@ def main() -> None:
         webui.CONFIG_PATH = orig_config_path
         webui.ENV_PATH = orig_env_path
         webui._trigger_reload = orig_trigger
+        webui.set_on_reload_callback(None)
         webui._rotate_account_creds = orig_rotate
 
     print("✅ Test 3 通过\n")

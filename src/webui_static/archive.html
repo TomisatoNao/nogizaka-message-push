@@ -6,10 +6,10 @@
 <meta name="referrer" content="no-referrer">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>坂道监控 · 消息归档</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260921_2">
+<link rel="stylesheet" href="/static/theme.css?v=20261027_1">
 <script src="/static/theme.js?v=20260905_3"></script>
-<link rel="stylesheet" href="/static/archive.css?v=20261023_1">
-<link rel="preload" href="/static/archive.js?v=20261023_1" as="script">
+<link rel="stylesheet" href="/static/archive.css?v=20261027_1">
+<link rel="preload" href="/static/archive.js?v=20261026_2" as="script">
 <script>
   // 极速首屏预路由：在 DOM 绘制前立即根据 URL Hash 激活对应视图，消除白屏与视图跳动
   (function() {
@@ -97,6 +97,7 @@
     <div class="sk-msg"><div></div><div></div><div></div></div>
   </div>
   <div class="portal-content" id="portalContent" style="display:none;">
+    <div class="portal-cache-notice" id="homeCacheNotice" role="status" aria-live="polite" hidden></div>
     <!-- 1. 全站总览 Hero 看板 -->
     <div class="portal-hero" id="portalHero"></div>
 
@@ -488,37 +489,37 @@
       <input type="hidden" id="bmMemberInput" value="" />
     </div>
 
-    <div style="margin-bottom: 16px;">
-      <label style="font-size: 12.5px; font-weight: 600; color: #a1a1a6; display: block; margin-bottom: 8px;">回填模式</label>
-      <div style="display: flex; flex-direction: column; gap: 10px;">
-        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
-          <input type="radio" name="bmMode" value="incremental" checked style="margin-top: 2px; accent-color: var(--primary, #7c3aed);" />
-          <div style="line-height: 1.3;">
-            <div style="font-size: 13.5px; font-weight: 600; color: #fff;">断点续传（推荐）</div>
-            <div style="font-size: 12px; color: #8e8e93; margin-top: 2px;">从上次保存的断点继续，自动快速跳过已归档消息</div>
+    <div class="bm-mode-group">
+      <label class="bm-mode-label">回填模式</label>
+      <div class="bm-mode-options">
+        <label class="bm-mode-card">
+          <input type="radio" name="bmMode" value="incremental" checked />
+          <div class="bm-mode-info">
+            <div class="bm-mode-title">断点续传（推荐）</div>
+            <div class="bm-mode-desc">从上次保存的断点继续，自动快速跳过已归档消息</div>
           </div>
         </label>
 
-        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
-          <input type="radio" name="bmMode" value="smart_full" style="margin-top: 2px; accent-color: var(--primary, #7c3aed);" />
-          <div style="line-height: 1.3;">
-            <div style="font-size: 13.5px; font-weight: 600; color: #fff;">智能全量扫描（换号 / 漏期推荐）</div>
-            <div style="font-size: 12px; color: #8e8e93; margin-top: 2px;">自动从成员开通首日智能扫描，补齐历史遗漏并重试失败媒体</div>
+        <label class="bm-mode-card">
+          <input type="radio" name="bmMode" value="smart_full" />
+          <div class="bm-mode-info">
+            <div class="bm-mode-title">智能全量扫描（换号 / 漏期推荐）</div>
+            <div class="bm-mode-desc">自动从成员开通首日智能扫描，补齐历史遗漏并重试失败媒体</div>
           </div>
         </label>
 
-        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
-          <input type="radio" name="bmMode" value="custom" style="margin-top: 2px; accent-color: var(--primary, #7c3aed);" />
-          <div style="line-height: 1.3;">
-            <div style="font-size: 13.5px; font-weight: 600; color: #fff;">指定起始日期</div>
-            <div style="font-size: 12px; color: #8e8e93; margin-top: 2px;">从指定年月日开始向后扫描归档</div>
+        <label class="bm-mode-card">
+          <input type="radio" name="bmMode" value="custom" />
+          <div class="bm-mode-info">
+            <div class="bm-mode-title">指定起始日期</div>
+            <div class="bm-mode-desc">从指定年月日开始向后扫描归档</div>
           </div>
         </label>
       </div>
     </div>
 
-    <div id="bmCustomDateRow" style="display: none; margin-bottom: 16px;">
-      <label style="font-size: 12.5px; font-weight: 600; color: #a1a1a6; display: block; margin-bottom: 6px;">起始日期 (YYYY-MM-DD)</label>
+    <div id="bmCustomDateRow" class="bm-custom-date-row" style="display: none;">
+      <label class="bm-mode-label">起始日期 (YYYY-MM-DD)</label>
       <input type="date" id="bmFromDateInput" class="cm-input" />
     </div>
 
@@ -581,7 +582,7 @@
 
 <!-- 版本号必须在 archive.js 行为变更时递增；静态处理器会对带 v 的资源启用 immutable 缓存。 -->
 <div id="toastContainer" class="toast-container"></div>
-<script src="/static/archive.js?v=20261023_1"></script>
+<script src="/static/archive.js?v=20261026_2"></script>
 
 </body>
 </html>

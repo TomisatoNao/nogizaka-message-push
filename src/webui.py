@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
 from pathlib import Path
 import socket
@@ -32,7 +33,12 @@ from src.webui_modules.config_service import (
     _rotate_account_creds,
     _snapshot_config,
     commit_config_and_secrets,
+    config_state_revision,
+    config_preview_diff,
+    redact_config_error_messages,
+    redact_config_preview,
     _trigger_reload,
+    _trigger_reload_report,
     list_config_history,
     save_config,
     serialize_config,
@@ -80,6 +86,7 @@ from src.webui_modules.system_handlers import (
     env_status as _env_status,
     handle_logs as _sys_handle_logs,
     handle_members as _sys_handle_members,
+    handle_route_diagnostics as _sys_handle_route_diagnostics,
     handle_openid_action as _sys_handle_openid_action,
     handle_openid_status as _sys_handle_openid_status,
     handle_proxy_test as _sys_handle_proxy_test,
@@ -129,7 +136,12 @@ __all__ = [
     "_rotate_account_creds",
     "_snapshot_config",
     "commit_config_and_secrets",
+    "config_state_revision",
+    "config_preview_diff",
+    "redact_config_error_messages",
+    "redact_config_preview",
     "_trigger_reload",
+    "_trigger_reload_report",
     "list_config_history",
     "save_config",
     "serialize_config",
@@ -165,6 +177,65 @@ def _load_raw_config() -> dict:
     import json5
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json5.load(f)
+
+
+def _read_expected_revision(handler, body: dict) -> str | None:
+    """Require an explicit optimistic-concurrency token on config mutations."""
+    expected = body.pop("expected_revision", None)
+    if isinstance(expected, str) and expected.strip():
+        if len(expected) == 64 and all(char in "0123456789abcdef" for char in expected):
+            return expected
+        handler._send_json({
+            "ok": False,
+            "error": "expected_revision_invalid",
+            "message": "配置版本格式无效，请重新读取配置后再提交。",
+        }, 400)
+        return None
+    handler._send_json({
+        "ok": False,
+        "error": "expected_revision_required",
+        "message": "缺少配置版本，请重新读取配置后再提交。",
+    }, 428)
+    return None
+
+
+def _check_expected_revision_locked(handler, expected: str) -> str | None:
+    """Check config+env state while the caller holds ``_mutation_lock``."""
+    try:
+        current = config_state_revision(CONFIG_PATH, ENV_PATH)
+    except Exception:
+        handler._send_json({
+            "ok": False,
+            "error": "revision_unavailable",
+            "message": "无法读取当前配置版本，请稍后重试。",
+        }, 500)
+        return None
+    if not hmac.compare_digest(expected, current):
+        handler._send_json({
+            "ok": False,
+            "error": "revision_conflict",
+            "revision": current,
+            "message": "配置或凭据已变化，请重新载入并合并草稿后再保存。",
+        }, 409)
+        return None
+    return current
+
+
+def _log_saved_reload(action: str, report: dict) -> None:
+    from src.logger import log_all
+
+    reload_state = report["reload"]
+    if reload_state["config"] == "loaded":
+        log_all(
+            f"⚙️ 网页端{action}已保存，配置 facade 已加载；组件状态: "
+            f"{reload_state['components']}"
+        )
+    else:
+        log_all(
+            f"⚠️ 网页端{action}已保存，但配置 facade 重载失败；"
+            f"组件状态: {reload_state['components']}",
+            is_error=True,
+        )
 
 
 def _validate_secret_commit_operations(body: dict) -> tuple[dict, dict, list[str], list[dict], list[str]]:
@@ -537,6 +608,12 @@ class _Handler(BaseHTTPRequestHandler):
             _sys_handle_members(self, _load_raw_config)
             return
 
+        if path == "/api/route-diagnostics":
+            if not self._guard(need_admin=True):
+                return
+            _sys_handle_route_diagnostics(self)
+            return
+
         if path == "/api/qq_openid/status":
             if not self._guard(need_admin=True):
                 return
@@ -548,12 +625,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._guard(need_admin=True):
                 return
             try:
-                raw = _load_raw_config()
+                with _mutation_lock:
+                    raw = _load_raw_config()
+                    revision = config_state_revision(CONFIG_PATH, ENV_PATH)
             except Exception as e:
-                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {e}"]}, 500)
+                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {type(e).__name__}"]}, 500)
                 return
             self._send_json({
-                "ok": True, "config": raw,
+                "ok": True, "config": raw, "revision": revision,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
                 "env_status": _env_status(raw),
                 # 只返回稳定的逻辑名称，避免暴露容器内绝对路径。
@@ -588,10 +667,23 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "errors": [f"快照文件不存在: {name!r}"]}, 404)
                     return
                 try:
-                    content_str = src.read_text(encoding="utf-8")
-                    self._send_json({"ok": True, "name": name, "content": content_str})
+                    import json5
+                    with _mutation_lock:
+                        snapshot_raw = json5.loads(src.read_text(encoding="utf-8"))
+                        current_raw = _load_raw_config()
+                    safe_content = json.dumps(
+                        redact_config_preview(snapshot_raw), ensure_ascii=False, indent=2,
+                    )
+                    self._send_json({
+                        "ok": True,
+                        "name": name,
+                        "content": safe_content,
+                        "content_redacted": True,
+                        "restore_uses_server_snapshot": True,
+                        "preview": config_preview_diff(current_raw, snapshot_raw),
+                    })
                 except Exception as e:
-                    self._send_json({"ok": False, "errors": [f"读取快照失败: {e}"]}, 500)
+                    self._send_json({"ok": False, "errors": [f"读取快照失败: {type(e).__name__}"]}, 500)
                 return
             self._send_json({"ok": True, "history": list_config_history(CONFIG_PATH)})
             return
@@ -625,6 +717,13 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_origin():
             return
         path = self.path.split("?", 1)[0]
+
+        if path == "/api/route-diagnostics":
+            if not self._guard(need_admin=True):
+                return
+            self._pending_headers = [*getattr(self, "_pending_headers", []), ("Allow", "GET")]
+            self._send_json({"ok": False, "errors": ["请使用 GET 请求"]}, 405)
+            return
 
         # 1. 登录认证
         if path == "/api/auth/login":
@@ -663,9 +762,15 @@ class _Handler(BaseHTTPRequestHandler):
             body = self._read_body_json()
             if body is None:
                 return
+            expected_revision = _read_expected_revision(self, body)
+            if expected_revision is None:
+                return
             ok, cookie_count = _social_handle_ig_session_save(
-                self, body, load_raw_config=_load_raw_config, trigger_reload=_trigger_reload,
-                update_env_file=update_env_file, mutation_lock=_mutation_lock,
+                self, body, load_raw_config=_load_raw_config, trigger_reload=_trigger_reload_report,
+                update_env_file=lambda values, **kwargs: update_env_file(values, path=ENV_PATH, **kwargs),
+                mutation_lock=_mutation_lock, expected_revision=expected_revision,
+                check_revision_locked=_check_expected_revision_locked,
+                get_revision=lambda: config_state_revision(CONFIG_PATH, ENV_PATH),
             )
             if ok:
                 self._audit("social.ig_session.save", details={"cookie_count": cookie_count})
@@ -680,9 +785,18 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/social/ig_session/clear":
             if not self._check_auth():
                 return
+            body = self._read_body_json()
+            if body is None:
+                return
+            expected_revision = _read_expected_revision(self, body)
+            if expected_revision is None:
+                return
             if _social_handle_ig_session_clear(
-                self, trigger_reload=_trigger_reload, update_env_file=update_env_file,
-                mutation_lock=_mutation_lock,
+                self, trigger_reload=_trigger_reload_report, update_env_file=update_env_file,
+                mutation_lock=_mutation_lock, expected_revision=expected_revision,
+                check_revision_locked=_check_expected_revision_locked,
+                get_revision=lambda: config_state_revision(CONFIG_PATH, ENV_PATH),
+                env_path=ENV_PATH,
             ):
                 self._audit("social.ig_session.clear")
             return
@@ -703,11 +817,15 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/reload":
             if not self._check_auth():
                 return
-            reloaded = _trigger_reload()
+            with _mutation_lock:
+                report = _trigger_reload_report()
             from src.logger import log_all
             log_all("⟳ 网页端请求系统配置热重载")
-            self._audit("config.reload", details={"reloaded": reloaded})
-            self._send_json({"ok": True, "reloaded": reloaded})
+            self._audit("config.reload", details={
+                "reloaded": report["reloaded"],
+                "components": report["reload"]["components"],
+            })
+            self._send_json({"ok": True, **report})
             return
 
         if path == "/api/secrets":
@@ -719,6 +837,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             body = self._read_body_json()
             if body is None:
+                return
+            expected_revision = _read_expected_revision(self, body)
+            if expected_revision is None:
                 return
             filename = str(body.get("name") or body.get("filename", "")).strip()
             if not _HISTORY_NAME_RE.match(filename):
@@ -733,18 +854,33 @@ class _Handler(BaseHTTPRequestHandler):
                 with open(src, "r", encoding="utf-8") as f:
                     raw = json5.load(f)
             except Exception as e:
-                self._send_json({"ok": False, "errors": [f"解析快照失败: {e}"]}, 500)
+                self._send_json({"ok": False, "errors": [f"解析快照失败: {type(e).__name__}"]}, 500)
+                return
+            errors = redact_config_error_messages(
+                validate_config(raw, schema_path=SCHEMA_PATH), raw,
+            )
+            if errors:
+                self._send_json({"ok": False, "errors": errors}, 400)
                 return
             with _mutation_lock:
+                if _check_expected_revision_locked(self, expected_revision) is None:
+                    return
                 try:
                     save_config(raw, path=CONFIG_PATH)
                 except Exception as e:
-                    self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
+                    self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {type(e).__name__}"]}, 500)
                     return
-                reloaded = _trigger_reload()
-            self._audit("config.restore", target=filename, details={"reloaded": reloaded})
+                revision = config_state_revision(CONFIG_PATH, ENV_PATH)
+                report = _trigger_reload_report()
+            _log_saved_reload("恢复历史配置", report)
+            self._audit("config.restore", target=filename, details={
+                "saved": True,
+                "reloaded": report["reloaded"],
+                "components": report["reload"]["components"],
+            })
             self._send_json({
-                "ok": True, "reloaded": reloaded, "restored": filename, "restored_from": filename,
+                "ok": True, "saved": True, "revision": revision, **report,
+                "restored": filename, "restored_from": filename,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
             })
             return
@@ -899,18 +1035,34 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
 
+        if path == "/api/route-diagnostics":
+            if not self._guard(need_admin=True):
+                return
+            self._pending_headers = [*getattr(self, "_pending_headers", []), ("Allow", "GET")]
+            self._send_json({"ok": False, "errors": ["请使用 GET 请求"]}, 405)
+            return
+
         if path == "/api/config/commit":
             if not self._check_auth():
                 return
             body = self._read_body_json()
             if body is None:
                 return
+            expected_revision = _read_expected_revision(self, body)
+            if expected_revision is None:
+                return
             raw, updates, removes, renames, op_errors = _validate_secret_commit_operations(body)
-            errors = list(op_errors) + validate_config(raw, schema_path=SCHEMA_PATH)
+            errors = redact_config_error_messages(
+                list(op_errors) + validate_config(raw, schema_path=SCHEMA_PATH),
+                raw,
+                updates,
+            )
             if errors:
                 self._send_json({"ok": False, "errors": errors}, 400)
                 return
             with _mutation_lock:
+                if _check_expected_revision_locked(self, expected_revision) is None:
+                    return
                 try:
                     result = commit_config_and_secrets(
                         raw,
@@ -921,18 +1073,20 @@ class _Handler(BaseHTTPRequestHandler):
                         env_path=ENV_PATH,
                     )
                 except ValueError as e:
-                    self._send_json({"ok": False, "errors": [str(e)]}, 400)
+                    self._send_json({"ok": False, "errors": [f"组合提交失败: {e}"]}, 400)
                     return
                 except Exception as e:
-                    self._send_json({"ok": False, "errors": [f"组合提交失败: {e}"]}, 500)
+                    self._send_json({"ok": False, "errors": [f"组合提交失败: {type(e).__name__}"]}, 500)
                     return
-                reloaded = _trigger_reload()
-                from src.logger import log_all
-                log_all("⚙️ 网页端组合更新 config.json 与 Bot 凭证并成功触发热重载")
+                revision = config_state_revision(CONFIG_PATH, ENV_PATH)
+                report = _trigger_reload_report()
+            _log_saved_reload("组合配置与 Bot 凭证", report)
             self._audit(
                 "config.commit",
                 details={
-                    "reloaded": reloaded,
+                    "saved": True,
+                    "reloaded": report["reloaded"],
+                    "components": report["reload"]["components"],
                     "updated": ",".join(result["updated"]),
                     "removed": ",".join(result["removed"]),
                     "renamed": len(result["renamed"]),
@@ -943,8 +1097,7 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 latest = raw
             self._send_json({
-                "ok": True,
-                "reloaded": reloaded,
+                "ok": True, "saved": True, "revision": revision, **report,
                 "updated": result["updated"],
                 "removed": result["removed"],
                 "renamed": result["renamed"],
@@ -960,22 +1113,33 @@ class _Handler(BaseHTTPRequestHandler):
             raw = self._read_body_json()
             if raw is None:
                 return
-            errors = validate_config(raw, schema_path=SCHEMA_PATH)
+            expected_revision = _read_expected_revision(self, raw)
+            if expected_revision is None:
+                return
+            errors = redact_config_error_messages(
+                validate_config(raw, schema_path=SCHEMA_PATH), raw,
+            )
             if errors:
                 self._send_json({"ok": False, "errors": errors}, 400)
                 return
             with _mutation_lock:
+                if _check_expected_revision_locked(self, expected_revision) is None:
+                    return
                 try:
                     save_config(raw, path=CONFIG_PATH)
                 except Exception as e:
-                    self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {e}"]}, 500)
+                    self._send_json({"ok": False, "errors": [f"写入 config.json 失败: {type(e).__name__}"]}, 500)
                     return
-                reloaded = _trigger_reload()
-                from src.logger import log_all
-                log_all("⚙️ 网页端更新 config.json 并成功触发热重载")
-            self._audit("config.update", details={"reloaded": reloaded})
+                revision = config_state_revision(CONFIG_PATH, ENV_PATH)
+                report = _trigger_reload_report()
+            _log_saved_reload("配置", report)
+            self._audit("config.update", details={
+                "saved": True,
+                "reloaded": report["reloaded"],
+                "components": report["reload"]["components"],
+            })
             self._send_json({
-                "ok": True, "reloaded": reloaded,
+                "ok": True, "saved": True, "revision": revision, **report,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
             })
             return
@@ -999,6 +1163,14 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._check_origin():
             return
         path = self.path.split("?", 1)[0]
+
+        if path == "/api/route-diagnostics":
+            if not self._guard(need_admin=True):
+                return
+            self._pending_headers = [*getattr(self, "_pending_headers", []), ("Allow", "GET")]
+            self._send_json({"ok": False, "errors": ["请使用 GET 请求"]}, 405)
+            return
+
         if path.startswith("/api/archive/"):
             sub = path[len("/api/archive/"):]
             _mod_handle_archive(self, sub, self._guard, self._read_body_json)
@@ -1016,6 +1188,9 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_body_json()
         if body is None:
             return
+        expected_revision = _read_expected_revision(self, body)
+        if expected_revision is None:
+            return
         remove = body.get("remove")
         if isinstance(remove, list) and remove and not body.get("values"):
             bad = [k for k in remove if not isinstance(k, str) or k in _FORBIDDEN_ENV_KEYS or not _SECRET_KEY_RE.match(k)]
@@ -1023,22 +1198,33 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": [f"不允许删除的变量: {bad}"]}, 400)
                 return
             with _mutation_lock:
+                if _check_expected_revision_locked(self, expected_revision) is None:
+                    return
                 try:
                     update_env_file({}, remove=remove, path=ENV_PATH)
                 except Exception as e:
-                    self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
+                    self._send_json({"ok": False, "errors": [f"写入 .env 失败: {type(e).__name__}"]}, 500)
                     return
                 for key in remove:
                     os.environ.pop(key, None)
-                reloaded = _trigger_reload()
+                revision = config_state_revision(CONFIG_PATH, ENV_PATH)
+                report = _trigger_reload_report()
             raw = None
             try:
                 raw = _load_raw_config()
                 status = {"cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw)}
             except Exception:
                 status = {}
-            self._audit("secrets.remove", details={"keys": ",".join(sorted(remove)), "reloaded": reloaded})
-            self._send_json({"ok": True, "reloaded": reloaded, "removed": sorted(remove), "env_status": _env_status(raw), **status})
+            self._audit("secrets.remove", details={
+                "keys": ",".join(sorted(remove)),
+                "saved": True,
+                "reloaded": report["reloaded"],
+                "components": report["reload"]["components"],
+            })
+            self._send_json({
+                "ok": True, "saved": True, "revision": revision, **report,
+                "removed": sorted(remove), "env_status": _env_status(raw), **status,
+            })
             return
 
         values = body.get("values")
@@ -1046,13 +1232,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "errors": ["缺少 values 对象"]}, 400)
             return
 
-        errors = validate_secret_values(values)
+        errors = redact_config_error_messages(validate_secret_values(values), values)
         account = body.get("account")
         if account is not None:
             try:
                 raw = _load_raw_config()
             except Exception as e:
-                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {e}"]}, 500)
+                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {type(e).__name__}"]}, 500)
                 return
             if account not in raw.get("accounts", {}):
                 errors.append(f"未知账号: {account!r}")
@@ -1061,16 +1247,19 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         with _mutation_lock:
+            if _check_expected_revision_locked(self, expected_revision) is None:
+                return
             try:
                 update_env_file(values, path=ENV_PATH)
             except Exception as e:
-                self._send_json({"ok": False, "errors": [f"写入 .env 失败: {e}"]}, 500)
+                self._send_json({"ok": False, "errors": [f"写入 .env 失败: {type(e).__name__}"]}, 500)
                 return
             for key, val in values.items():
                 os.environ[key] = val
             if account is not None:
                 _rotate_account_creds(account)
-            reloaded = _trigger_reload()
+            revision = config_state_revision(CONFIG_PATH, ENV_PATH)
+            report = _trigger_reload_report()
 
         raw = None
         try:
@@ -1079,8 +1268,16 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             status = {}
         self._audit("secrets.update", target=str(account or ""),
-                    details={"keys": ",".join(sorted(values)), "reloaded": reloaded})
-        self._send_json({"ok": True, "reloaded": reloaded, "updated": sorted(values), "env_status": _env_status(raw), **status})
+                    details={
+                        "keys": ",".join(sorted(values)),
+                        "saved": True,
+                        "reloaded": report["reloaded"],
+                        "components": report["reload"]["components"],
+                    })
+        self._send_json({
+            "ok": True, "saved": True, "revision": revision, **report,
+            "updated": sorted(values), "env_status": _env_status(raw), **status,
+        })
 
     def log_message(self, fmt: str, *args) -> None:
         pass

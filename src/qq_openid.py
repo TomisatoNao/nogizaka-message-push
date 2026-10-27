@@ -183,7 +183,13 @@ async def listen_once(app_id: str, client_secret: str,
             hb.cancel()
 
 
-async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: str = "") -> None:
+async def listen_forever(
+    app_id: str,
+    client_secret: str,
+    on_message,
+    bot_name: str = "",
+    on_connected=None,
+) -> None:
     """长期监听 Bot 网关的私聊消息（指令功能用），断线自动重连。
 
     on_message(text, sender_openid, app_id) -> str | None，返回非空则作为回复发送。
@@ -198,6 +204,7 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
     label = f"[{bot_name}] " if bot_name else f"[{app_id[:6]}...] " if app_id else ""
     backoff = 5
     first_connect = True
+    connection_reported = False
     while True:
         try:
             async with httpx.AsyncClient() as client:
@@ -239,6 +246,17 @@ async def listen_forever(app_id: str, client_secret: str, on_message, bot_name: 
                         event = json.loads(raw)
                         if time.monotonic() >= reconnect_at:
                             break  # 收到消息后刚好到时间，也重连
+                        if event.get("t") == "READY" and not connection_reported:
+                            connection_reported = True
+                            if on_connected is not None:
+                                try:
+                                    on_connected()
+                                except Exception as callback_exc:
+                                    log_all(
+                                        "⚠️ 官方 Bot 指令监听状态回报失败 "
+                                        f"({type(callback_exc).__name__})",
+                                        is_warning=True,
+                                    )
                         if event.get("s") is not None:
                             seq_ref["seq"] = event["s"]
                         t = event.get("t", "")

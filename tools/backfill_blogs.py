@@ -37,6 +37,10 @@ from src.blog_fetcher import (
     _normalize_date,
     init_blog_db,
 )
+from src.webui_modules.archive.task_retry import (
+    blog_article_requested as _retry_blog_article_requested,
+    blog_page_ids as _retry_blog_page_ids,
+)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -50,6 +54,31 @@ GROUP_NAMES = {
     "hinatazaka": "日向坂46",
 }
 RETRY_STATUS = {408, 425, 429, 500, 502, 503, 504}
+_TASK_ID: str | None = None
+_TASK_RETRY_ITEMS: list[dict] = []
+_TASK_COMPLETED_ITEMS: list[dict] = []
+
+
+def _task_item(type_: str, key: str, status: str, *, error: str = "", payload: dict | None = None) -> None:
+    if _TASK_ID:
+        from src.archive_tasks import set_item
+
+        set_item(_TASK_ID, type_, key, status, error=error, payload=payload)
+
+
+def _task_page_ids(group_key: str) -> set[int]:
+    return _retry_blog_page_ids(_TASK_RETRY_ITEMS, group_key)
+
+
+def _task_article_requested(group_key: str, page: int, post_url: str, index: int) -> bool:
+    return _retry_blog_article_requested(
+        _TASK_RETRY_ITEMS,
+        group_key,
+        page,
+        post_url,
+        index,
+        completed_items=_TASK_COMPLETED_ITEMS,
+    )
 
 
 @dataclass
@@ -254,8 +283,22 @@ async def backfill_nogizaka(
     url_base = "https://www.nogizaka46.com/s/n46/api/list/blog"
     nogi_headers = {**HEADERS, "accept": "application/json", "x-requested-with": "XMLHttpRequest"}
     rw = 30
-    st = 0
-    while True:
+    requested_offsets = sorted(_task_page_ids("nogizaka")) if _TASK_RETRY_ITEMS else None
+    offsets = requested_offsets if requested_offsets is not None else None
+    st = offsets[0] if offsets else 0
+    while offsets is None or offsets:
+        if offsets is not None and st not in offsets:
+            st += rw
+            if st > offsets[-1]:
+                break
+            continue
+        page_payload = {
+            "group": "nogizaka",
+            "page": st,
+            "url": f"{url_base}?st={st}&rw={rw}",
+        }
+        page_key = f"nogizaka:{st}"
+        _task_item("page", page_key, "running", payload=page_payload)
         try:
             response = await _get(client, f"{url_base}?st={st}&rw={rw}", headers=nogi_headers)
             text = re.sub(r"^\w+\(", "", response.text).rstrip(");")
@@ -263,12 +306,20 @@ async def backfill_nogizaka(
             items = data.get("data", [])
             if not items:
                 print(f"  乃木坂46 已抓取完毕 (已达终点 st={st})", flush=True)
+                _task_item("page", page_key, "completed", payload=page_payload)
                 break
             before = stats.added
-            for item in items:
+            for index, item in enumerate(items):
                 code = str(item.get("code") or "")
+                post_url = f"https://www.nogizaka46.com/s/n46/diary/detail/{code}?ima=0000&cd=MEMBER" if code else ""
+                article_key = post_url or f"nogizaka:{st}:{index}"
+                article_payload = {"group": "nogizaka", "page": st, "index": index, "url": post_url}
+                if not _task_article_requested("nogizaka", st, post_url, index):
+                    continue
+                _task_item("article", article_key, "running", payload=article_payload)
                 if not code:
                     stats.failed += 1
+                    _task_item("article", article_key, "failed", error="列表项缺少文章 code", payload=article_payload)
                     continue
                 raw_html = str(item.get("text") or "")
                 soup = BeautifulSoup(raw_html, "html.parser")
@@ -276,30 +327,50 @@ async def backfill_nogizaka(
                     urljoin("https://www.nogizaka46.com", img.get("src", ""))
                     for img in soup.find_all("img") if img.get("src")
                 ]
-                post_url = f"https://www.nogizaka46.com/s/n46/diary/detail/{code}?ima=0000&cd=MEMBER"
-                await _save_post(db, client, {
-                    "group_key": "nogizaka",
-                    "author": str(item.get("name") or "乃木坂46成员").strip(),
-                    "title": str(item.get("title") or "无标题").strip(),
-                    "url": post_url,
-                    "date": item.get("date", ""),
-                    "body_html": raw_html,
-                    "body_text": _html_to_text(raw_html),
-                    "images": images,
-                    "raw": item,
-                }, stats, download_images=download_images)
+                before_image_failures = stats.image_failed
+                try:
+                    await _save_post(db, client, {
+                        "group_key": "nogizaka",
+                        "author": str(item.get("name") or "乃木坂46成员").strip(),
+                        "title": str(item.get("title") or "无标题").strip(),
+                        "url": post_url,
+                        "date": item.get("date", ""),
+                        "body_html": raw_html,
+                        "body_text": _html_to_text(raw_html),
+                        "images": images,
+                        "raw": item,
+                    }, stats, download_images=download_images)
+                except Exception as exc:  # noqa: BLE001 - a failed article remains independently retryable
+                    stats.failed += 1
+                    _task_item("article", article_key, "failed", error=f"{type(exc).__name__}: {exc}", payload=article_payload)
+                else:
+                    image_error = stats.image_failed > before_image_failures
+                    _task_item(
+                        "article", article_key, "failed" if image_error else "completed",
+                        error="文章图片下载失败" if image_error else "", payload=article_payload,
+                    )
             db.commit()
             print(
                 f"  [乃木坂46] Offset {st:04d}: 本批新增 {stats.added - before:2d} 篇 "
                 f"(累计新增 {stats.added:,} | 已存在 {stats.skipped:,})",
                 flush=True,
             )
+            _task_item("page", page_key, "completed", payload=page_payload)
             st += rw
             await asyncio.sleep(0.12)
         except Exception as exc:  # noqa: BLE001 - 记录当前页并结束，重跑可续
             stats.failed += 1
             print(f"  [乃木坂46] Offset {st} 出错，停止本团: {exc}", flush=True)
-            break
+            _task_item("page", page_key, "failed", error=f"{type(exc).__name__}: {exc}", payload=page_payload)
+            if offsets is not None:
+                st += rw
+            else:
+                break
+        if offsets is not None:
+            offsets = [offset for offset in offsets if offset > st]
+            if not offsets:
+                break
+            st = offsets[0]
     print(f"🟣 乃木坂46 归档完成！{stats.summary()}", flush=True)
     return stats
 
@@ -313,25 +384,37 @@ async def backfill_hinatazaka(
 ) -> GroupStats:
     stats = GroupStats("hinatazaka")
     print("\n☀️ 开始抓取【日向坂46】官方博客全量数据...", flush=True)
-    for page in range(max_pages):
+    requested_pages = sorted(_task_page_ids("hinatazaka")) if _TASK_RETRY_ITEMS else None
+    pages = requested_pages if requested_pages is not None else range(max_pages)
+    for page in pages:
         page_url = f"https://www.hinatazaka46.com/s/official/diary/member/list?ima=0000&page={page}"
+        page_key = f"hinatazaka:{page}"
+        page_payload = {"group": "hinatazaka", "page": page, "url": page_url}
+        _task_item("page", page_key, "running", payload=page_payload)
         try:
             response = await _get(client, page_url)
             soup = BeautifulSoup(response.text, "html.parser")
             articles = soup.find_all("div", class_="p-blog-article")
             if not articles:
                 print(f"  日向坂46 已抓取至最后一页 (Page {page})", flush=True)
+                _task_item("page", page_key, "completed", payload=page_payload)
                 break
             before = stats.added
-            for article in articles:
+            for index, article in enumerate(articles):
                 post_url = ""
                 for link in article.find_all("a"):
                     href = link.get("href", "")
                     if "diary/detail" in href:
                         post_url = urljoin("https://www.hinatazaka46.com", href)
                         break
+                article_key = post_url or f"hinatazaka:{page}:{index}"
+                article_payload = {"group": "hinatazaka", "page": page, "index": index, "url": post_url}
+                if not _task_article_requested("hinatazaka", page, post_url, index):
+                    continue
+                _task_item("article", article_key, "running", payload=article_payload)
                 if not post_url:
                     stats.failed += 1
+                    _task_item("article", article_key, "failed", error="列表项缺少文章链接", payload=article_payload)
                     continue
                 title_el = article.find("div", class_="c-blog-article__title")
                 author_el = article.find("div", class_="c-blog-article__name")
@@ -361,28 +444,42 @@ async def backfill_hinatazaka(
                     )
                     if match:
                         author = match.group(1)
-                await _save_post(db, client, {
-                    "group_key": "hinatazaka",
-                    "author": author,
-                    "title": str(title_el.text.strip() if title_el else "无标题"),
-                    "url": post_url,
-                    "date": date_el.text.strip() if (date_el := article.find("div", class_="c-blog-article__date")) else "",
-                    "body_html": raw_html,
-                    "body_text": body_text,
-                    "images": images,
-                    "raw": {"url": post_url, "title": title_el.text.strip() if title_el else "", "author": author},
-                }, stats, download_images=download_images)
+                before_image_failures = stats.image_failed
+                try:
+                    await _save_post(db, client, {
+                        "group_key": "hinatazaka",
+                        "author": author,
+                        "title": str(title_el.text.strip() if title_el else "无标题"),
+                        "url": post_url,
+                        "date": date_el.text.strip() if (date_el := article.find("div", class_="c-blog-article__date")) else "",
+                        "body_html": raw_html,
+                        "body_text": body_text,
+                        "images": images,
+                        "raw": {"url": post_url, "title": title_el.text.strip() if title_el else "", "author": author},
+                    }, stats, download_images=download_images)
+                except Exception as exc:  # noqa: BLE001 - track each article independently
+                    stats.failed += 1
+                    _task_item("article", article_key, "failed", error=f"{type(exc).__name__}: {exc}", payload=article_payload)
+                else:
+                    image_error = stats.image_failed > before_image_failures
+                    _task_item(
+                        "article", article_key, "failed" if image_error else "completed",
+                        error="文章图片下载失败" if image_error else "", payload=article_payload,
+                    )
             db.commit()
             print(
                 f"  [日向坂46] Page {page:03d}: 本页新增 {stats.added - before:2d} 篇 "
                 f"(累计新增 {stats.added:,} | 已存在 {stats.skipped:,})",
                 flush=True,
             )
+            _task_item("page", page_key, "completed", payload=page_payload)
             await asyncio.sleep(0.18)
         except Exception as exc:  # noqa: BLE001 - 当前页失败后允许重跑继续
             stats.failed += 1
             print(f"  [日向坂46] Page {page} 出错，停止本团: {exc}", flush=True)
-            break
+            _task_item("page", page_key, "failed", error=f"{type(exc).__name__}: {exc}", payload=page_payload)
+            if requested_pages is None:
+                break
     print(f"☀️ 日向坂46 归档完成！{stats.summary()}", flush=True)
     return stats
 
@@ -444,6 +541,17 @@ async def backfill_sakurazaka(
 
     for page in range(max_pages):
         page_url = f"https://sakurazaka46.com/s/s46/diary/blog/list?ima=0000&page={page}"
+        page_key = f"sakurazaka:{page}"
+        page_payload = {"group": "sakurazaka", "page": page, "url": page_url}
+        if _TASK_RETRY_ITEMS and page not in _task_page_ids("sakurazaka"):
+            matching_article_pages = {
+                int(item.get("payload", {}).get("page", -1))
+                for item in _TASK_RETRY_ITEMS
+                if item.get("type") == "article" and item.get("payload", {}).get("group") == "sakurazaka"
+            }
+            if page not in matching_article_pages:
+                continue
+        _task_item("page", page_key, "running", payload=page_payload)
         try:
             response = await _get(client, page_url)
             soup = BeautifulSoup(response.text, "html.parser")
@@ -451,29 +559,62 @@ async def backfill_sakurazaka(
             boxes = container.find_all("li", class_="box") if container else []
             if not boxes:
                 print(f"  樱坂46 已抓取至最后一页 (Page {page})", flush=True)
+                _task_item("page", page_key, "completed", payload=page_payload)
                 break
             before = stats.added
-            results = await asyncio.gather(*(fetch_detail(box) for box in boxes), return_exceptions=True)
-            for result in results:
+            selected_boxes = []
+            for index, box in enumerate(boxes):
+                anchor = box.find("a")
+                post_url = urljoin("https://sakurazaka46.com", anchor.get("href", "")) if anchor else ""
+                if _task_article_requested("sakurazaka", page, post_url, index):
+                    selected_boxes.append((index, box, post_url))
+            for index, box, post_url in selected_boxes:
+                article_key = post_url or f"sakurazaka:{page}:{index}"
+                article_payload = {"group": "sakurazaka", "page": page, "index": index, "url": post_url}
+                _task_item("article", article_key, "running", payload=article_payload)
+            results = await asyncio.gather(
+                *(fetch_detail(box) for _index, box, _post_url in selected_boxes),
+                return_exceptions=True,
+            )
+            for (index, _box, post_url), result in zip(selected_boxes, results, strict=False):
+                article_key = post_url or f"sakurazaka:{page}:{index}"
+                article_payload = {"group": "sakurazaka", "page": page, "index": index, "url": post_url}
                 if isinstance(result, Exception) or result is None:
                     stats.failed += 1
+                    error = f"{type(result).__name__}: {result}" if isinstance(result, Exception) else "列表项缺少文章链接"
+                    _task_item("article", article_key, "failed", error=error, payload=article_payload)
                     continue
                 if result.get("_skip"):
                     stats.discovered += 1
                     stats.skipped += 1
+                    _task_item("article", article_key, "completed", payload=article_payload)
                     continue
-                await _save_post(db, client, result, stats, download_images=download_images)
+                before_image_failures = stats.image_failed
+                try:
+                    await _save_post(db, client, result, stats, download_images=download_images)
+                except Exception as exc:  # noqa: BLE001 - keep the article retryable
+                    stats.failed += 1
+                    _task_item("article", article_key, "failed", error=f"{type(exc).__name__}: {exc}", payload=article_payload)
+                else:
+                    image_error = stats.image_failed > before_image_failures
+                    _task_item(
+                        "article", article_key, "failed" if image_error else "completed",
+                        error="文章图片下载失败" if image_error else "", payload=article_payload,
+                    )
             db.commit()
             print(
                 f"  [樱坂46] Page {page:03d}: 本页新增 {stats.added - before:2d} 篇 "
                 f"(累计新增 {stats.added:,} | 已存在 {stats.skipped:,})",
                 flush=True,
             )
+            _task_item("page", page_key, "completed", payload=page_payload)
             await asyncio.sleep(0.18)
         except Exception as exc:  # noqa: BLE001 - 当前页失败后允许重跑继续
             stats.failed += 1
             print(f"  [樱坂46] Page {page} 出错，停止本团: {exc}", flush=True)
-            break
+            _task_item("page", page_key, "failed", error=f"{type(exc).__name__}: {exc}", payload=page_payload)
+            if not _TASK_RETRY_ITEMS:
+                break
     print(f"🌸 樱坂46 归档完成！{stats.summary()}", flush=True)
     return stats
 
@@ -486,6 +627,7 @@ def normalize_groups(values: list[str] | None) -> list[str]:
 
 
 async def main() -> None:
+    global _TASK_ID, _TASK_RETRY_ITEMS, _TASK_COMPLETED_ITEMS
     parser = argparse.ArgumentParser(description="三大坂道全历史博客回填归档工具")
     parser.add_argument(
         "--group",
@@ -499,19 +641,85 @@ async def main() -> None:
         action="store_true",
         help="下载图片到 data/blog_images，并为已有记录补齐缺失本地图片",
     )
+    parser.add_argument("--task-id", default="", help=argparse.SUPPRESS)
     args = parser.parse_args()
     groups = normalize_groups(args.groups)
-    db = get_db()
+    task_store = None
+    heartbeat_stop = None
+    task_error = ""
+    retry_task_item = None
+    task_params: dict = {}
+    _TASK_RETRY_ITEMS = []
+    _TASK_COMPLETED_ITEMS = []
+    if args.task_id:
+        from src import archive_tasks as task_store
+
+        _TASK_ID = args.task_id
+        task_store.mark_task_running(_TASK_ID)
+        heartbeat_stop = task_store.start_heartbeat(_TASK_ID)
+        queued_items = task_store.get_items(_TASK_ID, status="queued")
+        task_record = task_store.get_task(_TASK_ID) or {}
+        task_params = task_record.get("params", {})
+        parent_task_id = task_record.get("parent_id")
+        if parent_task_id:
+            _TASK_COMPLETED_ITEMS = task_store.get_completed_retry_ancestor_items(_TASK_ID)
+        retry_task_item = next((item for item in queued_items if item.get("type") == "task"), None)
+        _TASK_RETRY_ITEMS = [item for item in queued_items if item.get("type") in {"page", "article"}]
+        if retry_task_item:
+            task_store.set_item(
+                _TASK_ID, "task", str(retry_task_item.get("key") or "execution"), "running",
+                attempt=int(retry_task_item.get("attempt") or 1),
+                payload=retry_task_item.get("payload", {}),
+            )
+            if task_params.get("kind") == "groups":
+                groups = [group for group in GROUP_ORDER if group in task_params.get("groups", [])]
+        if _TASK_RETRY_ITEMS:
+            requested_groups = {
+                str(item.get("payload", {}).get("group") or "")
+                for item in _TASK_RETRY_ITEMS
+            }
+            groups = [group for group in groups if group in requested_groups]
+            if not groups:
+                groups = [group for group in GROUP_ORDER if group in requested_groups]
+    db = None
     summaries: list[GroupStats] = []
-    async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as client:
-        for group in groups:
-            if group == "nogizaka":
-                summaries.append(await backfill_nogizaka(client, db, download_images=args.download_images))
-            elif group == "sakurazaka":
-                summaries.append(await backfill_sakurazaka(client, db, download_images=args.download_images))
-            else:
-                summaries.append(await backfill_hinatazaka(client, db, download_images=args.download_images))
-    db.close()
+    try:
+        db = get_db()
+        async with httpx.AsyncClient(headers=HEADERS, timeout=20, follow_redirects=True) as client:
+            for index, group in enumerate(groups, start=1):
+                if task_store and _TASK_ID:
+                    task_store.set_progress(_TASK_ID, f"group:{group}", index - 1, len(groups))
+                if group == "nogizaka":
+                    summary = await backfill_nogizaka(client, db, download_images=args.download_images)
+                elif group == "sakurazaka":
+                    summary = await backfill_sakurazaka(client, db, download_images=args.download_images)
+                else:
+                    summary = await backfill_hinatazaka(client, db, download_images=args.download_images)
+                summaries.append(summary)
+                if task_store and _TASK_ID:
+                    task_store.set_progress(_TASK_ID, f"group:{group}", index, len(groups))
+        if task_store and _TASK_ID and retry_task_item:
+            task_store.set_item(
+                _TASK_ID, "task", str(retry_task_item.get("key") or "execution"), "completed",
+                attempt=int(retry_task_item.get("attempt") or 1),
+                payload=retry_task_item.get("payload", {}),
+            )
+    except Exception as exc:  # noqa: BLE001 - preserve task failure if setup or a group crashes
+        task_error = f"{type(exc).__name__}: {exc}"
+        if task_store and _TASK_ID and retry_task_item:
+            task_store.set_item(
+                _TASK_ID, "task", str(retry_task_item.get("key") or "execution"), "failed",
+                attempt=int(retry_task_item.get("attempt") or 1), error=task_error,
+                payload=retry_task_item.get("payload", {}),
+            )
+        raise
+    finally:
+        if db is not None:
+            db.close()
+        if task_store and _TASK_ID:
+            task_store.finish_task(_TASK_ID, error=task_error)
+        if heartbeat_stop:
+            heartbeat_stop.set()
     print("\n🎉 选定团体抓取归档完成！", flush=True)
     for summary in summaries:
         print(f"  [{GROUP_NAMES[summary.group_key]}] {summary.summary()}", flush=True)

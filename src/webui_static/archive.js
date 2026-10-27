@@ -1,8 +1,116 @@
 // archive.js
 "use strict";
 const $ = (id) => document.getElementById(id);
+const ARCHIVE_HOME_CACHE_TTL_MS = 7 * 86400000;
+const ARCHIVE_HOME_CACHE_VERSION = 2;
+const ARCHIVE_HOME_CACHE_LEGACY_KEY = "archive_portal_home_cache";
+const ARCHIVE_READING_SCROLL_PREFIX = "archive_reading_scroll_v1:";
+const ARCHIVE_READING_SCROLL_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const ARCHIVE_READING_SCROLL_MAX_ENTRIES = 24;
+let archiveCacheIdentity = null; // null 表示身份尚未确认，此时不读取持久首页缓存
+let lastConfirmedIdentity = null; // 重验期间保留最后确认的 scope，供登出清理使用
+const readingScrollMemory = new Map();
+let activeReadingRouteKey = "";
+let activeReadingRouteLoaded = false;
+let readingScrollSaveTimer = null;
+
+function archiveStorage(name) {
+  try { return window[name] || null; } catch (_) { return null; }
+}
+
+function archiveStorageGet(name, key) {
+  const storage = archiveStorage(name);
+  if (!storage || typeof storage.getItem !== "function") return null;
+  try { return storage.getItem(key); } catch (_) { return null; }
+}
+
+function archiveStorageSet(name, key, value) {
+  const storage = archiveStorage(name);
+  if (!storage || typeof storage.setItem !== "function") return false;
+  try { storage.setItem(key, value); return true; } catch (_) { return false; }
+}
+
+function archiveStorageRemove(name, key) {
+  const storage = archiveStorage(name);
+  if (!storage || typeof storage.removeItem !== "function") return;
+  try { storage.removeItem(key); } catch (_) {}
+}
+
+function setArchiveCacheIdentity(me) {
+  if (me && me.user && typeof me.user.username === "string" && me.user.username.trim()) {
+    archiveCacheIdentity = { key: "user:" + me.user.username, label: "此账号" };
+  } else if (me && me.auth_enabled === true && !me.user) {
+    archiveCacheIdentity = { key: "guest", label: "访客" };
+  } else if (me && me.auth_enabled === false) {
+    archiveCacheIdentity = { key: "public", label: "访客" };
+  } else {
+    archiveCacheIdentity = null;
+  }
+  if (archiveCacheIdentity) lastConfirmedIdentity = archiveCacheIdentity;
+}
+
+function archiveHomeCacheKey(identity = archiveCacheIdentity) {
+  return identity ? ARCHIVE_HOME_CACHE_LEGACY_KEY + ":v" + ARCHIVE_HOME_CACHE_VERSION + ":" + encodeURIComponent(identity.key) : "";
+}
+
+function clearArchiveHomeCache(identity = archiveCacheIdentity) {
+  const scopedKey = archiveHomeCacheKey(identity);
+  if (scopedKey) {
+    archiveStorageRemove("localStorage", scopedKey);
+    archiveStorageRemove("sessionStorage", scopedKey);
+  }
+  archiveStorageRemove("localStorage", ARCHIVE_HOME_CACHE_LEGACY_KEY);
+  archiveStorageRemove("sessionStorage", ARCHIVE_HOME_CACHE_LEGACY_KEY);
+}
+
+function archiveReadingScrollStorageKey(identity = archiveCacheIdentity) {
+  return identity ? ARCHIVE_READING_SCROLL_PREFIX + encodeURIComponent(identity.key) : "";
+}
+
+function clearArchiveReadingScroll(identity = archiveCacheIdentity) {
+  if (readingScrollSaveTimer !== null) {
+    clearTimeout(readingScrollSaveTimer);
+    readingScrollSaveTimer = null;
+  }
+  const storageKey = archiveReadingScrollStorageKey(identity);
+  if (storageKey) archiveStorageRemove("sessionStorage", storageKey);
+  if (identity) {
+    const prefix = identity.key + "\u001f";
+    for (const key of readingScrollMemory.keys()) {
+      if (key.startsWith(prefix)) readingScrollMemory.delete(key);
+    }
+  }
+  activeReadingRouteKey = "";
+  activeReadingRouteLoaded = false;
+}
+
+function clearArchiveBrowserStateForLogout(identity = archiveCacheIdentity || lastConfirmedIdentity) {
+  clearArchiveHomeCache(identity);
+  clearArchiveReadingScroll(identity);
+  archiveCacheIdentity = null;
+  lastConfirmedIdentity = null;
+  _portalHomeCached = null;
+  _portalHomeCacheScopeKey = "";
+  blogReaderSavedScroll = 0;
+  blogReaderSavedScrollReady = false;
+  blogListLoadedRouteKey = "";
+  try { if (_homePhotoCleanup) _homePhotoCleanup(); } catch (_) {}
+  _homePhotoCleanup = null;
+  const portalContent = $("portalContent");
+  if (portalContent) portalContent.style.display = "none";
+  for (const id of ["portalHero", "photoStrip", "portalSections", "homeFeedList"]) {
+    const content = $(id);
+    if (content) content.textContent = "";
+  }
+  const notice = $("homeCacheNotice");
+  if (notice) { notice.hidden = true; notice.textContent = ""; }
+}
+
+// 旧版缓存没有身份范围，升级后不再读取并移除这份共享缓存。
+clearArchiveHomeCache(null);
+
 // 清理旧版本遗留的可读 Token；新的 Token 模式使用 HttpOnly 会话 Cookie。
-try { localStorage.removeItem("webAdminToken"); } catch (_) {}
+archiveStorageRemove("localStorage", "webAdminToken");
 const TYPES = [["", "全部"], ["text", "文字"], ["picture", "图片"], ["video", "视频"], ["voice", "语音"]];
 const BLOG_GROUP_KEYS = ["nogizaka", "sakurazaka", "hinatazaka"];
 
@@ -18,7 +126,7 @@ let isFavFilter = false; // 是否开启收藏筛选
 const MESSAGE_ORDER_DEFAULT = "desc";
 let messageOrder = (() => {
   try {
-    return localStorage.getItem("archive_message_order") === "asc" ? "asc" : MESSAGE_ORDER_DEFAULT;
+    return archiveStorageGet("localStorage", "archive_message_order") === "asc" ? "asc" : MESSAGE_ORDER_DEFAULT;
   } catch (_) {
     return MESSAGE_ORDER_DEFAULT;
   }
@@ -35,6 +143,10 @@ let contentVersion = 0;  // 成员 / 月份 / 筛选变化后，旧响应不应�
 let contentAbort = null;
 let dayJumpAbort = null; // 仅取消过期的日期跳转批次，不打断普通滚动加载
 let pageLoading = false;
+let favoriteTimelineSyncState = "idle"; // idle / syncing / error；收藏筛选重排期间禁止旧偏移继续翻页
+let favoriteTimelineAbort = null;
+let favoriteTimelineSyncAnchor = null;
+let favoriteTimelineSyncTargetId = "";
 let dayJumpVersion = 0;  // 日期跳转请求版本，避免连续点击时旧定位覆盖新目标
 let calendarVersion = 0;
 let calendarAbort = null;
@@ -349,7 +461,7 @@ function setMessageOrder(order, { persist = true, reload = true } = {}) {
   const changed = next !== messageOrder;
   messageOrder = next;
   if (persist) {
-    try { localStorage.setItem("archive_message_order", messageOrder); } catch (_) {}
+    archiveStorageSet("localStorage", "archive_message_order", messageOrder);
   }
   syncMessageOrderControls();
   if (!changed || !reload || curMode !== "msg") {
@@ -367,6 +479,11 @@ function resetContent() {
   contentVersion++;
   if (contentAbort) contentAbort.abort();
   if (dayJumpAbort) dayJumpAbort.abort();
+  if (favoriteTimelineAbort) favoriteTimelineAbort.abort();
+  favoriteTimelineAbort = null;
+  favoriteTimelineSyncState = "idle";
+  favoriteTimelineSyncAnchor = null;
+  favoriteTimelineSyncTargetId = "";
   dayJumpAbort = null;
   contentAbort = null;
   pageLoading = false;
@@ -421,6 +538,7 @@ function escRegex(s) {
 function initInfiniteScroll() {
   window.addEventListener("scroll", () => {
     if (curMode !== "msg") return;
+    if (favoriteTimelineSyncState !== "idle") return;
     if (pageLoading || page >= totalPages) return;
     const scrollBottom = window.innerHeight + window.scrollY;
     const docHeight = document.documentElement.scrollHeight;
@@ -434,8 +552,38 @@ function initInfiniteScroll() {
 
 function setPageLoading(loading) {
   pageLoading = loading;
-  $("loadMore").disabled = loading;
-  $("loadMore").textContent = loading ? "加载中…" : loadMoreLabel();
+  const button = $("loadMore");
+  if (favoriteTimelineSyncState === "syncing") {
+    button.disabled = true;
+    button.textContent = "同步收藏筛选…";
+    return;
+  }
+  if (favoriteTimelineSyncState === "error") {
+    button.disabled = false;
+    button.hidden = false;
+    button.textContent = "同步失败，点击重试";
+    return;
+  }
+  button.disabled = loading;
+  button.textContent = loading ? "加载中…" : loadMoreLabel();
+}
+
+function setFavoriteTimelineSyncState(state) {
+  favoriteTimelineSyncState = state;
+  const button = $("loadMore");
+  if (state === "syncing") {
+    button.hidden = false;
+    button.disabled = true;
+    button.textContent = "同步收藏筛选…";
+  } else if (state === "error") {
+    button.hidden = false;
+    button.disabled = false;
+    button.textContent = "同步失败，点击重试";
+  } else {
+    button.disabled = pageLoading;
+    button.textContent = pageLoading ? "加载中…" : loadMoreLabel();
+    button.hidden = page >= totalPages;
+  }
 }
 
 
@@ -739,11 +887,12 @@ function estimateMessagePageForDay(dateKey) {
 }
 
 function waitForMessagePageIdle(jumpVersion) {
+  if (favoriteTimelineSyncState !== "idle") return Promise.resolve(false);
   if (!pageLoading) return Promise.resolve(true);
   return new Promise((resolve) => {
     const check = () => {
-      if (jumpVersion !== dayJumpVersion || !pageLoading) {
-        resolve(jumpVersion === dayJumpVersion);
+      if (jumpVersion !== dayJumpVersion || favoriteTimelineSyncState !== "idle" || !pageLoading) {
+        resolve(jumpVersion === dayJumpVersion && favoriteTimelineSyncState === "idle");
         return;
       }
       window.setTimeout(check, 16);
@@ -761,6 +910,7 @@ function messagePageRange(startPage, endPage) {
 }
 
 async function loadMessagePageBatchForDay(pageNumbers, jumpVersion, expectedContentVersion) {
+  if (favoriteTimelineSyncState !== "idle") return false;
   const pagesToLoad = [...new Set(pageNumbers)].filter((p) => p >= 1 && !loadedMessagePages.has(p));
   if (!pagesToLoad.length) return true;
   if (!(await waitForMessagePageIdle(jumpVersion))) return false;
@@ -813,6 +963,9 @@ async function loadMessagePageBatchForDay(pageNumbers, jumpVersion, expectedCont
 }
 
 async function loadNextMessagePageForDay(dateKey, jumpVersion, expectedContentVersion) {
+  if (favoriteTimelineSyncState !== "idle") {
+    return { found: false, complete: false, cancelled: true };
+  }
   if (hasDaySeparator(dateKey)) return { found: true, complete: page >= totalPages };
   if (!(await waitForMessagePageIdle(jumpVersion))) {
     return { found: false, complete: false, cancelled: true };
@@ -905,6 +1058,12 @@ function scrollToDay(dateKey, jumpVersion, expectedContentVersion) {
 }
 
 async function jumpToDay(dateKey) {
+  if (curMode === "msg" && favoriteTimelineSyncState !== "idle") {
+    if (favoriteTimelineSyncState === "error") {
+      showToast("收藏筛选同步失败，请点击“加载更多”重试", "error");
+    }
+    return;
+  }
   const jumpVersion = ++dayJumpVersion;
   // 连续点击不同日期时取消仍在网络中的旧批次，避免旧批次回包被丢弃
   // 后，新批次又重复请求相同页面。
@@ -1006,9 +1165,10 @@ function scheduleAuxiliaryPreload() {
 }
 
 async function switchMainTab(mode, keepHash) {
+  beginArchiveReadingRouteLoad();
   curMode = mode;
   setHtmlViewClass(mode);
-  try { localStorage.setItem("archive_last_main_tab", mode); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_last_main_tab", mode);
   syncNavTabs(mode);
   if (mode !== "msg") {
     if ($("emptyHint")) $("emptyHint").hidden = true;
@@ -1024,7 +1184,7 @@ async function switchMainTab(mode, keepHash) {
     }
     if (!keepHash) {
       let saved = null;
-      try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
+      saved = archiveStorageGet("localStorage", "archive_last_msg_member");
       const wanted = (saved && members.some(m => m.name === saved))
         ? saved
         : (curMember && members.some(m => m.name === curMember))
@@ -1037,7 +1197,7 @@ async function switchMainTab(mode, keepHash) {
       loadGalleryMembers();
     }
     let saved = null;
-    try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
+    saved = archiveStorageGet("localStorage", "archive_last_gallery_member");
     const activeList = galleryMembers.length ? galleryMembers : members;
     const wanted = (saved !== null && (saved === "" || activeList.some(m => m.name === saved || m.display === saved)))
       ? saved
@@ -1050,8 +1210,8 @@ async function switchMainTab(mode, keepHash) {
     let savedGroup = null;
     let savedAuthor = "";
     try {
-      savedGroup = localStorage.getItem("archive_last_blog_group");
-      savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
+      savedGroup = archiveStorageGet("localStorage", "archive_last_blog_group");
+      savedAuthor = archiveStorageGet("localStorage", "archive_last_blog_author") || "";
     } catch (_) {}
     const gKey = (savedGroup && blogGroups.some(g => g.key === savedGroup)) ? savedGroup : (curBlogGroup || "nogizaka");
     selectBlogGroup(gKey, savedAuthor);
@@ -1064,7 +1224,7 @@ async function switchMainTab(mode, keepHash) {
       await ensureMembersLoaded(true);
     }
     let saved = null;
-    try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
+    saved = archiveStorageGet("localStorage", "archive_last_letter_member");
     const wanted = (saved && members.some(m => m.name === saved))
       ? saved
       : (curLetterMember && members.some(m => m.name === curLetterMember))
@@ -1112,7 +1272,7 @@ async function loadMembers(skipSelect = false) {
   // skipSelect=true 或非消息模式时只渲染 chips，不自动跳转
   if (skipSelect || curMode !== "msg") return;
   let saved = null;
-  try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
+  saved = archiveStorageGet("localStorage", "archive_last_msg_member");
   const wanted = (curMember && members.some(m => m.name === curMember))
     ? curMember
     : (saved && members.some(m => m.name === saved))
@@ -1148,7 +1308,7 @@ const POPOVER_GROUP_KEYS = new Set(["nogizaka", "sakurazaka", "hinatazaka", "yod
 
 function loadCollapsedPopoverGroups() {
   try {
-    const raw = sessionStorage.getItem(POPOVER_GROUP_STATE_KEY);
+    const raw = archiveStorageGet("sessionStorage", POPOVER_GROUP_STATE_KEY);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return new Set();
@@ -1161,7 +1321,7 @@ function loadCollapsedPopoverGroups() {
 
 function persistCollapsedPopoverGroups() {
   try {
-    sessionStorage.setItem(POPOVER_GROUP_STATE_KEY, JSON.stringify([...collapsedPopoverGroups]));
+    archiveStorageSet("sessionStorage", POPOVER_GROUP_STATE_KEY, JSON.stringify([...collapsedPopoverGroups]));
   } catch (_) {
     // 存储不可用不影响当前页面内的折叠操作。
   }
@@ -1440,6 +1600,8 @@ function syncBlogHash(pageNum = page) {
 }
 
 async function selectBlogGroup(key, author = "", updateHash = true, routeState = {}) {
+  beginArchiveReadingRouteLoad();
+  blogListLoadedRouteKey = "";
   const selectionVersion = ++blogSelectionVersion;
   curMode = "blog";
   setHtmlViewClass("blog");
@@ -1448,8 +1610,8 @@ async function selectBlogGroup(key, author = "", updateHash = true, routeState =
   hideMessageMonthFooter();
   curBlogAuthor = author || "";
   try {
-    localStorage.setItem("archive_last_blog_group", key);
-    localStorage.setItem("archive_last_blog_author", curBlogAuthor);
+    archiveStorageSet("localStorage", "archive_last_blog_group", key);
+    archiveStorageSet("localStorage", "archive_last_blog_author", curBlogAuthor);
   } catch (_) {}
   curBlogDate = Object.prototype.hasOwnProperty.call(routeState, "date")
     ? String(routeState.date || "").slice(0, 10) : "";
@@ -1684,7 +1846,7 @@ function closeBlogAuthorPopover() {
 function selectBlogAuthor(author) {
   ++blogSelectionVersion;
   curBlogAuthor = author;
-  try { localStorage.setItem("archive_last_blog_author", author || ""); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_last_blog_author", author || "");
   curBlogDate = "";
   dayCounts = {};
   blogCalendarError = "";
@@ -1712,6 +1874,7 @@ function selectBlogAuthor(author) {
 // ── 渲染博客网格 ─────────────────────────────────────
 async function loadBlogPage(pageNum, updateHash = true) {
   const requestedPage = Math.max(1, parseInt(pageNum, 10) || 1);
+  beginArchiveReadingRouteLoad();
   const version = ++blogPageVersion;
   if (blogPageAbort) blogPageAbort.abort();
   blogPageAbort = new AbortController();
@@ -1762,6 +1925,15 @@ async function loadBlogPage(pageNum, updateHash = true) {
       if (requestedPage > 1) {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
+    }
+    const listRouteKey = "blog:" + buildBlogHash({
+      group: curBlogGroup, author: curBlogAuthor, date: curBlogDate,
+      query: searchQuery, pageNum: requestedPage,
+    });
+    blogListLoadedRouteKey = listRouteKey;
+    const routeParams = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+    if (!routeParams.has("id") && !routeParams.has("blog_id") && !routeParams.has("post")) {
+      markArchiveReadingContentLoaded(listRouteKey);
     }
   } catch (e) {
     if (e.name !== "AbortError" && version === blogPageVersion && curMode === "blog") {
@@ -1962,6 +2134,8 @@ let currentBlogReaderPost = null;
 let blogReaderReturnHash = null;
 let currentTransMode = "ja-zh";
 let blogReaderSavedScroll = 0;
+let blogReaderSavedScrollReady = false;
+let blogListLoadedRouteKey = "";
 let blogCardDownloadAbort = null;
 
 function resetBlogCardDownloadButton() {
@@ -1991,6 +2165,124 @@ function restoreWindowScroll(pos) {
   }
 }
 
+function restoreWindowScroll(pos) {
+  if (typeof pos !== "number" || !Number.isFinite(pos) || pos < 0) return;
+  const scrollToPosition = () => {
+    try { window.scrollTo(0, pos); } catch (_) {}
+  };
+  scrollToPosition();
+  const nextFrame = window.requestAnimationFrame || ((callback) => setTimeout(callback, 16));
+  nextFrame(() => {
+    scrollToPosition();
+    setTimeout(() => {
+      const current = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      if (Math.abs(current - pos) > 10) scrollToPosition();
+    }, 50);
+  });
+}
+
+function archiveReadingRouteKey() {
+  const rawHash = (location.hash || "").replace(/^#/, "");
+  const params = new URLSearchParams(rawHash);
+  const blogId = params.get("id") || params.get("blog_id") || params.get("post");
+  if (params.has("blog") || rawHash === "blog" || blogId) {
+    if (blogId) return "";
+    const group = params.get("blog") || (curMode === "blog" ? curBlogGroup : "") || "nogizaka";
+    const author = params.has("author")
+      ? (params.get("author") || "")
+      : (curMode === "blog" && group === curBlogGroup ? curBlogAuthor : "");
+    const date = params.get("date") || (curMode === "blog" ? curBlogDate : "");
+    const query = params.has("q") ? normalizedQuery(params.get("q")) : (curMode === "blog" ? searchQuery : "");
+    const routePage = Math.max(1, parseInt(params.get("page"), 10) || (curMode === "blog" ? page : 1));
+    return "blog:" + buildBlogHash({ group, author, date, query, pageNum: routePage });
+  }
+
+  if (params.has("member") || params.has("y") || params.has("m") || params.has("msg_id") || params.has("msg") || rawHash === "msg") {
+    const member = params.get("member") || (curMode === "msg" ? curMember : "");
+    if (!member) return "";
+    const year = parseInt(params.get("y") || params.get("year"), 10) ||
+      (curMode === "msg" && curMember === member && curYM ? curYM.year : 0);
+    const month = parseInt(params.get("m") || params.get("month"), 10) ||
+      (curMode === "msg" && curMember === member && curYM ? curYM.month : 0);
+    return "msg:" + JSON.stringify([
+      member, year, month, params.get("t") || "", params.get("fav") === "1",
+      params.get("order") || params.get("o") || MESSAGE_ORDER_DEFAULT,
+      normalizedQuery(params.get("q")),
+    ]);
+  }
+  return "";
+}
+
+function archiveReadingScrollEntries() {
+  const storageKey = archiveReadingScrollStorageKey();
+  if (!storageKey) return {};
+  const raw = archiveStorageGet("sessionStorage", storageKey);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 1 || !parsed.entries || typeof parsed.entries !== "object") return {};
+    const now = Date.now();
+    const entries = {};
+    Object.keys(parsed.entries).forEach((key) => {
+      const entry = parsed.entries[key];
+      if (entry && Number.isFinite(entry.y) && entry.y >= 0 && Number.isFinite(entry.ts) &&
+          now - entry.ts <= ARCHIVE_READING_SCROLL_MAX_AGE_MS) entries[key] = entry;
+    });
+    return entries;
+  } catch (_) { return {}; }
+}
+
+function saveCompletedArchiveReadingScroll() {
+  if (!activeReadingRouteKey || !activeReadingRouteLoaded || !archiveCacheIdentity) return;
+  const y = Number(window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0);
+  if (!Number.isFinite(y) || y < 0) return;
+  const memoryKey = archiveCacheIdentity.key + "\u001f" + activeReadingRouteKey;
+  const entry = { y, ts: Date.now() };
+  readingScrollMemory.set(memoryKey, entry);
+  const entries = archiveReadingScrollEntries();
+  entries[activeReadingRouteKey] = entry;
+  const ordered = Object.entries(entries).sort((a, b) => b[1].ts - a[1].ts).slice(0, ARCHIVE_READING_SCROLL_MAX_ENTRIES);
+  const boundedEntries = {};
+  ordered.forEach(([routeKey, value]) => { boundedEntries[routeKey] = value; });
+  archiveStorageSet("sessionStorage", archiveReadingScrollStorageKey(), JSON.stringify({
+    version: 1, entries: boundedEntries,
+  }));
+}
+
+function beginArchiveReadingRouteLoad() {
+  saveCompletedArchiveReadingScroll();
+  if (readingScrollSaveTimer !== null) {
+    clearTimeout(readingScrollSaveTimer);
+    readingScrollSaveTimer = null;
+  }
+  activeReadingRouteKey = "";
+  activeReadingRouteLoaded = false;
+  blogReaderSavedScrollReady = false;
+}
+
+function scheduleArchiveReadingScrollSave() {
+  if (!activeReadingRouteKey || !activeReadingRouteLoaded || readingScrollSaveTimer !== null) return;
+  readingScrollSaveTimer = setTimeout(() => {
+    readingScrollSaveTimer = null;
+    saveCompletedArchiveReadingScroll();
+  }, 180);
+}
+
+function markArchiveReadingContentLoaded(routeKey = archiveReadingRouteKey(), { restore = true } = {}) {
+  if (!routeKey) return;
+  activeReadingRouteKey = routeKey;
+  activeReadingRouteLoaded = true;
+  if (!archiveCacheIdentity || !restore) return;
+  const memoryKey = archiveCacheIdentity.key + "\u001f" + routeKey;
+  const memoryEntry = readingScrollMemory.get(memoryKey);
+  const entry = memoryEntry || archiveReadingScrollEntries()[routeKey];
+  if (entry && Number.isFinite(entry.y) && entry.y >= 0 && Date.now() - entry.ts <= ARCHIVE_READING_SCROLL_MAX_AGE_MS) {
+    restoreWindowScroll(entry.y);
+  } else if (entry) {
+    readingScrollMemory.delete(memoryKey);
+  }
+}
+
 function getStructuredBlocks(post) {
   if (!post) return null;
   const raw = post.content_json;
@@ -2007,7 +2299,7 @@ function hasTranslation(post) {
   return getStructuredBlocks(post) !== null;
 }
 
-let isFuriganaActive = localStorage.getItem("archive_furigana") === "true";
+let isFuriganaActive = archiveStorageGet("localStorage", "archive_furigana") === "true";
 
 function renderBlocks(blocks, mode) {
   const parts = [];
@@ -2109,7 +2401,7 @@ async function ensureFuriganaLoaded(post) {
 async function toggleFurigana() {
   if (!currentBlogReaderPost) return;
   isFuriganaActive = !isFuriganaActive;
-  localStorage.setItem("archive_furigana", isFuriganaActive ? "true" : "false");
+  archiveStorageSet("localStorage", "archive_furigana", isFuriganaActive ? "true" : "false");
   updateFuriganaUI();
   
   if (isFuriganaActive && !currentBlogReaderPost._furigana_html) {
@@ -2304,8 +2596,13 @@ function openBlogReader(post, bodyHtml, returnHash) {
   if (blogCardDownloadAbort) blogCardDownloadAbort.abort();
   resetBlogCardDownloadButton();
   const readerWasHidden = $("blogReader").style.display === "none";
-  if (readerWasHidden && !blogReaderSavedScroll) {
-    blogReaderSavedScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  if (readerWasHidden) {
+    saveCompletedArchiveReadingScroll();
+    const routeKey = archiveReadingRouteKey();
+    blogReaderSavedScrollReady = Boolean(routeKey && routeKey === blogListLoadedRouteKey);
+    blogReaderSavedScroll = blogReaderSavedScrollReady
+      ? (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0)
+      : 0;
   }
   if (returnHash !== undefined) {
     blogReaderReturnHash = returnHash || "";
@@ -2378,6 +2675,7 @@ function closeBlogReader() {
   if (blogCardDownloadAbort) blogCardDownloadAbort.abort();
   resetBlogCardDownloadButton();
   const savedScroll = blogReaderSavedScroll;
+  const restoreSavedScroll = blogReaderSavedScrollReady ? savedScroll : null;
   $("blogReader").style.display = "none";
   document.documentElement.classList.remove("modal-open");
   document.body.classList.remove("modal-open");
@@ -2386,16 +2684,17 @@ function closeBlogReader() {
   currentBlogReaderPost = null;
   if (typeof handleBackTopScroll === "function") handleBackTopScroll();
 
-  restoreWindowScroll(savedScroll);
+  if (restoreSavedScroll !== null) restoreWindowScroll(savedScroll);
 
   // 恢复打开前的路由：首页卡片关闭后必须回到首页，而不是博客列表。
   const returnHash = blogReaderReturnHash !== null
     ? blogReaderReturnHash
     : buildBlogHash({ pageNum: page });
   blogReaderReturnHash = null;
+  blogReaderSavedScrollReady = false;
   writeArchiveHash(returnHash);
   // writeArchiveHash 会抑制同一轮 hashchange；主动分发一次，确保视觉状态与 URL 一致。
-  setTimeout(() => handleRoute(false, savedScroll), 0);
+  setTimeout(() => handleRoute(false, restoreSavedScroll), 0);
 }
 
 const brCloseBtn = $("brClose");
@@ -2835,13 +3134,14 @@ async function loadMonths(preserveSelected = true) {
 }
 
 async function selectMember(name, keepHash) {
+  beginArchiveReadingRouteLoad();
   const version = ++memberVersion;
   curMode = "msg";
   ++blogSelectionVersion;
   if (blogPageAbort) blogPageAbort.abort();
   _enterMemberMode();
   curMember = name;
-  try { localStorage.setItem("archive_last_msg_member", name); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_last_msg_member", name);
   curBlogGroup = "";     // 切换到成员模式，清空博客分组
   hideMessageMonthFooter();
   if (!members.length) {
@@ -3010,8 +3310,29 @@ function updateMessageStats(data, requestPage = page) {
 function renderMessageBatch(messages) {
   if (!messages || !messages.length) return;
   const fragment = document.createDocumentFragment();
-  for (const msg of messages) renderBubble(msg, fragment);
+  const bubbles = [];
+  for (const msg of messages) {
+    const bubble = renderBubble(msg, fragment);
+    if (bubble) bubbles.push(bubble);
+  }
   $("timeline").appendChild(fragment);
+  stabilizeTimelineBubbleIntrinsicSizes(bubbles);
+}
+
+function stabilizeTimelineBubbleIntrinsicSizes(bubbles) {
+  const pending = [];
+  for (const bubble of bubbles) {
+    if (!bubble || !bubble.classList.contains("virtual-card")) continue;
+    const contentVisibility = bubble.style.contentVisibility;
+    bubble.style.contentVisibility = "visible";
+    pending.push({ bubble, contentVisibility });
+  }
+  const heights = pending.map(({ bubble }) => bubble.getBoundingClientRect().height);
+  pending.forEach(({ bubble, contentVisibility }, index) => {
+    const height = heights[index];
+    if (Number.isFinite(height) && height > 0) bubble.style.containIntrinsicSize = height + "px";
+    bubble.style.contentVisibility = contentVisibility;
+  });
 }
 
 function applyMessagePage(data, requestPage) {
@@ -3024,7 +3345,7 @@ function applyMessagePage(data, requestPage) {
 }
 
 async function loadPage() {
-  if (curMode !== "msg" || !curMember) return false;
+  if (curMode !== "msg" || !curMember || favoriteTimelineSyncState !== "idle") return false;
   const version = contentVersion;
   const requestPage = page;
   contentAbort = new AbortController();
@@ -3041,6 +3362,7 @@ async function loadPage() {
   if (version !== contentVersion) return false;
   if (!data.ok) { showEmpty("加载失败：" + (data.errors || []).join("；")); return false; }
   applyMessagePage(data, requestPage);
+  if (requestPage === 1 && !targetMsgId) markArchiveReadingContentLoaded();
 
   // 首页跳转：滚动到目标消息（跨页查找）
   if (targetMsgId) {
@@ -3066,14 +3388,23 @@ async function loadPage() {
     };
     // 渲染完成后稍等一下再查找（content-visibility 延迟渲染）
     setTimeout(async () => {
-      if (findAndScroll()) { targetMsgId = ""; return; }
+      if (findAndScroll()) {
+        targetMsgId = "";
+        markArchiveReadingContentLoaded(archiveReadingRouteKey(), { restore: false });
+        return;
+      }
       // 没找到，继续加载后续页
       while (page < totalPages) {
         page++;
         await loadPage();
-        if (findAndScroll()) { targetMsgId = ""; return; }
+        if (findAndScroll()) {
+          targetMsgId = "";
+          markArchiveReadingContentLoaded(archiveReadingRouteKey(), { restore: false });
+          return;
+        }
       }
       targetMsgId = "";
+      markArchiveReadingContentLoaded(archiveReadingRouteKey(), { restore: false });
     }, 400);
   }
   return true;
@@ -3145,12 +3476,12 @@ function clearSearch() {
 $("searchClear").addEventListener("click", clearSearch);
 
 // ── 标签开关 ─────────────────────────────────────
-let showTags = localStorage.getItem("archiveShowTags") !== "false";
+let showTags = archiveStorageGet("localStorage", "archiveShowTags") !== "false";
 $("tagToggle").checked = showTags;
 if (!showTags) document.body.classList.add("hide-tags");
 $("tagToggle").addEventListener("change", () => {
   showTags = $("tagToggle").checked;
-  localStorage.setItem("archiveShowTags", showTags ? "true" : "false");
+  archiveStorageSet("localStorage", "archiveShowTags", showTags ? "true" : "false");
   document.body.classList.toggle("hide-tags", !showTags);
 });
 
@@ -3162,20 +3493,25 @@ function showEmpty(text) {
 }
 
 // ── 渲染 ─────────────────────────────────────────
-function renderBubble(msg, container = $("timeline")) {
+function createMessageDaySeparator(msg) {
+  const separator = document.createElement("div");
+  separator.className = "day-sep";
+  separator.dataset.date = fmtDateKey(msg.published_at); // 日历跳转定位锚点
+  separator.innerHTML = "<span>" + esc(fmtDay(msg.published_at)) + "</span>";
+  return separator;
+}
+
+function renderBubble(msg, container = $("timeline"), suppressDaySeparator = false) {
   const tl = container;
   const day = fmtDay(msg.published_at);
-  if (day !== lastDay) {
+  if (!suppressDaySeparator && day !== lastDay) {
     lastDay = day;
-    const sep = document.createElement("div");
-    sep.className = "day-sep";
-    sep.dataset.date = fmtDateKey(msg.published_at);   // 日历跳转定位锚点
-    sep.innerHTML = "<span>" + esc(day) + "</span>";
-    tl.appendChild(sep);
+    tl.appendChild(createMessageDaySeparator(msg));
   }
   const b = document.createElement("div");
   b.className = "bubble virtual-card";
   if (msg.id) b.dataset.msgId = String(msg.id);
+  b.__archiveMessage = msg;
 
   const pubTimeStr = fmtTime(msg.published_at);
   let uploadBadgeHtml = "";
@@ -3206,8 +3542,9 @@ function renderBubble(msg, container = $("timeline")) {
   let favHtml = "";
   if (window._isLoggedIn) {
     const isFav = Boolean(msg.is_favorite);
+    const favLabel = isFav ? "取消收藏" : "收藏";
     favHtml =
-      '<button type="button" class="msg-action-btn fav-btn' + (isFav ? ' active' : '') + '" title="' + (isFav ? '取消收藏' : '收藏') + '" aria-label="收藏">' +
+      '<button type="button" class="msg-action-btn fav-btn' + (isFav ? ' active' : '') + '" title="' + favLabel + '" aria-label="' + favLabel + '">' +
         '<span class="btn-icon">' + (isFav ? '⭐' : '☆') + '</span>' +
       '</button>';
   }
@@ -3483,6 +3820,7 @@ function renderBubble(msg, container = $("timeline")) {
   });
   tl.appendChild(b);
   b.querySelectorAll("video, audio").forEach(observeArchiveMedia);
+  return b;
 }
 
 // toast notifications unified in showToast(msg, type)
@@ -4120,23 +4458,294 @@ async function refreshFilteredView() {
   }
 }
 
+function syncFavoriteButton(msg, button) {
+  if (!button) return;
+  const isFavorite = Boolean(msg.is_favorite);
+  button.classList.toggle("active", isFavorite);
+  button.title = isFavorite ? "取消收藏" : "收藏";
+  button.setAttribute("aria-label", button.title);
+  const icon = button.querySelector(".btn-icon");
+  if (icon) icon.textContent = isFavorite ? "⭐" : "☆";
+}
+
+function findTimelineBubble(messageId) {
+  const wanted = String(messageId);
+  return Array.from($("timeline").children).find((node) =>
+    node.classList.contains("bubble") && node.dataset.msgId === wanted
+  ) || null;
+}
+
+function captureTimelineAnchor(excludedMessageId = "") {
+  const excluded = excludedMessageId === "" ? "" : String(excludedMessageId);
+  for (const bubble of $("timeline").querySelectorAll(".bubble[data-msg-id]")) {
+    if (bubble.dataset.msgId === excluded) continue;
+    const rect = bubble.getBoundingClientRect();
+    if (rect.bottom > 0 && rect.top < window.innerHeight) {
+      return { id: bubble.dataset.msgId, top: rect.top, scrollY: window.scrollY };
+    }
+  }
+  return { id: "", top: 0, scrollY: window.scrollY };
+}
+
+function applyTimelineAnchor(anchor, expectedContentVersion) {
+  if (!anchor || expectedContentVersion !== contentVersion) return;
+  const bubble = anchor.id ? findTimelineBubble(anchor.id) : null;
+  let top = anchor.scrollY;
+  if (bubble) {
+    const rect = bubble.getBoundingClientRect();
+    top = window.scrollY + rect.top - anchor.top;
+  }
+  try {
+    window.scrollTo({ top: Math.max(0, top), behavior: "instant" });
+  } catch (_) {
+    window.scrollTo(0, Math.max(0, top));
+  }
+}
+
+async function restoreTimelineAnchor(anchor, expectedContentVersion = contentVersion) {
+  if (!anchor) return;
+  const nextFrame = () => new Promise((resolve) => {
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(resolve);
+    else window.setTimeout(resolve, 0);
+  });
+  await nextFrame();
+  applyTimelineAnchor(anchor, expectedContentVersion);
+  await nextFrame();
+  applyTimelineAnchor(anchor, expectedContentVersion);
+}
+
+function removeFavoriteTimelineBubble(messageId) {
+  const bubble = findTimelineBubble(messageId);
+  const anchor = captureTimelineAnchor(messageId);
+  if (!bubble) return { bubble: null, anchor };
+
+  const timeline = $("timeline");
+  const nextSibling = bubble.nextSibling;
+  const separator = bubble.previousElementSibling && bubble.previousElementSibling.classList.contains("day-sep")
+    ? bubble.previousElementSibling
+    : null;
+  clearArchiveMediaObservers(bubble);
+  bubble.remove();
+
+  let removedSeparator = null;
+  if (separator && (!separator.nextElementSibling || separator.nextElementSibling.classList.contains("day-sep"))) {
+    removedSeparator = separator;
+    separator.remove();
+  }
+  return { bubble, separator: removedSeparator, nextSibling, anchor, timeline };
+}
+
+function restoreFavoriteTimelineBubble(removal) {
+  if (!removal || !removal.bubble || !removal.timeline) return;
+  const { bubble, separator, nextSibling, timeline } = removal;
+  const before = nextSibling && nextSibling.parentNode === timeline ? nextSibling : null;
+  if (separator) timeline.insertBefore(separator, before);
+  timeline.insertBefore(bubble, before);
+  bubble.querySelectorAll("video, audio").forEach(observeArchiveMedia);
+}
+
+function makeMessageBubbleForReconcile(msg) {
+  const fragment = document.createDocumentFragment();
+  const previousLastDay = lastDay;
+  lastDay = fmtDay(msg.published_at);
+  renderBubble(msg, fragment, true);
+  lastDay = previousLastDay;
+  return fragment.firstElementChild;
+}
+
+function rebuildMessageImageIndex(bubbles) {
+  images = [];
+  for (const bubble of bubbles) {
+    const msg = bubble.__archiveMessage;
+    if (!msg) continue;
+    for (const image of bubble.querySelectorAll("img[data-lb]")) {
+      images.push({
+        url: image.getAttribute("src") || image.src,
+        caption: (msg.text || "").slice(0, 80),
+        source: "message",
+        messageId: msg.id,
+        memberName: msg.member_name || curMember,
+        memberDir: msg.member_dir || curMember,
+        year: msg.year || (curYM && curYM.year),
+        month: msg.month || (curYM && curYM.month),
+      });
+      image.dataset.lb = String(images.length - 1);
+    }
+  }
+}
+
+function reconcileFavoriteTimelineMessages(messages) {
+  const timeline = $("timeline");
+  const existingById = new Map();
+  const measuredHeights = new Map();
+  const duplicateBubbles = [];
+  for (const node of Array.from(timeline.children)) {
+    if (!node.classList.contains("bubble") || !node.dataset.msgId) continue;
+    const id = node.dataset.msgId;
+    const height = node.getBoundingClientRect().height;
+    if (Number.isFinite(height) && height > 0) measuredHeights.set(id, height);
+    if (existingById.has(id)) duplicateBubbles.push(node);
+    else existingById.set(id, node);
+  }
+
+  const desiredBubbles = [];
+  const newlyCreatedBubbles = [];
+  const desiredIds = new Set();
+  for (const msg of messages) {
+    const id = String(msg.id);
+    desiredIds.add(id);
+    let bubble = existingById.get(id);
+    if (bubble) {
+      const existingMessage = bubble.__archiveMessage || msg;
+      Object.assign(existingMessage, msg);
+      bubble.__archiveMessage = existingMessage;
+      const measuredHeight = measuredHeights.get(id);
+      if (measuredHeight) bubble.style.containIntrinsicSize = measuredHeight + "px";
+      syncFavoriteButton(existingMessage, bubble.querySelector(".fav-btn"));
+    } else {
+      bubble = makeMessageBubbleForReconcile(msg);
+      newlyCreatedBubbles.push(bubble);
+    }
+    desiredBubbles.push(bubble);
+  }
+
+  for (const bubble of duplicateBubbles) {
+    clearArchiveMediaObservers(bubble);
+    bubble.remove();
+  }
+  for (const [id, bubble] of existingById) {
+    if (desiredIds.has(id)) continue;
+    clearArchiveMediaObservers(bubble);
+    bubble.remove();
+  }
+  for (const node of Array.from(timeline.children)) {
+    if (node.classList.contains("day-sep")) node.remove();
+  }
+
+  // 对页面边界新增的卡片只做插入；已存在的 bubble 节点保持原样，保留虚拟化测量缓存。
+  let cursor = timeline.firstElementChild;
+  for (const bubble of desiredBubbles) {
+    if (bubble === cursor) cursor = cursor.nextElementSibling;
+    else timeline.insertBefore(bubble, cursor);
+  }
+
+  let previousDay = "";
+  for (const bubble of desiredBubbles) {
+    const msg = bubble.__archiveMessage;
+    const day = fmtDay(msg.published_at);
+    if (day !== previousDay) {
+      timeline.insertBefore(createMessageDaySeparator(msg), bubble);
+      previousDay = day;
+    }
+  }
+  lastDay = previousDay;
+  stabilizeTimelineBubbleIntrinsicSizes(newlyCreatedBubbles);
+  rebuildMessageImageIndex(desiredBubbles);
+}
+
+async function waitForFavoriteTimelinePageIdle(expectedContentVersion) {
+  while (pageLoading) {
+    if (expectedContentVersion !== contentVersion) return false;
+    await new Promise((resolve) => window.setTimeout(resolve, 16));
+  }
+  return expectedContentVersion === contentVersion;
+}
+
+async function refreshFavoriteTimelineInPlace(expectedContentVersion = contentVersion) {
+  if (expectedContentVersion !== contentVersion || !isFavFilter || curMode !== "msg") return false;
+  setFavoriteTimelineSyncState("syncing");
+  if (!(await waitForFavoriteTimelinePageIdle(expectedContentVersion))) return false;
+
+  const requestedPages = [...loadedMessagePages].filter((value) => Number.isInteger(value) && value >= 1).sort((a, b) => a - b);
+  if (!requestedPages.length) {
+    setFavoriteTimelineSyncState("error");
+    showToast("收藏筛选同步失败，点击“加载更多”重试：没有可同步的已加载页", "error");
+    return false;
+  }
+
+  const controller = new AbortController();
+  favoriteTimelineAbort = controller;
+  try {
+    const results = await Promise.all(requestedPages.map(async (pageNumber) => ({
+      pageNumber,
+      data: await api(buildMessageUrl(pageNumber), { signal: controller.signal }),
+    })));
+    if (expectedContentVersion !== contentVersion || favoriteTimelineSyncState !== "syncing") return false;
+    const failed = results.find(({ data }) => !data || !data.ok);
+    if (failed) {
+      const detail = failed.data && Array.isArray(failed.data.errors) ? failed.data.errors.join("；") : "消息接口返回无效数据";
+      throw new Error(detail || "消息接口返回无效数据");
+    }
+
+    const pageCounts = new Set(results.map(({ data }) => Number(data.total_pages) || totalPages));
+    if (pageCounts.size > 1) throw new Error("分页结果发生变化");
+    const refreshedTotalPages = Math.max(1, [...pageCounts][0] || totalPages);
+    const messages = [];
+    const seenIds = new Set();
+    for (const { pageNumber, data } of results) {
+      if (pageNumber > refreshedTotalPages) continue;
+      for (const msg of data.messages || []) {
+        if (!msg || msg.id === undefined || msg.id === null || String(msg.id) === "") {
+          throw new Error("分页结果缺少消息 ID");
+        }
+        const id = String(msg.id);
+        if (favoriteTimelineSyncTargetId && id === favoriteTimelineSyncTargetId) {
+          throw new Error("取消收藏结果尚未同步到列表");
+        }
+        if (seenIds.has(id)) throw new Error("分页结果包含重复消息");
+        seenIds.add(id);
+        messages.push(msg);
+      }
+    }
+
+    const validPages = requestedPages.filter((pageNumber) => pageNumber <= refreshedTotalPages);
+    totalPages = refreshedTotalPages;
+    loadedMessagePages = new Set(validPages);
+    page = validPages.length ? validPages[validPages.length - 1] : 1;
+    const statsPage = results.find(({ pageNumber }) => pageNumber === 1) || results[0];
+    if (statsPage) updateMessageStats(statsPage.data, 1);
+    reconcileFavoriteTimelineMessages(messages);
+    $("emptyHint").hidden = messages.length > 0;
+    $("loadMore").hidden = page >= totalPages;
+    await restoreTimelineAnchor(favoriteTimelineSyncAnchor, expectedContentVersion);
+    setFavoriteTimelineSyncState("idle");
+    favoriteTimelineSyncAnchor = null;
+    favoriteTimelineSyncTargetId = "";
+    return true;
+  } catch (error) {
+    if (expectedContentVersion === contentVersion && favoriteTimelineSyncState === "syncing") {
+      setFavoriteTimelineSyncState("error");
+      showToast("收藏筛选同步失败，点击“加载更多”重试：" + error.message, "error");
+    }
+    return false;
+  } finally {
+    if (favoriteTimelineAbort === controller) favoriteTimelineAbort = null;
+  }
+}
+
 // ── 消息收藏互动控制（仅登录用户可见与操作） ─────────────────
 async function toggleMessageFavorite(msg, btn) {
-  if (!window._isLoggedIn) return;
+  if (!window._isLoggedIn || favoriteTimelineSyncState !== "idle") return;
   const currentVal = Boolean(msg.is_favorite);
   const newVal = !currentVal;
+  const expectedContentVersion = contentVersion;
+  const shouldSyncFavoriteTimeline = currentVal && !newVal && isFavFilter && curMode === "msg";
+  const removal = shouldSyncFavoriteTimeline ? removeFavoriteTimelineBubble(msg.id) : null;
+  if (removal) {
+    favoriteTimelineSyncAnchor = removal.anchor;
+    favoriteTimelineSyncTargetId = String(msg.id);
+    setFavoriteTimelineSyncState("syncing");
+  }
 
   btn.classList.add("anim-pop");
   setTimeout(() => btn.classList.remove("anim-pop"), 400);
 
   msg.is_favorite = newVal;
-  btn.classList.toggle("active", newVal);
-  btn.title = newVal ? "取消收藏" : "收藏";
-  const iconEl = btn.querySelector(".btn-icon");
-  if (iconEl) iconEl.textContent = newVal ? "⭐" : "☆";
+  btn.disabled = true;
+  syncFavoriteButton(msg, btn);
 
   try {
-    const res = await api("/api/archive/message/interaction", {
+    const interactionRequest = api("/api/archive/message/interaction", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -4146,25 +4755,51 @@ async function toggleMessageFavorite(msg, btn) {
         value: newVal,
       }),
     });
+    if (removal) await restoreTimelineAnchor(removal.anchor, expectedContentVersion);
+    const res = await interactionRequest;
     if (res && res.ok) {
       msg.is_favorite = Boolean(res.is_favorite);
+      syncFavoriteButton(msg, btn);
       showToast(newVal ? "⭐ 已加入收藏" : "已取消收藏", "ok");
       // 实时同步更新月份选择器条数与日历标记，清空旧缓存
       msgCalendarCache.clear();
       memberMonthsCache.clear();
       loadMonths(true);
       loadCalendar();
+      if (removal && expectedContentVersion === contentVersion && isFavFilter && !msg.is_favorite) {
+        await refreshFavoriteTimelineInPlace(expectedContentVersion);
+      } else if (removal && expectedContentVersion === contentVersion) {
+        restoreFavoriteTimelineBubble(removal);
+        await restoreTimelineAnchor(removal.anchor, expectedContentVersion);
+        favoriteTimelineSyncAnchor = null;
+        favoriteTimelineSyncTargetId = "";
+        setFavoriteTimelineSyncState("idle");
+      }
+      btn.disabled = false;
     } else {
       msg.is_favorite = currentVal;
-      btn.classList.toggle("active", currentVal);
-      btn.title = currentVal ? "取消收藏" : "收藏";
-      if (iconEl) iconEl.textContent = currentVal ? "⭐" : "☆";
+      syncFavoriteButton(msg, btn);
+      btn.disabled = false;
+      if (removal && expectedContentVersion === contentVersion) {
+        restoreFavoriteTimelineBubble(removal);
+        await restoreTimelineAnchor(removal.anchor, expectedContentVersion);
+        favoriteTimelineSyncAnchor = null;
+        favoriteTimelineSyncTargetId = "";
+        setFavoriteTimelineSyncState("idle");
+      }
       showToast("操作失败：" + ((res && res.errors) ? res.errors.join("；") : "网络异常"), "error");
     }
   } catch (e) {
     msg.is_favorite = currentVal;
-    btn.classList.toggle("active", currentVal);
-    if (iconEl) iconEl.textContent = currentVal ? "⭐" : "☆";
+    syncFavoriteButton(msg, btn);
+    btn.disabled = false;
+    if (removal && expectedContentVersion === contentVersion) {
+      restoreFavoriteTimelineBubble(removal);
+      await restoreTimelineAnchor(removal.anchor, expectedContentVersion);
+      favoriteTimelineSyncAnchor = null;
+      favoriteTimelineSyncTargetId = "";
+      setFavoriteTimelineSyncState("idle");
+    }
     showToast("操作失败：" + e.message, "error");
   }
 }
@@ -4221,6 +4856,11 @@ $("nextMonthBottom").addEventListener("click", () => {
 });
 $("loadMore").addEventListener("click", () => {
   if (curMode !== "msg") return;
+  if (favoriteTimelineSyncState === "error") {
+    refreshFavoriteTimelineInPlace(contentVersion);
+    return;
+  }
+  if (favoriteTimelineSyncState !== "idle") return;
   if (pageLoading || page >= totalPages) return;
   page++;
   loadPage();
@@ -4392,14 +5032,66 @@ if ($("btnBlogAuthorSearchClear")) {
 window._isLoggedIn = false;
 window._canDownloadBlogCard = false;
 let _authInitPromise = null;
+let _authRequestVersion = 0;
+let _authRefreshInFlight = false;
+let _archiveAuthInvalidatedForLogout = false;
 
-async function initAuth() {
+function isArchiveAuthRequestCurrent(requestVersion) {
+  return requestVersion === _authRequestVersion && !_archiveAuthInvalidatedForLogout;
+}
+
+function invalidateArchiveAuthRequestsForLogout() {
+  _archiveAuthInvalidatedForLogout = true;
+  _authRequestVersion += 1;
+  _authInitPromise = null;
+  _authRefreshInFlight = false;
+  hideArchiveHomeWhileIdentityIsUnconfirmed();
+}
+
+function resumeArchiveAuthAfterLogoutFailure() {
+  _archiveAuthInvalidatedForLogout = false;
+  _authInitPromise = null;
+  _authRefreshInFlight = false;
+}
+
+function hideArchiveHomeWhileIdentityIsUnconfirmed() {
+  _homeRequestVersion += 1;
+  archiveCacheIdentity = null;
+  _portalHomeCached = null;
+  _portalHomeCacheScopeKey = "";
+  setArchiveHomeCacheNotice("");
+  if (curMode === "home") {
+    const portalContent = $("portalContent");
+    const homeSkeleton = $("homeSkeleton");
+    if (portalContent) portalContent.style.display = "none";
+    if (homeSkeleton) homeSkeleton.classList.add("active");
+  }
+}
+
+async function initAuth({ refresh = false } = {}) {
+  if (_archiveAuthInvalidatedForLogout) return Promise.resolve();
+  if (refresh && _authRefreshInFlight && _authInitPromise) return _authInitPromise;
+  const previousIdentity = refresh ? (archiveCacheIdentity || lastConfirmedIdentity) : null;
+  if (refresh) {
+    hideArchiveHomeWhileIdentityIsUnconfirmed();
+    _authInitPromise = null;
+  }
   if (_authInitPromise) return _authInitPromise;
+  const requestVersion = ++_authRequestVersion;
+  _authRefreshInFlight = refresh;
   _authInitPromise = (async () => {
     try {
       let me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+      if (!isArchiveAuthRequestCurrent(requestVersion)) return;
       if (me.auth_enabled && !me.user && me.refresh_available && await silentRefreshToken()) {
+        if (!isArchiveAuthRequestCurrent(requestVersion)) return;
         me = await (await fetch("/api/auth/me", { cache: "no-store" })).json();
+      }
+      if (!isArchiveAuthRequestCurrent(requestVersion)) return;
+      setArchiveCacheIdentity(me);
+      if (previousIdentity && (!archiveCacheIdentity || previousIdentity.key !== archiveCacheIdentity.key)) {
+        clearArchiveHomeCache(previousIdentity);
+        clearArchiveReadingScroll(previousIdentity);
       }
       window._canDownloadBlogCard = !!(me.auth_enabled && me.user);
       updateBlogCardDownloadVisibility(window._canDownloadBlogCard);
@@ -4459,7 +5151,11 @@ async function initAuth() {
           adminLink.innerHTML = "<span>⚙️</span><span>管理后台</span>";
         }
       }
-    } catch (e) { /* 忽略 */ }
+    } catch (e) {
+      if (isArchiveAuthRequestCurrent(requestVersion)) setArchiveCacheIdentity(null);
+    } finally {
+      if (isArchiveAuthRequestCurrent(requestVersion)) _authRefreshInFlight = false;
+    }
   })();
   return _authInitPromise;
 }
@@ -4565,13 +5261,42 @@ if (document.readyState === "loading") {
   bindChangePwDialog();
 }
 
+function beginArchiveLogout(logoutButton) {
+  const identity = archiveCacheIdentity || lastConfirmedIdentity;
+  invalidateArchiveAuthRequestsForLogout();
+  clearArchiveBrowserStateForLogout(identity);
+  archiveStorageRemove("localStorage", "webAdminToken");
+  if (logoutButton) {
+    logoutButton.disabled = true;
+    logoutButton.setAttribute("aria-busy", "true");
+    logoutButton.textContent = "⏳ 正在退出…";
+  }
+  return identity;
+}
+
+async function requestArchiveLogout(logoutButton) {
+  if (!logoutButton || logoutButton.disabled) return;
+  const logoutIdentity = beginArchiveLogout(logoutButton);
+  let response = null;
+  try {
+    response = await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
+  } catch (_) { /* 服务器状态未确认；本地归档状态已先清理 */ }
+  if (response && response.ok) {
+    location.href = "/login";
+    return;
+  }
+  resumeArchiveAuthAfterLogoutFailure();
+  logoutButton.disabled = false;
+  logoutButton.removeAttribute("aria-busy");
+  logoutButton.textContent = "⚠️ 服务器退出未确认，可重试";
+  try { await revalidateArchiveIdentity({ previousIdentity: logoutIdentity }); } catch (_) {}
+}
+
 const logoutBtn = $("logoutBtn");
 if (logoutBtn) {
-  logoutBtn.addEventListener("click", async (e) => {
+  logoutBtn.addEventListener("click", (e) => {
     e.preventDefault();
-    try { await fetch("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
-    try { localStorage.removeItem("webAdminToken"); } catch (err) { /* 保留偏好 */ }
-    location.href = "/login";
+    requestArchiveLogout(logoutBtn);
   });
 }
 
@@ -4625,7 +5350,7 @@ function jumpToMessage(member, year, month, msgId) {
   switchMainTab("msg", true);
   hideHome();
   curMember = member;
-  try { localStorage.setItem("archive_last_msg_member", member); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_last_msg_member", member);
   curType = "";
   searchQuery = "";
   syncSearchInput();
@@ -4642,14 +5367,58 @@ function jumpToMessage(member, year, month, msgId) {
 }
 
 let _portalHomeCached = null;
+let _portalHomeCacheScopeKey = "";
 let _homeRequestVersion = 0;
 let _homeRenderVersion = 0;
 let _homePhotoCleanup = null;
 
+function setArchiveHomeCacheNotice(message) {
+  const notice = $("homeCacheNotice");
+  if (!notice) return;
+  notice.textContent = message || "";
+  notice.hidden = !message;
+}
+
+function readArchivePortalHomeCache(cacheKey) {
+  if (!cacheKey || !archiveCacheIdentity) return null;
+  for (const storageName of ["localStorage", "sessionStorage"]) {
+    const raw = archiveStorageGet(storageName, cacheKey);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      const age = Date.now() - Number(parsed && parsed.ts);
+      if (parsed && parsed.version === ARCHIVE_HOME_CACHE_VERSION &&
+          parsed.scope === archiveCacheIdentity.key && parsed.data && typeof parsed.data === "object" &&
+          Number.isFinite(age) && age >= 0 && age < ARCHIVE_HOME_CACHE_TTL_MS) return parsed.data;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function writeArchivePortalHomeCache(cacheKey, data) {
+  if (!cacheKey || cacheKey !== archiveHomeCacheKey() || !archiveCacheIdentity || !data || typeof data !== "object") return;
+  const serialized = JSON.stringify({
+    version: ARCHIVE_HOME_CACHE_VERSION,
+    scope: archiveCacheIdentity.key,
+    ts: Date.now(),
+    data,
+  });
+  archiveStorageSet("localStorage", cacheKey, serialized);
+  archiveStorageSet("sessionStorage", cacheKey, serialized);
+}
+
 async function showHome() {
+  beginArchiveReadingRouteLoad();
   const requestVersion = ++_homeRequestVersion;
   const routeAtStart = location.hash;
   curMode = "home";
+  await initAuth();
+  if (requestVersion !== _homeRequestVersion || curMode !== "home" || location.hash !== routeAtStart) return;
+  const cacheKey = archiveHomeCacheKey();
+  if (_portalHomeCacheScopeKey !== cacheKey) {
+    _portalHomeCached = null;
+    _portalHomeCacheScopeKey = cacheKey;
+  }
   hideMessageMonthFooter();
   setHtmlViewClass("home");
   syncNavTabs("home");
@@ -4664,24 +5433,14 @@ async function showHome() {
   
   // 1. 如果已有内存或本地持久缓存，优先秒出（0ms 首屏响应，SWR 策略）
   let hasRenderedCache = false;
-  if (!_portalHomeCached) {
-    try {
-      const raw = localStorage.getItem("archive_portal_home_cache") || sessionStorage.getItem("archive_portal_home_cache");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        // SWR 策略：只要本地有缓存（7 天内），立即秒出静态看板与最近动态，再静默刷新
-        if (parsed && parsed.data && (Date.now() - (parsed._ts || 0) < 7 * 86400000)) {
-          _portalHomeCached = parsed.data;
-        }
-      }
-    } catch(e) {}
-  }
+  if (!_portalHomeCached) _portalHomeCached = readArchivePortalHomeCache(cacheKey);
   
   if (_portalHomeCached) {
     renderHome(_portalHomeCached);
     $('homeSkeleton').classList.remove('active');
     $('portalContent').style.display = '';
     hasRenderedCache = true;
+    setArchiveHomeCacheNotice("当前显示的是本浏览器保存的归档首页缓存，正在更新。");
   } else {
     // 骨架屏
     $('homeSkeleton').classList.add('active');
@@ -4699,23 +5458,22 @@ async function showHome() {
           '<div class="home-empty active"><div class="ee-icon">📭</div>' +
           '<div class="ee-title">还没有归档数据</div>' +
           '<div class="ee-desc">确认 config.json 的 archive.enabled 已开启。<br>新消息会自动归档；历史消息用 <code>python tools/backfill_archive.py</code> 回填。<br><br><a href="/">⚙️ 前往管理端</a></div></div>';
+      } else {
+        setArchiveHomeCacheNotice("最新请求未返回归档内容，当前仍显示本浏览器缓存。");
       }
       return;
     }
     _portalHomeCached = data;
-    try {
-      const serialized = JSON.stringify({ _ts: Date.now(), data });
-      localStorage.setItem("archive_portal_home_cache", serialized);
-      sessionStorage.setItem("archive_portal_home_cache", serialized);
-    } catch(e) {}
+    writeArchivePortalHomeCache(cacheKey, data);
     renderHome(data);
     $('homeSkeleton').classList.remove('active');
     $('portalContent').style.display = '';
+    setArchiveHomeCacheNotice("");
   } catch (e) {
     if (!hasRenderedCache) {
       $('homeSkeleton').classList.remove('active');
       $('archiveHome').innerHTML = '<div style="text-align:center;color:var(--err);padding:60px 20px">加载失败：' + esc(e.message) + '</div>';
-    }
+    } else setArchiveHomeCacheNotice("暂时无法更新，当前显示的是本浏览器缓存。");
   }
 }
 
@@ -5124,7 +5882,7 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
   // 0. 相册画廊模式：#gallery, #gallery=..., #source=..., #year=..., #order=...
   if (p.has("gallery") || rawHash === "gallery") {
     let saved = null;
-    try { saved = localStorage.getItem("archive_last_gallery_member"); } catch (_) {}
+    saved = archiveStorageGet("localStorage", "archive_last_gallery_member");
     const mem = p.get("gallery") || (saved !== null ? saved : curGalleryMember) || "";
     const source = p.get("source") || curGallerySource || "all";
     const year = p.get("year") || "";
@@ -5142,8 +5900,8 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
     let savedGroup = null;
     let savedAuthor = "";
     try {
-      savedGroup = localStorage.getItem("archive_last_blog_group");
-      savedAuthor = localStorage.getItem("archive_last_blog_author") || "";
+      savedGroup = archiveStorageGet("localStorage", "archive_last_blog_group");
+      savedAuthor = archiveStorageGet("localStorage", "archive_last_blog_author") || "";
     } catch (_) {}
     const requestedGroup = p.get("blog") || "";
     const knownGroups = new Set(BLOG_GROUP_KEYS);
@@ -5190,7 +5948,8 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
       return;
     }
 
-    const targetScroll = restoreScrollPos !== null ? restoreScrollPos : blogReaderSavedScroll;
+    const targetScroll = restoreScrollPos !== null ? restoreScrollPos :
+      (blogReaderSavedScrollReady ? blogReaderSavedScroll : null);
 
     // 未指定博客 ID：若阅读器正开着，关闭它并回到列表
     const readerWasOpen = $("blogReader").style.display !== "none";
@@ -5202,6 +5961,7 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
       $("brContent").innerHTML = "";
       currentBlogReaderPost = null;
       blogReaderReturnHash = null;
+      blogReaderSavedScrollReady = false;
     }
 
     const isAlreadyMatchingBlogList = (
@@ -5233,7 +5993,7 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
       return;
     }
     let saved = null;
-    try { saved = localStorage.getItem("archive_last_letter_member"); } catch (_) {}
+    saved = archiveStorageGet("localStorage", "archive_last_letter_member");
     const mem = p.get("letter") || (saved && members.some(m => m.name === saved) ? saved : curLetterMember) || getDefaultNogiMember();
     if (mem) {
       await selectLetterMember(mem);
@@ -5244,7 +6004,7 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
   // 2. 消息模式：#msg, #member=..., #y=..., #msg_id=...
   if (p.has("member") || p.has("y") || p.has("m") || p.has("msg_id") || p.has("msg") || rawHash === "msg") {
     let saved = null;
-    try { saved = localStorage.getItem("archive_last_msg_member"); } catch (_) {}
+    saved = archiveStorageGet("localStorage", "archive_last_msg_member");
     const mem = p.get("member") || (saved && members.some(m => m.name === saved) ? saved : curMember) || getDefaultNogiMember();
     const t = p.get("t") || "";
     const q = normalizedQuery(p.get("q"));
@@ -5265,6 +6025,8 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
 
   // 3. 首页模式（默认无 hash 或 #home）
   if (!rawHash || rawHash === "home") {
+    const targetScroll = restoreScrollPos !== null ? restoreScrollPos :
+      (blogReaderSavedScrollReady ? blogReaderSavedScroll : null);
     const readerWasOpen = $("blogReader").style.display !== "none";
     if (readerWasOpen) {
       $("blogReader").style.display = "none";
@@ -5274,9 +6036,9 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
       $("brContent").innerHTML = "";
       currentBlogReaderPost = null;
       blogReaderReturnHash = null;
+      blogReaderSavedScrollReady = false;
     }
 
-    const targetScroll = restoreScrollPos !== null ? restoreScrollPos : blogReaderSavedScroll;
     const isAlreadyMatchingHome = (
       curMode === "home" &&
       $('archiveHome') && $('archiveHome').classList.contains('active') &&
@@ -5297,6 +6059,20 @@ async function handleRoute(isInitial = false, restoreScrollPos = null) {
 
   // 4. 未知非法 Hash 路由：严格跳转至 404 页面
   location.replace("/404?from=" + encodeURIComponent(location.pathname + location.search + location.hash));
+}
+
+function prepareArchiveReadingRouteChange() {
+  const params = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+  const hasBlogId = Boolean(params.get("id") || params.get("blog_id") || params.get("post"));
+  if (hasBlogId) {
+    saveCompletedArchiveReadingScroll();
+    return;
+  }
+  const nextRouteKey = archiveReadingRouteKey();
+  if (nextRouteKey !== activeReadingRouteKey) {
+    beginArchiveReadingRouteLoad();
+    if (!nextRouteKey) blogReaderSavedScrollReady = false;
+  }
 }
 
 // ── 启动入口 ─────────────────────────────────────
@@ -5405,12 +6181,41 @@ async function boot() {
 }
 
 boot();
-// 从浏览器 bfcache 恢复时重新加载内容
-window.addEventListener("pageshow", (e) => { if (e.persisted) boot(); });
+window.addEventListener("scroll", scheduleArchiveReadingScrollSave, { passive: true });
+window.addEventListener("pagehide", saveCompletedArchiveReadingScroll);
+async function revalidateArchiveIdentity({
+  reboot = false,
+  previousIdentity = archiveCacheIdentity || lastConfirmedIdentity,
+} = {}) {
+  if (_archiveAuthInvalidatedForLogout) return;
+  await initAuth({ refresh: true });
+  if (_archiveAuthInvalidatedForLogout) return;
+  const previousScope = previousIdentity && previousIdentity.key ? previousIdentity.key : "";
+  const currentScope = archiveCacheIdentity && archiveCacheIdentity.key ? archiveCacheIdentity.key : "";
+  if (reboot || previousScope !== currentScope) {
+    await boot();
+  } else if (curMode === "home") {
+    await showHome();
+  }
+}
+// 从 bfcache 恢复、切回可见标签或旧版 auth token storage 改变时重新确认身份。
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) revalidateArchiveIdentity({ reboot: true });
+});
+window.addEventListener("focus", () => {
+  if (!document.hidden) revalidateArchiveIdentity();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && document.visibilityState === "visible") revalidateArchiveIdentity();
+});
+window.addEventListener("storage", (e) => {
+  if (e.key === "webAdminToken") revalidateArchiveIdentity();
+});
 
 // hash 变化时统一由 handleRoute 分发视图
 window.addEventListener("hashchange", () => {
   if (selfHashUpdate) return;
+  prepareArchiveReadingRouteChange();
   handleRoute(false);
 });
 
@@ -5858,7 +6663,7 @@ async function selectLetterMember(mName) {
   hideMessageMonthFooter();
   setHtmlViewClass("letter");
   curLetterMember = mName;
-  try { localStorage.setItem("archive_last_letter_member", mName); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_last_letter_member", mName);
   const mObj = members.find(m => m.name === mName) || { name: mName, display: mName };
   const disp = $("curLetterMemberDisplay");
   if (disp) disp.textContent = mObj.display || mName;
@@ -6212,8 +7017,7 @@ function syncGallerySourceChips() {
 }
 
 let curGalleryLayout = (function() {
-  try { return localStorage.getItem("archive_gallery_layout") || "masonry"; }
-  catch (_) { return "masonry"; }
+  return archiveStorageGet("localStorage", "archive_gallery_layout") || "masonry";
 })();
 
 function getMasonryColCount() {
@@ -6277,7 +7081,7 @@ function switchGalleryLayout(newLayout) {
   if (newLayout !== "masonry" && newLayout !== "grid") return;
   if (curGalleryLayout === newLayout) return;
   curGalleryLayout = newLayout;
-  try { localStorage.setItem("archive_gallery_layout", curGalleryLayout); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_gallery_layout", curGalleryLayout);
   syncGalleryLayoutToggle();
 
   const cardsBox = $("galleryCards");
@@ -6474,7 +7278,7 @@ async function selectGalleryMember(mName, updateHash = true) {
   hideMessageMonthFooter();
   setHtmlViewClass("gallery");
   curGalleryMember = mName || "";
-  try { localStorage.setItem("archive_last_gallery_member", curGalleryMember); } catch (_) {}
+  archiveStorageSet("localStorage", "archive_last_gallery_member", curGalleryMember);
 
   updateGalleryMemberButtonDisplay();
   syncGallerySourceChips();

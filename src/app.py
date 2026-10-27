@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import signal
 import sys
-import traceback
 import httpx
 
 import src.config.config as cfg
@@ -84,6 +83,10 @@ _blog_client: httpx.AsyncClient | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _command_listeners: dict[str, tuple[str, asyncio.Task]] = {}
 _last_command_status: str = ""
+_command_listener_connected: set[str] = set()
+_command_reload_expected: dict[str, set[str]] = {}
+_command_reload_ready: dict[str, set[str]] = {}
+_command_listener_waiters: dict[str, set[str]] = {}
 _napcat_inbound_listener: NapCatInboundListener | None = None
 
 
@@ -475,34 +478,135 @@ def get_command_listeners() -> dict[str, tuple[str, asyncio.Task]]:
     return _command_listeners
 
 
-def _sync_command_listeners() -> None:
+def _record_reload_component(
+    reload_id: str | None,
+    component_id: str,
+    state: str,
+    *,
+    reason_code: str | None = None,
+    progress: dict | None = None,
+) -> None:
+    if not reload_id:
+        return
+    from src.webui_modules.reload_status import record_component
+
+    record_component(reload_id, component_id, state, reason_code=reason_code, progress=progress)
+
+
+def _apply_reload_component(reload_id: str | None, component_id: str, action) -> bool:
+    """Run one synchronous reconfiguration step and record a safe result."""
+    try:
+        result = action()
+    except Exception as exc:
+        _record_reload_component(reload_id, component_id, "failed", reason_code="component_exception")
+        log_all(f"⚠️ 配置重载组件失败: {component_id} ({type(exc).__name__})", is_error=True)
+        return False
+    if result is False:
+        _record_reload_component(reload_id, component_id, "failed", reason_code="component_reported_failure")
+        return False
+    _record_reload_component(reload_id, component_id, "completed")
+    return True
+
+
+def _command_listener_connected_event(app_id: str) -> None:
+    _command_listener_connected.add(app_id)
+    for reload_id in list(_command_listener_waiters.get(app_id, ())):
+        expected = _command_reload_expected.get(reload_id, set())
+        ready = _command_reload_ready.setdefault(reload_id, set())
+        ready.add(app_id)
+        state = "completed" if expected and ready >= expected else "pending"
+        _record_reload_component(
+            reload_id,
+            "qq_command_listener",
+            state,
+            progress={"ready": len(ready & expected), "expected": len(expected)},
+        )
+        if state == "completed":
+            _drop_command_reload_tracking(reload_id)
+
+
+def _drop_command_reload_tracking(reload_id: str) -> None:
+    _command_reload_expected.pop(reload_id, None)
+    _command_reload_ready.pop(reload_id, None)
+    for app_id in list(_command_listener_waiters):
+        waiting = _command_listener_waiters[app_id]
+        waiting.discard(reload_id)
+        if not waiting:
+            _command_listener_waiters.pop(app_id, None)
+
+
+def _command_listener_task_done(app_id: str, task: asyncio.Task) -> None:
+    current = _command_listeners.get(app_id)
+    if current is not None and current[1] is not task:
+        if not task.cancelled():
+            try:
+                task.exception()
+            except (asyncio.CancelledError, Exception):
+                pass
+        return
+    if current is not None and current[1] is task:
+        _command_listeners.pop(app_id, None)
+    _command_listener_connected.discard(app_id)
+    waiting = list(_command_listener_waiters.pop(app_id, ()))
+    for reload_id in waiting:
+        _record_reload_component(reload_id, "qq_command_listener", "failed", reason_code="listener_task_ended")
+        _drop_command_reload_tracking(reload_id)
+    if not task.cancelled():
+        try:
+            task.exception()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+def _sync_command_listeners(reload_id: str | None = None) -> None:
     """按当前配置增删官方 Bot 指令监听任务（必须在事件循环里调用）。"""
+    try:
+        _sync_command_listeners_impl(reload_id)
+    except Exception as exc:
+        _record_reload_component(reload_id, "qq_command_listener", "failed", reason_code="component_exception")
+        log_all(f"⚠️ 官方 Bot 指令监听同步失败 ({type(exc).__name__})", is_error=True)
+        if reload_id is None:
+            raise
+
+
+def _sync_command_listeners_impl(reload_id: str | None = None) -> None:
     global _last_command_status
     from src import qq_commands
     from src.qq_openid import listen_forever
+
+    if reload_id:
+        for previous_id in list(_command_reload_expected):
+            if previous_id != reload_id:
+                _record_reload_component(previous_id, "qq_command_listener", "unconfirmed", reason_code="listener_superseded")
+                _drop_command_reload_tracking(previous_id)
 
     enabled = getattr(cfg, "QQ_COMMANDS_ENABLED", False)
     desired: dict[str, str] = {}
     bot_names: dict[str, str] = {}
     if enabled:
-        for b in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
-            if b.get("app_id") and b.get("client_secret"):
-                desired[b["app_id"]] = b["client_secret"]
-                bot_names[b["app_id"]] = b.get("name") or b["app_id"]
+        for bot in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
+            if bot.get("app_id") and bot.get("client_secret"):
+                desired[bot["app_id"]] = bot["client_secret"]
+                bot_names[bot["app_id"]] = bot.get("name") or bot["app_id"]
 
-    # 撤掉：已删除的 Bot、换了 secret 的 Bot、以及已经自行退出的任务
     for app_id, (secret, task) in list(_command_listeners.items()):
         if desired.get(app_id) != secret or task.done():
             task.cancel()
             del _command_listeners[app_id]
+            _command_listener_connected.discard(app_id)
 
-    started = [aid for aid in desired if aid not in _command_listeners]
-    for app_id in started:
-        _command_listeners[app_id] = (
+    for app_id in desired:
+        if app_id in _command_listeners:
+            continue
+        task = asyncio.create_task(listen_forever(
+            app_id,
             desired[app_id],
-            asyncio.create_task(listen_forever(
-                app_id, desired[app_id], qq_commands.handle, bot_name=bot_names.get(app_id, ""))),
-        )
+            qq_commands.handle,
+            bot_name=bot_names.get(app_id, ""),
+            on_connected=lambda listener_id=app_id: _command_listener_connected_event(listener_id),
+        ))
+        _command_listeners[app_id] = (desired[app_id], task)
+        task.add_done_callback(lambda done, listener_id=app_id: _command_listener_task_done(listener_id, done))
 
     if not enabled:
         status, is_error = "", False
@@ -514,14 +618,35 @@ def _sync_command_listeners() -> None:
                             "qq_commands.allow_openids），将不响应任何人的指令"), True
     else:
         status, is_error = f"🤖 官方 Bot 指令监听运行中（{len(desired)} 个 Bot）", False
-
-    # 只在状态变化时写日志，避免每次热重载都刷一条重复的
     if status and status != _last_command_status:
         log_all(status, is_error=is_error)
     _last_command_status = status
 
+    if not reload_id:
+        return
+    if not enabled:
+        _record_reload_component(reload_id, "qq_command_listener", "not_required", reason_code="listener_disabled")
+        return
+    if not desired:
+        _record_reload_component(reload_id, "qq_command_listener", "failed", reason_code="component_reported_failure")
+        return
+    expected = set(desired)
+    ready = expected & _command_listener_connected
+    _command_reload_expected[reload_id] = expected
+    _command_reload_ready[reload_id] = ready
+    state = "completed" if ready >= expected else "pending"
+    _record_reload_component(
+        reload_id, "qq_command_listener", state,
+        progress={"ready": len(ready), "expected": len(expected)},
+    )
+    if state == "completed":
+        _drop_command_reload_tracking(reload_id)
+    else:
+        for app_id in expected - ready:
+            _command_listener_waiters.setdefault(app_id, set()).add(reload_id)
 
-async def _sync_napcat_inbound_listener() -> bool:
+
+async def _sync_napcat_inbound_listener(reload_id: str | None = None) -> bool:
     """按当前配置启停 NapCat 入站社媒链接监听。"""
 
     global _napcat_inbound_listener
@@ -532,59 +657,119 @@ async def _sync_napcat_inbound_listener() -> bool:
             logger=log_all,
         )
     try:
-        return await _napcat_inbound_listener.reconcile()
-    except Exception as exc:
-        log_all(
-            f"⚠️ NapCat 入站监听同步失败: {type(exc).__name__}",
-            is_error=True,
+        settings = _napcat_inbound_listener._settings()
+        desired = bool(settings.get("enabled", False)) and _napcat_inbound_listener._napcat_enabled()
+        token_configured = (
+            bool(os.getenv("NAPCAT_EVENT_TOKEN", "").strip())
+            if _napcat_inbound_listener._event_token_from_env
+            else bool(_napcat_inbound_listener._event_token)
         )
+        if not desired:
+            await _napcat_inbound_listener.reconcile()
+            _record_reload_component(reload_id, "napcat_inbound_listener", "not_required", reason_code="listener_disabled")
+            return False
+        if not token_configured:
+            await _napcat_inbound_listener.reconcile()
+            _record_reload_component(reload_id, "napcat_inbound_listener", "failed", reason_code="missing_event_token")
+            return False
+        applied = await _napcat_inbound_listener.reconcile()
+        _record_reload_component(
+            reload_id,
+            "napcat_inbound_listener",
+            "completed" if applied else "failed",
+            reason_code=None if applied else "listener_start_failed",
+        )
+        return applied
+    except Exception as exc:
+        _record_reload_component(reload_id, "napcat_inbound_listener", "failed", reason_code="component_exception")
+        log_all(f"⚠️ NapCat 入站监听同步失败: {type(exc).__name__}", is_error=True)
         return False
 
 
-def _schedule_napcat_inbound_listener() -> None:
+def _schedule_napcat_inbound_listener(reload_id: str | None = None) -> None:
     """在主事件循环线程中异步执行入站监听热重载。"""
-
     try:
-        asyncio.create_task(
-            _sync_napcat_inbound_listener(),
-            name="napcat-inbound-reconcile",
-        )
+        task = asyncio.create_task(_sync_napcat_inbound_listener(reload_id), name="napcat-inbound-reconcile")
+        if reload_id:
+            task.add_done_callback(lambda done: _napcat_reload_task_done(reload_id, done))
     except RuntimeError:
-        # 事件循环正在退出时，配置 watchdog 的最后一次回调可以安全忽略。
-        pass
+        _record_reload_component(reload_id, "napcat_inbound_listener", "failed", reason_code="no_event_loop")
 
 
-def _on_config_reload(success: bool = True) -> None:
+def _napcat_reload_task_done(reload_id: str, task: asyncio.Task) -> None:
+    if not task.cancelled():
+        return
+    _record_reload_component(reload_id, "napcat_inbound_listener", "failed", reason_code="listener_task_ended")
+
+
+def _on_config_reload(success: bool = True, *, reload_id: str | None = None) -> None:
     """config.json 热重载后的补偿动作（由 watchdog 线程调用）。"""
     if not success:
         return
+    if reload_id:
+        from src.webui_modules.reload_status import begin_component_tracking
+        begin_component_tracking(reload_id)
     log_all("🔄 检测到配置文件变动，正在热重载系统组件...")
-    init_loggers()
-    try:
-        load_all_accounts()
-    except Exception:
-        log_all(f"🚨 热重载后加载账号凭证失败:\n{traceback.format_exc()}", is_error=True)
+    _apply_reload_component(reload_id, "loggers", init_loggers)
+    _apply_reload_component(reload_id, "accounts", load_all_accounts)
 
-    try:
-        tgbot.initialize()
-    except Exception as e:
-        log_all(f"⚠️ 热重载 TG Bot 失败: {e}", is_error=True)
+    if not getattr(cfg, "ENABLE_TG_BOT", False):
+        _record_reload_component(reload_id, "telegram_bots", "not_required", reason_code="listener_disabled")
+    else:
+        _apply_reload_component(reload_id, "telegram_bots", tgbot.initialize)
 
-    try:
-        qq_official.reload()
-    except Exception as e:
-        log_all(f"⚠️ 热重载 QQ Bot 失败: {e}", is_error=True)
+    configured_qq_bots = [
+        bot for bot in getattr(cfg, "QQ_OFFICIAL_BOTS", [])
+        if isinstance(bot, dict) and bot.get("app_id")
+    ]
+    if not configured_qq_bots:
+        _record_reload_component(reload_id, "qq_official_bots", "not_required", reason_code="listener_disabled")
+    else:
+        _apply_reload_component(reload_id, "qq_official_bots", qq_official.reload)
 
     try:
         from src.social.manager import reload_social_service
-        reload_social_service()
-    except Exception as e:
-        log_all(f"⚠️ 热重载社媒监控配置失败: {e}", is_error=True)
+        if get_social_service() is None:
+            _record_reload_component(reload_id, "social_config", "not_required", reason_code="listener_disabled")
+        else:
+            _apply_reload_component(reload_id, "social_config", reload_social_service)
+    except Exception as exc:
+        _record_reload_component(reload_id, "social_config", "failed", reason_code="component_exception")
+        log_all(f"⚠️ 热重载社媒监控配置失败 ({type(exc).__name__})", is_error=True)
 
-    # 指令监听要跟着新配置走，否则在管理端新加的 Bot 得等到下次重启才会上线
-    if _main_loop is not None and not _main_loop.is_closed():
-        _main_loop.call_soon_threadsafe(_sync_command_listeners)
-        _main_loop.call_soon_threadsafe(_schedule_napcat_inbound_listener)
+    loop = _main_loop
+    command_enabled = bool(getattr(cfg, "QQ_COMMANDS_ENABLED", False))
+    command_desired = any(
+        isinstance(bot, dict) and bot.get("app_id") and bot.get("client_secret")
+        for bot in getattr(cfg, "QQ_OFFICIAL_BOTS", [])
+    )
+    if loop is None or loop.is_closed():
+        _record_reload_component(
+            reload_id, "qq_command_listener",
+            "failed" if command_enabled and command_desired else "not_required",
+            reason_code="no_event_loop" if command_enabled and command_desired else "listener_disabled",
+        )
+        inbound = getattr(cfg, "_config", {}).get("napcat_inbound", {})
+        inbound_enabled = isinstance(inbound, dict) and bool(inbound.get("enabled", False))
+        napcat_enabled = bool(getattr(cfg, "ENABLE_NAPCAT_QQ", False))
+        enabled = inbound_enabled and napcat_enabled
+        _record_reload_component(
+            reload_id,
+            "napcat_inbound_listener",
+            "failed" if enabled else "not_required",
+            reason_code="no_event_loop" if enabled else "listener_disabled",
+        )
+        return
+    try:
+        loop.call_soon_threadsafe(_sync_command_listeners, reload_id)
+        loop.call_soon_threadsafe(_schedule_napcat_inbound_listener, reload_id)
+    except RuntimeError:
+        _record_reload_component(
+            reload_id, "qq_command_listener",
+            "failed" if command_enabled and command_desired else "not_required",
+            reason_code="event_loop_closed" if command_enabled and command_desired else "listener_disabled",
+        )
+        _record_reload_component(reload_id, "napcat_inbound_listener", "failed", reason_code="event_loop_closed")
 
 
 # ──────────────────────────────────────────────

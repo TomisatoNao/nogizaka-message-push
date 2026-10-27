@@ -23,6 +23,24 @@ from src.webui_modules import (  # noqa: E402
 def test_static_handler_mime():
     assert "theme.css" in static_handler._STATIC_MIME
     assert static_handler._STATIC_MIME["theme.css"] == "text/css"
+    # B5/B6 任务中心与路由诊断前端资源必须能被静态服务提供。
+    for name, ctype in (
+        ("admin_tasks.js", "application/javascript"),
+        ("admin_route_diagnostics.js", "application/javascript"),
+        ("admin_route_diagnostics.css", "text/css"),
+    ):
+        assert static_handler._STATIC_MIME.get(name) == ctype, f"{name} 未登记到 _STATIC_MIME"
+
+def test_static_handler_serves_all_referenced_assets():
+    """页面引用的每个 .js/.css 静态资源都必须登记在 MIME 白名单里，否则会 404。"""
+    import re
+    static_root = _ROOT / "src" / "webui_static"
+    referenced: set[str] = set()
+    for page in ("index.html", "archive.html"):
+        text = (static_root / page).read_text(encoding="utf-8")
+        referenced.update(re.findall(r"/static/([\w.\-]+\.(?:js|css))\?v=", text))
+    missing = sorted(name for name in referenced if name not in static_handler._STATIC_MIME)
+    assert not missing, f"页面引用了未登记到 _STATIC_MIME 的静态资源：{missing}"
 
 
 class _ResponseHandler:
@@ -174,7 +192,7 @@ def test_test_push_normalizes_legacy_official_channel():
 def test_admin_frontend_config_and_dark_select_contracts():
     html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
     assert "const configLabel =" in html
-    assert 'msg("已载入 " + configLabel, "ok")' in html
+    assert '"已载入 " + configLabel' in html
     assert 'opt.style.color = "#000"' not in html
     assert 'channel === "qq_official" || channel === "official"' in html
     assert 'enabled.push(["qq_official", "QQ 官方 Bot"])' in html
@@ -1169,10 +1187,10 @@ def test_archive_blog_route_and_request_guards_are_present():
 def test_archive_home_static_asset_version_bumped():
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     perf = (_ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
-    assert "/static/archive.js?v=20261023_1" in html
-    assert "/static/archive.css?v=20261023_1" in html
-    assert "/static/archive.js?v=20261023_1" in perf
-    assert "/static/archive.css?v=20261023_1" in perf
+    assert "/static/archive.js?v=20261026_2" in html
+    assert "/static/archive.css?v=20261027_1" in html
+    assert "/static/archive.js?v=20261026_2" in perf
+    assert "/static/archive.css?v=20261027_1" in perf
 
 
 def test_archive_day_jump_loads_only_missing_pages_and_invalidates_old_jumps():
@@ -1440,8 +1458,8 @@ def test_shared_header_sticky_is_not_disabled_by_root_overflow_container():
     assert "html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: clip;" in theme
     assert "body { min-height: 100vh; min-height: 100dvh; overflow-x: clip;" in theme
     assert "html, body {\n    /* clip 不会创建额外的滚动容器" in theme
-    assert "/static/theme.css?v=20260921_2" in archive
-    assert "/static/theme.css?v=20260921_2" in admin
+    assert "/static/theme.css?v=20261027_1" in archive
+    assert "/static/theme.css?v=20261027_1" in admin
 
 def test_mobile_header_2row_layout_and_actions_guard():
     theme = (_ROOT / "src" / "webui_static" / "theme.css").read_text(encoding="utf-8")
@@ -1593,7 +1611,7 @@ def test_archive_message_order_controls_and_route_state():
     script = (_ROOT / "src" / "webui_static" / "archive.js").read_text(encoding="utf-8")
     html = (_ROOT / "src" / "webui_static" / "archive.html").read_text(encoding="utf-8")
     assert 'let messageOrder' in script
-    assert 'localStorage.getItem("archive_message_order")' in script
+    assert 'archiveStorageGet("localStorage", "archive_message_order")' in script
     assert '&order=" + messageOrder' in script
     assert 'p.set("order", messageOrder)' in script
     assert 'setMessageOrder(requestedOrder' in script

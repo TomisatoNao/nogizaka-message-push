@@ -325,3 +325,166 @@ def test_message_day_jump_batches_missing_pages_using_calendar_index(archive_sta
         assert elapsed_ms < 1000
         assert page.locator('.day-sep[data-date="2026-09-16"]').count() == 1
         browser.close()
+
+
+def test_unfavorite_in_filtered_timeline_preserves_sparse_pages_and_reading_anchor(archive_static_server):
+    """取消收藏后只同步已加载页，保持锚点并让下一次翻页从原游标继续。"""
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        for width, theme in ((1280, "light"), (390, "dark"), (1280, "dark"), (390, "light")):
+            state = {"removed": False, "message_requests": []}
+            all_ids = [f"m{index:03d}" for index in range(1, 51)]
+
+            def handle_api(route):
+                request = route.request
+                parsed = urlsplit(request.url)
+                query = parse_qs(parsed.query)
+                path = parsed.path
+                if path == "/api/archive/messages":
+                    requested_page = int(query.get("page", ["1"])[0])
+                    state["message_requests"].append(requested_page)
+                    ids = [message_id for message_id in all_ids if not (state["removed"] and message_id == "m003")]
+                    start = (requested_page - 1) * 10
+                    page_ids = ids[start : start + 10]
+                    messages = []
+                    for message_id in page_ids:
+                        message = _message(message_id, "2026-09-20")
+                        message["text"] = ("测试消息 " + message_id + "\n长文本用于验证收藏同步不会移动阅读位置。\n") * 2
+                        message["is_favorite"] = message_id != "m003" or not state["removed"]
+                        messages.append(message)
+                    payload = {
+                        "ok": True,
+                        "member": "示例成员",
+                        "group": "nogizaka",
+                        "year": 2026,
+                        "month": 9,
+                        "total": len(ids),
+                        "page": requested_page,
+                        "total_pages": max(1, (len(ids) + 9) // 10),
+                        "order": "desc",
+                        "messages": messages,
+                    }
+                elif path == "/api/archive/message/interaction":
+                    body = json.loads(request.post_data or "{}")
+                    if body.get("message_id") == "m003" and body.get("action") == "favorite" and body.get("value") is False:
+                        state["removed"] = True
+                    payload = {"ok": True, "is_favorite": False}
+                elif path == "/api/auth/me":
+                    payload = {"ok": True, "auth_enabled": False}
+                elif path == "/api/archive/members":
+                    payload = {
+                        "ok": True,
+                        "members": [{
+                            "name": "示例成员",
+                            "display": "示例成员",
+                            "group": "nogizaka",
+                            "total": 50,
+                            "stats": {"total": 50, "months": 1},
+                        }],
+                        "monitor_members": [],
+                    }
+                elif path == "/api/archive/months":
+                    payload = {"ok": True, "months": [{"year": 2026, "month": 9, "count": 50}]}
+                elif path == "/api/archive/calendar":
+                    payload = {"ok": True, "days": {"2026-09-20": 50}}
+                elif path == "/api/archive/blog_groups":
+                    payload = {"ok": True, "groups": []}
+                else:
+                    payload = {"ok": True, "members": [], "groups": [], "months": [], "days": {}}
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(payload, ensure_ascii=False))
+
+            context = browser.new_context(
+                viewport={"width": width, "height": 760},
+                service_workers="block",
+            )
+            context.route("**/api/**", handle_api)
+            page = context.new_page()
+            url = archive_static_server + "/archive.html#member=" + quote("示例成员") + "&y=2026&m=9&fav=1"
+            page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_function("loadedMessagePages.has(1) && document.querySelector('[data-msg-id=\\\"m001\\\"]')")
+            page.evaluate("(value) => document.documentElement.setAttribute('data-theme', value)", theme)
+
+            page.evaluate("""async () => {
+                page = 2;
+                await loadPage();
+                page = 4;
+                await loadPage();
+            }""")
+            assert page.evaluate("Array.from(loadedMessagePages).sort((a, b) => a - b)") == [1, 2, 4]
+            assert page.evaluate("page") == 4
+            assert page.evaluate("Array.from(document.querySelectorAll('#timeline > .bubble')).some((bubble) => bubble.dataset.msgId === 'm003')")
+
+            before = page.evaluate("""() => {
+                const target = document.querySelector('[data-msg-id="m035"]');
+                target.scrollIntoView({block: "start", behavior: "instant"});
+                const anchor = Array.from(document.querySelectorAll('#timeline > .bubble[data-msg-id]'))
+                    .find((bubble) => {
+                        const rect = bubble.getBoundingClientRect();
+                        return rect.bottom > 0 && rect.top < window.innerHeight;
+                    });
+                const rect = anchor.getBoundingClientRect();
+                return {id: anchor.dataset.msgId, top: rect.top, scrollY: window.scrollY};
+            }""")
+            page.evaluate("""() => {
+                const apply = window.applyTimelineAnchor;
+                window.__favoriteAnchorTrace = [];
+                window.applyTimelineAnchor = (anchor, version) => {
+                    const bubble = anchor && document.querySelector('[data-msg-id="' + anchor.id + '"]');
+                    const beforeTop = bubble ? bubble.getBoundingClientRect().top : null;
+                    const beforeY = window.scrollY;
+                    apply(anchor, version);
+                    const restored = anchor && document.querySelector('[data-msg-id="' + anchor.id + '"]');
+                    window.__favoriteAnchorTrace.push({
+                        id: anchor && anchor.id, wantedTop: anchor && anchor.top,
+                        beforeY, beforeTop, afterY: window.scrollY,
+                        afterTop: restored ? restored.getBoundingClientRect().top : null,
+                    });
+                };
+            }""")
+            state["message_requests"].clear()
+            removed_immediately = page.evaluate("""() => {
+                const target = document.querySelector('[data-msg-id="m003"]');
+                target.querySelector('.fav-btn').click();
+                return !document.querySelector('[data-msg-id="m003"]');
+            }""")
+            assert removed_immediately, f"favorite result remained visible immediately at {width}px/{theme}"
+            page.wait_for_function("favoriteTimelineSyncState === 'idle' && !document.querySelector('[data-msg-id=\\\"m003\\\"]')")
+            assert sorted(state["message_requests"]) == [1, 2, 4]
+            assert page.evaluate("page") == 4
+            assert page.evaluate("Array.from(loadedMessagePages).sort((a, b) => a - b)") == [1, 2, 4]
+            after = page.evaluate("""async (anchorId) => {
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const anchor = document.querySelector('[data-msg-id="' + anchorId + '"]');
+                return {
+                    top: anchor ? anchor.getBoundingClientRect().top : null,
+                    scrollY: window.scrollY,
+                    trace: window.__favoriteAnchorTrace,
+                };
+            }""", before["id"])
+            assert after["top"] is not None, f"reading anchor {before['id']} disappeared at {width}px/{theme}"
+            assert abs(after["top"] - before["top"]) <= 2, (
+                f"reading anchor moved at {width}px/{theme}: {before} -> {after}"
+            )
+            assert after["trace"], f"anchor correction did not run at {width}px/{theme}"
+            restored = after["trace"][-1]
+            assert restored["id"] == before["id"]
+            assert abs(restored["afterTop"] - restored["wantedTop"]) <= 2, (
+                f"internal anchor correction drifted at {width}px/{theme}: {restored}"
+            )
+
+            visible_ids = page.locator("#timeline > .bubble").evaluate_all("nodes => nodes.map((node) => node.dataset.msgId)")
+            assert len(visible_ids) == len(set(visible_ids)), f"duplicate messages after sync at {width}px/{theme}"
+            assert page.locator("#loadMore").is_visible()
+            page.locator("#loadMore").click()
+            page.wait_for_function("page === 5 && loadedMessagePages.has(5)")
+            assert state["message_requests"][-1] == 5
+            visible_ids = page.locator("#timeline > .bubble").evaluate_all("nodes => nodes.map((node) => node.dataset.msgId)")
+            assert len(visible_ids) == len(set(visible_ids)), f"duplicate messages after page 5 at {width}px/{theme}"
+            expected_ids = [f"m{index:03d}" for index in range(1, 22) if index != 3]
+            expected_ids.extend(f"m{index:03d}" for index in range(32, 51))
+            assert visible_ids == expected_ids, f"loaded page content shifted at {width}px/{theme}"
+            assert "m003" not in visible_ids
+            context.close()
+
+        browser.close()
