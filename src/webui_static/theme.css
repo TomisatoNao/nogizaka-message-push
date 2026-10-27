@@ -1022,8 +1022,9 @@ dialog.archive-dialog {
   border: none;
   background: transparent;
   padding: 0;
-  max-width: none;
-  width: auto;
+  width: fit-content;
+  max-width: min(520px, calc(100vw - 32px));
+  margin: auto;
   overflow: visible;
 }
 dialog.archive-dialog::backdrop {
