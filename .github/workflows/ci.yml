@@ -35,8 +35,8 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install ruff pytest pytest-asyncio pytest-cov
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
+          sudo apt-get update -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20
+          sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 fonts-noto-cjk fonts-noto-color-emoji
           playwright install --with-deps chromium
 
       - name: Lint (ruff)
