@@ -244,30 +244,48 @@ def diagnose_member_route(member: Mapping[str, Any]) -> dict[str, Any]:
         filters = getattr(bot, "member_filter", None)
         push_enabled = bool(getattr(bot, "push_message", True))
         remark = str(getattr(bot, "remark", "") or "").strip()
-        official_results.append(_route_result(
-            channel="qq_official",
-            label=f"Official bot {index} private",
-            remark=remark,
-            target_type="private",
-            channel_enabled=official_enabled,
-            route_enabled=push_enabled,
-            has_target=bool(getattr(bot, "target_openid", "")),
-            filters=filters,
-            member_name=member_name,
-            member_id=member_id,
-        ))
-        official_results.append(_route_result(
-            channel="qq_official",
-            label=f"Official bot {index} group",
-            remark=remark,
-            target_type="group",
-            channel_enabled=official_enabled,
-            route_enabled=push_enabled,
-            has_target=bool(getattr(bot, "group_openid", "")),
-            filters=filters,
-            member_name=member_name,
-            member_id=member_id,
-        ))
+        has_private = bool(getattr(bot, "target_openid", ""))
+        has_group = bool(getattr(bot, "group_openid", ""))
+
+        if has_private:
+            official_results.append(_route_result(
+                channel="qq_official",
+                label=f"Official bot {index} private",
+                remark=remark,
+                target_type="private",
+                channel_enabled=official_enabled,
+                route_enabled=push_enabled,
+                has_target=True,
+                filters=filters,
+                member_name=member_name,
+                member_id=member_id,
+            ))
+        if has_group:
+            official_results.append(_route_result(
+                channel="qq_official",
+                label=f"Official bot {index} group",
+                remark=remark,
+                target_type="group",
+                channel_enabled=official_enabled,
+                route_enabled=push_enabled,
+                has_target=True,
+                filters=filters,
+                member_name=member_name,
+                member_id=member_id,
+            ))
+        if not has_private and not has_group:
+            official_results.append(_route_result(
+                channel="qq_official",
+                label=f"Official bot {index}",
+                remark=remark,
+                target_type="",
+                channel_enabled=official_enabled,
+                route_enabled=push_enabled,
+                has_target=False,
+                filters=filters,
+                member_name=member_name,
+                member_id=member_id,
+            ))
     routes.extend(official_results)
     channel_summaries.append(_channel_summary("qq_official", official_enabled, official_results))
 

@@ -264,3 +264,29 @@ def test_default_subscription_read_failures_are_unknown(clean_config, monkeypatc
     report = _report()
 
     assert report["subscription"]["state"] == "unknown"
+
+
+def test_official_bot_routes_only_emit_configured_targets(clean_config, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(diagnostics.cfg, "ENABLE_QQ_OFFICIAL_BOT", True, raising=False)
+    monkeypatch.setattr(diagnostics, "_configured_official_bots", lambda: [
+        SimpleNamespace(name="b1", remark="private_only", target_openid="user_1", group_openid="", push_message=True, member_filter=[]),
+        SimpleNamespace(name="b2", remark="group_only", target_openid="", group_openid="group_1", push_message=True, member_filter=[]),
+        SimpleNamespace(name="b3", remark="unconfigured", target_openid="", group_openid="", push_message=True, member_filter=[]),
+    ])
+
+    report = _report()
+    official_routes = [r for r in report["routes"] if r["channel"] == "qq_official"]
+    assert len(official_routes) == 3
+    assert official_routes[0]["label"] == "Official bot 1 private"
+    assert official_routes[0]["target_type"] == "private"
+    assert official_routes[0]["status"] == "applicable"
+
+    assert official_routes[1]["label"] == "Official bot 2 group"
+    assert official_routes[1]["target_type"] == "group"
+    assert official_routes[1]["status"] == "applicable"
+
+    assert official_routes[2]["label"] == "Official bot 3"
+    assert official_routes[2]["status"] == "blocked"
+    assert official_routes[2]["reason"] == "no_target"
