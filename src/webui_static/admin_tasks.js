@@ -2,7 +2,30 @@
   "use strict";
 
   const POLL_INTERVAL_MS = 2000;
+  const IDLE_POLL_INTERVAL_MS = 15000;
   const REQUEST_TIMEOUT_MS = 12000;
+
+  const TASK_PHASE_LABELS = {
+    pending: "排队准备中",
+    starting: "启动中",
+    running: "执行中",
+    completed: "已完成",
+    interrupted: "任务已中断",
+    failed: "执行失败",
+    partial: "部分完成",
+    fetching: "消息抓取中",
+    media: "媒体文件下载中",
+    saving: "写入归档数据库",
+    scanning: "扫描博文列表",
+    articles: "下载博文与图片",
+    translating: "博客翻译中",
+    archive_db_quick_check: "消息数据库快速检查",
+    blog_db_quick_check: "博客数据库快速检查",
+    dirty_marker: "检查消息索引标记",
+    message_index_comparison: "对照消息与数据库索引",
+    message_json_scan: "扫描消息结构与本地媒体",
+    blog_media_references: "检查博客图片与本地文件",
+  };
   const TASK_KINDS = {
     message_backfill: "消息补档",
     archive_integrity: "归档完整性检查",
@@ -102,7 +125,15 @@
   const errorNotice = document.getElementById("archiveTaskError");
   const taskList = document.getElementById("archiveTaskList");
   const refreshButton = document.getElementById("btnRefreshArchiveTasks");
+  const btnLaunchMessageBackfill = document.getElementById("btnLaunchMessageBackfill");
+  const btnLaunchBlogBackfill = document.getElementById("btnLaunchBlogBackfill");
+  const filterToolbar = document.getElementById("archiveTaskFilters");
+  const dialogArchiveMessage = document.getElementById("dialogArchiveMessage");
+  const dialogArchiveBlog = document.getElementById("dialogArchiveBlog");
   const taskSection = document.getElementById("tab-tasks");
+
+  let currentFilterType = "all";
+  let currentFilterStatus = "all";
   const integrityPanel = document.getElementById("archiveIntegrityPanel");
   const integrityStatus = document.getElementById("archiveIntegrityStatus");
   const integrityReport = document.getElementById("archiveIntegrityReport");
@@ -761,7 +792,13 @@
     chevron.className = "admin-task-chevron";
     chevron.setAttribute("aria-hidden", "true");
     chevron.textContent = "⌄";
-    summary.append(main, phase, progress, time, chevron);
+    const progressBar = document.createElement("div");
+    progressBar.className = "admin-task-progress-bar";
+    progressBar.hidden = true;
+    const progressFill = document.createElement("div");
+    progressFill.className = "admin-task-progress-fill";
+    progressBar.append(progressFill);
+    summary.append(main, phase, progress, time, chevron, progressBar);
 
     const panel = document.createElement("div");
     panel.className = "admin-task-detail";
@@ -836,6 +873,8 @@
       phase: summary.querySelector('[data-task-field="phase"]'),
       progress: summary.querySelector('[data-task-field="progress"]'),
       time: summary.querySelector('[data-task-field="time"]'),
+      progressBar,
+      progressFill,
       detailStatus,
       heartbeatStaleNote,
       taskError,
@@ -859,19 +898,37 @@
     card.kind.textContent = taskKindLabel(task);
     card.badge.textContent = meta.label;
     card.badge.className = `admin-status-badge admin-task-status-badge ${meta.tone}`;
+    const rawPhase = String(task.phase || "");
     card.phase.textContent = task.kind === "archive_integrity"
-      ? (INTEGRITY_PHASE_LABELS[String(task.phase || "")] || "正在检查")
-      : asText(task.phase);
+      ? (INTEGRITY_PHASE_LABELS[rawPhase] || "正在检查")
+      : (TASK_PHASE_LABELS[rawPhase] || INTEGRITY_PHASE_LABELS[rawPhase] || asText(task.phase));
     const done = task.done === null || task.done === undefined ? "—" : asText(task.done);
     const total = task.total === null || task.total === undefined ? "—" : asText(task.total);
     const failures = task.failure_count === null || task.failure_count === undefined ? "0" : asText(task.failure_count);
     const progressLabel = card.progress.parentElement.querySelector(".admin-task-meta-label");
     if (task.kind === "archive_integrity") {
       card.progress.textContent = `${done} / ${total}`;
-      if (progressLabel) progressLabel.textContent = "进度";
+      if (progressLabel) progressLabel.textContent = "检查进度";
     } else {
       card.progress.textContent = `${done} / ${total} · 失败 ${failures}`;
       if (progressLabel) progressLabel.textContent = "进度 / 失败项";
+      if (typeof task.total === "number" && task.total > 0 && typeof task.done === "number") {
+        const pct = Math.min(100, Math.max(0, Math.round((task.done / task.total) * 100)));
+        card.progress.textContent = `${done} / ${total} (${pct}%) · 失败 ${failures}`;
+      } else if (task.total === 0 && Number(failures) > 0) {
+        card.progress.textContent = `未产出项 · 失败 ${failures}`;
+      }
+    }
+    if (card.progressBar && card.progressFill) {
+      if (typeof task.total === "number" && task.total > 0 && typeof task.done === "number") {
+        const pct = Math.min(100, Math.max(0, Math.round((task.done / task.total) * 100)));
+        card.progressFill.style.width = pct + "%";
+        card.progressFill.className = `admin-task-progress-fill ${meta.tone}`;
+        card.progressBar.hidden = false;
+        card.progressBar.title = `完成进度: ${pct}%`;
+      } else {
+        card.progressBar.hidden = true;
+      }
     }
     const time = taskTime(task);
     const formattedTime = formatTimestamp(time.value);
@@ -908,6 +965,45 @@
     });
     while (taskList.children.length > orderedElements.length) {
       taskList.lastElementChild.remove();
+    }
+    applyFilters();
+  }
+
+  function taskMatchesFilter(task) {
+    if (!task) return false;
+    if (currentFilterType !== "all" && task.kind !== currentFilterType) return false;
+    if (currentFilterStatus !== "all") {
+      const s = String(task.status || "").toLowerCase();
+      if (currentFilterStatus === "running") {
+        if (s !== "running" && s !== "queued" && s !== "starting") return false;
+      } else if (currentFilterStatus === "issues") {
+        const isIssue = s === "failed" || s === "interrupted" || (task.failure_count && Number(task.failure_count) > 0);
+        if (!isIssue) return false;
+      } else if (currentFilterStatus === "completed") {
+        if (s !== "completed") return false;
+      }
+    }
+    return true;
+  }
+
+  function applyFilters() {
+    let visibleCount = 0;
+    for (const [id, card] of cards) {
+      const task = taskRecords.get(id);
+      const visible = taskMatchesFilter(task);
+      card.element.hidden = !visible;
+      if (visible) visibleCount += 1;
+    }
+    if (hasLoadedTasks) {
+      const totalCount = taskRecords.size;
+      const isFiltered = currentFilterType !== "all" || currentFilterStatus !== "all";
+      if (totalCount === 0) {
+        setNotice("没有最近的归档任务。启动归档任务后会在此显示。");
+      } else if (isFiltered) {
+        setNotice(`已加载 ${totalCount} 个最近任务（筛选显示 ${visibleCount} 个）；任务中心打开时实时同步。`);
+      } else {
+        setNotice(`已加载 ${totalCount} 个最近任务；任务中心打开时实时同步。`);
+      }
     }
   }
 
@@ -992,8 +1088,36 @@
     }
 
     if (integrityTask) {
-      card.detailStatus.textContent = "完整性检查报告显示在下方的独立面板中；此任务不支持重试失败项。";
-      card.detailStatus.className = "admin-task-detail-status";
+      if (state.report && typeof state.report === "object") {
+        const rep = state.report;
+        const checks = Array.isArray(rep.checks) ? rep.checks : [];
+        const issueCount = readCount(rep.issue_count) || 0;
+        card.detailStatus.textContent = issueCount === 0
+          ? `检查完成：各检查项均正常（共 ${checks.length} 项检查，无异常）。完整检查报告亦可在下方独立面板中查看。`
+          : `检查完成：发现 ${issueCount} 处问题，详情可参考下方独立面板。`;
+        card.detailStatus.className = `admin-task-detail-status${issueCount > 0 ? " is-error" : ""}`;
+        if (checks.length > 0) {
+          checks.forEach((chk) => {
+            const itemArticle = document.createElement("article");
+            itemArticle.className = "admin-task-item";
+            const heading = document.createElement("div");
+            heading.className = "admin-task-item-heading";
+            const name = document.createElement("strong");
+            name.className = "admin-task-item-type";
+            name.textContent = INTEGRITY_CHECK_LABELS[chk.name] || chk.name;
+            const badge = document.createElement("span");
+            const stMeta = INTEGRITY_CHECK_STATUSES[chk.status] || { label: chk.status, tone: "muted" };
+            badge.className = `admin-status-badge ${stMeta.tone}`;
+            badge.textContent = stMeta.label;
+            heading.append(name, badge);
+            itemArticle.append(heading);
+            card.items.append(itemArticle);
+          });
+        }
+      } else {
+        card.detailStatus.textContent = "完整性检查报告显示在下方的独立面板中；此任务不支持重试失败项。";
+        card.detailStatus.className = "admin-task-detail-status";
+      }
       return;
     }
 
@@ -1038,10 +1162,15 @@
 
   function scheduleNextPoll() {
     if (!authorized || !taskTabActive || document.hidden || listTimer !== null) return;
+    const hasActive = Array.from(taskRecords.values()).some((t) => {
+      const s = String(t && t.status || "").toLowerCase();
+      return s === "running" || s === "starting" || s === "queued";
+    });
+    const interval = hasActive ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
     listTimer = window.setTimeout(() => {
       listTimer = null;
       void refreshTaskList();
-    }, POLL_INTERVAL_MS);
+    }, interval);
   }
 
   async function refreshTaskList({ manual = false } = {}) {
@@ -1269,7 +1398,245 @@
     }
     authorized = true;
     renderIntegrityPanel();
+    setupLaunchModals();
+    setupFilterPills();
     syncArchiveTaskPolling(taskSection.classList.contains("active"));
+  }
+
+
+  // ── 任务筛选胶囊与发起弹窗控制 ───────────────────────────
+  function setupFilterPills() {
+    if (!filterToolbar || filterToolbar.dataset.bound === "true") return;
+    filterToolbar.dataset.bound = "true";
+    filterToolbar.querySelectorAll(".admin-task-filter-pill").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const typeFilter = btn.dataset.filterType;
+        const statusFilter = btn.dataset.filterStatus;
+        if (typeFilter !== undefined) {
+          currentFilterType = typeFilter;
+          filterToolbar.querySelectorAll('[data-filter-group="type"] .admin-task-filter-pill').forEach((p) => {
+            p.classList.toggle("active", p === btn);
+          });
+        }
+        if (statusFilter !== undefined) {
+          currentFilterStatus = statusFilter;
+          filterToolbar.querySelectorAll('[data-filter-group="status"] .admin-task-filter-pill').forEach((p) => {
+            p.classList.toggle("active", p === btn);
+          });
+        }
+        applyFilters();
+      });
+    });
+  }
+
+  function setupLaunchModals() {
+    if (!dialogArchiveMessage || !dialogArchiveBlog) return;
+    if (dialogArchiveMessage.dataset.bound === "true") return;
+    dialogArchiveMessage.dataset.bound = "true";
+
+    const msgMemberList = document.getElementById("archiveMsgMemberList");
+    const msgSelectAll = document.getElementById("btnArchiveMsgSelectAll");
+    const msgClear = document.getElementById("btnArchiveMsgClear");
+    const msgDateRow = document.getElementById("archiveMsgDateRow");
+    const msgStartDate = document.getElementById("archiveMsgStartDate");
+    const msgDialogError = document.getElementById("archiveMsgDialogError");
+    const btnConfirmMsg = document.getElementById("btnConfirmArchiveMessage");
+
+    function renderMessageMembers() {
+      if (!msgMemberList) return;
+      const monitors = Array.isArray(window.config && window.config.monitor) ? window.config.monitor : [];
+      if (!monitors.length) {
+        msgMemberList.innerHTML = '<p class="admin-note">暂无监控中的成员，可直接提交以回填全部成员。</p>';
+        return;
+      }
+      msgMemberList.replaceChildren();
+      monitors.forEach((m) => {
+        const label = document.createElement("label");
+        label.className = "archive-member-chip";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = "archiveMsgMember";
+        input.value = m.name || m.id;
+        const acc = String(m.account || "").toLowerCase();
+        const icon = acc.includes("nogi") ? "💜" : acc.includes("sakura") ? "🌸" : acc.includes("hinata") ? "☀️" : "👤";
+        const text = document.createElement("span");
+        text.textContent = `${icon} ${m.name || m.id}`;
+        label.append(input, text);
+        input.addEventListener("change", () => label.classList.toggle("selected", input.checked));
+        msgMemberList.append(label);
+      });
+    }
+
+    if (btnLaunchMessageBackfill) {
+      btnLaunchMessageBackfill.addEventListener("click", () => {
+        renderMessageMembers();
+        if (msgDialogError) msgDialogError.hidden = true;
+        if (msgDateRow) msgDateRow.hidden = true;
+        const defaultRadio = dialogArchiveMessage.querySelector('input[name="archiveMsgMode"][value="incremental"]');
+        if (defaultRadio) defaultRadio.checked = true;
+        if (msgStartDate) msgStartDate.value = "";
+        dialogArchiveMessage.showModal();
+      });
+    }
+
+    if (msgSelectAll) {
+      msgSelectAll.addEventListener("click", () => {
+        msgMemberList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+          cb.checked = true;
+          cb.closest(".archive-member-chip")?.classList.add("selected");
+        });
+      });
+    }
+
+    if (msgClear) {
+      msgClear.addEventListener("click", () => {
+        msgMemberList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+          cb.checked = false;
+          cb.closest(".archive-member-chip")?.classList.remove("selected");
+        });
+      });
+    }
+
+    dialogArchiveMessage.querySelectorAll('input[name="archiveMsgMode"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        if (msgDateRow) msgDateRow.hidden = radio.value !== "custom";
+      });
+    });
+
+    if (btnConfirmMsg) {
+      btnConfirmMsg.addEventListener("click", async () => {
+        if (msgDialogError) msgDialogError.hidden = true;
+        const checkedBoxes = Array.from(msgMemberList.querySelectorAll('input[type="checkbox"]:checked'));
+        const memberStr = checkedBoxes.map((cb) => cb.value).join(", ");
+        const selectedMode = dialogArchiveMessage.querySelector('input[name="archiveMsgMode"]:checked')?.value || "incremental";
+        const fromDate = selectedMode === "custom" ? (msgStartDate && msgStartDate.value ? msgStartDate.value.trim() : "") : "";
+
+        if (selectedMode === "custom" && !fromDate) {
+          if (msgDialogError) {
+            msgDialogError.textContent = "请选择起始日期。";
+            msgDialogError.hidden = false;
+          }
+          return;
+        }
+
+        btnConfirmMsg.disabled = true;
+        try {
+          const res = await api("/api/archive/messages/backfill", {
+            method: "POST",
+            body: JSON.stringify({
+              member: memberStr,
+              reset: selectedMode === "all",
+              from_date: fromDate,
+            }),
+          });
+          if (res && res.ok === false) {
+            throw new Error(res.msg || "发起消息补档失败");
+          }
+          dialogArchiveMessage.close();
+          setNotice("已成功启动消息补档任务，正在同步进度…");
+          void refreshTaskList({ manual: true });
+        } catch (err) {
+          if (msgDialogError) {
+            msgDialogError.textContent = err.message || "请求失败，请稍后重试。";
+            msgDialogError.hidden = false;
+          }
+        } finally {
+          btnConfirmMsg.disabled = false;
+        }
+      });
+    }
+
+    // 2. 博客回填弹窗
+    const chkNogi = document.getElementById("chkArchiveBlogNogi");
+    const chkSakura = document.getElementById("chkArchiveBlogSakura");
+    const chkHinata = document.getElementById("chkArchiveBlogHinata");
+    const btnSelectAllBlog = document.getElementById("btnArchiveBlogSelectAll");
+    const blogUrlInput = document.getElementById("archiveBlogMemberUrl");
+    const blogDialogError = document.getElementById("archiveBlogDialogError");
+    const btnConfirmBlog = document.getElementById("btnConfirmArchiveBlog");
+
+    function syncBlogConfirmState() {
+      const hasGroup = [chkNogi, chkSakura, chkHinata].some((cb) => cb && cb.checked);
+      const hasUrl = Boolean(blogUrlInput && blogUrlInput.value.trim());
+      if (btnConfirmBlog) btnConfirmBlog.disabled = !hasGroup && !hasUrl;
+      [chkNogi, chkSakura, chkHinata].forEach((cb) => {
+        if (cb) cb.closest(".archive-group-card")?.classList.toggle("selected", cb.checked);
+      });
+    }
+
+    if (btnLaunchBlogBackfill) {
+      btnLaunchBlogBackfill.addEventListener("click", () => {
+        if (blogDialogError) blogDialogError.hidden = true;
+        if (blogUrlInput) blogUrlInput.value = "";
+        [chkNogi, chkSakura, chkHinata].forEach((cb) => {
+          if (cb) cb.checked = false;
+        });
+        syncBlogConfirmState();
+        dialogArchiveBlog.showModal();
+      });
+    }
+
+    [chkNogi, chkSakura, chkHinata].forEach((cb) => {
+      if (cb) cb.addEventListener("change", syncBlogConfirmState);
+    });
+    if (blogUrlInput) blogUrlInput.addEventListener("input", syncBlogConfirmState);
+
+    if (btnSelectAllBlog) {
+      btnSelectAllBlog.addEventListener("click", () => {
+        const allChecked = [chkNogi, chkSakura, chkHinata].every((cb) => cb && cb.checked);
+        [chkNogi, chkSakura, chkHinata].forEach((cb) => {
+          if (cb) cb.checked = !allChecked;
+        });
+        syncBlogConfirmState();
+      });
+    }
+
+    if (btnConfirmBlog) {
+      btnConfirmBlog.addEventListener("click", async () => {
+        if (blogDialogError) blogDialogError.hidden = true;
+        const memberUrl = blogUrlInput && blogUrlInput.value ? blogUrlInput.value.trim() : "";
+        const selectedGroups = [
+          chkNogi && chkNogi.checked ? "nogizaka" : null,
+          chkSakura && chkSakura.checked ? "sakurazaka" : null,
+          chkHinata && chkHinata.checked ? "hinatazaka" : null,
+        ].filter(Boolean);
+
+        btnConfirmBlog.disabled = true;
+        try {
+          let res;
+          if (memberUrl) {
+            res = await api("/api/archive/blogs/archive_member", {
+              method: "POST",
+              body: JSON.stringify({ url: memberUrl }),
+            });
+          } else {
+            res = await api("/api/archive/blogs/archive_groups", {
+              method: "POST",
+              body: JSON.stringify({ groups: selectedGroups }),
+            });
+          }
+          if (res && res.ok === false) {
+            throw new Error(res.msg || "发起博客归档失败");
+          }
+          dialogArchiveBlog.close();
+          setNotice("已成功启动后台博客归档任务，正在同步进度…");
+          void refreshTaskList({ manual: true });
+        } catch (err) {
+          if (blogDialogError) {
+            blogDialogError.textContent = err.message || "请求失败，请稍后重试。";
+            blogDialogError.hidden = false;
+          }
+        } finally {
+          btnConfirmBlog.disabled = false;
+        }
+      });
+    }
+
+    [dialogArchiveMessage, dialogArchiveBlog].forEach((dlg) => {
+      dlg.querySelectorAll("[data-dialog-close]").forEach((btn) => {
+        btn.addEventListener("click", () => dlg.close());
+      });
+    });
   }
 
   if (window.webAdminRole === "pending") {

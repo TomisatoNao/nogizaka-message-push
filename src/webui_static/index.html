@@ -1366,10 +1366,28 @@
     <div class="admin-module-heading">
       <h2 id="archiveTaskHeading">🗂️ 归档任务中心</h2>
       <div class="admin-actions">
+        <button class="btn primary small" id="btnLaunchMessageBackfill" type="button">💬 发起消息补档</button>
+        <button class="btn secondary small" id="btnLaunchBlogBackfill" type="button">📄 发起博客回填</button>
         <button class="btn small admin-task-refresh" id="btnRefreshArchiveTasks" type="button">🔄 刷新任务</button>
       </div>
     </div>
     <p class="hint admin-note">查看最近归档任务进度与失败原因；展开任务可检查失败项，必要时只重试失败项。</p>
+    <div class="admin-task-filters" id="archiveTaskFilters" role="toolbar" aria-label="任务筛选">
+      <div class="admin-task-filter-group" data-filter-group="type">
+        <span class="admin-task-filter-label">类型</span>
+        <button class="admin-task-filter-pill active" type="button" data-filter-type="all">全部</button>
+        <button class="admin-task-filter-pill" type="button" data-filter-type="message_backfill">💬 消息补档</button>
+        <button class="admin-task-filter-pill" type="button" data-filter-type="blog_backfill">📄 博客回填</button>
+        <button class="admin-task-filter-pill" type="button" data-filter-type="archive_integrity">🔎 完整性检查</button>
+      </div>
+      <div class="admin-task-filter-group" data-filter-group="status">
+        <span class="admin-task-filter-label">状态</span>
+        <button class="admin-task-filter-pill active" type="button" data-filter-status="all">全部</button>
+        <button class="admin-task-filter-pill" type="button" data-filter-status="running">⚡ 执行中</button>
+        <button class="admin-task-filter-pill" type="button" data-filter-status="issues">⚠️ 失败/中断</button>
+        <button class="admin-task-filter-pill" type="button" data-filter-status="completed">✅ 已完成</button>
+      </div>
+    </div>
     <div id="archiveTaskNotice" class="admin-table-state" role="status" aria-live="polite">选择本页签后会恢复最近任务。</div>
     <p id="archiveTaskError" class="admin-table-state admin-table-state--error" role="alert" hidden></p>
     <div id="archiveTaskList" class="admin-task-list" aria-label="最近归档任务"></div>
@@ -2994,6 +3012,104 @@
 <button class="btn primary" id="btnSaveMemberSelect">确定</button>
 </div>
 </div>
+</dialog>
+
+<dialog id="dialogArchiveMessage" class="monitor-settings-dialog archive-dialog" aria-labelledby="dialogArchiveMessageTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="dialogArchiveMessageTitle">💬 发起成员历史消息补档</h3>
+      <p>从监控成员中选择补档目标；支持断点续传增量抓取或指定起始日期回填。</p>
+    </div>
+    <button class="dialog-close-btn" type="button" data-dialog-close title="关闭">✕</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="archive-dialog-section">
+      <div class="archive-dialog-section-header">
+        <strong>选择目标成员</strong>
+        <div class="archive-dialog-section-actions">
+          <button type="button" class="btn small" id="btnArchiveMsgSelectAll">全选</button>
+          <button type="button" class="btn small" id="btnArchiveMsgClear">清空</button>
+        </div>
+      </div>
+      <div class="archive-member-chips" id="archiveMsgMemberList">
+        <p class="admin-note">正在加载监控成员列表...</p>
+      </div>
+    </div>
+    <div class="archive-dialog-section">
+      <strong>拉取模式</strong>
+      <div class="archive-mode-options">
+        <label class="archive-mode-option">
+          <input type="radio" name="archiveMsgMode" value="incremental" checked>
+          <span><strong>断点增量续传（推荐）</strong><small>自动从本地数据库各成员最新一条消息向后补抓</small></span>
+        </label>
+        <label class="archive-mode-option">
+          <input type="radio" name="archiveMsgMode" value="custom">
+          <span><strong>指定起始日期</strong><small>从选定日期开始向后回填</small></span>
+        </label>
+        <label class="archive-mode-option">
+          <input type="radio" name="archiveMsgMode" value="all">
+          <span><strong>全量重扫</strong><small>从该成员账号订阅起点的最早历史拉取</small></span>
+        </label>
+      </div>
+      <div class="field archive-date-row" id="archiveMsgDateRow" hidden>
+        <label for="archiveMsgStartDate">起始日期 (JST)</label>
+        <input type="date" id="archiveMsgStartDate" placeholder="YYYY-MM-DD">
+      </div>
+    </div>
+    <p id="archiveMsgDialogError" class="admin-field-error" hidden></p>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-dialog-close>取消</button>
+    <button class="btn primary" type="button" id="btnConfirmArchiveMessage">🚀 启动消息补档</button>
+  </div>
+</dialog>
+
+<dialog id="dialogArchiveBlog" class="monitor-settings-dialog archive-dialog" aria-labelledby="dialogArchiveBlogTitle">
+  <div class="monitor-dialog-header">
+    <div>
+      <h3 id="dialogArchiveBlogTitle">📄 发起博客历史回填</h3>
+      <p>选择要归档的坂道团体博客；已有文章自动跳过，新文章与图片自动归档保存。</p>
+    </div>
+    <button class="dialog-close-btn" type="button" data-dialog-close title="关闭">✕</button>
+  </div>
+  <div class="monitor-dialog-scroll">
+    <div class="archive-dialog-section">
+      <div class="archive-dialog-section-header">
+        <strong>选择归档团体</strong>
+        <button type="button" class="btn small" id="btnArchiveBlogSelectAll">全选</button>
+      </div>
+      <div class="archive-group-grid">
+        <label class="archive-group-card">
+          <input type="checkbox" id="chkArchiveBlogNogi" value="nogizaka">
+          <span class="archive-group-icon">💜</span>
+          <span class="archive-group-name">乃木坂46</span>
+        </label>
+        <label class="archive-group-card">
+          <input type="checkbox" id="chkArchiveBlogSakura" value="sakurazaka">
+          <span class="archive-group-icon">🌸</span>
+          <span class="archive-group-name">樱坂46</span>
+        </label>
+        <label class="archive-group-card">
+          <input type="checkbox" id="chkArchiveBlogHinata" value="hinatazaka">
+          <span class="archive-group-icon">☀️</span>
+          <span class="archive-group-name">日向坂46</span>
+        </label>
+      </div>
+    </div>
+    <details class="archive-advanced-details">
+      <summary class="admin-note">高级选项：按成员博客主页 URL 单独补抓 ▾</summary>
+      <div class="field">
+        <label for="archiveBlogMemberUrl">成员博客主页 URL</label>
+        <input type="url" id="archiveBlogMemberUrl" placeholder="例如: https://www.hinatazaka46.com/s/official/diary/member/list?ct=36">
+        <p class="hint">输入单个成员的博客列表页 URL，可精确补录该成员历史博客。</p>
+      </div>
+    </details>
+    <p id="archiveBlogDialogError" class="admin-field-error" hidden></p>
+  </div>
+  <div class="dialog-actions monitor-dialog-actions">
+    <button class="btn" type="button" data-dialog-close>取消</button>
+    <button class="btn primary" type="button" id="btnConfirmArchiveBlog" disabled>📚 开始博客归档</button>
+  </div>
 </dialog>
 <script>
 "use strict";
