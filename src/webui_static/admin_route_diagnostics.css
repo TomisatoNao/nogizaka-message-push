@@ -54,7 +54,7 @@
 .admin-route-diagnostics-error { margin: 0; line-height: 1.6; }
 .admin-route-diagnostics-status { color: var(--muted); font-size: var(--text-sm); }
 .admin-route-diagnostics-status.is-loading { color: var(--accent); }
-.admin-route-diagnostics-status.is-ready { color: var(--ok); }
+.admin-route-diagnostics-status.is-ready { color: var(--muted); }
 .admin-route-diagnostics-status.is-empty,
 .admin-route-diagnostics-status.is-error { color: var(--warn); }
 .admin-route-diagnostics-error {
@@ -86,10 +86,17 @@
   box-shadow: var(--shadow-xs);
 }
 
-.admin-route-member.status-ok { border-left: 3.5px solid var(--ok); }
-.admin-route-member.status-warn { border-left: 3.5px solid var(--warn); }
-.admin-route-member.status-err { border-left: 3.5px solid var(--err); }
-.admin-route-member.status-neutral { border-left: 3.5px solid var(--muted); }
+.admin-route-member:hover {
+  border-color: var(--border-hover);
+}
+
+.admin-route-member.status-warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
+}
+
+.admin-route-member.status-err {
+  border-color: color-mix(in srgb, var(--err) 40%, var(--border));
+}
 
 /* ── 成员摘要头部（可点击展开/收起） ── */
 .admin-route-member-header {

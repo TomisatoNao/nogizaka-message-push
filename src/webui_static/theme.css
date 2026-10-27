@@ -990,11 +990,29 @@ dialog {
 }
 
 .admin-task-filter-pill.active {
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--accent-soft);
+  color: var(--accent);
   border-color: var(--accent);
   font-weight: 600;
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 1px 4px var(--accent-ring);
+}
+
+.admin-task-filter-pill.active:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.admin-task-filter-pill[data-route-filter="issues"].active,
+.admin-task-filter-pill[data-filter-status="issues"].active {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+
+.admin-task-filter-pill[data-route-filter="issues"].active:hover,
+.admin-task-filter-pill[data-filter-status="issues"].active:hover {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
 }
 
 .admin-task-progress-bar {
@@ -1639,9 +1657,11 @@ dialog.archive-dialog::backdrop {
   border-color: var(--border);
 }
 .admin-integrity-filter-btn.is-active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--accent);
   border-color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 1px 4px var(--accent-ring);
 }
 
 @media (max-width: 640px) {
