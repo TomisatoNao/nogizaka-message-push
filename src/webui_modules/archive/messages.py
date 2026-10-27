@@ -227,7 +227,10 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         interactions = {}
         if req_user and req_user.get("username"):
             msg_ids = [str(m.get("id")) for m in paged_msgs if m.get("id")]
-            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids, member_dir=member)
+            try:
+                interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids, member_dir=member)
+            except TypeError:
+                interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids)
 
         slim = [{
             "id": m.get("id"),
@@ -534,7 +537,10 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         interactions = {}
         if req_user and req_user.get("username"):
             msg_ids = [str(m.get("id")) for m in paged_hits if m.get("id")]
-            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids, member_dir=member)
+            try:
+                interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids, member_dir=member)
+            except TypeError:
+                interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids)
 
         slim = [{
             "id": m.get("id"),

@@ -99,7 +99,7 @@ def test_favorite_search_filters_before_cap_and_is_user_scoped(
         "get_user_favorite_message_ids",
         lambda username, member: favorite_ids_by_user[username] if member == "测试成员" else set(),
     )
-    monkeypatch.setattr(messages._auth, "get_user_message_interactions", lambda _username, _ids: {})
+    monkeypatch.setattr(messages._auth, "get_user_message_interactions", lambda _username, _ids, *args, **kwargs: {})
 
     payloads = {}
     for current_username in ("alice", "bob"):
