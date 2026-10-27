@@ -2260,13 +2260,13 @@ html.view-home #messageMonthFooter { display: none !important; }
     display: none !important;
   }
   
-  /* Custom Confirm Modal */
+  /* Custom Confirm & Backfill Modals (Shared App-Style Design) */
   .custom-modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: var(--overlay);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     z-index: 10000;
     display: flex;
     align-items: center;
@@ -2274,66 +2274,74 @@ html.view-home #messageMonthFooter { display: none !important; }
     animation: fadeIn 0.2s ease-out;
   }
   .custom-modal-card {
-    background: #1c1c1e;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 16px;
+    background: var(--card-solid);
+    border: 1px solid var(--border);
+    border-radius: 18px;
     padding: 24px;
     width: 90%;
-    max-width: 380px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+    max-width: 400px;
+    box-shadow: var(--shadow-lg);
     text-align: center;
+    color: var(--text);
     animation: modalPop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-sizing: border-box;
   }
   @keyframes modalPop {
-    from { transform: scale(0.9); opacity: 0; }
+    from { transform: scale(0.92); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
   }
   .cm-icon {
-    font-size: 36px;
-    margin-bottom: 12px;
+    font-size: 38px;
+    margin-bottom: 10px;
+    line-height: 1;
+    display: inline-block;
+  }
+  .cm-icon.danger {
+    color: var(--err);
   }
   .cm-title {
-    font-size: 18px;
-    font-weight: 600;
-    color: #fff;
-    margin: 0 0 8px 0;
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--text-strong);
+    margin: 0 0 6px 0;
+    letter-spacing: -0.01em;
   }
   .cm-message {
-    font-size: 14px;
-    color: #a1a1a6;
+    font-size: 13.5px;
+    color: var(--muted);
     margin: 0 0 16px 0;
     line-height: 1.5;
   }
   .cm-input-wrapper {
-    margin: 12px 0 20px 0;
+    margin: 12px 0 18px 0;
     text-align: left;
   }
   .cm-input {
     width: 100%;
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: var(--field);
+    border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 12px 14px;
-    color: #fff;
+    padding: 11px 14px;
+    color: var(--text);
     font-size: 14px;
     outline: none;
     transition: all 0.2s ease;
     box-sizing: border-box;
   }
   .cm-input:focus {
-    border-color: var(--primary, #7c3aed);
-    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.25);
-    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+    background: var(--card-solid);
   }
   .cm-input-error {
     margin-top: 7px;
-    color: #ff7b73;
+    color: var(--err);
     font-size: 12.5px;
     line-height: 1.45;
   }
   .cm-input[aria-invalid="true"] {
-    border-color: rgba(255, 69, 58, 0.9);
-    box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.18);
+    border-color: var(--err);
+    box-shadow: 0 0 0 3px var(--err-soft);
   }
   .cm-checkbox-group {
     display: flex;
@@ -2341,16 +2349,18 @@ html.view-home #messageMonthFooter { display: none !important; }
     gap: 8px;
     margin-top: 12px;
     font-size: 13px;
-    color: #c7c7cc;
+    color: var(--text);
     cursor: pointer;
     user-select: none;
   }
   .cm-checkbox-group input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: var(--primary, #7c3aed);
+    accent-color: var(--accent);
     cursor: pointer;
   }
+
+  /* ── 博客回填卡片 ────────────────────────────────── */
   .blog-group-backfill-card {
     max-width: 440px;
     text-align: left;
@@ -2366,28 +2376,28 @@ html.view-home #messageMonthFooter { display: none !important; }
     justify-content: space-between;
     gap: 12px;
     margin: 4px 0 8px;
-    color: #a1a1a6;
+    color: var(--muted);
     font-size: 12.5px;
     font-weight: 600;
   }
   .blog-group-select-all,
   .blog-group-advanced {
-    border: 1px solid rgba(124, 58, 237, 0.35);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
     border-radius: 8px;
-    background: rgba(124, 58, 237, 0.1);
-    color: #c7b6ff;
+    background: var(--accent-soft);
+    color: var(--accent);
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
     transition: all 0.2s ease;
   }
   .blog-group-select-all {
-    padding: 5px 10px;
+    padding: 5px 12px;
   }
   .blog-group-select-all:hover,
   .blog-group-advanced:hover {
-    background: rgba(124, 58, 237, 0.2);
-    border-color: rgba(124, 58, 237, 0.6);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: var(--accent);
   }
   .blog-group-options {
     display: grid;
@@ -2399,46 +2409,59 @@ html.view-home #messageMonthFooter { display: none !important; }
     align-items: center;
     gap: 7px;
     min-height: 44px;
-    padding: 8px 9px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 10px;
+    border: 1px solid var(--border);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    color: #f2f2f7;
+    background: var(--card-soft);
+    color: var(--text);
     cursor: pointer;
     font-size: 13px;
     transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+    box-sizing: border-box;
   }
-  .blog-group-option:has(input:checked) {
-    border-color: rgba(124, 58, 237, 0.8);
-    background: rgba(124, 58, 237, 0.18);
-    color: #d6c8ff;
+  .blog-group-option:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+  }
+  .blog-group-option:has(input:checked),
+  .blog-group-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text-strong);
+    font-weight: 600;
   }
   .blog-group-option input[type="checkbox"] {
     width: 16px;
     height: 16px;
     flex: 0 0 auto;
-    accent-color: var(--primary, #7c3aed);
+    accent-color: var(--accent);
     cursor: pointer;
   }
   .blog-group-option-icon {
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1;
   }
   .blog-group-backfill-note {
     margin: 12px 0 8px;
-    color: #8e8e93;
+    color: var(--muted);
     font-size: 12px;
     line-height: 1.5;
+    text-align: center;
   }
   .blog-group-advanced {
     width: 100%;
-    padding: 8px 10px;
+    padding: 9px 12px;
     margin-bottom: 16px;
+    text-align: center;
+    display: block;
+    box-sizing: border-box;
   }
   .blog-group-backfill-card .cm-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
+
+  /* ── 消息回填卡片 ────────────────────────────────── */
   .message-backfill-card {
     max-width: 520px;
     text-align: left;
@@ -2449,7 +2472,7 @@ html.view-home #messageMonthFooter { display: none !important; }
     text-align: center;
   }
   .bm-member-picker {
-    margin: 0 0 18px;
+    margin: 0 0 16px;
   }
   .bm-member-picker-head {
     display: flex;
@@ -2459,24 +2482,24 @@ html.view-home #messageMonthFooter { display: none !important; }
     margin-bottom: 8px;
   }
   .bm-member-picker-label {
-    color: #a1a1a6;
+    color: var(--muted);
     font-size: 12.5px;
     font-weight: 600;
   }
   .bm-member-select-all {
-    border: 1px solid rgba(124, 58, 237, 0.35);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
     border-radius: 8px;
-    padding: 5px 10px;
-    background: rgba(124, 58, 237, 0.1);
-    color: #c7b6ff;
+    padding: 5px 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
     transition: all 0.2s ease;
   }
   .bm-member-select-all:hover {
-    background: rgba(124, 58, 237, 0.2);
-    border-color: rgba(124, 58, 237, 0.6);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: var(--accent);
   }
   .bm-member-select-all:disabled {
     cursor: not-allowed;
@@ -2498,28 +2521,30 @@ html.view-home #messageMonthFooter { display: none !important; }
     min-width: 0;
     min-height: 44px;
     padding: 8px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    color: #f2f2f7;
+    background: var(--card-soft);
+    color: var(--text);
     cursor: pointer;
     font-size: 13px;
     transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+    box-sizing: border-box;
   }
   .bm-member-option:hover {
-    border-color: rgba(124, 58, 237, 0.45);
-    background: rgba(124, 58, 237, 0.1);
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
   }
   .bm-member-option:has(input:checked) {
-    border-color: rgba(124, 58, 237, 0.8);
-    background: rgba(124, 58, 237, 0.18);
-    color: #d6c8ff;
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text-strong);
+    font-weight: 600;
   }
   .bm-member-option input[type="checkbox"] {
     width: 16px;
     height: 16px;
     flex: 0 0 auto;
-    accent-color: var(--primary, #7c3aed);
+    accent-color: var(--accent);
     cursor: pointer;
   }
   .bm-member-option-name {
@@ -2533,56 +2558,139 @@ html.view-home #messageMonthFooter { display: none !important; }
     margin-left: auto;
     padding: 2px 6px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #a1a1a6;
+    background: var(--field);
+    border: 1px solid var(--border-soft);
+    color: var(--muted);
     font-size: 10px;
     white-space: nowrap;
   }
   .bm-member-empty {
     grid-column: 1 / -1;
     padding: 16px 12px;
-    border: 1px dashed rgba(255, 255, 255, 0.14);
+    border: 1px dashed var(--border);
     border-radius: 10px;
-    color: #8e8e93;
+    color: var(--muted);
     font-size: 12.5px;
     text-align: center;
   }
   .bm-member-selection-summary {
     margin-top: 8px;
-    color: #8e8e93;
+    color: var(--muted);
     font-size: 12px;
     line-height: 1.45;
   }
+
+  /* ── 消息回填模式选择 ────────────────────────────── */
+  .bm-mode-group {
+    margin-bottom: 16px;
+  }
+  .bm-mode-label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .bm-mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bm-mode-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    background: var(--card-soft);
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+  }
+  .bm-mode-card:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+  }
+  .bm-mode-card:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .bm-mode-card input[type="radio"] {
+    margin-top: 3px;
+    accent-color: var(--accent);
+    flex: 0 0 auto;
+  }
+  .bm-mode-info {
+    line-height: 1.35;
+    flex: 1;
+    min-width: 0;
+  }
+  .bm-mode-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+  .bm-mode-desc {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .bm-custom-date-row {
+    margin-bottom: 16px;
+  }
+
+  /* ── 模态框通用操作按钮 ──────────────────────────── */
   .cm-actions {
     display: flex;
     gap: 10px;
+    margin-top: 18px;
   }
   .cm-btn {
     flex: 1;
-    padding: 10px 16px;
+    padding: 11px 16px;
     border-radius: 10px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    border: none;
+    border: 1px solid transparent;
     transition: all 0.2s;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .cm-btn.secondary {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    background: var(--field);
+    border: 1px solid var(--border);
+    color: var(--text);
   }
   .cm-btn.secondary:hover {
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+  }
+  .cm-btn.primary {
+    background: var(--accent);
+    color: #ffffff;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .cm-btn.primary:hover:not(:disabled) {
+    filter: brightness(1.08);
   }
   .cm-btn.danger {
-    background: linear-gradient(135deg, #ff453a, #ff3b30);
-    color: #fff;
+    background: var(--err);
+    color: #ffffff;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--err) 30%, transparent);
   }
   .cm-btn.danger:hover {
-    opacity: 0.9;
-    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.4);
+    filter: brightness(1.08);
   }
-  
+  .cm-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.5);
+  }
+
   /* Toast Notifications */
   .toast-container {
     position: fixed;
@@ -2598,20 +2706,21 @@ html.view-home #messageMonthFooter { display: none !important; }
     pointer-events: auto;
     padding: 10px 18px;
     border-radius: 10px;
-    background: rgba(30, 30, 32, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: var(--card-solid);
+    border: 1px solid var(--border);
+    color: var(--text-strong);
     font-size: 14px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: var(--shadow-lg);
     display: flex;
     align-items: center;
     gap: 8px;
     animation: toastIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     transition: opacity 0.3s, transform 0.3s;
   }
-  .custom-toast.success { border-color: rgba(52, 199, 89, 0.4); }
-  .custom-toast.error { border-color: rgba(255, 59, 48, 0.4); }
+  .custom-toast.success { border-color: var(--ok); }
+  .custom-toast.error { border-color: var(--err); }
   @keyframes toastIn {
     from { transform: translateY(-20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }

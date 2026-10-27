@@ -1452,7 +1452,7 @@
       msgMemberList.replaceChildren();
       monitors.forEach((m) => {
         const label = document.createElement("label");
-        label.className = "archive-member-chip";
+        label.className = "bm-member-option";
         const input = document.createElement("input");
         input.type = "checkbox";
         input.name = "archiveMsgMember";
@@ -1460,6 +1460,7 @@
         const acc = String(m.account || "").toLowerCase();
         const icon = acc.includes("nogi") ? "💜" : acc.includes("sakura") ? "🌸" : acc.includes("hinata") ? "☀️" : "👤";
         const text = document.createElement("span");
+        text.className = "bm-member-option-name";
         text.textContent = `${icon} ${m.name || m.id}`;
         label.append(input, text);
         input.addEventListener("change", () => label.classList.toggle("selected", input.checked));
@@ -1635,6 +1636,9 @@
     [dialogArchiveMessage, dialogArchiveBlog].forEach((dlg) => {
       dlg.querySelectorAll("[data-dialog-close]").forEach((btn) => {
         btn.addEventListener("click", () => dlg.close());
+      });
+      dlg.addEventListener("click", (e) => {
+        if (e.target === dlg) dlg.close();
       });
     });
   }
