@@ -32,11 +32,16 @@ jobs:
           cache: pip
 
       - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
+          echo 'Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/99custom-timeout
+          echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99custom-timeout
+          echo 'Acquire::Retries "3";' | sudo tee -a /etc/apt/apt.conf.d/99custom-timeout
           pip install -r requirements.txt
           pip install ruff pytest pytest-asyncio pytest-cov
-          sudo apt-get update -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20
-          sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 fonts-noto-cjk fonts-noto-color-emoji
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
           playwright install --with-deps chromium
 
       - name: Lint (ruff)
