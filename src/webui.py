@@ -1361,7 +1361,13 @@ def start_webui(
         log_all(f"⚠️ [安全警告] 网页管理端监听非回环地址 ({host}) 且未启用密码或 Token 鉴权！", is_error=True)
 
     try:
-        log_all(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
+        if host in ("0.0.0.0", "::"):
+            log_all(
+                f"🌐 网页管理端已启动: 绑定 {host}:{server.server_address[1]} "
+                f"（本地访问可用 http://127.0.0.1:{server.server_address[1]}/，远端按部署主机 IP 访问 | {hint}）"
+            )
+        else:
+            log_all(f"🌐 网页管理端已启动: http://{host}:{server.server_address[1]}/ （{hint}）")
     except Exception:
         log_all(f"WebUI started: http://{host}:{server.server_address[1]}/")
     return server

@@ -22,7 +22,7 @@ from urllib.parse import parse_qs
 
 import httpx
 
-from src.logger import get_recent
+from src.logger import get_recent, redact_for_export
 from src.utils import format_bytes, get_storage_breakdown, clean_storage_category
 from src.webui_modules.static_handler import send_json
 
@@ -156,8 +156,11 @@ def handle_logs(handler) -> None:
             return default
 
     source = (qs.get("source") or ["live"])[0]
+    redact_pii = bool((qs.get("redact_pii") or qs.get("export") or ["0"])[0] in ("1", "true"))
     if source == "live":
         entries, seq = get_recent(qs_int("after", 0))
+        if redact_pii:
+            entries = [{**e, "text": redact_for_export(e.get("text", ""))} for e in entries]
         send_json(handler, {"ok": True, "source": "live", "entries": entries, "seq": seq})
         return
 
@@ -178,6 +181,8 @@ def handle_logs(handler) -> None:
         except OSError as e:
             send_json(handler, {"ok": False, "errors": [f"读取日志文件失败: {e}"]}, 500)
             return
+        if redact_pii:
+            lines = [redact_for_export(line) for line in lines]
         send_json(handler, {"ok": True, "source": source, "lines": lines, "file": str(fp)})
         return
 

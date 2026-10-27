@@ -442,10 +442,25 @@ class HealthTracker:
                 self._errors.popleft()
             self._errors.append((msg, tier, self._cycle_count))
 
-    def record_next_cycle(self, at_epoch: float, tag: str) -> None:
-        """记录下一轮巡查的预计时间（供网页状态页显示倒计时）。"""
+    def record_next_cycle(
+        self,
+        at_epoch: float,
+        tag: str,
+        *,
+        phase: str = "",
+        reason: str = "",
+        wake_jst: str = "",
+    ) -> None:
+        """记录下一轮巡查的预计时间（供网页状态页显示倒计时与调度原因）。"""
         with self._lock:
-            self._next_cycle = {"at_epoch": at_epoch, "tag": tag}
+            payload: dict = {"at_epoch": at_epoch, "tag": tag}
+            if phase:
+                payload["phase"] = phase
+            if reason:
+                payload["reason"] = reason
+            if wake_jst:
+                payload["wake_jst"] = wake_jst
+            self._next_cycle = payload
 
     # ── 结构化快照（网页状态页用）───────────────────────
 

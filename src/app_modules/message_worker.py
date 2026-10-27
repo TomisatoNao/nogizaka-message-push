@@ -11,6 +11,8 @@ import sys
 import time
 import traceback
 import uuid
+from datetime import datetime
+from typing import Any, Callable
 
 import httpx
 
@@ -240,7 +242,7 @@ def _next_interval() -> tuple[int, str]:
     return max(1, base + jitter), tag
 
 
-async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
+async def _default_wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
     """等待 timeout 秒；期间事件被置位（网页「立即巡查」）则提前返回 True。"""
     try:
         await asyncio.wait_for(event.wait(), timeout=timeout)
@@ -248,6 +250,161 @@ async def _wait_or_trigger(event: asyncio.Event, timeout: float) -> bool:
         return True
     except asyncio.TimeoutError:
         return False
+
+
+_wait_or_trigger = _default_wait_or_trigger
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleDecision:
+    phase: str
+    wait_seconds: float
+    target_epoch: float
+    tag: str
+    reason: str
+    wake_iso_jst: str
+
+
+def plan_message_cycle(config: Any = None, now_jst: datetime | None = None) -> ScheduleDecision:
+    """基于当前时间统一规划下一轮巡查调度。"""
+    active_cfg = config if config is not None else cfg
+    enabled = getattr(active_cfg, "MESSAGE_MONITOR_ENABLED", None)
+    if enabled is None:
+        enabled = _is_message_monitor_enabled()
+    if not enabled:
+        return ScheduleDecision(
+            phase="paused",
+            wait_seconds=30.0,
+            target_epoch=time.time() + 30.0,
+            tag="⏸️ 监控暂停",
+            reason="monitor_disabled",
+            wake_iso_jst="-",
+        )
+
+    schedule = MonitorSchedule.from_config(active_cfg)
+    current_jst = schedule._as_jst(now_jst)
+
+    if schedule.is_sleeping(current_jst):
+        sec_wake = schedule.seconds_until_wake(current_jst)
+        wake_label = f"{schedule.sleep_end_hour:02d}:00 JST"
+        return ScheduleDecision(
+            phase="sleep",
+            wait_seconds=float(sec_wake),
+            target_epoch=time.time() + sec_wake,
+            tag="😴 休眠",
+            reason="sleep_window",
+            wake_iso_jst=wake_label,
+        )
+
+    if schedule.interval_phase(current_jst) == "night":
+        interval_range = getattr(active_cfg, "NIGHT_INTERVAL", (2700, 3300))
+        tag = "🌙 深夜低速"
+    else:
+        interval_range = getattr(active_cfg, "DAY_INTERVAL", (120, 180))
+        tag = "☀️ 日间巡查"
+    base = random.randint(*interval_range)  # nosec B311
+    jitter = int(base * random.uniform(-0.1, 0.1))  # nosec B311
+    base_wait = max(1, base + jitter)
+
+    sec_until_sleep = schedule.seconds_until_sleep(current_jst)
+    if sec_until_sleep > 0 and base_wait > sec_until_sleep:
+        wait_seconds = float(sec_until_sleep)
+    else:
+        wait_seconds = float(base_wait)
+
+    cur_phase = schedule.interval_phase(current_jst)
+    return ScheduleDecision(
+        phase=cur_phase,
+        wait_seconds=wait_seconds,
+        target_epoch=time.time() + wait_seconds,
+        tag=tag,
+        reason="interval",
+        wake_iso_jst="-",
+    )
+
+
+async def _wait_slice(
+    poll_event: asyncio.Event,
+    reload_event: asyncio.Event | None,
+    stop_event: asyncio.Event | None,
+    timeout: float,
+) -> str:
+    """分片等待多个事件，返回 'manual' | 'reload' | 'stop' | 'timeout'。"""
+    if _wait_or_trigger is not _default_wait_or_trigger:
+        triggered = await _wait_or_trigger(poll_event, timeout)
+        return "manual" if triggered else "timeout"
+
+    if stop_event is not None and stop_event.is_set():
+        return "stop"
+    if reload_event is not None and reload_event.is_set():
+        reload_event.clear()
+        return "reload"
+    if poll_event.is_set():
+        poll_event.clear()
+        return "manual"
+
+    waiters: list[asyncio.Task] = [asyncio.create_task(poll_event.wait())]
+    if reload_event is not None:
+        waiters.append(asyncio.create_task(reload_event.wait()))
+    if stop_event is not None:
+        waiters.append(asyncio.create_task(stop_event.wait()))
+
+    try:
+        done, pending = await asyncio.wait(
+            waiters, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+        if stop_event is not None and stop_event.is_set():
+            return "stop"
+        if reload_event is not None and reload_event.is_set():
+            reload_event.clear()
+            return "reload"
+        if poll_event.is_set():
+            poll_event.clear()
+            return "manual"
+        return "timeout"
+    except asyncio.CancelledError:
+        for t in waiters:
+            t.cancel()
+        await asyncio.gather(*waiters, return_exceptions=True)
+        raise
+
+
+async def _wait_for_next_action(
+    seconds: float,
+    *,
+    poll_event: asyncio.Event,
+    reload_event: asyncio.Event | None = None,
+    stop_event: asyncio.Event | None = None,
+    check_stop_fn: Callable[[], bool] | None = None,
+    slice_seconds: float = 10.0,
+) -> str:
+    """分片等待并响应手动触发、配置热重载、停止事件及停止文件。"""
+    if seconds <= 0:
+        return "timeout"
+
+    waited = 0.0
+    while waited < seconds:
+        if stop_event is not None and stop_event.is_set():
+            return "stop"
+        if check_stop_fn is not None and check_stop_fn():
+            return "stop"
+
+        remaining = seconds - waited
+        cur_slice = min(slice_seconds, max(0.01, remaining))
+
+        action = await _wait_slice(poll_event, reload_event, stop_event, cur_slice)
+        if action in ("manual", "reload", "stop"):
+            return action
+
+        waited += cur_slice
+        if check_stop_fn is not None and check_stop_fn():
+            return "stop"
+
+    return "timeout" 
 
 
 def _is_message_monitor_enabled() -> bool:
@@ -466,45 +623,100 @@ async def _run_cycle() -> _CycleResult:
         log_all("⏸️ Message 监控已暂停（配置已关闭）", is_debug=True)
     return _CycleResult()
 
-async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
-                    stop_event: asyncio.Event | None = None) -> None:
+async def _run_loop(
+    http_client: httpx.AsyncClient,
+    poll_event: asyncio.Event,
+    stop_event: asyncio.Event | None = None,
+    reload_event: asyncio.Event | None = None,
+) -> None:
     app_mod = sys.modules.get("src.app")
     check_stop_fn = getattr(app_mod, "_stop_requested", _stop_requested) if app_mod else _stop_requested
     run_cycle_fn = getattr(app_mod, "_run_cycle", _run_cycle) if app_mod else _run_cycle
 
+    if reload_event is None:
+        reload_event = asyncio.Event()
+
+    manual_pending = False
+    last_trigger = "startup"
+
     while True:
+        if stop_event is not None and stop_event.is_set():
+            return
         if check_stop_fn():
             log_all("🛑 检测到停止信号文件，优雅退出")
             if stop_event is not None:
                 stop_event.set()
             return
-        try:
-            # ── 改进 3：休眠时段暂停轮询（手动触发可唤醒）──
-            sleep_sec = _calc_sleep_seconds()
-            if sleep_sec > 0:
-                jst = _get_jst_now()
-                schedule = MonitorSchedule.from_config(cfg)
+
+        # 检查事件队列中是否有待执行手动请求
+        if poll_event.is_set():
+            poll_event.clear()
+            manual_pending = True
+
+        jst_now = _get_jst_now()
+        schedule = MonitorSchedule.from_config(cfg)
+        is_sleeping = schedule.is_sleeping(jst_now)
+
+        # 休眠时段且无手动请求时，进入休眠分片等待
+        if not manual_pending and is_sleeping:
+            decision = plan_message_cycle(cfg, jst_now)
+            health.get_tracker().record_next_cycle(
+                decision.target_epoch,
+                decision.tag,
+                phase=decision.phase,
+                reason=decision.reason,
+                wake_jst=decision.wake_iso_jst,
+            )
+            if last_trigger == "manual":
+                log_all(
+                    f"⏩ 手动巡查完成 | 恢复休眠 | next_auto={decision.wake_iso_jst} | trigger=manual",
+                )
+            else:
                 log_all(
                     f"😴 全局内容监控休眠（{schedule.sleep_start_hour}:00-"
                     f"{schedule.sleep_end_hour}:00 JST），"
-                    f"当前 {jst.hour:02d}:{jst.minute:02d}，暂停 {sleep_sec}s",
+                    f"当前 {jst_now.hour:02d}:{jst_now.minute:02d}，暂停 {int(decision.wait_seconds)}s | "
+                    f"下次自动巡查 {decision.wake_iso_jst}",
                     is_debug=True,
                 )
-                health.get_tracker().record_next_cycle(time.time() + sleep_sec, "😴 休眠")
-                if not await _wait_or_trigger(poll_event, sleep_sec):
-                    continue
-                log_all("⏩ 休眠时段手动触发巡查", is_debug=True)
 
+            action = await _wait_for_next_action(
+                decision.wait_seconds,
+                poll_event=poll_event,
+                reload_event=reload_event,
+                stop_event=stop_event,
+                check_stop_fn=check_stop_fn,
+            )
+            if action == "stop":
+                if check_stop_fn():
+                    log_all("🛑 检测到停止信号文件，优雅退出")
+                    if stop_event is not None:
+                        stop_event.set()
+                return
+            if action == "reload":
+                log_all("🔄 配置已热重载，重新计算监控日程", is_debug=True)
+                last_trigger = "reload"
+                continue
+            if action == "manual":
+                manual_pending = True
+                log_all("⏩ 休眠时段手动触发巡查", is_debug=True)
+            elif action == "timeout":
+                last_trigger = "auto"
+
+        # 真正开始执行轮次时消费 manual_pending 意图
+        current_trigger = "manual" if manual_pending else "auto"
+        manual_pending = False
+        last_trigger = current_trigger
+
+        try:
             cycle_id = f"{int(time.time() * 1000):x}-{uuid.uuid4().hex[:6]}"
             cycle_timeout = _timeout_setting("MESSAGE_CYCLE_TIMEOUT_SECONDS", 900.0)
             await _run_cycle_bounded(run_cycle_fn, cycle_timeout, cycle_id)
         except asyncio.CancelledError:
             raise
         except asyncio.TimeoutError:
-            # _run_cycle_bounded 已记录 cycle_id / 阶段 / 清理结果；此处只继续调度。
             pass
         except Exception:
-            # 任何未预料的异常都不该终止长驻循环：记录后照常等待下一轮
             monitor = health.get_tracker().monitor_snapshot()
             log_all(
                 f"💥 巡查轮次异常，跳过本轮 | cycle_id={monitor.get('cycle_id') or '-'} | "
@@ -517,19 +729,59 @@ async def _run_loop(http_client: httpx.AsyncClient, poll_event: asyncio.Event,
         if summary:
             log_all(summary)
 
-        wait_time, tag = _next_interval()
-        health.get_tracker().record_next_cycle(time.time() + wait_time, tag)
-        log_all(f"{tag} | 下次巡查: {wait_time}s 后", is_debug=True)
-        # 长等待期间也要能及时响应停止信号，切成小段轮询
-        waited = 0.0
-        while waited < wait_time:
-            slice_s = min(10.0, wait_time - waited)
-            if await _wait_or_trigger(poll_event, slice_s):
-                log_all("⏩ 手动触发巡查", is_debug=True)
-                break
-            waited += slice_s
+        # 检查运行期间是否又有新的手动巡查请求到达
+        if poll_event.is_set():
+            poll_event.clear()
+            manual_pending = True
+            log_all("⏩ 运行期间捕获手动巡查请求，立即执行下一轮", is_debug=True)
+            continue
+
+        # 重新规划下一轮
+        jst_now = _get_jst_now()
+        decision = plan_message_cycle(cfg, jst_now)
+
+        health.get_tracker().record_next_cycle(
+            decision.target_epoch,
+            decision.tag,
+            phase=decision.phase,
+            reason=decision.reason,
+            wake_jst=decision.wake_iso_jst,
+        )
+
+        if decision.phase == "sleep":
+            # 刚跑完的轮次完成后处于休眠时段，直接跳到顶部进入休眠等待分支
+            continue
+
+        if current_trigger == "manual":
+            log_all(
+                f"⏩ 手动巡查完成 | {decision.tag} | 下次巡查: {int(decision.wait_seconds)}s 后 | trigger=manual",
+                is_debug=True,
+            )
+        else:
+            log_all(f"{decision.tag} | 下次巡查: {int(decision.wait_seconds)}s 后", is_debug=True)
+
+        action = await _wait_for_next_action(
+            decision.wait_seconds,
+            poll_event=poll_event,
+            reload_event=reload_event,
+            stop_event=stop_event,
+            check_stop_fn=check_stop_fn,
+        )
+        if action == "stop":
             if check_stop_fn():
-                break
+                log_all("🛑 检测到停止信号文件，优雅退出")
+                if stop_event is not None:
+                    stop_event.set()
+            return
+        if action == "reload":
+            log_all("🔄 配置已热重载，重新计算监控日程", is_debug=True)
+            last_trigger = "reload"
+            continue
+        if action == "manual":
+            manual_pending = True
+            log_all("⏩ 手动触发巡查", is_debug=True)
+        elif action == "timeout":
+            last_trigger = "auto" 
 
 
 __all__ = [
@@ -539,6 +791,9 @@ __all__ = [
     "_calc_sleep_seconds",
     "_next_interval",
     "_wait_or_trigger",
+    "ScheduleDecision",
+    "plan_message_cycle",
+    "_wait_for_next_action",
     "_run_cycle_bounded",
     "_run_cycle",
     "_run_loop",

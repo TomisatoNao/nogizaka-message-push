@@ -91,7 +91,7 @@ class CycleHTTPDiagnostics:
                 f"HTTP 诊断 | cycle_id={self.cycle_id} | operation={operation}\n"
                 f"host={host} | account_id={account or '-'}\n"
                 f"calls={totals.calls} | active_peak={totals.peak} | "
-                f"queue_ms_total={totals.queue_ms:.0f} | queue_ms_max={totals.queue_max_ms:.0f}\n"
+                f"queue_ms_total={totals.queue_ms:.0f} (并发累计) | queue_ms_max={totals.queue_max_ms:.0f}\n"
                 f"request_ms_p95={p95:.0f} | request_ms_max={totals.request_max_ms:.0f}\n"
                 f"results={results}"
             )

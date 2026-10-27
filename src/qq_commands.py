@@ -73,7 +73,8 @@ def _cmd_status(_args: str) -> str:
     nxt = snap.get("next_cycle")
     if nxt:
         left = nxt["at_epoch"] - time.time()
-        lines.append(f"⏰ 下次巡查: {_fmt_duration(left)} 后 {nxt.get('tag', '')}".strip())
+        wake_info = f" (预计 {nxt['wake_jst']})" if nxt.get("wake_jst") and nxt["wake_jst"] != "-" else ""
+        lines.append(f"⏰ 下次巡查: {_fmt_duration(left)} 后 {nxt.get('tag', '')}{wake_info}".strip())
 
     tokens = []
     for acc_id in cfg.ACCOUNTS:

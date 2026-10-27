@@ -191,3 +191,15 @@ def format_httpx_error(e: Exception) -> str:
             detail += f": {cause_msg}"
         current = cause
     return redact_sensitive(f"kind={classify_http_error(e)} | {detail}")
+
+
+def redact_for_export(content: str) -> str:
+    """脱敏导出日志中的个人与群组身份信息（如 QQ 群号、发言人等）。"""
+    safe = redact_sensitive(content)
+    # 脱敏来自群123456/User -> 来自群***/***
+    safe = re.sub(r'来自群\d+/[^\s|]+', '来自群***/***', safe)
+    # 脱敏群123456 -> 群***
+    safe = re.sub(r'\b群\d{5,12}\b', '群***', safe)
+    # 脱敏纯数字用户 ID (QQ 号等 5-12 位数字)
+    safe = re.sub(r'(\b(?:user_id|sender_id|from_id|openid|target_id)=)\d{5,12}\b', r'\1***', safe)
+    return safe

@@ -81,6 +81,7 @@ _blog_client: httpx.AsyncClient | None = None
 
 # 指令监听主事件循环引用与任务状态
 _main_loop: asyncio.AbstractEventLoop | None = None
+_message_reload_event: asyncio.Event | None = None
 _command_listeners: dict[str, tuple[str, asyncio.Task]] = {}
 _last_command_status: str = ""
 _command_listener_connected: set[str] = set()
@@ -377,7 +378,7 @@ async def _health_check(qq_client: httpx.AsyncClient) -> bool:
                 all_ok = False
                 setup_reasons.append(f"{len(invalid)} 个监控账号凭证待完善")
             elif not missing:
-                log_all(f"🟢 监控账号凭证完整（{len(needed)} 个账号）")
+                log_all(f"🟢 监控账号凭证完整（已加载 {len(ACCOUNT_CREDS)} 个凭证，其中 {len(needed)} 个处于活跃监控）")
                 for acc_id in sorted(needed):
                     token_health = get_token_health(acc_id)
                     # 访问 Token 过期但尚未进入本轮巡查时，只表示等待自动
@@ -510,6 +511,12 @@ def _apply_reload_component(reload_id: str | None, component_id: str, action) ->
 
 def _command_listener_connected_event(app_id: str) -> None:
     _command_listener_connected.add(app_id)
+    desired_count = len(_command_listeners)
+    connected_count = len(_command_listener_connected)
+    log_all(
+        f"🟢 官方 Bot 指令监听已连接: {app_id[:6]}...（{connected_count}/{desired_count} 个应用已连接）",
+        is_debug=True,
+    )
     for reload_id in list(_command_listener_waiters.get(app_id, ())):
         expected = _command_reload_expected.get(reload_id, set())
         ready = _command_reload_ready.setdefault(reload_id, set())
@@ -583,11 +590,24 @@ def _sync_command_listeners_impl(reload_id: str | None = None) -> None:
     enabled = getattr(cfg, "QQ_COMMANDS_ENABLED", False)
     desired: dict[str, str] = {}
     bot_names: dict[str, str] = {}
+    bot_configs = [b for b in getattr(cfg, "QQ_OFFICIAL_BOTS", []) if isinstance(b, dict)]
+    total_configs = len([b for b in bot_configs if b.get("app_id")])
+    conflicts = []
     if enabled:
-        for bot in getattr(cfg, "QQ_OFFICIAL_BOTS", []):
-            if bot.get("app_id") and bot.get("client_secret"):
-                desired[bot["app_id"]] = bot["client_secret"]
-                bot_names[bot["app_id"]] = bot.get("name") or bot["app_id"]
+        for bot in bot_configs:
+            app_id = bot.get("app_id")
+            secret = bot.get("client_secret")
+            if app_id and secret:
+                if app_id in desired and desired[app_id] != secret:
+                    conflicts.append(app_id)
+                    continue
+                desired.setdefault(app_id, secret)
+                bot_names.setdefault(app_id, bot.get("name") or app_id)
+        if conflicts:
+            log_all(
+                f"⚠️ 官方 Bot 配置冲突: 存在 {len(conflicts)} 个相同 App ID 但 Client Secret 不一致的配置项，已使用首个有效凭证",
+                is_warning=True,
+            )
 
     for app_id, (secret, task) in list(_command_listeners.items()):
         if desired.get(app_id) != secret or task.done():
@@ -617,7 +637,11 @@ def _sync_command_listeners_impl(reload_id: str | None = None) -> None:
         status, is_error = ("⚠️ Bot 指令已启用，但白名单为空（既无 target_openid 也无 "
                             "qq_commands.allow_openids），将不响应任何人的指令"), True
     else:
-        status, is_error = f"🤖 官方 Bot 指令监听运行中（{len(desired)} 个 Bot）", False
+        connected_now = len(_command_listener_connected & set(desired))
+        status, is_error = (
+            f"🤖 官方 Bot 指令监听任务已启动（配置项 {total_configs}，独立应用 {len(desired)}，已连接 {connected_now}）",
+            False,
+        )
     if status and status != _last_command_status:
         log_all(status, is_error=is_error)
     _last_command_status = status
@@ -763,6 +787,8 @@ def _on_config_reload(success: bool = True, *, reload_id: str | None = None) -> 
     try:
         loop.call_soon_threadsafe(_sync_command_listeners, reload_id)
         loop.call_soon_threadsafe(_schedule_napcat_inbound_listener, reload_id)
+        if _message_reload_event is not None:
+            loop.call_soon_threadsafe(_message_reload_event.set)
     except RuntimeError:
         _record_reload_component(
             reload_id, "qq_command_listener",
@@ -898,9 +924,14 @@ async def main() -> None:
         init_loggers()
         _acquire_instance_lock()
         log_all("🌸 坂道联合监控系统已启动")
+        from datetime import datetime
+        from src.runtime_info import runtime_metadata
+        meta = runtime_metadata()
+        local_tz = datetime.now().astimezone().tzname() or "Local"
         log_all(
-            f"🕘 内容监控时段已生效 | {MonitorSchedule.from_config(cfg).window_summary()}",
-            is_debug=True,
+            f"🏷️ 运行环境指纹 | 版本={meta['version']} | git_sha={meta['git_sha']} | "
+            f"日志时区={local_tz} | 调度时区=JST (UTC+9) | "
+            f"窗口={MonitorSchedule.from_config(cfg).window_summary()}"
         )
         # 上次的停止信号不该影响本次启动
         try:
@@ -1110,6 +1141,8 @@ async def main() -> None:
         loop.set_exception_handler(_loop_exception_handler)
 
         poll_event = asyncio.Event()
+        global _message_reload_event
+        _message_reload_event = asyncio.Event()
 
         def _request_restart() -> None:
             nonlocal restart_requested
@@ -1150,7 +1183,7 @@ async def main() -> None:
         _main_loop = loop
         _sync_command_listeners()
 
-        loop_task = asyncio.create_task(_run_loop(http_client, poll_event, stop_event))
+        loop_task = asyncio.create_task(_run_loop(http_client, poll_event, stop_event, _message_reload_event))
         stop_task = asyncio.create_task(stop_event.wait())
         done, _ = await asyncio.wait(
             {loop_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,

@@ -151,7 +151,10 @@ class QQOfficialClient:
             )
             return False
 
-        expires_in = int(data.get("expires_in", 7200))
+        try:
+            expires_in = int(data.get("expires_in", 7200))
+        except (ValueError, TypeError):
+            expires_in = 7200
         self._access_token = token
         self._token_expire_at = now + expires_in
         log_all(

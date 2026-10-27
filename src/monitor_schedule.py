@@ -134,6 +134,8 @@ class MonitorSchedule:
             )
 
         nested_raw = getattr(raw_config, "MONITOR_SCHEDULE", None)
+        if nested_raw is None:
+            nested_raw = getattr(raw_config, "monitor_schedule", None)
         nested = nested_raw if isinstance(nested_raw, Mapping) else {}
 
         def attr_value(key: str, default: Any) -> Any:
@@ -226,6 +228,23 @@ class MonitorSchedule:
         if wake <= current:
             wake += timedelta(days=1)
         return max(1, int((wake - current).total_seconds()))
+
+    def seconds_until_sleep(self, now: datetime | None = None) -> int:
+        """若休眠已启用且当前未在休眠，返回到休眠开始的秒数，否则返回 0。"""
+        if not self.sleep_enabled:
+            return 0
+        current = self._as_jst(now)
+        if self.is_sleeping(current):
+            return 0
+        target = current.replace(
+            hour=self.sleep_start_hour,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        if target <= current:
+            target += timedelta(days=1)
+        return max(1, int((target - current).total_seconds()))
 
     def next_transition(self, now: datetime | None = None) -> datetime:
         """返回下一个小时边界，用于状态页和调度日志。"""
