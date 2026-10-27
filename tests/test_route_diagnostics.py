@@ -146,14 +146,18 @@ def test_route_diagnostics_are_read_only_and_redact_targets_and_secrets(clean_co
         "OPENID_CANARY",
         "GROUP_OPENID_CANARY",
         "TG_TARGET_CANARY",
-        "BOT_NAME_CANARY",
-        "BOT_REMARK_CANARY",
         "CLIENT_SECRET_CANARY",
         "TG_TOKEN_CANARY",
         "MEMBER_TOKEN_CANARY",
         "COOKIE_CANARY",
     ):
         assert secret not in report_text
+    assert [r.get("remark") for r in report["routes"]] == [
+        None,
+        "BOT_REMARK_CANARY",
+        "BOT_REMARK_CANARY",
+        "TG_REMARK_CANARY",
+    ]
     assert all(route["delivery_status"] == "not_evaluated" for route in report["routes"])
 
 

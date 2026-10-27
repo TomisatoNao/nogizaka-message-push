@@ -72,24 +72,43 @@
     status.textContent = message;
   }
 
-  // 格式化安全具名路由标签，避免用户困惑于无语义的“路由 1 / 路由 2”
-  function formatRouteLabel(rawLabel, fallbackIndex) {
-    if (typeof rawLabel !== "string") return `路由 ${fallbackIndex}`;
-    const clean = rawLabel.trim();
-    const officialMatch = /^Official bot (\d+) (private|group)$/i.exec(clean);
+  // 格式化具名路由标签：优先使用管理员设置的备注名称（如“地偶痴群bot · 群聊”、“闹闹群”），无备注时回退到具名类型标签
+  function formatRouteLabel(routeOrLabel, fallbackIndex) {
+    if (!routeOrLabel) return `路由 ${fallbackIndex}`;
+    const isObj = typeof routeOrLabel === "object";
+    const rawLabel = (isObj ? (typeof routeOrLabel.label === "string" ? routeOrLabel.label : "") : String(routeOrLabel)).trim();
+    const remark = (isObj && typeof routeOrLabel.remark === "string" ? routeOrLabel.remark : "").trim();
+    const targetType = (isObj && typeof routeOrLabel.target_type === "string" ? routeOrLabel.target_type : "").trim();
+
+    const officialMatch = /^Official bot (\d+) (private|group)$/i.exec(rawLabel);
     if (officialMatch) {
-      const type = officialMatch[2].toLowerCase() === "private" ? "私聊" : "群聊";
+      const type = (targetType || officialMatch[2]).toLowerCase() === "private" ? "私聊" : "群聊";
+      if (remark) {
+        return `${remark} · ${type}`;
+      }
       return `QQ 官方 Bot ${officialMatch[1]} · ${type}`;
     }
-    const napcatMatch = /^NapCat route (\d+)$/i.exec(clean);
+    const napcatMatch = /^NapCat route (\d+)$/i.exec(rawLabel);
     if (napcatMatch) {
+      if (remark) {
+        return remark;
+      }
       return `OneBot 配置 ${napcatMatch[1]}`;
     }
-    const tgMatch = /^Telegram bot (\d+)$/i.exec(clean);
+    const tgMatch = /^Telegram bot (\d+)$/i.exec(rawLabel);
     if (tgMatch) {
+      if (remark) {
+        return remark;
+      }
       return `Telegram Bot ${tgMatch[1]}`;
     }
-    return `路由 ${fallbackIndex}`;
+
+    if (remark) {
+      if (targetType === "private") return `${remark} · 私聊`;
+      if (targetType === "group") return `${remark} · 群聊`;
+      return remark;
+    }
+    return rawLabel || `路由 ${fallbackIndex}`;
   }
 
   function evaluateMember(report) {
@@ -128,8 +147,7 @@
   function routeItem(route, routeNumber) {
     const applicable = route && route.status === "applicable";
     const item = element("li", "admin-route-item" + (applicable ? " is-applicable" : ""));
-    const rawLabel = route && typeof route.label === "string" ? route.label : "";
-    item.append(element("span", "admin-route-item-name", formatRouteLabel(rawLabel, routeNumber)));
+    item.append(element("span", "admin-route-item-name", formatRouteLabel(route, routeNumber)));
     item.append(element("span", "admin-route-state " + (applicable ? "is-applicable" : "is-blocked"),
       applicable ? "符合条件" : "未满足"));
     item.append(element("p", "admin-route-item-reason", applicable
@@ -246,7 +264,12 @@
     const tgCount = tgSummary ? countValue(tgSummary.applicable_route_count, 0) : 0;
 
     const channelSummaryText = `匹配推送：OneBot ${napcatCount} · QQ 官方 ${qqCount} · Telegram ${tgCount}`;
-    mid.append(element("span", "admin-route-channel-pills", channelSummaryText));
+    const channelPill = element("span", "admin-route-channel-pills", channelSummaryText);
+    const matchedNames = info.applicableRoutes.map((r, i) => formatRouteLabel(r, i + 1));
+    if (matchedNames.length) {
+      channelPill.title = `符合条件的推送目标：\n${matchedNames.join("\n")}`;
+    }
+    mid.append(channelPill);
     headerBtn.append(mid);
 
     // 右侧：展开/收起按钮文字

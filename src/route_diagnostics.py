@@ -130,9 +130,11 @@ def _route_result(
     filters: list[str] | None,
     member_name: str,
     member_id: Any,
-) -> dict[str, str]:
+    remark: str = "",
+    target_type: str = "",
+) -> dict[str, Any]:
     if not channel_enabled:
-        return {
+        res = {
             "channel": channel,
             "label": label,
             "status": "blocked",
@@ -140,8 +142,8 @@ def _route_result(
             "filter_status": "not_evaluated",
             "delivery_status": "not_evaluated",
         }
-    if not route_enabled:
-        return {
+    elif not route_enabled:
+        res = {
             "channel": channel,
             "label": label,
             "status": "blocked",
@@ -149,8 +151,8 @@ def _route_result(
             "filter_status": "not_evaluated",
             "delivery_status": "not_evaluated",
         }
-    if not has_target:
-        return {
+    elif not has_target:
+        res = {
             "channel": channel,
             "label": label,
             "status": "blocked",
@@ -158,8 +160,8 @@ def _route_result(
             "filter_status": "not_evaluated",
             "delivery_status": "not_evaluated",
         }
-    if not match_member_filter(member_name, filters or [], member_id):
-        return {
+    elif not match_member_filter(member_name, filters or [], member_id):
+        res = {
             "channel": channel,
             "label": label,
             "status": "blocked",
@@ -167,14 +169,22 @@ def _route_result(
             "filter_status": "miss",
             "delivery_status": "not_evaluated",
         }
-    return {
-        "channel": channel,
-        "label": label,
-        "status": "applicable",
-        "reason": "applicable_route",
-        "filter_status": "match",
-        "delivery_status": "not_evaluated",
-    }
+    else:
+        res = {
+            "channel": channel,
+            "label": label,
+            "status": "applicable",
+            "reason": "applicable_route",
+            "filter_status": "match",
+            "delivery_status": "not_evaluated",
+        }
+
+    clean_remark = str(remark or "").strip().replace("\r", " ").replace("\n", " ")[:128]
+    if clean_remark:
+        res["remark"] = clean_remark
+    if target_type:
+        res["target_type"] = target_type
+    return res
 
 
 def _channel_summary(channel: str, enabled: bool, route_results: list[dict[str, str]]) -> dict[str, Any]:
@@ -196,8 +206,8 @@ def _channel_summary(channel: str, enabled: bool, route_results: list[dict[str, 
 def diagnose_member_route(member: Mapping[str, Any]) -> dict[str, Any]:
     """Describe fetch association, cached subscription state, and eligible routes.
 
-    Route labels are generated locally and never contain configured targets,
-    bot identifiers, remarks, credentials, or message delivery results.
+    Route labels and remarks are safe identifiers for administrator navigation and
+    never contain configured targets (openIDs, chat IDs), credentials, or delivery results.
     """
     member_name, member_id = _member_identity(member)
     account_state, account_id, account_reason = _fetch_account(member)
@@ -212,9 +222,12 @@ def diagnose_member_route(member: Mapping[str, Any]) -> dict[str, Any]:
     for index, route in enumerate(napcat_routes, start=1):
         if not isinstance(route, Mapping):
             continue
+        remark = str(route.get("remark") or "").strip()
         napcat_results.append(_route_result(
             channel="napcat",
             label=f"NapCat route {index}",
+            remark=remark,
+            target_type="group",
             channel_enabled=napcat_enabled,
             route_enabled=bool(route.get("push_message", True)),
             has_target=bool(route.get("group_id")),
@@ -230,9 +243,12 @@ def diagnose_member_route(member: Mapping[str, Any]) -> dict[str, Any]:
     for index, bot in enumerate(_configured_official_bots(), start=1):
         filters = getattr(bot, "member_filter", None)
         push_enabled = bool(getattr(bot, "push_message", True))
+        remark = str(getattr(bot, "remark", "") or "").strip()
         official_results.append(_route_result(
             channel="qq_official",
             label=f"Official bot {index} private",
+            remark=remark,
+            target_type="private",
             channel_enabled=official_enabled,
             route_enabled=push_enabled,
             has_target=bool(getattr(bot, "target_openid", "")),
@@ -243,6 +259,8 @@ def diagnose_member_route(member: Mapping[str, Any]) -> dict[str, Any]:
         official_results.append(_route_result(
             channel="qq_official",
             label=f"Official bot {index} group",
+            remark=remark,
+            target_type="group",
             channel_enabled=official_enabled,
             route_enabled=push_enabled,
             has_target=bool(getattr(bot, "group_openid", "")),
@@ -256,9 +274,12 @@ def diagnose_member_route(member: Mapping[str, Any]) -> dict[str, Any]:
     telegram_enabled = bool(getattr(cfg, "ENABLE_TG_BOT", False))
     telegram_results = []
     for index, bot in enumerate(_configured_telegram_bots(), start=1):
+        remark = str(getattr(bot, "remark", "") or "").strip()
         telegram_results.append(_route_result(
             channel="tg",
             label=f"Telegram bot {index}",
+            remark=remark,
+            target_type="chat",
             channel_enabled=telegram_enabled,
             route_enabled=bool(getattr(bot, "push_message", True)),
             has_target=bool(getattr(bot, "target_chat", "")),

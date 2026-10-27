@@ -132,11 +132,15 @@ def test_admin_api_returns_generic_route_labels_without_targets_or_side_effects(
         "OFFICIAL_TARGET_CANARY",
         "OFFICIAL_GROUP_CANARY",
         "TELEGRAM_TARGET_CANARY",
-        "OFFICIAL_BOT_CANARY",
-        "OFFICIAL_REMARK_CANARY",
         "OFFICIAL_SECRET_CANARY",
-        "TELEGRAM_BOT_CANARY",
-        "TELEGRAM_REMARK_CANARY",
         "TELEGRAM_SECRET_CANARY",
     ):
         assert private_value not in encoded
+
+    # Remarks are safely preserved so administrators can distinguish configured bots
+    assert member["routes"][1]["remark"] == "OFFICIAL_REMARK_CANARY"
+    assert member["routes"][1]["target_type"] == "private"
+    assert member["routes"][2]["remark"] == "OFFICIAL_REMARK_CANARY"
+    assert member["routes"][2]["target_type"] == "group"
+    assert member["routes"][3]["remark"] == "TELEGRAM_REMARK_CANARY"
+    assert member["routes"][3]["target_type"] == "chat"
