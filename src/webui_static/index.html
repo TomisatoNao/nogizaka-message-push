@@ -7,7 +7,7 @@
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
 <link href="/static/theme.css?v=20261027_1" rel="stylesheet"/>
-<link href="/static/admin_route_diagnostics.css?v=20261026_1" rel="stylesheet"/>
+<link href="/static/admin_route_diagnostics.css?v=20261027_1" rel="stylesheet"/>
 <script src="/static/theme.js?v=20260905_3"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
@@ -1291,12 +1291,25 @@
 
   <div class="card admin-module admin-route-diagnostics" id="routeDiagnosticsPanel" hidden role="region" aria-labelledby="routeDiagnosticsHeading">
     <div class="admin-module-heading">
-      <h2 id="routeDiagnosticsHeading">🧭 成员路由诊断</h2>
+      <h2 id="routeDiagnosticsHeading">🧭 成员推送配置检查</h2>
       <div class="admin-actions">
-        <button class="btn small" id="btnRefreshRouteDiagnostics" type="button">🔄 刷新诊断</button>
+        <button class="btn small" id="btnRefreshRouteDiagnostics" type="button">🔄 刷新检查</button>
       </div>
     </div>
-    <p class="hint admin-note">展示抓取账号关联、订阅缓存与推送路由配置条件。路由符合条件不代表已尝试推送或已送达。</p>
+    <p class="hint admin-note">展示抓取账号关联、订阅缓存与推送路由配置条件；配置匹配不代表已尝试推送或已送达。</p>
+    <div class="admin-route-toolbar" id="routeDiagnosticsToolbar" role="toolbar" aria-label="诊断筛选与搜索">
+      <div class="admin-route-search-wrap">
+        <input type="search" id="routeDiagnosticsSearch" class="admin-route-search" placeholder="🔍 搜索成员姓名..." aria-label="搜索成员姓名" autocomplete="off">
+      </div>
+      <div class="admin-route-filter-group">
+        <button type="button" class="admin-task-filter-pill active" id="btnRouteFilterAll" data-route-filter="all">全部</button>
+        <button type="button" class="admin-task-filter-pill" id="btnRouteFilterIssues" data-route-filter="issues">⚠️ 仅看需处理</button>
+      </div>
+      <div class="admin-route-collapse-actions">
+        <button type="button" class="btn small" id="btnRouteExpandAll">展开全部</button>
+        <button type="button" class="btn small" id="btnRouteCollapseAll">收起全部</button>
+      </div>
+    </div>
     <p class="admin-route-diagnostics-status" id="routeDiagnosticsStatus" role="status" aria-live="polite">等待管理员身份确认。</p>
     <p class="admin-route-diagnostics-error" id="routeDiagnosticsError" role="alert" hidden></p>
     <div class="admin-actions admin-route-diagnostics-retry-actions">
@@ -10129,6 +10142,6 @@ function bindNapcatAdvancedEvents() {
 bindNapcatAdvancedEvents();
 </script>
 <script src="/static/admin_tasks.js?v=20261026_2"></script>
-<script src="/static/admin_route_diagnostics.js?v=20261026_1"></script>
+<script src="/static/admin_route_diagnostics.js?v=20261027_1"></script>
 </body>
 </html>

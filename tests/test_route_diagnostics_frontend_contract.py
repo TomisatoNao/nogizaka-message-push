@@ -11,9 +11,9 @@ def test_route_diagnostics_panel_is_admin_gated_and_uses_one_script():
     page = (STATIC / "index.html").read_text(encoding="utf-8")
     script = (STATIC / "admin_route_diagnostics.js").read_text(encoding="utf-8")
 
-    script_url = "/static/admin_route_diagnostics.js?v=20261026_1"
+    script_url = "/static/admin_route_diagnostics.js?v=20261027_1"
     assert page.count(script_url) == 1
-    assert page.count('/static/admin_route_diagnostics.css?v=20261026_1') == 1
+    assert page.count('/static/admin_route_diagnostics.css?v=20261027_1') == 1
     assert 'id="routeDiagnosticsPanel" hidden' in page
     assert 'window.webAdminRole === "admin"' in script
     assert 'window.addEventListener("webadminauthready", syncAuthorization' in script
@@ -41,10 +41,15 @@ def test_route_diagnostics_uses_read_only_admin_endpoint_and_explicit_states():
 def test_route_diagnostics_does_not_render_targets_bot_names_or_raw_config():
     script = (STATIC / "admin_route_diagnostics.js").read_text(encoding="utf-8")
 
+    # 隐私与安全边界：严禁暴露目标 OpenID、群号、chat_id、密钥或原始配置结构
     for private_field in (
-        "route.label", "target_openid", "group_openid", "target_chat", "client_secret",
+        "target_openid", "group_openid", "target_chat", "client_secret",
         "raw config", "raw_config", "napcat_api_token",
     ):
         assert private_field not in script
     assert "innerHTML" not in script
     assert "delivery_status" not in script
+
+    # 安全标签消费：仅由白名单正则转换为去歧义的通用中文标签
+    for safe_label in ("QQ 官方 Bot", "OneBot 配置", "Telegram Bot"):
+        assert safe_label in script

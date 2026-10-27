@@ -27,20 +27,29 @@
   const panel = document.getElementById("routeDiagnosticsPanel");
   const status = document.getElementById("routeDiagnosticsStatus");
   const error = document.getElementById("routeDiagnosticsError");
-  const members = document.getElementById("routeDiagnosticsMembers");
+  const membersContainer = document.getElementById("routeDiagnosticsMembers");
   const refreshButton = document.getElementById("btnRefreshRouteDiagnostics");
   const retryButton = document.getElementById("btnRetryRouteDiagnostics");
-  if (!panel || !status || !error || !members || !refreshButton || !retryButton) return;
+  const searchInput = document.getElementById("routeDiagnosticsSearch");
+  const filterAllBtn = document.getElementById("btnRouteFilterAll");
+  const filterIssuesBtn = document.getElementById("btnRouteFilterIssues");
+  const expandAllBtn = document.getElementById("btnRouteExpandAll");
+  const collapseAllBtn = document.getElementById("btnRouteCollapseAll");
+
+  if (!panel || !status || !error || !membersContainer || !refreshButton || !retryButton) return;
 
   let authorized = false;
   let requestInFlight = false;
   let requestVersion = 0;
   let activeController = null;
+  let cachedReports = [];
+  let currentFilter = "all"; // "all" | "issues"
+  let currentSearch = "";
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
-    if (text !== undefined) node.textContent = String(text);
+    if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
   }
 
@@ -63,26 +72,64 @@
     status.textContent = message;
   }
 
-  function fact(label, value, note = "", unknown = false) {
-    const item = element("div", "admin-route-fact");
-    item.append(element("span", "admin-route-fact-label", label));
-    item.append(element("strong", "admin-route-fact-value" + (unknown ? " is-unknown" : ""), value));
-    if (note) item.append(element("p", "admin-route-fact-note", note));
-    return item;
+  // 格式化安全具名路由标签，避免用户困惑于无语义的“路由 1 / 路由 2”
+  function formatRouteLabel(rawLabel, fallbackIndex) {
+    if (typeof rawLabel !== "string") return `路由 ${fallbackIndex}`;
+    const clean = rawLabel.trim();
+    const officialMatch = /^Official bot (\d+) (private|group)$/i.exec(clean);
+    if (officialMatch) {
+      const type = officialMatch[2].toLowerCase() === "private" ? "私聊" : "群聊";
+      return `QQ 官方 Bot ${officialMatch[1]} · ${type}`;
+    }
+    const napcatMatch = /^NapCat route (\d+)$/i.exec(clean);
+    if (napcatMatch) {
+      return `OneBot 配置 ${napcatMatch[1]}`;
+    }
+    const tgMatch = /^Telegram bot (\d+)$/i.exec(clean);
+    if (tgMatch) {
+      return `Telegram Bot ${tgMatch[1]}`;
+    }
+    return `路由 ${fallbackIndex}`;
   }
 
-  function subscriptionFact(subscription) {
-    const stateValue = subscription && typeof subscription.state === "string" ? subscription.state : "unknown";
-    if (stateValue === "active") return fact("订阅缓存", "缓存显示已订阅", "以只读缓存状态为准。");
-    if (stateValue === "inactive") return fact("订阅缓存", "缓存显示当前无有效订阅", "来自现有订阅缓存记录。");
-    const reason = subscription && typeof subscription.reason === "string" ? subscription.reason : "subscription_state_unknown";
-    return fact("订阅缓存", "未知 / 未同步", reasonLabel(reason), true);
+  function evaluateMember(report) {
+    const member = report && typeof report === "object" ? report : {};
+    const fetchAccount = member.fetch_account && typeof member.fetch_account === "object" ? member.fetch_account : {};
+    const subscription = member.subscription && typeof member.subscription === "object" ? member.subscription : {};
+    const routes = Array.isArray(member.routes) ? member.routes : [];
+    const applicableRoutes = routes.filter((r) => r && r.status === "applicable");
+    const applicableCount = applicableRoutes.length;
+
+    const hasAccount = fetchAccount.status === "configured" && !!fetchAccount.account_id;
+    const subState = subscription.state || "unknown";
+    const isSubInactive = subState === "inactive";
+    const isSubUnknown = subState === "unknown";
+    const isNoApplicableRoute = applicableCount === 0;
+
+    // 需关注处理项：缺账号、所有通道无匹配、订阅明确已失效
+    const needsAttention = !hasAccount || isNoApplicableRoute || isSubInactive;
+
+    return {
+      member,
+      fetchAccount,
+      subscription,
+      routes,
+      applicableRoutes,
+      applicableCount,
+      hasAccount,
+      subState,
+      isSubInactive,
+      isSubUnknown,
+      isNoApplicableRoute,
+      needsAttention,
+    };
   }
 
   function routeItem(route, routeNumber) {
     const applicable = route && route.status === "applicable";
-    const item = element("li", "admin-route-item");
-    item.append(element("span", "admin-route-item-name", `路由 ${routeNumber}`));
+    const item = element("li", "admin-route-item" + (applicable ? " is-applicable" : ""));
+    const rawLabel = route && typeof route.label === "string" ? route.label : "";
+    item.append(element("span", "admin-route-item-name", formatRouteLabel(rawLabel, routeNumber)));
     item.append(element("span", "admin-route-state " + (applicable ? "is-applicable" : "is-blocked"),
       applicable ? "符合条件" : "未满足"));
     item.append(element("p", "admin-route-item-reason", applicable
@@ -95,70 +142,225 @@
     const card = element("section", "admin-route-channel");
     const heading = element("div", "admin-route-channel-heading");
     heading.append(element("h4", "", channelLabel(channel)));
-    card.append(heading);
 
     const configuredCount = countValue(summary && summary.configured_route_count, channelRoutes.length);
-    const applicableCount = countValue(summary && summary.applicable_route_count,
-      channelRoutes.filter((route) => route && route.status === "applicable").length);
-    card.append(element("p", "admin-route-channel-count", `${applicableCount} / ${configuredCount} 条路由符合条件`));
+    const matched = channelRoutes.filter((r) => r && r.status === "applicable");
+    const unmatched = channelRoutes.filter((r) => !r || r.status !== "applicable");
+    const applicableCount = matched.length;
 
-    if (channelRoutes.length) {
-      const list = element("ul", "admin-route-list");
-      channelRoutes.forEach((route, index) => list.append(routeItem(route, index + 1)));
-      card.append(list);
-    } else {
+    const enabled = summary && summary.enabled !== false;
+    heading.append(element("span", "admin-route-channel-count", enabled
+      ? `${applicableCount} / ${configuredCount} 条符合条件`
+      : "通道已关闭"));
+    card.append(heading);
+
+    if (!channelRoutes.length) {
       card.append(element("p", "admin-route-empty", "当前没有已配置的推送路由。"));
       const reasons = summary && Array.isArray(summary.reasons) ? summary.reasons : [];
       const labels = reasons.map(reasonLabel).filter(Boolean);
       if (labels.length) card.append(element("p", "admin-route-channel-reasons", labels.join("；")));
+      return card;
     }
+
+    // 1. 优先展示符合条件的有效分支
+    if (matched.length) {
+      const matchedList = element("ul", "admin-route-list");
+      matched.forEach((route, idx) => matchedList.append(routeItem(route, idx + 1)));
+      card.append(matchedList);
+    }
+
+    // 2. 将未匹配/停用/未使用的分支折叠聚合，避免 18 条分支撑爆整行
+    if (unmatched.length) {
+      const details = element("details", "admin-route-unmatched-details");
+      const sumNode = element("summary", "admin-route-unmatched-summary",
+        `其他未匹配/未配置分支 (${unmatched.length}) ▾`);
+      details.append(sumNode);
+      const unmatchedList = element("ul", "admin-route-list");
+      unmatched.forEach((route, idx) => unmatchedList.append(routeItem(route, matched.length + idx + 1)));
+      details.append(unmatchedList);
+      card.append(details);
+    }
+
     return card;
   }
 
-  function memberCard(report) {
-    const member = report && typeof report === "object" ? report : {};
+  function memberCard(report, index) {
+    const info = evaluateMember(report);
+    const memberName = info.member.member_name || "未命名成员";
+
     const card = element("article", "admin-route-member");
-    const heading = element("div", "admin-route-member-heading");
-    heading.append(element("h3", "", member.member_name || "未命名成员"));
-    card.append(heading);
+    if (!info.hasAccount) card.classList.add("status-err");
+    else if (info.needsAttention) card.classList.add("status-warn");
+    else if (info.isSubUnknown) card.classList.add("status-neutral");
+    else card.classList.add("status-ok");
 
-    const fetchAccount = member.fetch_account && typeof member.fetch_account === "object" ? member.fetch_account : {};
-    const facts = element("div", "admin-route-member-facts");
-    if (fetchAccount.status === "configured" && fetchAccount.account_id) {
-      facts.append(fact("抓取账号关联", `已关联 · ${fetchAccount.account_id}`, "用于该成员的抓取账号。"));
-    } else {
-      facts.append(fact("抓取账号关联", "未关联或账号未配置", reasonLabel("missing_fetch_account"), true));
+    card.dataset.memberName = memberName;
+    card.dataset.needsAttention = info.needsAttention ? "true" : "false";
+
+    // ── 1. 紧凑摘要头部（默认折叠） ──
+    const headerBtn = element("button", "admin-route-member-header");
+    headerBtn.type = "button";
+    headerBtn.setAttribute("aria-expanded", "false");
+    const bodyId = `routeMemberBody-${index}`;
+    headerBtn.setAttribute("aria-controls", bodyId);
+
+    // 左侧：折叠指示箭头 + 姓名 + 状态徽章
+    const lead = element("div", "admin-route-member-lead");
+    lead.append(element("span", "admin-route-chevron", "▸"));
+    lead.append(element("span", "admin-route-member-name", memberName));
+
+    let badgeClass = "is-ok";
+    let badgeText = "✅ 匹配正常";
+    if (!info.hasAccount) {
+      badgeClass = "is-err";
+      badgeText = "⚠️ 抓取账号未关联";
+    } else if (info.isNoApplicableRoute) {
+      badgeClass = "is-warn";
+      badgeText = "⚠️ 无匹配路由";
+    } else if (info.isSubInactive) {
+      badgeClass = "is-warn";
+      badgeText = "⚠️ 订阅缓存已失效";
+    } else if (info.isSubUnknown) {
+      badgeClass = "is-neutral";
+      badgeText = "订阅待确认";
     }
-    facts.append(subscriptionFact(member.subscription));
-    card.append(facts);
+    lead.append(element("span", `admin-route-badge ${badgeClass}`, badgeText));
+    headerBtn.append(lead);
 
-    const routes = Array.isArray(member.routes) ? member.routes : [];
-    const routeSummary = member.route_summary && typeof member.route_summary === "object" ? member.route_summary : {};
-    const eligibleCount = countValue(routeSummary.applicable_route_count,
-      routes.filter((route) => route && route.status === "applicable").length);
-    const summary = element("div", "admin-route-summary " + (eligibleCount ? "is-applicable" : "is-blocked"));
-    summary.append(element("strong", "", eligibleCount
-      ? `${eligibleCount} 条路由符合条件`
-      : "没有推送路由符合当前条件"));
-    summary.append(element("span", "", "这只表示配置条件匹配，不代表已尝试推送或已送达。"));
-    card.append(summary);
+    // 中间：关键属性速览 + 三通道匹配数
+    const mid = element("div", "admin-route-member-mid");
+    const accountStr = info.hasAccount ? `账号: ${info.fetchAccount.account_id}` : "未关联账号";
+    mid.append(element("span", "admin-route-meta-chip", accountStr));
 
-    const summaries = Array.isArray(member.channels) ? member.channels : [];
+    const subText = info.subState === "active" ? "订阅有效" : info.subState === "inactive" ? "无有效订阅" : "订阅未知";
+    mid.append(element("span", "admin-route-meta-chip", `订阅: ${subText}`));
+
+    // 通道匹配数汇总
+    const summaries = Array.isArray(info.member.channels) ? info.member.channels : [];
+    const napcatSummary = summaries.find((c) => c && c.channel === "napcat");
+    const qqSummary = summaries.find((c) => c && c.channel === "qq_official");
+    const tgSummary = summaries.find((c) => c && c.channel === "tg");
+
+    const napcatCount = napcatSummary ? countValue(napcatSummary.applicable_route_count, 0) : 0;
+    const qqCount = qqSummary ? countValue(qqSummary.applicable_route_count, 0) : 0;
+    const tgCount = tgSummary ? countValue(tgSummary.applicable_route_count, 0) : 0;
+
+    const channelSummaryText = `匹配推送：OneBot ${napcatCount} · QQ 官方 ${qqCount} · Telegram ${tgCount}`;
+    mid.append(element("span", "admin-route-channel-pills", channelSummaryText));
+    headerBtn.append(mid);
+
+    // 右侧：展开/收起按钮文字
+    const tail = element("div", "admin-route-member-tail");
+    const toggleLabel = element("span", "admin-route-toggle-label", "查看详情 ▾");
+    tail.append(toggleLabel);
+    headerBtn.append(tail);
+
+    card.append(headerBtn);
+
+    // ── 2. 详情内容（默认隐藏） ──
+    const body = element("div", "admin-route-member-body");
+    body.id = bodyId;
+    body.hidden = true;
+
+    // 顶部诊断信息行与通道跳转入口
+    const metaBar = element("div", "admin-route-meta-bar");
+    const facts = element("div", "admin-route-meta-facts");
+
+    // 抓取账号关联说明
+    const factAcc = element("div", "admin-route-meta-fact-item");
+    factAcc.append(element("span", "", "抓取账号关联："));
+    factAcc.append(element("strong", "", info.hasAccount ? `已关联 (${info.fetchAccount.account_id})` : "未关联或账号未配置"));
+    facts.append(factAcc);
+
+    // 订阅缓存说明
+    const factSub = element("div", "admin-route-meta-fact-item");
+    factSub.append(element("span", "", "订阅缓存："));
+    if (info.subState === "active") {
+      factSub.append(element("strong", "", "缓存显示已订阅（以只读缓存状态为准）"));
+    } else if (info.subState === "inactive") {
+      factSub.append(element("strong", "", "缓存显示当前无有效订阅"));
+    } else {
+      factSub.append(element("strong", "", "未知 / 未同步（不能据此判断为未订阅）"));
+    }
+    facts.append(factSub);
+
+    metaBar.append(facts);
+
+    // 通往推送通道页签事件入口
+    const gotoChannelsBtn = element("button", "btn small admin-route-goto-channels", "📢 前往推送通道设置");
+    gotoChannelsBtn.type = "button";
+    gotoChannelsBtn.title = "跳转至推送通道配置页签进行编辑调整";
+    gotoChannelsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const tabChannels = document.querySelector('button.nav-tab[data-tab="channels"]');
+      if (tabChannels) tabChannels.click();
+    });
+    metaBar.append(gotoChannelsBtn);
+
+    body.append(metaBar);
+
+    // 通道卡片三列网格
     const channelGrid = element("div", "admin-route-channel-grid");
     CHANNEL_ORDER.forEach((channel) => {
       const channelSummary = summaries.find((item) => item && item.channel === channel);
-      const channelRoutes = routes.filter((route) => route && route.channel === channel);
+      const channelRoutes = info.routes.filter((route) => route && route.channel === channel);
       channelGrid.append(channelCard(channel, channelSummary, channelRoutes));
     });
-    card.append(channelGrid);
+    body.append(channelGrid);
+
+    card.append(body);
+
+    // 折叠展开点击交互
+    headerBtn.addEventListener("click", () => {
+      const isExpanded = card.classList.toggle("is-expanded");
+      body.hidden = !isExpanded;
+      headerBtn.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+      toggleLabel.textContent = isExpanded ? "收起 ▴" : "查看详情 ▾";
+    });
+
     return card;
   }
 
+  function applyFilters() {
+    const term = currentSearch.trim().toLowerCase();
+    const cards = membersContainer.querySelectorAll(".admin-route-member");
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const name = (card.dataset.memberName || "").toLowerCase();
+      const needsAttention = card.dataset.needsAttention === "true";
+
+      const matchesSearch = !term || name.includes(term);
+      const matchesFilter = currentFilter === "all" || (currentFilter === "issues" && needsAttention);
+
+      const visible = matchesSearch && matchesFilter;
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+
+    if (cachedReports.length > 0) {
+      if (visibleCount === 0) {
+        setStatus("没有符合当前筛选条件的成员。", "empty");
+      } else {
+        const issuesTotal = cachedReports.filter((r) => evaluateMember(r).needsAttention).length;
+        const note = currentFilter === "issues"
+          ? `（需处理 ${visibleCount} 位）`
+          : (issuesTotal ? `（其中 ${issuesTotal} 位需处理）` : "（全部配置正常）");
+        setStatus(`已载入 ${cachedReports.length} 位成员的路由诊断${note}；配置匹配不代表已尝试推送或已送达。`, "ready");
+      }
+    }
+  }
+
   function renderReports(reports) {
-    members.replaceChildren();
-    reports.forEach((report) => members.append(memberCard(report)));
-    if (reports.length) {
-      setStatus(`已载入 ${reports.length} 位成员的路由诊断。`, "ready");
+    cachedReports = Array.isArray(reports) ? reports : [];
+    membersContainer.replaceChildren();
+
+    cachedReports.forEach((report, index) => {
+      membersContainer.append(memberCard(report, index + 1));
+    });
+
+    if (cachedReports.length) {
+      applyFilters();
     } else {
       setStatus("当前没有可诊断的监控成员。", "empty");
     }
@@ -223,7 +425,7 @@
       activeController = null;
       requestInFlight = false;
       panel.hidden = true;
-      members.replaceChildren();
+      membersContainer.replaceChildren();
       error.hidden = true;
       retryButton.hidden = true;
       refreshButton.disabled = false;
@@ -235,6 +437,55 @@
     authorized = true;
     panel.hidden = false;
     loadDiagnostics();
+  }
+
+  // 绑定工具栏搜索与筛选事件
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      currentSearch = e.target.value;
+      applyFilters();
+    });
+  }
+
+  if (filterAllBtn && filterIssuesBtn) {
+    filterAllBtn.addEventListener("click", () => {
+      currentFilter = "all";
+      filterAllBtn.classList.add("active");
+      filterIssuesBtn.classList.remove("active");
+      applyFilters();
+    });
+    filterIssuesBtn.addEventListener("click", () => {
+      currentFilter = "issues";
+      filterIssuesBtn.classList.add("active");
+      filterAllBtn.classList.remove("active");
+      applyFilters();
+    });
+  }
+
+  if (expandAllBtn && collapseAllBtn) {
+    expandAllBtn.addEventListener("click", () => {
+      membersContainer.querySelectorAll(".admin-route-member:not([hidden])").forEach((card) => {
+        card.classList.add("is-expanded");
+        const body = card.querySelector(".admin-route-member-body");
+        const header = card.querySelector(".admin-route-member-header");
+        const toggle = card.querySelector(".admin-route-toggle-label");
+        if (body) body.hidden = false;
+        if (header) header.setAttribute("aria-expanded", "true");
+        if (toggle) toggle.textContent = "收起 ▴";
+      });
+    });
+
+    collapseAllBtn.addEventListener("click", () => {
+      membersContainer.querySelectorAll(".admin-route-member").forEach((card) => {
+        card.classList.remove("is-expanded");
+        const body = card.querySelector(".admin-route-member-body");
+        const header = card.querySelector(".admin-route-member-header");
+        const toggle = card.querySelector(".admin-route-toggle-label");
+        if (body) body.hidden = true;
+        if (header) header.setAttribute("aria-expanded", "false");
+        if (toggle) toggle.textContent = "查看详情 ▾";
+      });
+    });
   }
 
   refreshButton.addEventListener("click", loadDiagnostics);
