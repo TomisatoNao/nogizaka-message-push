@@ -17,6 +17,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       PYTHONPATH: .
       ADMIN_VISUAL_MAX_RATIO: "0.60"
@@ -32,21 +33,17 @@ jobs:
           cache: pip
 
       - name: Install dependencies
+        timeout-minutes: 5
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo systemctl stop unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-          sudo systemctl kill --kill-who=all -s 9 apt-daily.service 2>/dev/null || true
-          sudo systemctl kill --kill-who=all -s 9 apt-daily-upgrade.service 2>/dev/null || true
-          sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null || true
-          echo 'Acquire::http::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99custom-timeout
-          echo 'Acquire::https::Timeout "30";' | sudo tee -a /etc/apt/apt.conf.d/99custom-timeout
+          echo 'Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/99custom-timeout
+          echo 'Acquire::https::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99custom-timeout
           echo 'Acquire::Retries "3";' | sudo tee -a /etc/apt/apt.conf.d/99custom-timeout
-          echo 'DPkg::Lock::Timeout "60";' | sudo tee -a /etc/apt/apt.conf.d/99custom-timeout
           pip install -r requirements.txt
           pip install ruff pytest pytest-asyncio pytest-cov
-          sudo -E apt-get update -q
-          sudo -E apt-get install -y -q fonts-noto-cjk fonts-noto-color-emoji
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji
           playwright install --with-deps chromium
 
       - name: Lint (ruff)
