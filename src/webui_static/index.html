@@ -6,7 +6,7 @@
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
-<link href="/static/theme.css?v=20261026_1" rel="stylesheet"/>
+<link href="/static/theme.css?v=20261027_1" rel="stylesheet"/>
 <link href="/static/admin_route_diagnostics.css?v=20261026_1" rel="stylesheet"/>
 <script src="/static/theme.js?v=20260905_3"></script>
 <style>
@@ -1374,14 +1374,14 @@
     <p class="hint admin-note">查看最近归档任务进度与失败原因；展开任务可检查失败项，必要时只重试失败项。</p>
     <div class="admin-task-filters" id="archiveTaskFilters" role="toolbar" aria-label="任务筛选">
       <div class="admin-task-filter-group" data-filter-group="type">
-        <span class="admin-task-filter-label">类型</span>
+        <span class="admin-task-filter-label">类型：</span>
         <button class="admin-task-filter-pill active" type="button" data-filter-type="all">全部</button>
         <button class="admin-task-filter-pill" type="button" data-filter-type="message_backfill">💬 消息补档</button>
         <button class="admin-task-filter-pill" type="button" data-filter-type="blog_backfill">📄 博客回填</button>
         <button class="admin-task-filter-pill" type="button" data-filter-type="archive_integrity">🔎 完整性检查</button>
       </div>
       <div class="admin-task-filter-group" data-filter-group="status">
-        <span class="admin-task-filter-label">状态</span>
+        <span class="admin-task-filter-label">状态：</span>
         <button class="admin-task-filter-pill active" type="button" data-filter-status="all">全部</button>
         <button class="admin-task-filter-pill" type="button" data-filter-status="running">⚡ 执行中</button>
         <button class="admin-task-filter-pill" type="button" data-filter-status="issues">⚠️ 失败/中断</button>

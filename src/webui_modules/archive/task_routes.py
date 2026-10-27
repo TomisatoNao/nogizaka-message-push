@@ -183,7 +183,7 @@ def handle_archive_tasks(handler, sub: str) -> None:
     if sub == "tasks":
         query = parse_qs(handler.path.partition("?")[2])
         try:
-            limit = int((query.get("limit") or [50])[0])
+            limit = int((query.get("limit") or [10])[0])
         except (TypeError, ValueError):
             _send_error(handler, "limit 必须是整数", 400)
             return

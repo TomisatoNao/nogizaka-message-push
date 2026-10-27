@@ -957,25 +957,23 @@ dialog {
 .admin-task-filter-group {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 6px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-card);
-  border: 1px solid var(--border-soft);
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .admin-task-filter-label {
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--muted);
-  padding: 0 4px 0 6px;
+  padding: 0 2px 0 0;
   user-select: none;
+  cursor: default;
 }
 
 .admin-task-filter-pill {
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  background: var(--card-solid);
+  color: var(--muted);
   font-size: var(--text-xs);
   font-weight: 500;
   padding: 4px 10px;
@@ -987,13 +985,16 @@ dialog {
 
 .admin-task-filter-pill:hover {
   color: var(--text);
-  background: var(--border-soft);
+  border-color: var(--accent);
+  background: var(--bg-hover);
 }
 
 .admin-task-filter-pill.active {
-  background: color-mix(in srgb, var(--brand) 12%, transparent);
-  color: var(--brand);
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
   font-weight: 600;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .admin-task-progress-bar {
@@ -1009,7 +1010,7 @@ dialog {
 .admin-task-progress-fill {
   height: 100%;
   border-radius: 2px;
-  background: var(--brand);
+  background: var(--accent);
   transition: width 0.3s ease;
 }
 

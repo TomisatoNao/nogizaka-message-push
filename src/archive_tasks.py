@@ -751,7 +751,7 @@ def get_items_readonly(task_id: str) -> list[dict]:
     return [_item_dict(row) for row in rows]
 
 
-def list_tasks(*, limit: int = 50) -> list[dict]:
+def list_tasks(*, limit: int = 10) -> list[dict]:
     recover_stale_tasks()
     bounded = min(200, max(1, int(limit)))
     with closing(_connect()) as conn:

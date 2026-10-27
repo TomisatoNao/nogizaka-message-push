@@ -487,7 +487,7 @@ def test_task_only_failure_without_completed_work_matches_retry_support(task_db:
 def test_task_route_storage_failure_logs_only_safe_code_and_type(
     task_db: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def fail_list_tasks(*, limit: int = 50):
+    def fail_list_tasks(*, limit: int = 10):
         raise OSError("SECRET_CANARY must never be logged")
 
     monkeypatch.setattr(archive_tasks, "list_tasks", fail_list_tasks)
