@@ -143,22 +143,53 @@ def get_auth_db() -> sqlite3.Connection:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_username ON refresh_tokens(username);")
 
+        # 自动静默自愈旧版 user_message_interactions 表（将 (username, message_id) 主键升级为 (username, member_dir, message_id)）
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_message_interactions';")
+        if cur.fetchone() is not None:
+            cur.execute("PRAGMA table_info(user_message_interactions);")
+            cols = cur.fetchall()
+            pk_cols = [c[1] for c in cols if c[5] > 0]
+            if "member_dir" not in pk_cols:
+                conn.execute("""
+                    CREATE TABLE user_message_interactions_scoped_v2 (
+                        username TEXT NOT NULL,
+                        member_dir TEXT NOT NULL DEFAULT '',
+                        message_id TEXT NOT NULL,
+                        member_name TEXT NOT NULL DEFAULT '',
+                        is_favorite INTEGER NOT NULL DEFAULT 0,
+                        is_liked INTEGER NOT NULL DEFAULT 0,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY (username, member_dir, message_id)
+                    );
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO user_message_interactions_scoped_v2
+                    (username, member_dir, message_id, member_name, is_favorite, is_liked, created_at, updated_at)
+                    SELECT username, COALESCE(member_dir, ''), message_id, COALESCE(member_name, ''), is_favorite, is_liked, created_at, updated_at
+                    FROM user_message_interactions;
+                """)
+                conn.execute("DROP TABLE user_message_interactions;")
+                conn.execute("ALTER TABLE user_message_interactions_scoped_v2 RENAME TO user_message_interactions;")
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_message_interactions (
                 username TEXT NOT NULL,
-                message_id TEXT NOT NULL,
                 member_dir TEXT NOT NULL DEFAULT '',
+                message_id TEXT NOT NULL,
                 member_name TEXT NOT NULL DEFAULT '',
                 is_favorite INTEGER NOT NULL DEFAULT 0,
                 is_liked INTEGER NOT NULL DEFAULT 0,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
-                PRIMARY KEY (username, message_id)
+                PRIMARY KEY (username, member_dir, message_id)
             );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_fav ON user_message_interactions(username, is_favorite, updated_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_like ON user_message_interactions(username, is_liked, updated_at DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_member ON user_message_interactions(username, member_dir);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_msg_member_mid ON user_message_interactions(username, member_dir, message_id);")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_letter_favorites (
@@ -924,19 +955,27 @@ def set_user_message_interaction(
     val_int = 1 if bool(value) else 0
     now = time.time()
     conn = get_auth_db()
+    m_dir = member_dir or ""
+    m_name = member_name or ""
     with _lock:
         try:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT is_favorite, is_liked, member_dir, member_name FROM user_message_interactions WHERE username = ? AND message_id = ?;",
-                (username, str(message_id)),
-            )
+            if m_dir:
+                cur.execute(
+                    "SELECT is_favorite, is_liked, member_dir, member_name FROM user_message_interactions WHERE username = ? AND member_dir = ? AND message_id = ?;",
+                    (username, m_dir, str(message_id)),
+                )
+            else:
+                cur.execute(
+                    "SELECT is_favorite, is_liked, member_dir, member_name FROM user_message_interactions WHERE username = ? AND message_id = ?;",
+                    (username, str(message_id)),
+                )
             row = cur.fetchone()
             if row:
                 fav = row[0]
                 like = row[1]
-                m_dir = member_dir or row[2]
-                m_name = member_name or row[3]
+                target_mdir = m_dir or row[2] or ""
+                target_mname = m_name or row[3] or ""
                 if action == "favorite":
                     fav = val_int
                 else:
@@ -946,9 +985,9 @@ def set_user_message_interaction(
                         """
                         UPDATE user_message_interactions
                         SET is_favorite = ?, is_liked = ?, member_dir = ?, member_name = ?, updated_at = ?
-                        WHERE username = ? AND message_id = ?;
+                        WHERE username = ? AND member_dir = ? AND message_id = ?;
                         """,
-                        (fav, like, m_dir, m_name, now, username, str(message_id)),
+                        (fav, like, target_mdir, target_mname, now, username, row[2] or "", str(message_id)),
                     )
             else:
                 fav = val_int if action == "favorite" else 0
@@ -957,10 +996,10 @@ def set_user_message_interaction(
                     conn.execute(
                         """
                         INSERT INTO user_message_interactions
-                        (username, message_id, member_dir, member_name, is_favorite, is_liked, created_at, updated_at)
+                        (username, member_dir, message_id, member_name, is_favorite, is_liked, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                         """,
-                        (username, str(message_id), member_dir, member_name, fav, like, now, now),
+                        (username, m_dir, str(message_id), m_name, fav, like, now, now),
                     )
             return {
                 "ok": True,
@@ -977,6 +1016,7 @@ def set_user_message_interaction(
 def get_user_message_interactions(
     username: str,
     message_ids: list[str] | set[str] | tuple[str, ...],
+    member_dir: str = "",
 ) -> dict[str, dict]:
     """批量获取用户对指定消息列表的交互状态字典: {message_id: {'is_favorite': bool, 'is_liked': bool}}。"""
     if not username or not message_ids:
@@ -993,14 +1033,24 @@ def get_user_message_interactions(
                 chunk = clean_ids[start:start + 400]
                 placeholders = ",".join("?" for _ in chunk)
                 cur = conn.cursor()
-                cur.execute(
-                    f"""
-                    SELECT message_id, is_favorite, is_liked
-                    FROM user_message_interactions
-                    WHERE username = ? AND message_id IN ({placeholders});
-                    """,
-                    [username, *chunk],
-                )
+                if member_dir:
+                    cur.execute(
+                        f"""
+                        SELECT message_id, is_favorite, is_liked
+                        FROM user_message_interactions
+                        WHERE username = ? AND member_dir = ? AND message_id IN ({placeholders});
+                        """,
+                        [username, member_dir, *chunk],
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        SELECT message_id, is_favorite, is_liked
+                        FROM user_message_interactions
+                        WHERE username = ? AND message_id IN ({placeholders});
+                        """,
+                        [username, *chunk],
+                    )
                 for r in cur.fetchall():
                     result[r[0]] = {
                         "is_favorite": bool(r[1]),

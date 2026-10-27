@@ -131,7 +131,7 @@ _schema_lock = threading.Lock()
 _has_fts5: bool = False
 # 归档 JSON 中的自定义标签由管理端直接编辑。索引版本用于在升级后只做一次
 # 全量重建，补齐旧版本已经保存到 JSON、但尚未写入 SQLite/FTS 的标签。
-_MESSAGE_INDEX_VERSION = 2
+_MESSAGE_INDEX_VERSION = 3
 
 
 class ArchiveWriteError(RuntimeError):
@@ -176,9 +176,49 @@ def init_db() -> sqlite3.Connection | None:
 
         with _schema_lock:
             if not _schema_initialized:
+                # 自动静默自愈旧版 messages 表（将单一 id 主键升级为 member_dir, id 复合主键）
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='messages';")
+                if cursor.fetchone() is not None:
+                    cursor.execute("PRAGMA table_info(messages);")
+                    cols = cursor.fetchall()
+                    pk_cols = [c[1] for c in cols if c[5] > 0]
+                    if "member_dir" not in pk_cols:
+                        log_all("🔧 检测到 messages 表采用旧版全局 ID 主键，自动执行自愈迁移至 (member_dir, id)...")
+                        conn.execute("""
+                            CREATE TABLE messages_scoped_v2 (
+                                id TEXT NOT NULL,
+                                member_name TEXT NOT NULL,
+                                member_dir TEXT NOT NULL,
+                                year INTEGER NOT NULL,
+                                month INTEGER NOT NULL,
+                                type TEXT,
+                                published_at TEXT,
+                                updated_at TEXT,
+                                text TEXT,
+                                translation TEXT,
+                                tags TEXT,
+                                local_file TEXT,
+                                raw_json TEXT NOT NULL,
+                                PRIMARY KEY (member_dir, id)
+                            );
+                        """)
+                        conn.execute("""
+                            INSERT OR REPLACE INTO messages_scoped_v2 (
+                                id, member_name, member_dir, year, month, type,
+                                published_at, updated_at, text, translation, tags, local_file, raw_json
+                            )
+                            SELECT id, member_name, member_dir, year, month, type,
+                                   published_at, updated_at, text, translation, tags, local_file, raw_json
+                            FROM messages;
+                        """)
+                        conn.execute("DROP TABLE messages;")
+                        conn.execute("ALTER TABLE messages_scoped_v2 RENAME TO messages;")
+                        log_all("✅ messages 表 (member_dir, id) 复合主键自愈迁移厌成")
+
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS messages (
-                        id TEXT PRIMARY KEY,
+                        id TEXT NOT NULL,
                         member_name TEXT NOT NULL,
                         member_dir TEXT NOT NULL,
                         year INTEGER NOT NULL,
@@ -190,7 +230,8 @@ def init_db() -> sqlite3.Connection | None:
                         translation TEXT,
                         tags TEXT,
                         local_file TEXT,
-                        raw_json TEXT NOT NULL
+                        raw_json TEXT NOT NULL,
+                        PRIMARY KEY (member_dir, id)
                     );
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_member_year_month ON messages(member_dir, year, month);")
@@ -492,7 +533,7 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
             conn.executemany("""
                 INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, updated_at, text, translation, tags, local_file, raw_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
+                ON CONFLICT(member_dir, id) DO UPDATE SET
                     member_name=excluded.member_name,
                     member_dir=excluded.member_dir,
                     year=excluded.year,
@@ -507,7 +548,7 @@ def _save_msgs_to_sqlite(member_name: str, year: int, month: int, msgs: list[dic
                     raw_json=excluded.raw_json;
             """, rows)
             if _has_fts5 and fts_rows:
-                conn.executemany("DELETE FROM messages_fts WHERE id = ?;", [(r[0],) for r in fts_rows])
+                conn.executemany("DELETE FROM messages_fts WHERE member_dir = ? AND id = ?;", [(r[1], r[0]) for r in fts_rows])
                 conn.executemany("""
                     INSERT INTO messages_fts (id, member_dir, member_name, text, translation, tags)
                     VALUES (?, ?, ?, ?, ?, ?);
@@ -614,7 +655,7 @@ def _sync_all_to_sqlite_locked(root: Path, conn: sqlite3.Connection, *, force: b
                 conn.executemany("""
                     INSERT INTO messages (id, member_name, member_dir, year, month, type, published_at, updated_at, text, translation, tags, local_file, raw_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
+                    ON CONFLICT(member_dir, id) DO UPDATE SET
                         member_name=excluded.member_name,
                         member_dir=excluded.member_dir,
                         year=excluded.year,

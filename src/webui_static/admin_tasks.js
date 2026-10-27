@@ -344,6 +344,10 @@
   function integrityIssueHref(issue) {
     if (!issue || typeof issue !== "object") return "";
     const code = String(issue.code || "");
+    if (code === "message_index_entry_without_json") {
+      // 索引缺对应 JSON/跨月项在原归档月无文件，不提供无效查看链接
+      return "";
+    }
     const params = new URLSearchParams();
     if (MESSAGE_ISSUE_CODES.has(code)) {
       const member = typeof issue.member === "string" ? issue.member : "";
@@ -370,10 +374,16 @@
   function renderIntegrityIssue(issue) {
     const wrapper = document.createElement("article");
     wrapper.className = "admin-integrity-issue";
+    const code = typeof issue.code === "string" ? issue.code : "";
+    let category = "other";
+    if (code === "message_missing_from_index") category = "missing";
+    else if (code === "message_index_entry_mismatch") category = "mismatch";
+    else if (code === "message_index_entry_without_json") category = "no_json";
+    wrapper.dataset.category = category;
+
     const heading = document.createElement("div");
     heading.className = "admin-integrity-issue-heading";
     const label = document.createElement("strong");
-    const code = typeof issue.code === "string" ? issue.code : "";
     label.textContent = Object.prototype.hasOwnProperty.call(INTEGRITY_ISSUE_LABELS, code)
       ? INTEGRITY_ISSUE_LABELS[code]
       : "发现一条需要人工确认的问题";
@@ -395,6 +405,14 @@
     if (issue.blog_id !== null && issue.blog_id !== undefined) locationParts.push(`博客编号：${String(issue.blog_id)}`);
     if (locationParts.length) appendIntegrityMessage(wrapper, locationParts.join(" · "), "admin-integrity-issue-location");
 
+    if (code === "message_missing_from_index") {
+      appendIntegrityMessage(wrapper, "💡 消息已存在于月度 JSON，但数据库缺失索引（多由历史跨成员同编号覆盖导致）。", "admin-integrity-manual-note");
+    } else if (code === "message_index_entry_mismatch") {
+      appendIntegrityMessage(wrapper, "💡 数据库索引字段与月度 JSON 权威内容不一致（多由历史同编号覆盖导致）。", "admin-integrity-manual-note");
+    } else if (code === "message_index_entry_without_json") {
+      appendIntegrityMessage(wrapper, "💡 原归档月未检索到对应 JSON，可能为跨月漂移或孤立调试记录；无法直接定位月文件。", "admin-integrity-manual-note");
+    }
+
     const href = integrityIssueHref(issue);
     if (href) {
       const link = document.createElement("a");
@@ -402,7 +420,7 @@
       link.href = href;
       link.textContent = BLOG_ISSUE_CODES.has(code) ? "在博客归档中查看" : "在消息归档中查看";
       wrapper.append(link);
-    } else {
+    } else if (code !== "message_index_entry_without_json") {
       appendIntegrityMessage(wrapper, "请结合检查日志和任务详情人工确认；本检查不会自动修改数据。", "admin-integrity-manual-note");
     }
     return wrapper;
@@ -437,6 +455,65 @@
       : `问题总数：${issueTotal} · 已省略：${omittedText} 条`;
     summary.append(countNode);
     integrityReport.append(summary);
+
+    const issues = Array.isArray(report.issues) ? report.issues.filter((issue) => issue && typeof issue === "object") : [];
+
+    if (issueCount > 0 && !inProgress) {
+      const missingCount = issues.filter((i) => i.code === "message_missing_from_index").length;
+      const mismatchCount = issues.filter((i) => i.code === "message_index_entry_mismatch").length;
+      const noJsonCount = issues.filter((i) => i.code === "message_index_entry_without_json").length;
+
+      const guidanceCard = document.createElement("div");
+      guidanceCard.className = "admin-integrity-guidance-card";
+
+      const gTitle = document.createElement("h4");
+      gTitle.className = "admin-integrity-guidance-title";
+      gTitle.textContent = "📋 完整性异常诊断与处置建议";
+      guidanceCard.append(gTitle);
+
+      const gLead = document.createElement("p");
+      gLead.className = "admin-integrity-guidance-lead";
+      gLead.textContent = "原始月度消息 JSON 与本地媒体引用检查通过。所发现问题属于数据库索引对应异常（主要由历史跨成员同编号消息的主键覆盖引起），可能影响搜索与列表归属。原始数据完全完好，无需重新下载全部媒体。";
+      guidanceCard.append(gLead);
+
+      const gStats = document.createElement("div");
+      gStats.className = "admin-integrity-guidance-stats";
+      if (missingCount > 0) {
+        const p1 = document.createElement("span");
+        p1.className = "admin-integrity-stat-pill";
+        p1.textContent = `缺索引：${missingCount} 条（含同编号）`;
+        gStats.append(p1);
+      }
+      if (mismatchCount > 0) {
+        const p2 = document.createElement("span");
+        p2.className = "admin-integrity-stat-pill";
+        p2.textContent = `内容不一致：${mismatchCount} 条`;
+        gStats.append(p2);
+      }
+      if (noJsonCount > 0) {
+        const p3 = document.createElement("span");
+        p3.className = "admin-integrity-stat-pill";
+        p3.textContent = `索引无对应 JSON：${noJsonCount} 条`;
+        gStats.append(p3);
+      }
+      guidanceCard.append(gStats);
+
+      const gAdvice = document.createElement("div");
+      gAdvice.className = "admin-integrity-guidance-advice";
+      const strong = document.createElement("strong");
+      strong.textContent = "推荐处置：";
+      const desc = document.createTextNode("系统现已支持 (member_dir, id) 复合身份隔离。可在终端使用数据安全迁移工具预演并应用修复，无需全量重新下载媒体：");
+      const br1 = document.createElement("br");
+      const code1 = document.createElement("code");
+      code1.textContent = "python tools/migrate_archive_identity.py --dry-run";
+      const br2 = document.createElement("br");
+      const code2 = document.createElement("code");
+      code2.textContent = "python tools/migrate_archive_identity.py --apply";
+      gAdvice.append(strong, desc, br1, code1, br2, code2);
+      guidanceCard.append(gAdvice);
+
+      integrityReport.append(guidanceCard);
+    }
 
     const timestamps = document.createElement("div");
     timestamps.className = "admin-integrity-timestamps";
@@ -491,10 +568,45 @@
     checksSection.append(checkList);
     integrityReport.append(checksSection);
 
-    const issues = Array.isArray(report.issues) ? report.issues.filter((issue) => issue && typeof issue === "object") : [];
     const issuesSection = makeIntegritySection(`问题明细（显示 ${issues.length} 条）`, "admin-integrity-issues-section");
     const issueList = document.createElement("div");
     issueList.className = "admin-integrity-issue-list";
+
+    if (issues.length > 5) {
+      const filterBar = document.createElement("div");
+      filterBar.className = "admin-integrity-filter-bar";
+      const missingTotal = issues.filter((i) => i.code === "message_missing_from_index").length;
+      const mismatchTotal = issues.filter((i) => i.code === "message_index_entry_mismatch").length;
+      const noJsonTotal = issues.filter((i) => i.code === "message_index_entry_without_json").length;
+
+      const filterCategories = [
+        { id: "all", label: `全部 (${issues.length})` },
+        { id: "missing", label: `缺索引 (${missingTotal})` },
+        { id: "mismatch", label: `内容不一致 (${mismatchTotal})` },
+        { id: "no_json", label: `索引无 JSON (${noJsonTotal})` },
+      ].filter((cat) => cat.id === "all" || !cat.label.includes("(0)"));
+
+      let activeCategory = "all";
+      const filterButtons = [];
+      for (const cat of filterCategories) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `admin-integrity-filter-btn${cat.id === activeCategory ? " is-active" : ""}`;
+        btn.textContent = cat.label;
+        btn.addEventListener("click", () => {
+          activeCategory = cat.id;
+          for (const b of filterButtons) b.classList.toggle("is-active", b === btn);
+          const issueCards = issueList.querySelectorAll(".admin-integrity-issue");
+          for (const card of issueCards) {
+            const cardCat = card.dataset.category || "other";
+            card.hidden = activeCategory !== "all" && cardCat !== activeCategory;
+          }
+        });
+        filterButtons.push(btn);
+        filterBar.append(btn);
+      }
+      issuesSection.append(filterBar);
+    }
     if (!issues.length) {
       const reportStatus = String(report.status || "").toLowerCase();
       const noIssueMessage = reportStatus === "healthy" && !inProgress

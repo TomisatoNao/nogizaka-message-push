@@ -227,7 +227,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         interactions = {}
         if req_user and req_user.get("username"):
             msg_ids = [str(m.get("id")) for m in paged_msgs if m.get("id")]
-            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids)
+            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids, member_dir=member)
 
         slim = [{
             "id": m.get("id"),
@@ -358,13 +358,15 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
         msg_ids = [r["message_id"] for r in records]
         loaded_msgs = _archive.load_messages_by_ids(member_dir if member_dir else None, msg_ids)
-        loaded_map = {str(m.get("id")): m for m in loaded_msgs}
+        loaded_map = {(str(m.get("_member_dir") or ""), str(m.get("id"))): m for m in loaded_msgs}
+        id_fallback_map = {str(m.get("id")): m for m in loaded_msgs}
 
         show_auto_tags = bool(getattr(cfg, "ENABLE_IMAGE_TAGGING", False))
         slim = []
         for r in records:
             mid = r["message_id"]
-            m = loaded_map.get(mid) or {}
+            rec_mdir = r.get("member_dir") or member_dir or ""
+            m = loaded_map.get((rec_mdir, mid)) or id_fallback_map.get(mid) or {}
             m_dir = m.get("_member_dir") or r.get("member_dir") or member_dir
             m_name = m.get("_member_name") or r.get("member_name") or m_dir
             grp = _archive.infer_member_group(m_dir) if m_dir else ""
@@ -532,7 +534,7 @@ def handle_messages(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
         interactions = {}
         if req_user and req_user.get("username"):
             msg_ids = [str(m.get("id")) for m in paged_hits if m.get("id")]
-            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids)
+            interactions = _auth.get_user_message_interactions(req_user["username"], msg_ids, member_dir=member)
 
         slim = [{
             "id": m.get("id"),
