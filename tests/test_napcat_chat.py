@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +13,10 @@ from src.platforms.napcat_listener import NapCatInboundListener
 
 
 def _chat_config(**chat_overrides):
+    inbound_overrides = {}
+    for k in ("listen_host", "listen_port"):
+        if k in chat_overrides:
+            inbound_overrides[k] = chat_overrides.pop(k)
     return {
         "enable_napcat_qq": True,
         "napcat_routes": [{"group_id": 123456}],
@@ -20,6 +25,7 @@ def _chat_config(**chat_overrides):
             "queue_size": 4,
             "workers": 1,
             "cooldown_seconds": 0,
+            **inbound_overrides,
         },
         "napcat_ai_chat": {
             "enabled": True,
@@ -182,7 +188,12 @@ async def test_listener_dispatches_to_chat_when_no_urls():
     async def mock_sender(gid, chain):
         sent_messages.append((gid, chain))
 
-    config = _chat_config()
+    port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    port_socket.bind(("127.0.0.1", 0))
+    port = port_socket.getsockname()[1]
+    port_socket.close()
+
+    config = _chat_config(listen_host="127.0.0.1", listen_port=port)
     listener = NapCatInboundListener(
         config_provider=lambda: config,
         event_token="test-secret",
