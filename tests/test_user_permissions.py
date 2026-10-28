@@ -77,7 +77,14 @@ def _isolate_auth_and_flights(tmp_path, monkeypatch):
     db_file = tmp_path / "test_auth.db"
     monkeypatch.setattr(auth, "AUTH_DB_PATH", db_file)
     monkeypatch.setattr(auth, "USERS_PATH", db_file)
+    if auth._auth_conn is not None:
+        try:
+            auth._auth_conn.close()
+        except Exception:
+            pass
     auth._auth_conn = None
+    auth._sessions.clear()
+    auth._sessions_loaded_from_db = False
     _user_in_flight_translations.clear()
 
     # 初始化测试用户：admin 与 viewer
@@ -85,7 +92,14 @@ def _isolate_auth_and_flights(tmp_path, monkeypatch):
     auth.add_user("friend_user", "FriendPassword123!", role="viewer")
     auth.add_user("viewer_user", "ViewerPassword123!", role="viewer")
     yield
+    if auth._auth_conn is not None:
+        try:
+            auth._auth_conn.close()
+        except Exception:
+            pass
     auth._auth_conn = None
+    auth._sessions.clear()
+    auth._sessions_loaded_from_db = False
     _user_in_flight_translations.clear()
 
 

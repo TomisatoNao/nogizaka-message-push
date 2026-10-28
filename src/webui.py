@@ -741,7 +741,9 @@ class _Handler(BaseHTTPRequestHandler):
             handle_logout(self)
             return
         if path in ("/api/auth/change_password", "/api/auth/password"):
-            handle_change_password(self)
+            body = self._read_body_json()
+            if body is not None:
+                handle_change_password(self, body)
             return
         if path in ("/api/users", "/api/auth/users"):
             body = self._read_body_json()

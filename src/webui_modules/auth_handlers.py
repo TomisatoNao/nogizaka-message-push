@@ -621,8 +621,14 @@ def handle_logout(handler) -> None:
     send_json(handler, {"ok": True, "message": "已成功退出登录"}, 200)
 
 
-def handle_change_password(handler) -> None:
+def handle_change_password(handler, body: dict | None = None) -> None:
     """POST /api/auth/change_password 用户自主修改密码（任何登录用户均可调用）。"""
+    if body is None:
+        body = handler._read_body_json() if hasattr(handler, "_read_body_json") else {}
+    if not isinstance(body, dict):
+        send_json(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
+        return
+
     if not guard(handler, need_admin=False):
         return
 
@@ -634,11 +640,6 @@ def handle_change_password(handler) -> None:
     username = user.get("username", "")
     if not username or username in (API_TOKEN_SESSION_USER, "(api-token)"):
         send_json(handler, {"ok": False, "errors": ["静态访问令牌会话不支持修改密码"]}, 400)
-        return
-
-    body = handler._read_body_json() if hasattr(handler, "_read_body_json") else {}
-    if not isinstance(body, dict):
-        send_json(handler, {"ok": False, "errors": ["请求体必须是 JSON 对象"]}, 400)
         return
 
     old_pw = str(body.get("old_password", ""))
