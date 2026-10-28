@@ -350,8 +350,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _current_user(self) -> dict | None:
         return current_user(self)
 
-    def _guard(self, need_admin: bool = True, is_page: bool = False) -> bool:
-        return guard(self, need_admin, is_page)
+    def _guard(self, need_admin: bool = True, is_page: bool = False, capability: str | None = None) -> bool:
+        return guard(self, need_admin, is_page, capability=capability)
 
     def _check_auth(self) -> bool:
         return guard(self, need_admin=True)

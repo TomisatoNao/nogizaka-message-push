@@ -69,9 +69,12 @@ _READ_ROUTES = frozenset({
 _ADMIN_GET_ROUTES = frozenset({"integrity"})
 _ADMIN_POST_ROUTES = frozenset({
     "tags", "retry_download", "messages/backfill", "letters_sync", "letters/favorite",
-    "blogs/archive_groups", "blogs/archive_member", "blogs/translate", "blogs/delete_translation",
+    "blogs/archive_groups", "blogs/archive_member", "blogs/delete_translation",
     "integrity/check",
 })
+_CAPABILITY_POST_ROUTES = {
+    "blogs/translate": "archive.blog.translate",
+}
 _READER_POST_ROUTES = frozenset({
     "message/interaction", "message/star", "blogs/card", "blogs/furigana",
 })
@@ -84,6 +87,7 @@ def _authorize_archive(handler, sub: str, guard_fn) -> bool:
         task_authorized = authorize_archive_task_route(handler, sub, guard_fn)
         if task_authorized is not None:
             return task_authorized
+    capability = None
     if sub == "avatar":
         # Public roster artwork is also used by the login/admin pages.
         method = "GET"
@@ -94,6 +98,9 @@ def _authorize_archive(handler, sub: str, guard_fn) -> bool:
         method, need_admin = "POST", True
     elif sub in _ADMIN_GET_ROUTES:
         method, need_admin = "GET", True
+    elif sub in _CAPABILITY_POST_ROUTES:
+        method, need_admin = "POST", False
+        capability = _CAPABILITY_POST_ROUTES[sub]
     elif sub in _READER_POST_ROUTES:
         method, need_admin = "POST", False
     elif sub in _READ_ROUTES or sub.startswith(("media/", "blog_media/")):
@@ -101,7 +108,14 @@ def _authorize_archive(handler, sub: str, guard_fn) -> bool:
     else:
         _send_json_resp(handler, {"ok": False, "errors": ["未知路径"]}, 404)
         return False
-    if need_admin is not None and not guard_fn(need_admin=need_admin):
+    if capability is not None:
+        try:
+            if not guard_fn(need_admin=False, capability=capability):
+                return False
+        except TypeError:
+            if not guard_fn(need_admin=False):
+                return False
+    elif need_admin is not None and not guard_fn(need_admin=need_admin):
         return False
     if handler.command != method:
         handler._pending_headers = [*getattr(handler, "_pending_headers", []), ("Allow", method)]

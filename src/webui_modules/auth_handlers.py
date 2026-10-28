@@ -79,9 +79,12 @@ def api_token_ok(handler) -> bool:
     token = os.getenv("WEB_ADMIN_TOKEN", "").strip()
     if not token:
         return False
-    supplied = handler.headers.get("X-Auth-Token", "").strip()
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return False
+    supplied = headers.get("X-Auth-Token", "").strip() if hasattr(headers, "get") else ""
     if not supplied:
-        authz = handler.headers.get("Authorization", "").strip()
+        authz = headers.get("Authorization", "").strip() if hasattr(headers, "get") else ""
         if authz.startswith("Bearer "):
             supplied = authz[7:].strip()
     return bool(supplied) and hmac.compare_digest(supplied, token)
@@ -89,7 +92,10 @@ def api_token_ok(handler) -> bool:
 
 def cookie_token(handler) -> str:
     """提取当前请求的 Session Token。"""
-    raw = handler.headers.get("Cookie", "")
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return ""
+    raw = headers.get("Cookie", "") if hasattr(headers, "get") else ""
     for part in raw.split(";"):
         name, _, value = part.strip().partition("=")
         if name == SESSION_COOKIE:
@@ -99,7 +105,10 @@ def cookie_token(handler) -> str:
 
 def cookie_refresh_token(handler) -> str:
     """提取当前请求的 Refresh Token。"""
-    raw = handler.headers.get("Cookie", "")
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return ""
+    raw = headers.get("Cookie", "") if hasattr(headers, "get") else ""
     for part in raw.split(";"):
         name, _, value = part.strip().partition("=")
         if name == REFRESH_COOKIE:
@@ -278,7 +287,7 @@ def redirect(handler, location: str) -> None:
     handler.end_headers()
 
 
-def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
+def guard(handler, need_admin: bool = True, is_page: bool = False, capability: str | None = None) -> bool:
     """路由守卫。通过返回 True；否则已发送响应（页面 302 / API 401·403）返回 False。"""
     if not getattr(cfg, "AUTH_ENABLED", False):
         if not os.getenv("WEB_ADMIN_TOKEN", ""):
@@ -295,7 +304,7 @@ def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
         send_json(handler, {"ok": False, "errors": ["未授权：X-Auth-Token 缺失或错误"]}, 401)
         return False
 
-    if not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
+    if capability is None and not need_admin and getattr(cfg, "AUTH_ARCHIVE_PUBLIC", False):
         return True
 
     user = current_user(handler)
@@ -322,6 +331,23 @@ def guard(handler, need_admin: bool = True, is_page: bool = False) -> bool:
                 ]
 
     if user is not None:
+        if capability is not None:
+            if not _auth.has_permission(user, capability):
+                if is_page:
+                    send_html_prompt(
+                        handler,
+                        "权限不足",
+                        f"当前账号 {user['username']} 未获得 [{capability}] 功能授权。",
+                        403,
+                        link=("/archive", "前往消息归档"),
+                    )
+                else:
+                    meta = _auth.CAPABILITY_METADATA.get(capability, {})
+                    cap_name = meta.get("name", capability)
+                    send_json(handler, {"ok": False, "errors": [f"缺少所需权限: {cap_name}"]}, 403)
+                return False
+            return True
+
         if need_admin and user["role"] != "admin":
             if is_page:
                 send_html_prompt(
@@ -373,15 +399,24 @@ def handle_auth_me(handler) -> None:
             "refresh_available": refresh_available,
         }, 200)
         return
+    capabilities = _auth.get_user_capabilities(user)
+    translation_quota = _auth.get_translation_quota(user)
     send_json(handler, {
         "ok": True,
         "auth_enabled": auth_enabled,
         "archive_public": archive_public,
         "has_users": has_u,
         "authenticated": True,
-        "user": {"username": user["username"], "role": user["role"]},
+        "user": {
+            "username": user["username"],
+            "role": user["role"],
+            "capabilities": capabilities,
+            "translation_quota": translation_quota,
+        },
         "username": user["username"],
         "role": user["role"],
+        "capabilities": capabilities,
+        "translation_quota": translation_quota,
         "via": user.get("via", "session"),
         "refresh_available": refresh_available,
     }, 200)
@@ -659,13 +694,34 @@ def handle_users_get(handler) -> None:
     if not guard(handler, need_admin=True):
         return
     me = current_user(handler) or {}
-    users = [{
-        "username": name,
-        "role": u.get("role", "viewer"),
-        "created_at": u.get("created_at", 0),
-        "is_me": name == me.get("username"),
-    } for name, u in sorted(_auth.load_users().items())]
-    send_json(handler, {"ok": True, "users": users, "min_password_len": _auth.MIN_PASSWORD_LEN}, 200)
+    all_users = _auth.load_users()
+    users = []
+    for name, u in sorted(all_users.items()):
+        role = u.get("role", "viewer")
+        grants_list = _auth.get_user_permission_grants(name)
+        grants_map = {g["permission"]: g for g in grants_list}
+        caps = _auth.get_user_capabilities({"username": name, "role": role})
+        users.append({
+            "username": name,
+            "role": role,
+            "created_at": u.get("created_at", 0),
+            "is_me": name == me.get("username"),
+            "capabilities": caps,
+            "permission_grants": grants_map,
+        })
+    send_json(handler, {
+        "ok": True,
+        "users": users,
+        "min_password_len": _auth.MIN_PASSWORD_LEN,
+        "available_permissions": [
+            {
+                "permission": _auth.PERM_BLOG_TRANSLATE,
+                "name": "博客翻译",
+                "description": "可发起单篇翻译及失败重试；不能删除译文或管理系统。",
+                "default_daily_limit": 10,
+            }
+        ],
+    }, 200)
 
 
 def handle_users_write(handler, body: dict, method: str = "POST") -> None:
@@ -685,6 +741,43 @@ def handle_users_write(handler, body: dict, method: str = "POST") -> None:
         ok, msg = _auth.set_password(username, password)
     elif action in ("role", "set_role"):
         ok, msg = _auth.set_role(username, role)
+    elif action in ("set_permissions", "permission", "permissions"):
+        perm = str(body.get("permission", _auth.PERM_BLOG_TRANSLATE))
+        enabled = bool(body.get("enabled", True))
+        try:
+            daily_limit = int(body.get("daily_limit", 10))
+        except (TypeError, ValueError):
+            send_json(handler, {"ok": False, "errors": ["每日配额必须是有效整数"]}, 400)
+            return
+
+        expires_at_val = body.get("expires_at")
+        if expires_at_val is not None and expires_at_val != "":
+            try:
+                expires_at = float(expires_at_val)
+            except (TypeError, ValueError):
+                send_json(handler, {"ok": False, "errors": ["到期时间格式无效"]}, 400)
+                return
+        else:
+            expires_at = None
+
+        expected_rev_val = body.get("expected_revision")
+        if expected_rev_val is not None and expected_rev_val != "":
+            try:
+                expected_revision = int(expected_rev_val)
+            except (TypeError, ValueError):
+                expected_revision = None
+        else:
+            expected_revision = None
+
+        ok, msg = _auth.set_user_permission(
+            username,
+            perm,
+            me,
+            enabled=enabled,
+            daily_limit=daily_limit,
+            expires_at=expires_at,
+            expected_revision=expected_revision,
+        )
     elif action == "delete":
         if username == me:
             ok, msg = False, "不能删除当前登录的账号"

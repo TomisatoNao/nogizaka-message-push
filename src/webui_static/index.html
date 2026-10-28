@@ -263,10 +263,22 @@
   .admin-link { color: var(--accent); font-weight: 600; }
   .admin-user-access-toggle { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
   .admin-user-table { min-width: 620px; }
-  .admin-user-table td:first-child { min-width: 150px; }
-  .admin-user-table td:nth-child(2) { min-width: 110px; }
-  .admin-user-table td:nth-child(3) { min-width: 180px; white-space: nowrap; }
-  .admin-user-table th:last-child, .admin-user-table td:last-child { min-width: 220px; }
+  .admin-user-table td:first-child { min-width: 130px; }
+  .admin-user-table td:nth-child(2) { min-width: 90px; }
+  .admin-user-table td:nth-child(3) { min-width: 140px; }
+  .admin-user-table td:nth-child(4) { min-width: 160px; white-space: nowrap; }
+  .admin-user-table th:last-child, .admin-user-table td:last-child { min-width: 240px; }
+  .perm-dialog { max-width: 480px; width: 95%; }
+  .perm-target-val { font-weight: 600; padding: 4px 0; }
+  .perm-role-badge { display: inline-block; }
+  .perm-label-wrap { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; margin-top: 4px; }
+  .perm-label-wrap input { margin-top: 3px; }
+  .perm-title-text { font-weight: 600; }
+  .perm-desc-hint { margin: 2px 0 0; font-size: 12px; color: var(--muted, #666); }
+  .perm-expiry-options { display: flex; gap: 12px; margin-bottom: 8px; }
+  .perm-radio-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .perm-custom-wrap { margin-top: 6px; }
+  .perm-hint-text { margin-top: 4px; font-size: 12px; color: var(--muted, #666); }
   .admin-user-empty { text-align: center; }
   .admin-table-state { color: var(--muted); padding: 14px 4px; text-align: center; }
   .admin-table-state--error { color: var(--err); text-align: left; }
@@ -2173,7 +2185,7 @@
     <div class="admin-data-group">
     <div class="table-wrap">
       <table class="admin-user-table">
-        <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>用户名</th><th>角色</th><th>附加权限</th><th>创建时间</th><th>操作</th></tr></thead>
         <tbody id="userRows"></tbody>
       </table>
     </div>
@@ -2472,6 +2484,66 @@
 <div class="actions">
 <button class="btn" id="userCancel">取消</button>
 <button class="btn primary" id="userSave">创建</button>
+</div>
+</dialog>
+<!-- 用户附加权限设置对话框 -->
+<dialog id="userPermissionDialog" class="perm-dialog" aria-labelledby="userPermDialogTitle" aria-describedby="userPermDialogNote">
+<h3 id="userPermDialogTitle">权限设置</h3>
+<div class="dialog-note" id="userPermDialogNote">为用户分配独立功能权限，无需赋予管理员权限即可发起对应操作。</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">目标用户</span></div>
+<div id="permTargetUser" class="perm-target-val"></div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">基础角色</span></div>
+<div id="permTargetRole" class="admin-status-badge muted perm-role-badge">viewer</div>
+</div>
+<div class="secret-field">
+<div class="flabel"><span class="fname">附加能力授权</span></div>
+<label class="perm-label-wrap">
+<input type="checkbox" id="permBlogTranslateEnabled"/>
+<div>
+<span class="perm-title-text">博客翻译</span>
+<div class="hint perm-desc-hint">
+可发起单篇翻译及失败重试；不能删除译文或管理系统。
+</div>
+</div>
+</label>
+</div>
+<div id="permQuotaSection" class="secret-field">
+<div class="flabel">
+<span class="fname">每日新翻译任务上限</span>
+<span class="fenv">次 / 日</span>
+</div>
+<input type="number" id="permDailyLimit" min="1" max="1000" step="1" value="10"/>
+<div class="hint perm-hint-text">
+以日本时间 00:00（北京时间 23:00）为日界线重置。
+</div>
+</div>
+<div id="permExpirySection" class="secret-field">
+<div class="flabel">
+<span class="fname">有效期</span>
+</div>
+<div class="perm-expiry-options">
+<label class="perm-radio-label">
+<input type="radio" name="permExpiryType" id="permExpiryForever" value="forever" checked/>
+<span>长期有效</span>
+</label>
+<label class="perm-radio-label">
+<input type="radio" name="permExpiryType" id="permExpiryCustom" value="custom"/>
+<span>指定到期时间</span>
+</label>
+</div>
+<div id="permExpiryCustomWrap" class="perm-custom-wrap" hidden="">
+<input type="datetime-local" id="permExpiresAt"/>
+<div class="hint perm-hint-text">
+到达设定时间后，该权限将自动失效。
+</div>
+</div>
+</div>
+<div class="actions">
+<button class="btn" id="userPermCancel" type="button">取消</button>
+<button class="btn primary" id="userPermSave" type="button">保存权限</button>
 </div>
 </dialog>
 <!-- 官方 Bot 订阅对话框 -->
@@ -9277,39 +9349,171 @@ function initCmdOpenidEvents() {
 // ── 用户管理 ─────────────────────────────────────
 let minPwLen = 8;
 
+let currentPermUser = null;
+let currentPermRevision = null;
+
+function updatePermFieldStates() {
+  const enabled = $("permBlogTranslateEnabled").checked;
+  $("permDailyLimit").disabled = !enabled;
+  $("permExpiryForever").disabled = !enabled;
+  $("permExpiryCustom").disabled = !enabled;
+  $("permExpiresAt").disabled = !enabled;
+  $("permQuotaSection").style.opacity = enabled ? "1" : "0.5";
+  $("permExpirySection").style.opacity = enabled ? "1" : "0.5";
+}
+
+function openUserPermissionDialog(u) {
+  currentPermUser = u;
+  const grants = u.permission_grants || {};
+  const transGrant = grants["archive.blog.translate"];
+  currentPermRevision = transGrant ? transGrant.revision : null;
+
+  $("permTargetUser").textContent = u.username;
+  $("permTargetRole").textContent = u.role;
+  const isEnabled = !!transGrant;
+  $("permBlogTranslateEnabled").checked = isEnabled;
+  $("permDailyLimit").value = transGrant ? (transGrant.daily_limit || 10) : 10;
+
+  if (transGrant && transGrant.expires_at) {
+    $("permExpiryCustom").checked = true;
+    $("permExpiryForever").checked = false;
+    $("permExpiryCustomWrap").hidden = false;
+    const dt = new Date(transGrant.expires_at * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    const localIso = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    $("permExpiresAt").value = localIso;
+  } else {
+    $("permExpiryForever").checked = true;
+    $("permExpiryCustom").checked = false;
+    $("permExpiryCustomWrap").hidden = true;
+    $("permExpiresAt").value = "";
+  }
+  updatePermFieldStates();
+  $("userPermissionDialog").showModal();
+}
+
+$("permBlogTranslateEnabled").addEventListener("change", updatePermFieldStates);
+$("permExpiryForever").addEventListener("change", () => {
+  $("permExpiryCustomWrap").hidden = true;
+});
+$("permExpiryCustom").addEventListener("change", () => {
+  $("permExpiryCustomWrap").hidden = false;
+});
+$("userPermCancel").addEventListener("click", () => {
+  $("userPermissionDialog").close();
+});
+$("userPermSave").addEventListener("click", async () => {
+  if (!currentPermUser) return;
+  const enabled = $("permBlogTranslateEnabled").checked;
+  const dailyLimit = parseInt($("permDailyLimit").value, 10);
+  if (enabled && (!dailyLimit || dailyLimit <= 0)) {
+    msg("每日上限必须是有效正整数", "warn");
+    return;
+  }
+  let expiresAt = null;
+  if (enabled && $("permExpiryCustom").checked) {
+    const val = $("permExpiresAt").value;
+    if (!val) {
+      msg("请指定有效的到期时间", "warn");
+      return;
+    }
+    const ts = new Date(val).getTime() / 1000;
+    if (isNaN(ts)) {
+      msg("到期时间格式无效", "warn");
+      return;
+    }
+    expiresAt = ts;
+  }
+
+  const payload = {
+    action: "set_permissions",
+    username: currentPermUser.username,
+    permission: "archive.blog.translate",
+    enabled: enabled,
+    daily_limit: dailyLimit || 10,
+    expires_at: expiresAt,
+  };
+  if (currentPermRevision !== null) {
+    payload.expected_revision = currentPermRevision;
+  }
+
+  $("userPermSave").disabled = true;
+  try {
+    const res = await api("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      msg("❌ " + (res.errors || []).join("；"), "err");
+      return;
+    }
+    msg("✅ 权限已更新", "ok");
+    $("userPermissionDialog").close();
+    refreshUsers();
+  } catch (e) {
+    msg("保存权限失败: " + e.message, "err");
+  } finally {
+    $("userPermSave").disabled = false;
+  }
+});
+
 async function refreshUsers() {
   const tbody = $("userRows");
   // 显示骨架屏 loading 状态
-  tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state">⏳ 加载用户列表中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="5" class="admin-table-state">⏳ 加载用户列表中...</td></tr>';
   let data;
   try {
     data = await api("/api/users");
   } catch (e) {
     console.error("[refreshUsers] API 请求失败:", e);
-    tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state admin-table-state--error">❌ 加载失败：' + esc(e.message) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="admin-table-state admin-table-state--error">❌ 加载失败：' + esc(e.message) + '</td></tr>';
     return;
   }
   if (!data.ok) {
     const errMsg = (data.errors || ["接口返回 ok=false"]).join("；");
     console.error("[refreshUsers] API 返回错误:", errMsg);
-    tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state admin-table-state--error">❌ ' + esc(errMsg) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="admin-table-state admin-table-state--error">❌ ' + esc(errMsg) + '</td></tr>';
     return;
   }
   minPwLen = data.min_password_len || 8;
   tbody.innerHTML = "";
   if (!data.users || data.users.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="admin-table-state">暂无用户数据</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="admin-table-state">暂无用户数据</td></tr>';
     return;
   }
   const adminCount = data.users.filter((u) => u.role === "admin").length;
   for (const u of data.users) {
     const tr = document.createElement("tr");
     const when = u.created_at ? new Date(u.created_at * 1000).toLocaleString() : "—";
+    
+    // 附加权限列展示
+    let permsHtml = '<span class="admin-status-badge muted">无</span>';
+    if (u.role === "admin") {
+      permsHtml = '<span class="admin-status-badge ok" title="管理员默认拥有全部功能权限">全部功能</span>';
+    } else {
+      const grants = u.permission_grants || {};
+      const transGrant = grants["archive.blog.translate"];
+      if (transGrant) {
+        const nowSec = Date.now() / 1000;
+        const isExpired = transGrant.expires_at && nowSec > transGrant.expires_at;
+        if (isExpired) {
+          const expStr = new Date(transGrant.expires_at * 1000).toLocaleString();
+          permsHtml = '<span class="admin-status-badge muted" title="已于 ' + esc(expStr) + ' 到期">博客翻译 (已到期)</span>';
+        } else {
+          const expTitle = transGrant.expires_at
+            ? "每日上限 " + (transGrant.daily_limit || 10) + " 次，到期时间：" + new Date(transGrant.expires_at * 1000).toLocaleString()
+            : "每日上限 " + (transGrant.daily_limit || 10) + " 次，长期有效";
+          permsHtml = '<span class="admin-status-badge ok" title="' + esc(expTitle) + '">博客翻译</span>';
+        }
+      }
+    }
+
     tr.innerHTML = "<td><b>" + esc(u.username) + "</b>" +
       (u.is_me ? ' <span class="admin-status-badge ok admin-user-current">当前登录</span>' : "") + "</td>" +
       "<td>" + (u.role === "admin" ? '<span class="admin-status-badge ok">admin</span>'
                                    : '<span class="admin-status-badge muted">viewer</span>') +
-      "</td><td>" + esc(when) + "</td>";
+      "</td><td>" + permsHtml + "</td><td>" + esc(when) + "</td>";
     const td = document.createElement("td");
     td.className = "admin-table-actions-cell admin-nowrap";
     const actions = document.createElement("div");
@@ -9320,6 +9524,11 @@ async function refreshUsers() {
       [{ env: "__password__", label: "新密码", required: true,
          help: "至少 " + minPwLen + " 位。" }],
       null, { userAction: { action: "passwd", username: u.username } })));
+
+    if (u.role !== "admin") {
+      actions.appendChild(mkBtn("权限设置", () => openUserPermissionDialog(u)));
+    }
+
     // 最后一个 admin 不给降级入口；其余可切换角色
     const canToggle = !(u.role === "admin" && adminCount <= 1);
     if (canToggle) {

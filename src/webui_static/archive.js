@@ -2628,19 +2628,37 @@ function openBlogReader(post, bodyHtml, returnHash) {
   
   const transBtn = $("brTranslate");
   if (transBtn) {
-    if (!window._isArchiveAdmin) {
-      transBtn.style.display = "none";
+    const canTranslate = !!(window._isArchiveAdmin || window._canTranslateBlog);
+    if (!canTranslate) {
+      if (hasTranslation(post)) {
+        transBtn.style.display = "none";
+      } else {
+        transBtn.style.display = "inline-flex";
+        transBtn.innerHTML = '<span class="btn-icon">🔒</span><span>需翻译权限</span>';
+        transBtn.disabled = true;
+        transBtn.title = "暂无译文，发起翻译需要管理员授予博客翻译权限";
+        transBtn.classList.remove("primary");
+      }
     } else {
       transBtn.style.display = "inline-flex";
+      transBtn.classList.add("primary");
+      let quotaHint = "";
+      if (window._translationQuota && !window._isArchiveAdmin) {
+        const q = window._translationQuota;
+        quotaHint = "（今日剩余 " + q.remaining + "/" + q.daily_limit + " 次）";
+      }
       if (hasTranslation(post) && post.translation_status !== "partial") {
         transBtn.innerHTML = '<span class="btn-icon">✓</span><span>已翻译</span>';
         transBtn.disabled = true;
+        transBtn.title = "该博客已包含完整译文";
       } else if (hasTranslation(post)) {
-        transBtn.innerHTML = '<span class="btn-icon">↻</span><span>部分翻译，重试</span>';
+        transBtn.innerHTML = '<span class="btn-icon">↻</span><span>补齐翻译</span>';
         transBtn.disabled = false;
+        transBtn.title = "补齐未翻译段落" + quotaHint;
       } else {
-        transBtn.innerHTML = '<span class="btn-icon">🌐</span><span>翻译</span>';
+        transBtn.innerHTML = '<span class="btn-icon">🌐</span><span>翻译为中文</span>';
         transBtn.disabled = false;
+        transBtn.title = "触发智能模型翻译" + quotaHint;
       }
     }
   }
@@ -2977,7 +2995,12 @@ if (brTranslateBtn) {
     const targetPost = currentBlogReaderPost;
     const reqBlogId = targetPost.id;
     
-    brTranslateBtn.innerHTML = '<span class="btn-icon">⏳</span><span>翻译中（可能需要几分钟）...</span>';
+    if (!localStorage.getItem("blog_translate_notice_ack")) {
+      localStorage.setItem("blog_translate_notice_ack", "1");
+      showToast("翻译结果将保存到公共归档供所有读者查看", "info", 4500);
+    }
+
+    brTranslateBtn.innerHTML = '<span class="btn-icon">⏳</span><span>正在翻译...</span>';
     brTranslateBtn.disabled = true;
     
     try {
@@ -2987,6 +3010,42 @@ if (brTranslateBtn) {
         body: JSON.stringify({ id: reqBlogId })
       });
       const data = await res.json();
+      if (data.quota) {
+        window._translationQuota = data.quota;
+      }
+
+      if (res.status === 409) {
+        showToast(data.msg || "该博客正在翻译中，完成后刷新即可查看", "info", 4000);
+        if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
+          brTranslateBtn.innerHTML = '<span class="btn-icon">⏳</span><span>他人翻译中</span>';
+          brTranslateBtn.disabled = false;
+        }
+        return;
+      }
+
+      if (res.status === 429) {
+        showToast(data.msg || "今日翻译配额已用完或已有进行中的翻译任务", "warning", 5000);
+        if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
+          brTranslateBtn.innerHTML = '<span class="btn-icon">🌐</span><span>重试翻译</span>';
+          brTranslateBtn.disabled = false;
+        }
+        return;
+      }
+
+      if (res.status === 403) {
+        showToast(data.msg || (data.errors ? data.errors.join("；") : "无权执行此操作"), "error", 4000);
+        probeCurrentAuth().then((me) => {
+          if (me.user) {
+            const caps = me.user.capabilities || [];
+            window._canTranslateBlog = (me.user.role === "admin") || caps.includes("archive.blog.translate");
+            if (!window._canTranslateBlog && !window._isArchiveAdmin) {
+              brTranslateBtn.style.display = "none";
+            }
+          }
+        });
+        return;
+      }
+
       if (data.ok && data.html) {
         targetPost.translation = data.html;
         if (data.content_json) targetPost.content_json = data.content_json;
@@ -2998,7 +3057,7 @@ if (brTranslateBtn) {
           currentTransMode = "ja-zh";
           renderCurrentBlogContent();
           if (data.translation_status === "partial" || data.translation_complete === false) {
-            brTranslateBtn.innerHTML = '<span class="btn-icon">↻</span><span>部分翻译，重试</span>';
+            brTranslateBtn.innerHTML = '<span class="btn-icon">↻</span><span>补齐翻译</span>';
             brTranslateBtn.disabled = false;
             showToast("部分段落翻译成功，可再次点击补齐", "info");
           } else {
@@ -3008,7 +3067,7 @@ if (brTranslateBtn) {
         }
       } else {
         const traceHint = data.request_id ? `（请求 ${data.request_id}）` : "";
-        showToast((data.msg || "翻译失败，请检查 API Key 配置与网络连接") + traceHint, "error");
+        showToast((data.msg || "翻译服务暂未返回有效结果，请稍后重试") + traceHint, "error");
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
           brTranslateBtn.innerHTML = '<span class="btn-icon">🌐</span><span>重试翻译</span>';
           brTranslateBtn.disabled = false;
@@ -5095,6 +5154,10 @@ async function initAuth({ refresh = false } = {}) {
       }
       window._canDownloadBlogCard = !!(me.auth_enabled && me.user);
       updateBlogCardDownloadVisibility(window._canDownloadBlogCard);
+      const isAdmin = !me.auth_enabled || (me.user && me.user.role === "admin");
+      const userCaps = me.user?.capabilities || (isAdmin ? ["archive.blog.translate"] : []);
+      window._canTranslateBlog = isAdmin || userCaps.includes("archive.blog.translate");
+      window._translationQuota = me.user?.translation_quota || null;
       const adminLink = $("adminLink");
       if (!me.auth_enabled) { 
         window._isLoggedIn = true; 
@@ -5118,7 +5181,13 @@ async function initAuth({ refresh = false } = {}) {
         if (ichips) { ichips.hidden = false; ichips.style.display = "inline-flex"; }
         $("whoami").textContent = me.user.username;
         if ($("userMenuName")) $("userMenuName").textContent = "👤 " + me.user.username;
-        if ($("userMenuRole")) $("userMenuRole").textContent = me.user.role === "admin" ? "系统管理员" : "普通用户";
+        if ($("userMenuRole")) {
+          let roleText = me.user.role === "admin" ? "系统管理员" : "普通用户";
+          if (me.user.role !== "admin" && window._canTranslateBlog) {
+            roleText = "普通用户 · 可翻译博客";
+          }
+          $("userMenuRole").textContent = roleText;
+        }
         if ($("userDropdown")) { $("userDropdown").hidden = false; $("userDropdown").style.display = "inline-block"; }
         $("logoutBtn").hidden = false;
         $("logoutBtn").style.display = "flex";

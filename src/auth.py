@@ -35,6 +35,17 @@ USERS_PATH = AUTH_DB_PATH  # 兼容测试与旧引用别名
 ROLES = ("admin", "viewer")
 MIN_PASSWORD_LEN = 8
 
+PERM_BLOG_TRANSLATE = "archive.blog.translate"
+REGISTERED_PERMISSIONS = frozenset({PERM_BLOG_TRANSLATE})
+CAPABILITY_METADATA = {
+    PERM_BLOG_TRANSLATE: {
+        "name": "博客翻译",
+        "description": "可发起单篇翻译及失败重试；不能删除译文或管理系统。",
+        "default_daily_limit": 10,
+        "default_concurrency_limit": 1,
+    }
+}
+
 # scrypt 参数（n=2**14 约需 16MB 内存、现代机器几十毫秒，符合 OWASP 下限建议）
 # maxmem 显式给到 128MB —— OpenSSL 默认上限 32MB，不显式声明时调大 n 会直接报错
 _SCRYPT_N = 2 ** 14
@@ -202,6 +213,32 @@ def get_auth_db() -> sqlite3.Connection:
             );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_letter_fav ON user_letter_favorites(username, member_dir);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_permission_grants (
+                username TEXT NOT NULL,
+                permission TEXT NOT NULL,
+                granted_by TEXT NOT NULL,
+                granted_at REAL NOT NULL,
+                expires_at REAL,
+                daily_limit INTEGER NOT NULL DEFAULT 10,
+                concurrency_limit INTEGER NOT NULL DEFAULT 1,
+                revision INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (username, permission)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_perm_user ON user_permission_grants(username);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS translation_quota_ledger (
+                username TEXT NOT NULL,
+                date_key TEXT NOT NULL,
+                used_count INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (username, date_key)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_trans_quota_user_date ON translation_quota_ledger(username, date_key);")
         conn.commit()
 
         # 自动无缝平滑迁移旧版 data/users.json（若存在且 users 表为空）
@@ -566,6 +603,8 @@ def delete_user(username: str) -> tuple[bool, str]:
             with conn:
                 conn.execute("DELETE FROM user_message_interactions WHERE username = ?;", (username,))
                 conn.execute("DELETE FROM user_letter_favorites WHERE username = ?;", (username,))
+                conn.execute("DELETE FROM user_permission_grants WHERE username = ?;", (username,))
+                conn.execute("DELETE FROM translation_quota_ledger WHERE username = ?;", (username,))
         except sqlite3.Error:
             pass
     return True, f"已删除用户: {username}"
@@ -1214,4 +1253,296 @@ def get_user_favorite_letter_ids(username: str, member_dir: str) -> set[str]:
         except sqlite3.Error as exc:
             log_all(f"⚠️ 读取用户信件收藏失败 ({username}, {member_dir}): {exc}", is_error=True)
             return set()
+
+
+# ================================================================
+# 独立功能权限授权与配额管理 (Capability-Based Access Control)
+# ================================================================
+
+def has_permission(user_or_username: str | dict | None, permission: str, resource: str | None = None) -> bool:
+    """统一能力判定。匿名返回 False；admin 拥有全部注册能力；普通用户检查 grants 表与有效期。"""
+    if not user_or_username or not permission:
+        return False
+    if permission not in REGISTERED_PERMISSIONS:
+        return False
+
+    if isinstance(user_or_username, dict):
+        username = user_or_username.get("username", "")
+        role = user_or_username.get("role", "")
+    else:
+        username = str(user_or_username)
+        u = load_users().get(username)
+        if not u:
+            return False
+        role = u.get("role", "viewer")
+
+    if role == "admin":
+        return True
+
+    now = time.time()
+    conn = get_auth_db()
+    with _lock:
+        row = conn.execute(
+            "SELECT expires_at FROM user_permission_grants WHERE username = ? AND permission = ?;",
+            (username, permission),
+        ).fetchone()
+        if not row:
+            return False
+        expires_at = row[0]
+        if expires_at is not None and now > float(expires_at):
+            return False
+        return True
+
+
+def get_user_capabilities(user_or_username: str | dict | None) -> list[str]:
+    """返回当前用户所有生效的能力列表。"""
+    if not user_or_username:
+        return []
+    if isinstance(user_or_username, dict):
+        username = user_or_username.get("username", "")
+        role = user_or_username.get("role", "")
+    else:
+        username = str(user_or_username)
+        u = load_users().get(username, {})
+        role = u.get("role", "viewer")
+
+    if role == "admin":
+        return sorted(list(REGISTERED_PERMISSIONS))
+
+    now = time.time()
+    conn = get_auth_db()
+    with _lock:
+        rows = conn.execute(
+            "SELECT permission, expires_at FROM user_permission_grants WHERE username = ?;",
+            (username,),
+        ).fetchall()
+        caps = []
+        for perm, exp in rows:
+            if perm in REGISTERED_PERMISSIONS:
+                if exp is None or now <= float(exp):
+                    caps.append(perm)
+        return sorted(caps)
+
+
+def get_user_permission_grants(username: str) -> list[dict]:
+    """查询指定用户的所有授权配置详情（供管理员界面展示）。"""
+    conn = get_auth_db()
+    now = time.time()
+    with _lock:
+        rows = conn.execute(
+            """SELECT permission, granted_by, granted_at, expires_at, daily_limit, concurrency_limit, revision
+               FROM user_permission_grants WHERE username = ?;""",
+            (username,),
+        ).fetchall()
+        result = []
+        for perm, by, at, exp, d_limit, c_limit, rev in rows:
+            is_expired = exp is not None and now > float(exp)
+            meta = CAPABILITY_METADATA.get(perm, {})
+            result.append({
+                "permission": perm,
+                "name": meta.get("name", perm),
+                "description": meta.get("description", ""),
+                "granted_by": by,
+                "granted_at": at,
+                "expires_at": exp,
+                "daily_limit": d_limit,
+                "concurrency_limit": c_limit,
+                "revision": rev,
+                "is_expired": is_expired,
+                "is_active": not is_expired and perm in REGISTERED_PERMISSIONS,
+            })
+        return result
+
+
+def set_user_permission(
+    username: str,
+    permission: str,
+    granted_by: str,
+    *,
+    enabled: bool,
+    daily_limit: int = 10,
+    expires_at: float | None = None,
+    expected_revision: int | None = None,
+) -> tuple[bool, str]:
+    """设置或撤销用户的特定权限（带 revision 乐观锁冲突保护）。"""
+    if permission not in REGISTERED_PERMISSIONS:
+        return False, f"不支持的权限: {permission}"
+    users = load_users()
+    if username not in users:
+        return False, f"用户不存在: {username}"
+
+    if daily_limit < 1 or daily_limit > 1000:
+        return False, "每日配额上限必须在 1 到 1000 之间"
+
+    if expires_at is not None:
+        try:
+            expires_at = float(expires_at)
+            if expires_at <= time.time():
+                return False, "到期时间必须大于当前时间"
+        except (TypeError, ValueError):
+            return False, "到期时间格式无效"
+
+    conn = get_auth_db()
+    now = time.time()
+    with _lock:
+        cur_row = conn.execute(
+            "SELECT revision FROM user_permission_grants WHERE username = ? AND permission = ?;",
+            (username, permission),
+        ).fetchone()
+        cur_rev = cur_row[0] if cur_row else 0
+
+        if expected_revision is not None and expected_revision != cur_rev:
+            return False, "权限已被他人修改，请刷新后重试"
+
+        with conn:
+            if enabled:
+                new_rev = cur_rev + 1
+                conn.execute(
+                    """INSERT INTO user_permission_grants
+                       (username, permission, granted_by, granted_at, expires_at, daily_limit, concurrency_limit, revision)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(username, permission) DO UPDATE SET
+                           granted_by = excluded.granted_by,
+                           granted_at = excluded.granted_at,
+                           expires_at = excluded.expires_at,
+                           daily_limit = excluded.daily_limit,
+                           concurrency_limit = excluded.concurrency_limit,
+                           revision = excluded.revision;""",
+                    (username, permission, granted_by, now, expires_at, daily_limit, 1, new_rev),
+                )
+                msg = f"已授予用户 [{username}] 权限: {permission}"
+            else:
+                conn.execute(
+                    "DELETE FROM user_permission_grants WHERE username = ? AND permission = ?;",
+                    (username, permission),
+                )
+                msg = f"已撤销用户 [{username}] 权限: {permission}"
+
+    return True, msg
+
+
+def get_quota_date_key(tz_offset_hours: int = 9) -> str:
+    """返回基于站点基准时区（默认 JST UTC+9）的日期键 YYYY-MM-DD。"""
+    utc_epoch = time.time()
+    jst_time = time.gmtime(utc_epoch + tz_offset_hours * 3600)
+    return time.strftime("%Y-%m-%d", jst_time)
+
+
+def get_quota_reset_iso(tz_offset_hours: int = 9) -> str:
+    """计算下一个站点时区午夜（00:00 JST）的 ISO 格式字符串。"""
+    utc_epoch = time.time()
+    jst_secs_in_day = int(utc_epoch + tz_offset_hours * 3600) % 86400
+    secs_until_midnight = 86400 - jst_secs_in_day
+    next_midnight_epoch = utc_epoch + secs_until_midnight
+    next_jst = time.gmtime(next_midnight_epoch + tz_offset_hours * 3600)
+    return time.strftime("%Y-%m-%dT00:00:00+09:00", next_jst)
+
+
+def get_translation_quota(user_or_username: str | dict | None) -> dict:
+    """获取用户今日翻译配额状态。"""
+    if not user_or_username:
+        return {"unlimited": False, "limit": 0, "used": 0, "remaining": 0, "reset_at": "", "has_permission": False}
+
+    if isinstance(user_or_username, dict):
+        username = user_or_username.get("username", "")
+        role = user_or_username.get("role", "")
+    else:
+        username = str(user_or_username)
+        u = load_users().get(username, {})
+        role = u.get("role", "viewer")
+
+    date_key = get_quota_date_key()
+    reset_at = get_quota_reset_iso()
+
+    if role == "admin":
+        return {
+            "unlimited": True,
+            "daily_limit": None,
+            "limit": None,
+            "used": 0,
+            "remaining": None,
+            "reset_at": reset_at,
+            "reset_at_display": f"{reset_at} (日本时间 00:00 / 北京时间 23:00)",
+            "date_key": date_key,
+            "has_permission": True,
+        }
+
+    has_perm = has_permission(username, PERM_BLOG_TRANSLATE)
+    conn = get_auth_db()
+    with _lock:
+        grant_row = conn.execute(
+            "SELECT daily_limit FROM user_permission_grants WHERE username = ? AND permission = ?;",
+            (username, PERM_BLOG_TRANSLATE),
+        ).fetchone()
+        daily_limit = grant_row[0] if grant_row else 10
+
+        used_row = conn.execute(
+            "SELECT used_count FROM translation_quota_ledger WHERE username = ? AND date_key = ?;",
+            (username, date_key),
+        ).fetchone()
+        used = used_row[0] if used_row else 0
+
+    remaining = max(0, daily_limit - used)
+    return {
+        "unlimited": False,
+        "daily_limit": daily_limit,
+        "limit": daily_limit,
+        "used": used,
+        "remaining": remaining,
+        "reset_at": reset_at,
+        "reset_at_display": f"{reset_at} (日本时间 00:00 / 北京时间 23:00)",
+        "date_key": date_key,
+        "has_permission": has_perm,
+    }
+
+
+def reserve_translation_quota(user_or_username: str | dict, count: int = 1) -> tuple[bool, str, dict]:
+    """原子预留翻译配额。超额或无权返回 False 与提示；成功扣额后返回 True 与最新配额信息。"""
+    if isinstance(user_or_username, dict):
+        username = user_or_username.get("username", "")
+        role = user_or_username.get("role", "")
+    else:
+        username = str(user_or_username)
+        u = load_users().get(username, {})
+        role = u.get("role", "viewer")
+
+    if role == "admin":
+        return True, "", get_translation_quota(user_or_username)
+
+    if not has_permission(username, PERM_BLOG_TRANSLATE):
+        return False, "需要博客翻译权限", get_translation_quota(user_or_username)
+
+    count = max(1, int(count))
+    date_key = get_quota_date_key()
+    now = time.time()
+    conn = get_auth_db()
+    with _lock:
+        grant_row = conn.execute(
+            "SELECT daily_limit FROM user_permission_grants WHERE username = ? AND permission = ?;",
+            (username, PERM_BLOG_TRANSLATE),
+        ).fetchone()
+        daily_limit = grant_row[0] if grant_row else 10
+
+        used_row = conn.execute(
+            "SELECT used_count FROM translation_quota_ledger WHERE username = ? AND date_key = ?;",
+            (username, date_key),
+        ).fetchone()
+        used = used_row[0] if used_row else 0
+
+        if used + count > daily_limit:
+            quota_info = get_translation_quota(user_or_username)
+            return False, f"今日翻译配额已用完（已用 {used}/{daily_limit} 次）。配额将于日本时间 00:00（北京时间 23:00）重置。", quota_info
+
+        with conn:
+            conn.execute(
+                """INSERT INTO translation_quota_ledger (username, date_key, used_count, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(username, date_key) DO UPDATE SET
+                       used_count = used_count + ?,
+                       updated_at = excluded.updated_at;""",
+                (username, date_key, count, now, count),
+            )
+
+    updated_quota = get_translation_quota(user_or_username)
+    return True, "", updated_quota
 

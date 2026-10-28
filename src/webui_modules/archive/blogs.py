@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+import time
 from urllib.parse import parse_qs, unquote
 import uuid
 
@@ -32,6 +33,25 @@ import src.config.config as cfg
 
 _blog_translation_locks: dict[int, threading.Lock] = {}
 _blog_translation_locks_guard = threading.Lock()
+_user_in_flight_translations: set[str] = set()
+_user_in_flight_lock = threading.Lock()
+
+
+def _acquire_user_flight(username: str) -> bool:
+    if not username:
+        return True
+    with _user_in_flight_lock:
+        if username in _user_in_flight_translations:
+            return False
+        _user_in_flight_translations.add(username)
+        return True
+
+
+def _release_user_flight(username: str) -> None:
+    if not username:
+        return
+    with _user_in_flight_lock:
+        _user_in_flight_translations.discard(username)
 
 
 def _guard_card_login(handler) -> bool:
@@ -459,8 +479,12 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
 
     # 5. 手动翻译博客
     if sub == "blogs/translate":
-        if not guard_fn(need_admin=True):
-            return True
+        try:
+            if not guard_fn(need_admin=False, capability="archive.blog.translate"):
+                return True
+        except TypeError:
+            if not guard_fn(need_admin=False):
+                return True
         if handler.command != "POST":
             _send_json_resp(handler, {"ok": False, "msg": "Method not allowed"}, 405)
             return True
@@ -484,6 +508,17 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             _send_json_resp(handler, {"ok": False, "msg": "无效参数：id 必须是正整数"}, 400)
             return True
 
+        from src import auth as _auth
+        current_user_fn = getattr(handler, "_current_user", None)
+        user = current_user_fn() if callable(current_user_fn) else current_user(handler)
+        username = user.get("username", "") if isinstance(user, dict) else str(user or "")
+        is_admin = (user.get("role") == "admin") if isinstance(user, dict) else False
+
+        is_force = bool(body.get("force", False))
+        if is_force and not is_admin:
+            _send_json_resp(handler, {"ok": False, "msg": "仅管理员可执行强制重译"}, 403)
+            return True
+
         request_id = f"manual-{uuid.uuid4().hex[:12]}"
         translation_lock = _get_translation_lock(blog_id)
         if not translation_lock.acquire(blocking=False):
@@ -496,10 +531,21 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             }, 409)
             return True
 
+        if username and not is_admin and not _acquire_user_flight(username):
+            translation_lock.release()
+            _send_json_resp(handler, {
+                "ok": False,
+                "id": blog_id,
+                "status": "rate_limited",
+                "msg": "您已有正在进行的翻译任务，请等待完成后再发起新任务",
+            }, 429)
+            return True
+
         from src import translator
         from src.logger import log_all
 
         db = None
+        user_flight_acquired = bool(username and not is_admin)
         try:
             db = _get_db()
             row = db.execute("SELECT * FROM blog_posts WHERE id = ?", (blog_id,)).fetchone()
@@ -513,10 +559,12 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             cached_blocks = str(row.get("content_json") or "")
             cached_status = str(row.get("translation_status") or "")
             if (
-                cached_translation.strip()
+                not is_force
+                and cached_translation.strip()
                 and cached_blocks not in ("", "[]", "{}")
                 and cached_status not in {"partial", "failed", "running"}
             ):
+                quota_info = _auth.get_translation_quota(user) if user else None
                 _send_json_resp(handler, {
                     "ok": True,
                     "id": blog_id,
@@ -525,6 +573,7 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                     "translation_model": row.get("translation_model") or "",
                     "translation_status": row.get("translation_status") or "succeeded",
                     "request_id": request_id,
+                    "quota": quota_info,
                 })
                 return True
 
@@ -536,6 +585,21 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 _send_json_resp(handler, {"ok": False, "msg": "该博客没有可翻译的正文", "request_id": request_id}, 422)
                 return True
 
+            quota_info = None
+            if user and not is_admin:
+                quota_ok, quota_msg, quota_info = _auth.reserve_translation_quota(user, count=1)
+                if not quota_ok:
+                    _send_json_resp(handler, {
+                        "ok": False,
+                        "id": blog_id,
+                        "status": "quota_exceeded",
+                        "msg": quota_msg,
+                        "quota": quota_info,
+                        "request_id": request_id,
+                    }, 429)
+                    return True
+
+            start_time = time.time()
             _set_state(db, blog_id, status="running", request_id=request_id)
             log_all(
                 f"🔄 网页端博客翻译开始 | trace={request_id} | id={blog_id} | "
@@ -565,12 +629,26 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                     f"error={error_code}",
                     is_error=True,
                 )
+                record_event(
+                    "archive.blog_translate",
+                    outcome="failure",
+                    actor=username or "anonymous",
+                    source_ip=get_client_ip(handler),
+                    target=str(blog_id),
+                    details={
+                        "request_id": request_id,
+                        "error": error_code,
+                        "elapsed_ms": round((time.time() - start_time) * 1000, 2),
+                    },
+                )
+                latest_quota = _auth.get_translation_quota(user) if user else None
                 _send_json_resp(handler, {
                     "ok": False,
                     "id": blog_id,
                     "status": "failed",
                     "request_id": request_id,
-                    "msg": "翻译失败，请检查 API Key、代理与网络连接",
+                    "quota": latest_quota,
+                    "msg": "翻译服务暂未返回有效结果，请稍后重试",
                 }, 502)
                 return True
 
@@ -587,6 +665,22 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             _set_state(
                 db, blog_id, status=translation_status, request_id=request_id,
             )
+            record_event(
+                "archive.blog_translate",
+                outcome="success" if complete else "partial",
+                actor=username or "anonymous",
+                source_ip=get_client_ip(handler),
+                target=str(blog_id),
+                details={
+                    "request_id": request_id,
+                    "model": translation_model,
+                    "complete": complete,
+                    "translated_count": translated_count,
+                    "total_count": total_count,
+                    "elapsed_ms": round((time.time() - start_time) * 1000, 2),
+                },
+            )
+            latest_quota = _auth.get_translation_quota(user) if user else None
             log_all(
                 f"✅ 网页端博客翻译完成 | trace={request_id} | id={blog_id} | "
                 f"model={translation_model or 'unknown'} | translated={translated_count}/{total_count} | "
@@ -602,6 +696,7 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 "translation_status": translation_status,
                 "translation_complete": complete,
                 "request_id": request_id,
+                "quota": latest_quota,
             })
         except asyncio.TimeoutError:
             error_code = "timeout"
@@ -611,9 +706,11 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 f"⏱️ 网页端博客翻译超时 | trace={request_id} | id={blog_id} | error={error_code}",
                 is_error=True,
             )
+            latest_quota = _auth.get_translation_quota(user) if user else None
             _send_json_resp(handler, {
                 "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
-                "msg": "翻译超时，请稍后重试（可在日志中按请求 ID 定位）",
+                "quota": latest_quota,
+                "msg": "翻译超时，请稍后重试",
             }, 504)
         except httpx.TimeoutException:
             error_code = "timeout"
@@ -623,9 +720,11 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 f"⏱️ 网页端博客翻译网络超时 | trace={request_id} | id={blog_id} | error={error_code}",
                 is_error=True,
             )
+            latest_quota = _auth.get_translation_quota(user) if user else None
             _send_json_resp(handler, {
                 "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
-                "msg": "翻译网络超时，请检查代理后重试",
+                "quota": latest_quota,
+                "msg": "翻译网络超时，请检查网络连接后重试",
             }, 504)
         except httpx.HTTPError as exc:
             from src import translator
@@ -636,9 +735,11 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 f"⚠️ 网页端博客翻译网络失败 | trace={request_id} | id={blog_id} | error={error_code}",
                 is_error=True,
             )
+            latest_quota = _auth.get_translation_quota(user) if user else None
             _send_json_resp(handler, {
                 "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
-                "msg": "翻译网络请求失败，请检查代理与 API 配置",
+                "quota": latest_quota,
+                "msg": "翻译服务网络连接失败，请稍后重试",
             }, 502)
         except (sqlite3.Error, OSError, ValueError, TypeError, RuntimeError) as exc:
             from src import translator
@@ -646,11 +747,13 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
             if db is not None:
                 _set_state(db, blog_id, status="failed", error=error_code, request_id=request_id)
             log_all(
-                f"⚠️ 网页端博客翻译失败 | trace={request_id} | id={blog_id} | error={error_code}",
+                f"⚠️ 网页端博客翻译失败 | trace={request_id} | id={blog_id} | error={error_code} | exc={type(exc).__name__}: {exc}",
                 is_error=True,
             )
+            latest_quota = _auth.get_translation_quota(user) if user else None
             _send_json_resp(handler, {
                 "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "quota": latest_quota,
                 "msg": "翻译失败，请稍后重试",
             }, 500)
         except Exception as exc:
@@ -662,11 +765,15 @@ def handle_blogs(handler, sub: str, guard_fn, read_body_json_fn) -> bool:
                 f"⚠️ 网页端博客翻译未预期异常 | trace={request_id} | id={blog_id} | error={error_code}",
                 is_error=True,
             )
+            latest_quota = _auth.get_translation_quota(user) if user else None
             _send_json_resp(handler, {
                 "ok": False, "id": blog_id, "status": "failed", "request_id": request_id,
+                "quota": latest_quota,
                 "msg": "翻译失败，请稍后重试",
             }, 500)
         finally:
+            if user_flight_acquired:
+                _release_user_flight(username)
             translation_lock.release()
         return True
 
