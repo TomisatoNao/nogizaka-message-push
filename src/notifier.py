@@ -543,7 +543,13 @@ async def send_blog_post(post: dict) -> bool:
     )
 
     # 2. 提取双语段落 (Pairs)
-    trans_content = post.get("translation") or post.get("body_text", "")
+    trans_content = post.get("translation") or ""
+    if not trans_content and (post.get("content_json") or post.get("body_html")):
+        from src.blog_content import normalize_blog_content, blocks_to_interleaved_html
+        norm_content = normalize_blog_content(post, mode="ja-zh")
+        trans_content = blocks_to_interleaved_html(norm_content.blocks)
+    if not trans_content:
+        trans_content = post.get("body_text") or post.get("body") or ""
     pairs = _extract_bilingual_pairs(trans_content, media_urls=media_urls)
 
     # 3. 预渲染精美长图卡片（若 Playwright 不可用或渲染异常则自动降级为 None）
@@ -551,7 +557,7 @@ async def send_blog_post(post: dict) -> bool:
     try:
         from src.blog_card_renderer import render_blog_card
         card_path = await render_blog_card(post)
-    except (OSError, RuntimeError, ValueError) as e:
+    except Exception as e:
         log_all(f"💡 长图卡片预渲染跳过或失败，自动降级为标准图文: {type(e).__name__}", is_debug=True)
 
     # 辅助函数：向 QQ 官方 Bot 发送全量原始写真

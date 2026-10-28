@@ -25,7 +25,7 @@ from src.blog_card_renderer import _generate_html, is_playwright_available
 
 CARD_DIR = Path("data/cache/blog_cards/downloads")
 IMAGE_ROOT = Path("data/blog_images")
-TEMPLATE_VERSION = "download-v1"
+TEMPLATE_VERSION = "download-v2"
 MODES = frozenset({"ja-zh", "ja-only", "zh-only"})
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024
@@ -106,27 +106,20 @@ def _json_list(value):
 
 
 def _blocks(post: dict, mode: str) -> tuple[list[dict], str]:
-    translated = _json_list(post.get("content_json"))
-    if mode != "ja-only" and translated:
-        blocks = []
-        for item in translated:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") == "img":
-                blocks.append({"type": "img"})
-            else:
-                blocks.append({
-                    "type": "text",
-                    "jp": str(item.get("jp") or ""),
-                    "zh": str(item.get("zh") or ""),
-                })
-        return blocks, mode
-    parser = _JapaneseBlocks()
-    parser.feed(str(post.get("body_html") or ""))
-    blocks = parser.finish()
-    if not blocks and post.get("body_text"):
-        blocks = [{"type": "text", "jp": str(post["body_text"]), "zh": ""}]
-    return blocks, "ja-only"
+    from src.blog_content import normalize_blog_content
+
+    norm_content = normalize_blog_content(post, mode=mode)
+    blocks = []
+    for b in norm_content.blocks:
+        if b.get("type") == "img":
+            blocks.append({"type": "img"})
+        else:
+            blocks.append({
+                "type": "text",
+                "jp": str(b.get("jp") or ""),
+                "zh": str(b.get("zh") or ""),
+            })
+    return blocks, norm_content.actual_mode
 
 
 def _local_image(path_value: str) -> Path | None:

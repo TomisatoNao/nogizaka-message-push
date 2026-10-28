@@ -3,13 +3,13 @@
 # ============================================================
 import asyncio
 import hashlib
-import html as html_lib
 import json
-import re
 import time
-from urllib.parse import urljoin
-from bs4 import BeautifulSoup, NavigableString, Comment
 import httpx
+from src.blog_content import (
+    blocks_to_interleaved_html as blocks_to_html,
+    flatten_html_blocks as _flatten_html_blocks,
+)
 
 import src.config.config as cfg
 from src.logger import log_all
@@ -746,148 +746,7 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "",
     res, _ = await translate_text_with_model(text, member_name, group_type, custom_client=custom_client)
     return res
 
-# ── 博客正文节点化拆解：保留 <img> 原位 + 段落级切分 ──
-
-_GROUP_BASE_URLS = {
-    "nogizaka": "https://www.nogizaka46.com",
-    "nogizaka46": "https://www.nogizaka46.com",
-    "sakurazaka": "https://sakurazaka46.com",
-    "sakurazaka46": "https://sakurazaka46.com",
-    "hinatazaka": "https://www.hinatazaka46.com",
-    "hinatazaka46": "https://www.hinatazaka46.com",
-}
-
-_SKIP_TAGS = frozenset({"script", "style", "noscript", "template"})
-
-# 空白判定：普通空白 + 全角空格(U+3000) + 不间断空格(U+00A0) + 各类零宽/窄空格
-_WS_RE = re.compile(r"[\s\u00a0\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]")
-_WS_RUN_RE = re.compile(r"(?:[\s\u00a0\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff])+")
-
-
-def _resolve_img_src(src: str, group_type: str) -> str:
-    """把相对/协议相对路径的图片 src 补全为绝对 URL（供前端替换 + 防盗链处理）。"""
-    if not src:
-        return ""
-    src = src.strip()
-    if src.startswith("//"):
-        return "https:" + src
-    if src.startswith(("http://", "https://")):
-        return src
-    base = _GROUP_BASE_URLS.get(group_type, _GROUP_BASE_URLS["nogizaka"])
-    return urljoin(base, src)
-
-
-def _is_empty_block(node) -> bool:
-    """判定 <p>/<div> 是否为「空块」：无图片且无可读文本（仅空白/换行）。"""
-    if node.find("img") is not None:
-        return False
-    return not _WS_RE.sub("", node.get_text(""))
-
-
-def _flatten_html_blocks(html: str, group_type: str) -> list[tuple[str, str]]:
-    """把博客 HTML 解析为有序块列表，按「视效大段落」粒度切分，逐图保留原位。
-
-    返回 [(kind, content)]，kind ∈ {"text", "img"}：
-      - "text": 一个视效大段落的日文文本（段落内换行保留为 \\n）
-      - "img":  补全后的图片绝对 URL
-
-    官方博客 DOM 的段落分隔实际有 5 种形态，统一归一为「空行 = 段落边界」：
-      * br-based（约 60%）：单容器内 <br> 换行，连续 >=2 个 <br> 为空行；
-      * p-per-line（约 27%）：连续非空 <p> 为同一段，空 <p> 为空行；
-      * div-based（约 12%）：同 p-per-line，但载体是 <div>；
-      * img-mostly / mixed：仅少量图片+文本。
-
-    实现：文档序递归走树，<br> 与「非空块结束」都只记一个换行（块边界去重，
-    避免 <br></p> 被算成空行）；空块记两个换行（空行）；<img> 先 flush 当前段再
-    独立成块。最后按「两个及以上换行」把缓冲切成若干大段落。
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    blocks: list[tuple[str, str]] = []
-    buf: list[str] = []
-
-    def flush() -> None:
-        text = "".join(buf).strip()
-        buf.clear()
-        if not text:
-            return
-        # 两个及以上换行 = 空行 → 切出大段落；段落内单换行保留
-        for part in re.split(r"\n{2,}", text):
-            part = part.strip()
-            if part:
-                blocks.append(("text", part))
-
-    def newline(force: bool) -> None:
-        # force=True：<br> 本身（连续 <br> 要累计成空行，不能去重）
-        # force=False：非空块结束（去重，避免紧跟 <br></p> 被算成两个换行）
-        if force or not buf or buf[-1] != "\n":
-            buf.append("\n")
-
-    def walk(node) -> None:
-        if isinstance(node, Comment):
-            return
-        if isinstance(node, NavigableString):
-            s = _WS_RUN_RE.sub(" ", str(node))
-            if s.strip():
-                buf.append(s)
-            return
-        name = getattr(node, "name", None)
-        if not name:
-            return
-        if name in _SKIP_TAGS:
-            return
-        if name == "br":
-            newline(force=True)
-            return
-        if name == "img":
-            flush()
-            abs_src = _resolve_img_src(node.get("src", ""), group_type)
-            if abs_src:
-                blocks.append(("img", abs_src))
-            # 不能 return：畸形 HTML（如源码里多出的 </img>）会让 BeautifulSoup
-            # 把后续内容错误地嵌套进 <img> 子节点，继续递归才能不丢后续文字/图片
-            for child in node.children:
-                walk(child)
-            return
-        if name in ("p", "div"):
-            if _is_empty_block(node):
-                newline(force=True)   # 空行
-                newline(force=True)
-                return
-            for child in node.children:
-                walk(child)
-            newline(force=False)      # 非空块结束 = 换行（与下一个非空块合并成段）
-            return
-        # 其它内联/未知标签透明透传
-        for child in node.children:
-            walk(child)
-
-    for child in soup.children:
-        walk(child)
-    flush()
-    return blocks
-
-
-def blocks_to_html(blocks: list[dict]) -> str:
-    """把结构化块列表渲染为交织 HTML（日中对照视图，供推送/旧接口用）。
-
-    块结构：[{"type":"text","jp":str,"zh":str}, {"type":"img","src":str}]
-    日文 <em> 斜体、中文 <span> 常规体；zh 为空则仅日文。
-    """
-    if not blocks:
-        return ""
-    parts: list[str] = []
-    for b in blocks:
-        if b.get("type") == "img":
-            parts.append(f'<img src="{b["src"]}" referrerpolicy="no-referrer" loading="lazy">')
-            continue
-        jp_html = html_lib.escape(b.get("jp", "")).replace("\n", "<br>")
-        zh = (b.get("zh") or "").strip()
-        if zh and "[翻译失败]" not in zh:
-            zh_html = html_lib.escape(zh).replace("\n", "<br>")
-            parts.append(f"<em>{jp_html}</em><br><span>{zh_html}</span>")
-        else:
-            parts.append(f"<em>{jp_html}</em>")
-    return "<br><br>".join(parts)
+# ── 博客正文节点化拆解：复用 src.blog_content 规范化解析器 ──
 
 
 def blog_translation_stats(blocks: list[dict]) -> tuple[int, int, bool]:

@@ -120,16 +120,11 @@ def _generate_html(post: dict, image_b64_list: list[str], *, mode: str = "ja-zh"
     author = html_lib.escape(str(post.get("author", "成员")))
     title = html_lib.escape(str(post.get("title", "无标题")))
     date_str = html_lib.escape(str(post.get("date", "")))
-    trans_model = html_lib.escape(str(post.get("translation_model") or "AI 双语翻译引擎"))
 
-    content_json_raw = post.get("content_json") or ""
-    structured_blocks = []
-    if content_json_raw:
-        try:
-            structured_blocks = json.loads(content_json_raw) if isinstance(content_json_raw, str) else content_json_raw
-        except Exception:
-            structured_blocks = []
+    from src.blog_content import normalize_blog_content
 
+    norm_content = normalize_blog_content(post, mode=mode)
+    structured_blocks = norm_content.blocks
     body_elements = []
     img_idx = 0
 
@@ -160,65 +155,34 @@ def _generate_html(post: dict, image_b64_list: list[str], *, mode: str = "ja-zh"
                 )
                 block_cls = "para-block signature-block" if is_sig else "para-block"
                 elem_html = f'<div class="{block_cls}">'
-                if jp_escaped and mode != "zh-only":
+                if jp_escaped and norm_content.actual_mode != "zh-only":
                     elem_html += f'<div class="jp-text">{jp_escaped}</div>'
-                if mode == "zh-only" and not valid_zh:
+                if norm_content.actual_mode == "zh-only" and not valid_zh:
                     elem_html += f'<div class="jp-text">{jp_escaped}</div>'
-                if mode != "ja-only" and valid_zh and (not is_sig or zh_escaped != jp_escaped):
+                if norm_content.actual_mode != "ja-only" and valid_zh and (not is_sig or zh_escaped != jp_escaped):
                     elem_html += f'<div class="zh-text">{zh_escaped}</div>'
                 elem_html += '</div>'
                 body_elements.append(elem_html)
 
-        # 兜底：如果还有剩余未渲染的图片，附在正文后
-        while img_idx < len(image_b64_list):
-            if image_b64_list[img_idx]:
-                body_elements.append(
-                    f'<div class="blog-img-wrap">'
-                    f'<img src="{image_b64_list[img_idx]}" class="blog-img" alt="写真 {img_idx + 1}"/>'
-                    f'</div>'
-                )
-            img_idx += 1
+    # 兜底：若正文中未匹配完所有图片，将剩余图片附在文末
+    while img_idx < len(image_b64_list):
+        if image_b64_list[img_idx]:
+            body_elements.append(
+                f'<div class="blog-img-wrap">'
+                f'<img src="{image_b64_list[img_idx]}" class="blog-img" alt="写真 {img_idx + 1}"/>'
+                f'</div>'
+            )
+        img_idx += 1
 
-        processed_body = "\n".join(body_elements)
-    else:
-        # 兼容传统 HTML 结构，去除 em 与 span 间冗余的空行 <br>
-        raw_html = post.get("translation") or post.get("body_text") or ""
-        raw_html = re.sub(r'</em>\s*(?:<br\s*/?>\s*)+<span>', '</em><span>', raw_html)
-
-        img_counter = [0]
-
-        def _replace_img(match):
-            idx = img_counter[0]
-            img_counter[0] += 1
-            if idx < len(image_b64_list) and image_b64_list[idx]:
-                return (
-                    f'<div class="blog-img-wrap">'
-                    f'<img src="{image_b64_list[idx]}" class="blog-img" alt="写真 {idx + 1}"/>'
-                    f'</div>'
-                )
-            return ""
-
-        processed_body = re.sub(r'<img\s+src="[^"]+"\s*/?>', _replace_img, raw_html)
-
-        # 兜底：若正文中未匹配完所有图片，将剩余图片附在文末
-        if img_counter[0] < len(image_b64_list):
-            trailing_imgs = []
-            for idx in range(img_counter[0], len(image_b64_list)):
-                if image_b64_list[idx]:
-                    trailing_imgs.append(
-                        f'<div class="blog-img-wrap">'
-                        f'<img src="{image_b64_list[idx]}" class="blog-img" alt="写真 {idx + 1}"/>'
-                        f'</div>'
-                    )
-            if trailing_imgs:
-                processed_body += "\n" + "\n".join(trailing_imgs)
+    processed_body = "\n".join(body_elements)
 
     valid_images_count = sum(1 for b in image_b64_list if b)
-    ai_badge = f'<div class="ai-badge">🤖 AI 智能双语精读对照 · {trans_model}</div>'
-    if export and mode == "ja-only":
+    if export and norm_content.actual_mode == "ja-only":
         ai_badge = ""
-    elif export and mode == "zh-only":
-        ai_badge = f'<div class="ai-badge">🤖 中文译文 · {trans_model}</div>'
+    elif norm_content.badge_text:
+        ai_badge = f'<div class="ai-badge">{norm_content.badge_text}</div>'
+    else:
+        ai_badge = "" 
     author_avatar_b64 = post.get("author_avatar_b64") or _get_author_avatar_b64(author, group_key)
     if author_avatar_b64:
         avatar_html = f'<img src="{author_avatar_b64}" class="author-avatar" alt="{author}"/>'
@@ -586,9 +550,13 @@ async def render_blog_card(post: dict) -> Optional[Path]:
     tmp_png = cache_dir / f"{base_name}.png"
     final_jpg = cache_dir / f"{base_name}.jpg"
 
-    html_content = _generate_html(post, image_b64_list)
-    with open(tmp_html, "w", encoding="utf-8") as f:
-        f.write(html_content)
+    try:
+        html_content = _generate_html(post, image_b64_list)
+        with open(tmp_html, "w", encoding="utf-8") as f:
+            f.write(html_content)
+    except Exception as e:
+        log_all(f"⚠️ 博客卡片 HTML 预处理异常，自动降级为标准图文: {e}", is_error=True)
+        return None
 
     try:
         async with async_playwright() as p:

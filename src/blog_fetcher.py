@@ -519,6 +519,7 @@ async def _process_single_post(post: dict, key: str, group_name: str,
     post["translation_error"] = translation_error
     post["translation_request_id"] = translation_request_id
     post["translation_updated_at"] = datetime.now(timezone.utc).isoformat()
+    post["body_text"] = post.get("body_text") or post.get("body", "")
     return post
 
 
