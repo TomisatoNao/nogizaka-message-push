@@ -2995,8 +2995,8 @@ if (brTranslateBtn) {
     const targetPost = currentBlogReaderPost;
     const reqBlogId = targetPost.id;
     
-    if (!localStorage.getItem("blog_translate_notice_ack")) {
-      localStorage.setItem("blog_translate_notice_ack", "1");
+    if (!archiveStorageGet("localStorage", "blog_translate_notice_ack")) {
+      archiveStorageSet("localStorage", "blog_translate_notice_ack", "1");
       showToast("翻译结果将保存到公共归档供所有读者查看", "info", 4500);
     }
 
