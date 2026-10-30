@@ -6778,7 +6778,18 @@ async function loadLetters(mName) {
   const statsBox = $("letterStats");
   if (!cardsBox) return;
 
-  cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;">🔄</span> 正在加载信件...</div>';
+  let skelHTML = '<div class="letter-status-msg"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div class="letter-status-title">正在加载信件...</div><div class="letter-status-sub">获取信件归档记录与精美信纸中</div></div>';
+  for (let i = 0; i < 3; i++) {
+    skelHTML += '<div class="letter-card skeleton" aria-hidden="true">' +
+      '<div class="letter-skeleton-thumb"><span style="opacity:0.25;font-size:28px;">✉️</span></div>' +
+      '<div class="letter-skeleton-body">' +
+        '<div class="letter-skeleton-line" style="width:45%;"></div>' +
+        '<div class="letter-skeleton-line" style="width:88%;"></div>' +
+        '<div class="letter-skeleton-line" style="width:68%;"></div>' +
+      '</div>' +
+    '</div>';
+  }
+  cardsBox.innerHTML = skelHTML;
   if (statsBox) statsBox.textContent = "";
 
   try {

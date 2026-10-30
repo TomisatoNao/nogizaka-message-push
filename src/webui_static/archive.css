@@ -68,6 +68,21 @@ html.view-home #emptyHint,
 html.view-home #loadMore,
 html.view-home #messageMonthFooter { display: none !important; }
 
+/* 全局视口 Sticky Footer 弹性布局：防止内容过少或加载中时页脚悬浮在屏幕中间（CLS） */
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+#archiveHome,
+.layout {
+  flex: 1 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
   #memberSelect { max-width: 200px; padding: 5px 8px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--field); color: var(--text);
     font-size: 13px; font-family: inherit; }
@@ -2825,10 +2840,71 @@ html.view-home #messageMonthFooter { display: none !important; }
     to { transform: rotate(360deg); }
   }
 
+  .letter-grid {
+    min-height: calc(100vh - 280px);
+  }
+
   .letter-cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 22px;
+    min-height: 380px;
+  }
+
+  /* 信件骨架屏与状态指示（消除加载期布局坍塌与 CLS） */
+  .letter-status-msg {
+    grid-column: 1 / -1;
+    width: 100%;
+    text-align: center;
+    padding: 32px 20px 24px;
+    color: var(--muted);
+  }
+  .letter-status-title {
+    margin-top: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .letter-status-sub {
+    font-size: 12px;
+    margin-top: 4px;
+    opacity: 0.8;
+  }
+  .letter-card.skeleton {
+    background: var(--card);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    pointer-events: none;
+    animation: skPulse 1.5s ease-in-out infinite;
+  }
+  @media (max-width: 640px) {
+    .letter-card.skeleton:nth-of-type(n+2) {
+      display: none;
+    }
+  }
+  .letter-skeleton-thumb {
+    width: 100%;
+    aspect-ratio: 341 / 480;
+    background: color-mix(in srgb, var(--card-soft) 80%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .letter-skeleton-body {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--card);
+  }
+  .letter-skeleton-line {
+    height: 12px;
+    border-radius: var(--radius-xs);
+    background: color-mix(in srgb, var(--card-soft) 80%, transparent);
   }
 
   .letter-card {
@@ -3771,8 +3847,9 @@ button.nav,
 
 /* 全站统一样式页脚（M-02） */
 .app-global-footer {
-  margin-top: 48px;
-  padding: 24px 20px 36px;
+  margin-top: auto;
+  flex-shrink: 0;
+  padding: 32px 20px 36px;
   border-top: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--card) 40%, transparent);
   color: var(--muted);
