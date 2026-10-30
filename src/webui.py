@@ -847,6 +847,19 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_secrets()
             return
 
+        if path == "/api/config/reveal":
+            if not self._check_auth():
+                return
+            try:
+                with _mutation_lock:
+                    raw = _load_raw_config()
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {type(e).__name__}"]}, 500)
+                return
+            self._audit("config.reveal_sensitive", details={"reason": "admin_requested"})
+            self._send_json({"ok": True, "config": raw})
+            return
+
         if path in ("/api/config/rollback", "/api/config/restore"):
             if not self._check_auth():
                 return
@@ -1129,7 +1142,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/config/reveal":
-            if not self._guard(need_admin=True):
+            if not self._check_auth():
                 return
             try:
                 with _mutation_lock:

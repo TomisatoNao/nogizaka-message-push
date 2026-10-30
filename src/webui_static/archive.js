@@ -7472,7 +7472,7 @@ async function loadGalleryPhotos(reset = true) {
     curGalleryImages = [];
     curGalleryPerPage = getGalleryPerPage();
     cardsBox.classList.remove("layout-masonry");
-    let skelHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:32px 20px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;font-weight:600;font-size:14px;color:var(--text);">正在加载相册媒体写真...</div><div style="font-size:12px;margin-top:4px;opacity:0.8;">高分辨率写真索引检索中</div></div>';
+    let skelHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:32px 20px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;font-weight:600;font-size:14px;color:var(--text);">正在加载相册图片...</div><div style="font-size:12px;margin-top:4px;opacity:0.8;">高分辨率写真索引检索中</div></div>';
     for (let i = 0; i < 8; i++) {
       skelHTML += '<div class="gallery-card skeleton" style="min-height:220px;background:color-mix(in srgb, var(--card-soft) 80%, transparent);border-radius:var(--radius-sm);border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;"><span style="opacity:0.25;font-size:26px;">📷</span></div>';
     }
