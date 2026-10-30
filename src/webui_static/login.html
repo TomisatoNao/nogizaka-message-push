@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <link rel="icon" href="/static/admin_icon.svg" type="image/svg+xml">
 <title>登录 · 坂道监控</title>
-<link rel="stylesheet" href="/static/theme.css?v=20261031_2">
-<script src="/static/theme.js?v=20261031_2"></script>
+<link rel="stylesheet" href="/static/theme.css?v=20261031_3">
+<script src="/static/theme.js?v=20261031_3"></script>
 <style>
   :root {
     --accent2: var(--accent-2, #a78bfa);
@@ -22,7 +22,7 @@
     align-items: center;
     justify-content: space-between;
     min-height: 100vh;
-    padding: 24px 24px 0;
+    padding: 24px 0 0;
     box-sizing: border-box;
     position: relative;
     overflow-x: hidden;
@@ -315,8 +315,8 @@
   /* 手机端适配 */
   @media (max-width: 640px) {
     html, body { min-height: 100vh; min-height: 100dvh; }
-    body { padding: 16px; align-items: center; justify-content: center; }
-    .card { padding: 28px 22px 22px; border-radius: 22px; width: 100%; max-width: 360px; box-sizing: border-box; }
+    body { padding: 16px 0 0; align-items: center; justify-content: space-between; }
+    .card { padding: 28px 22px 22px; border-radius: 22px; width: min(360px, calc(100% - 32px)); box-sizing: border-box; margin: auto 16px; }
     .theme-toggle {
       top: max(14px, env(safe-area-inset-top));
       right: max(14px, env(safe-area-inset-right));
@@ -442,6 +442,8 @@
       <a href="/archive" class="footer-link">消息归档</a>
       <span class="footer-sep">·</span>
       <a href="https://github.com/TomisatoNao/nogizaka-message-push" target="_blank" rel="noopener noreferrer" class="footer-link">GitHub</a>
+      <span class="footer-sep">·</span>
+      <button type="button" class="footer-back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">返回顶部 ↑</button>
     </div>
   </div>
 </footer>

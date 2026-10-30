@@ -74,10 +74,10 @@ def test_archive_cache_versions_are_synchronised():
     perf = (ROOT / "tools" / "measure_archive_performance.py").read_text(encoding="utf-8")
 
     for resource in (
-        "/static/archive.css?v=20261031_2",
-        "/static/archive.js?v=20261031_2",
+        "/static/archive.css?v=20261031_3",
+        "/static/archive.js?v=20261031_3",
     ):
-        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261031_2") else 1)
+        assert html.count(resource) == (2 if resource.endswith("archive.js?v=20261031_3") else 1)
         assert resource in perf
 
 

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>404 页面迷失 · 坂道监控归档系统</title>
-<link rel="stylesheet" href="/static/theme.css?v=20261031_2">
-<script src="/static/theme.js?v=20261031_2"></script>
+<link rel="stylesheet" href="/static/theme.css?v=20261031_3">
+<script src="/static/theme.js?v=20261031_3"></script>
 <style>
   :root {
     --accent2: var(--accent-2, #a78bfa);
@@ -18,13 +18,19 @@
   }
   body {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     min-height: 100vh;
-    padding: 24px;
+    min-height: 100dvh;
+    padding: 24px 0 0;
     box-sizing: border-box;
     position: relative;
     overflow-x: hidden;
+  }
+  .notfound-card {
+    margin: auto 0;
+    width: min(540px, calc(100% - 32px));
   }
 
   /* 顶部全局主题切换按钮 */
@@ -242,7 +248,8 @@
 
   /* 手机端适配 */
   @media (max-width: 540px) {
-    body { padding: 16px; }
+    body { padding: 16px 0 0; }
+    .notfound-card { margin: auto 16px; }
     .notfound-card { padding: 32px 20px 24px; border-radius: 20px; }
     .code-hero { font-size: 72px; }
     .title { font-size: 19px; }
@@ -331,6 +338,25 @@ if (btnAuto) {
   });
 }
 </script>
+
+<!-- 全站统一全局页脚 -->
+<footer class="app-global-footer notfound-global-footer">
+  <div class="app-global-footer-inner">
+    <div class="footer-brand-info">
+      <div class="footer-brand-name">坂道监控系统</div>
+      <div class="footer-brand-desc">乃木坂46 · 樱坂46 · 日向坂46 历史消息、官方博客与媒体写真归档</div>
+    </div>
+    <div class="footer-quick-links">
+      <a href="/archive" class="footer-link">归档首页</a>
+      <span class="footer-sep">·</span>
+      <a href="/" class="footer-link">管理后台</a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/TomisatoNao/nogizaka-message-push" target="_blank" rel="noopener noreferrer" class="footer-link">GitHub</a>
+      <span class="footer-sep">·</span>
+      <button type="button" class="footer-back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">返回顶部 ↑</button>
+    </div>
+  </div>
+</footer>
 
 </body>
 </html>

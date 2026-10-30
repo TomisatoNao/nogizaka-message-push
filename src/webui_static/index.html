@@ -6,13 +6,13 @@
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
-<link href="/static/theme.css?v=20261031_2" rel="stylesheet"/>
+<link href="/static/theme.css?v=20261031_3" rel="stylesheet"/>
 <link href="/static/admin_route_diagnostics.css?v=20261027_1" rel="stylesheet"/>
 <script src="/static/theme.js?v=20260905_3"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
   .dirty-dot { display: none !important; }
-  main { max-width: 1000px; margin: 0 auto; padding: 32px 24px 100px; box-sizing: border-box; }
+  main { flex: 1 0 auto; width: 100%; max-width: 1000px; margin: 0 auto; padding: 32px 24px 32px; box-sizing: border-box; }
   section.tab { display: none; }
   section.tab.active { display: block; animation: fadeUp .3s cubic-bezier(.2,.8,.2,1) both; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } }
@@ -986,7 +986,7 @@
 
   /* ── 手机端适配（≤640px） ──────────────────────── */
   @media (max-width: 640px) {
-    main { padding: 14px 12px 180px; max-width: 100vw; box-sizing: border-box; }
+    main { padding: 14px 12px 24px; max-width: 100vw; box-sizing: border-box; }
     .status-actions #btnRestart { margin-left: 0; }
     .card { padding: 18px 20px; margin-bottom: 16px; box-sizing: border-box; }
     .card h2 { font-size: 12px; margin-bottom: 14px; }
@@ -2295,6 +2295,7 @@
     </p>
   </div>
 </section>
+</main>
 
 <!-- 统一后台全局页脚 (V2-04) -->
 <footer class="app-global-footer admin-global-footer">
@@ -2312,7 +2313,7 @@
     </div>
   </div>
 </footer>
-</main>
+
 <footer class="savebar">
 <div class="savebar-actions">
 <button class="btn primary" id="btnSave" type="button">💾 保存并热重载</button>
@@ -10547,7 +10548,7 @@ if (socialUrlInput) {
   });
 }
 </script>
-<script src="/static/admin_tasks.js?v=20261031_2"></script>
+<script src="/static/admin_tasks.js?v=20261031_3"></script>
 <script src="/static/admin_route_diagnostics.js?v=20261027_1"></script>
 </body>
 </html>
