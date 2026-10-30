@@ -1038,6 +1038,24 @@ def redact_sensitive_config(config_dict: dict) -> dict:
                 new_wl.append(item)
         redacted["cmd_whitelist_openids"] = new_wl
 
+    # 4. qq_commands.allow_openids 脱敏 (V2-01)
+    qq_cmds = redacted.get("qq_commands")
+    if isinstance(qq_cmds, dict):
+        allow_openids = qq_cmds.get("allow_openids")
+        if isinstance(allow_openids, list):
+            new_allow = []
+            for item in allow_openids:
+                if isinstance(item, str) and item:
+                    new_allow.append(mask_secret_value(item))
+                elif isinstance(item, dict):
+                    d = dict(item)
+                    if d.get("openid"):
+                        d["openid"] = mask_secret_value(d["openid"])
+                    new_allow.append(d)
+                else:
+                    new_allow.append(item)
+            qq_cmds["allow_openids"] = new_allow
+
     return redacted
 
 
@@ -1100,5 +1118,44 @@ def restore_sensitive_config(submitted_raw: dict, existing_raw: dict) -> dict:
             else:
                 new_wl.append(item)
         restored["cmd_whitelist_openids"] = new_wl
+
+    # 4. qq_commands.allow_openids 还原 (V2-01)
+    sub_qq = restored.get("qq_commands")
+    old_qq = existing_raw.get("qq_commands") or {}
+    if isinstance(sub_qq, dict) and isinstance(old_qq, dict):
+        sub_allow = sub_qq.get("allow_openids")
+        old_allow = old_qq.get("allow_openids") or []
+        if isinstance(sub_allow, list) and isinstance(old_allow, list):
+            old_allow_mask_map = {}
+            for item in old_allow:
+                if isinstance(item, str) and item:
+                    old_allow_mask_map[mask_secret_value(item)] = item
+                elif isinstance(item, dict) and item.get("openid"):
+                    old_allow_mask_map[mask_secret_value(item["openid"])] = item["openid"]
+
+            new_allow = []
+            for i, item in enumerate(sub_allow):
+                if isinstance(item, str):
+                    orig = old_allow_mask_map.get(item)
+                    if not orig and is_masked_secret(item) and i < len(old_allow):
+                        cand = old_allow[i] if isinstance(old_allow[i], str) else old_allow[i].get("openid")
+                        if cand and mask_secret_value(cand) == item:
+                            orig = cand
+                    new_allow.append(orig or item)
+                elif isinstance(item, dict):
+                    d = dict(item)
+                    oid = d.get("openid")
+                    if oid:
+                        orig = old_allow_mask_map.get(oid)
+                        if not orig and is_masked_secret(oid) and i < len(old_allow):
+                            cand = old_allow[i] if isinstance(old_allow[i], str) else old_allow[i].get("openid")
+                            if cand and mask_secret_value(cand) == oid:
+                                orig = cand
+                        if orig:
+                            d["openid"] = orig
+                    new_allow.append(d)
+                else:
+                    new_allow.append(item)
+            sub_qq["allow_openids"] = new_allow
 
     return restored

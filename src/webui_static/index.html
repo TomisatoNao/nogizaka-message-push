@@ -6,7 +6,7 @@
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
-<link href="/static/theme.css?v=20261027_1" rel="stylesheet"/>
+<link href="/static/theme.css?v=20261031_2" rel="stylesheet"/>
 <link href="/static/admin_route_diagnostics.css?v=20261027_1" rel="stylesheet"/>
 <script src="/static/theme.js?v=20260905_3"></script>
 <style>
@@ -1197,7 +1197,16 @@
   .disk-alert-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .disk-alert-text strong { font-size: 13.5px; font-weight: 650; }
   .disk-alert-sub { font-size: 12px; color: var(--muted); }
-  .admin-table-qq-bot { min-width: 980px; }
+  .admin-table-qq-bot { min-width: 880px; width: 100%; }
+  .admin-table-qq-bot th, .admin-table-qq-bot td { padding: 8px 6px; }
+  td input.admin-table-input--id { width: 95px; max-width: 95px; }
+  td input.admin-table-input--remark { width: 105px; max-width: 105px; }
+  td input.admin-table-input--app { width: 90px; max-width: 90px; }
+  td input.admin-table-input--openid { width: 115px; max-width: 115px; }
+  td input.admin-table-input--group-openid { width: 105px; max-width: 105px; }
+  .sub-summary-wrap { display: flex; align-items: center; min-width: 120px; }
+  .sub-summary-count { font-weight: 650; margin-right: 2px; }
+  .btn-sub-config { padding: 4px 8px; font-size: 11.5px; white-space: nowrap; }
 
 </style>
 </head>
@@ -1318,10 +1327,11 @@
       <div class="admin-data-group">
         <div class="table-wrap">
           <table class="status-table">
-            <thead><tr><th>成员</th><th>抓取</th><th>推送</th><th>最近错误</th></tr></thead>
+            <thead><tr><th>成员 / 服务</th><th>抓取</th><th>推送</th><th>最近错误</th></tr></thead>
             <tbody id="stMembers"></tbody>
           </table>
         </div>
+        <p class="hint admin-note admin-member-footnote">* 注：巡查列表包含各订阅成员及官方博客全局抓取任务（博客 (全局)）。</p>
       </div>
     </details>
   </div>
@@ -1382,6 +1392,17 @@
     <div class="admin-module-heading">
       <h2>💾 存储空间与媒体占用</h2>
       <div class="admin-actions"><button class="btn small" id="btnRefreshStorage" type="button">🔄 刷新用量</button></div>
+    </div>
+
+    <!-- 磁盘告警横幅 (H-03 / V2-02) -->
+    <div id="stDiskAlertBanner" class="admin-disk-alert-banner" role="alert">
+      <div class="disk-alert-content">
+        <span id="stDiskAlertIcon" class="disk-alert-icon">⚠️</span>
+        <div class="disk-alert-text">
+          <strong id="stDiskAlertTitle">磁盘空间警示</strong>
+          <span id="stDiskAlertSub" class="disk-alert-sub">建议优先清理社媒临时媒体与运行日志；博客原图与消息为核心归档已受保护。</span>
+        </div>
+      </div>
     </div>
 
     <!-- 磁盘总体使用率进度条 -->
@@ -2274,6 +2295,23 @@
     </p>
   </div>
 </section>
+
+<!-- 统一后台全局页脚 (V2-04) -->
+<footer class="app-global-footer admin-global-footer">
+  <div class="app-global-footer-inner">
+    <div class="footer-brand-info">
+      <div class="footer-brand-name">坂道监控管理后台</div>
+      <div class="footer-brand-desc">乃木坂46 · 樱坂46 · 日向坂46 消息推送与内容归档服务</div>
+    </div>
+    <div class="footer-quick-links">
+      <a href="/archive" class="footer-link">消息归档</a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/TomisatoNao/nogizaka-message-push" target="_blank" rel="noopener noreferrer" class="footer-link">GitHub</a>
+      <span class="footer-sep">·</span>
+      <button type="button" class="footer-back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">返回顶部 ↑</button>
+    </div>
+  </div>
+</footer>
 </main>
 <footer class="savebar">
 <div class="savebar-actions">
@@ -3863,6 +3901,11 @@ function setDirty(v) {
   dirty = v;
   document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
   const bar = document.querySelector("footer.savebar");
+  const activeTab = document.querySelector(".header-nav .nav-tab.active, nav.tabs button.active")?.dataset.tab;
+  const isReadOnlyTab = ["status", "users", "tasks"].includes(activeTab);
+  if (isReadOnlyTab) {
+    bar.style.display = "none";
+  }
   if (v) {
     bar.classList.add("show");
   } else if (!window.saveMsgTimer) {
@@ -3985,6 +4028,9 @@ $("confirmDialog").addEventListener("close", () => {
   const res = _confirmResult;
   _confirmResult = false;
   _settleConfirm(res);
+  if ($("toolSocialUrl")?.classList.contains("admin-field-invalid")) {
+    clearAdminFieldValidation($("toolSocialUrl"));
+  }
 });
 function msg(text, cls) {
   const el = $("saveMsg"); el.textContent = text; el.className = "msg " + (cls || "");
@@ -4804,6 +4850,13 @@ function switchAdminTab(targetTab, updateHash = true) {
   document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
   window.syncArchiveTaskPolling?.(targetTab === "tasks");
 
+  // V2-07: 只读或独立维护页 (status, users, tasks) 隐藏保存条
+  const isReadOnlyTab = ["status", "users", "tasks"].includes(targetTab);
+  const savebarEl = document.querySelector("footer.savebar");
+  if (savebarEl) {
+    savebarEl.style.display = isReadOnlyTab ? "none" : "";
+  }
+
   // L-01: 每页标题增加栏目名区分
   const tabTitles = {
     status: "运行状态",
@@ -5104,12 +5157,24 @@ async function fetchStatus() {
     const memberSummary = $("stMembersSummary");
     const memberDetails = $("stMembersDetails");
     if (memberSummary) {
-      const uniqueNames = new Set(memberData.map((m) => m.name.replace(/[\s\u3000]+/g, "")));
-      const totalCount = uniqueNames.size || memberData.length;
+      const allNames = Array.from(new Set(memberData.map((m) => m.name.replace(/[\s\u3000]+/g, ""))));
+      const blogItems = allNames.filter((n) => n.includes("博客"));
+      const memberItems = allNames.filter((n) => !n.includes("博客"));
+      const memberCount = memberItems.length;
+      const blogCount = blogItems.length;
+      const totalCount = allNames.length || memberData.length;
       const failureCount = new Set(fetchFailures.concat(pushFailures).map((m) => m.name.replace(/[\s\u3000]+/g, ""))).size;
-      memberSummary.textContent = totalCount
-        ? (failureCount ? `⚠️ ${failureCount}/${totalCount} 位需关注（最近一轮巡查）` : `✓ ${totalCount} 位正常（最近一轮巡查）`)
-        : "暂无成员数据";
+      let summaryText = "";
+      if (!totalCount) {
+        summaryText = "暂无成员数据";
+      } else if (failureCount) {
+        summaryText = `⚠️ ${failureCount}/${totalCount} 项需关注（最近一轮巡查）`;
+      } else if (blogCount > 0 && memberCount > 0) {
+        summaryText = `✓ ${memberCount} 位成员 + 博客全局，共 ${totalCount} 项正常（最近一轮巡查）`;
+      } else {
+        summaryText = `✓ ${totalCount} 位正常（最近一轮巡查）`;
+      }
+      memberSummary.textContent = summaryText;
       memberSummary.className = "admin-status-badge " + (failureCount ? "warn" : (totalCount ? "ok" : "muted"));
     }
     if (memberDetails && fetchFailures.length + pushFailures.length > 0) memberDetails.open = true;
@@ -5187,7 +5252,7 @@ function renderStorage(st) {
     diskBar.style.width = Math.min(100, Math.max(0, pct)) + "%";
     if (pct >= 90) {
       diskBar.style.background = "var(--err)";
-    } else if (pct >= 80) {
+    } else if (pct >= 85) {
       diskBar.style.background = "var(--warn)";
     } else {
       diskBar.style.background = "var(--accent)";
@@ -5195,17 +5260,17 @@ function renderStorage(st) {
   }
   if ($("stAppTotal")) $("stAppTotal").textContent = app.human || "—";
 
-  // H-03: 磁盘高水位告警横幅（超过 80% 黄色告警，超过 90% 红色告警）
+  // H-03 / V2-02: 磁盘高水位告警横幅（>=85% 黄色告警，>=90% 红色严重告警及清理建议）
   const alertBanner = $("stDiskAlertBanner");
   if (alertBanner) {
-    if (pct >= 80) {
+    if (pct >= 85) {
       alertBanner.style.display = "flex";
       alertBanner.className = "admin-disk-alert-banner" + (pct >= 90 ? " danger" : "");
       $("stDiskAlertIcon").textContent = pct >= 90 ? "🚨" : "⚠️";
       $("stDiskAlertTitle").textContent = (pct >= 90 ? "磁盘空间严重不足：已用 " : "磁盘空间警示：已用 ") + pct + "% (剩余 " + (disk.free_human || "—") + ")";
       
-      const blogImgHuman = (cats.blog_images && cats.blog_images.human) || "17.5 GB";
-      $("stDiskAlertSub").textContent = "占用 Top 项：博客原图 (" + blogImgHuman + ")。请及时关注或执行清理。";
+      const blogImgHuman = (cats.blog_images && cats.blog_images.human) || "—";
+      $("stDiskAlertSub").textContent = "占用 Top 项：博客原图 (" + blogImgHuman + ")。建议优先清理社媒临时媒体与运行日志；博客原图与消息为核心归档已受保护。";
     } else {
       alertBanner.style.display = "none";
     }
@@ -7831,50 +7896,45 @@ $("subSave").addEventListener("click", () => {
 function renderSubSummary(item, onOpenDialog) {
   const wrap = document.createElement("div");
   wrap.className = "sub-summary-wrap";
-  
-  const badges = document.createElement("div");
-  badges.className = "sub-badge-row";
-  
-  const activeSubscriptions = enabledSubscriptions(item);
 
-  SUBSCRIPTION_DEFINITIONS.forEach(p => {
+  const activeSubscriptions = enabledSubscriptions(item);
+  const allSubLabels = SUBSCRIPTION_DEFINITIONS.map(p => {
     const active = subscriptionValue(item, p);
-    const badge = document.createElement("span");
-    badge.className = "sub-badge-pill " + (active ? "on" : "off");
-    badge.textContent = p.label;
-    badges.appendChild(badge);
-  });
-  
+    return `${active ? "✓" : "✗"} ${p.label}`;
+  }).join("\n");
+
   const filterDesc = [];
   const mems = item.member_filter || [];
   const socs = item.social_filter || [];
   const blogs = item.blog_filter || [];
-  
+
   if (mems.length) filterDesc.push(`成员 ${mems.length}`);
   if (socs.length) filterDesc.push(`社媒 ${socs.length}`);
   if (blogs.length) filterDesc.push(`博客 ${blogs.length}`);
   if (item.forward_nickname || item.forward_user_id) filterDesc.push("卡片定制");
-  
+
   const btn = document.createElement("button");
   btn.className = "btn-sub-config";
   btn.type = "button";
-  
+
   let tagHtml = "";
   if (!activeSubscriptions.length) {
     tagHtml = '<span class="sub-filter-tag paused">已暂停</span>';
   } else if (filterDesc.length) {
     tagHtml = filterDesc.map(t => `<span class="sub-filter-tag">${esc(t)}</span>`).join(" ");
   } else {
-    tagHtml = '<span class="sub-filter-tag all">全量订阅</span>';
+    tagHtml = '<span class="sub-filter-tag all">全量</span>';
   }
-  
-  btn.innerHTML = `<span class="gear-icon">⚙️</span><span>订阅规则</span> ${tagHtml}`;
+
+  const countText = activeSubscriptions.length ? `${activeSubscriptions.length} 项` : "0 项";
+  btn.innerHTML = `<span class="gear-icon">⚙️</span><span class="sub-summary-count">${countText}</span> ${tagHtml}`;
+  btn.title = `【订阅状态】\n${allSubLabels}\n\n【过滤规则】\n${filterDesc.join(", ") || "全量订阅"}\n（点击进入配置面板）`;
   btn.onclick = (e) => {
     e.preventDefault();
     onOpenDialog();
   };
-  
-  wrap.append(badges, btn);
+
+  wrap.append(btn);
   return wrap;
 }
 
@@ -9362,7 +9422,8 @@ function initCmdOpenidEvents() {
     const rawOpenid = ($("cmdOpenidInput").value || "").trim().toUpperCase();
     clearAdminFieldValidation($("cmdOpenidInput"));
     clearAdminFieldValidation($("cmdOpenidName"));
-    if (!/^[A-Z0-9_-]{4,256}$/.test(rawOpenid)) {
+    const isMaskedOpenid = rawOpenid.includes("****");
+    if (!/^[A-Z0-9_-]{4,256}$/.test(rawOpenid) && !isMaskedOpenid) {
       markAdminFieldInvalid($("cmdOpenidInput"), "OpenID 只能包含字母、数字、下划线或连字符（4–256 位）");
       uiAlert("请输入有效的 OpenID（4–256 位字母、数字或下划线）");
       return;
@@ -10476,12 +10537,17 @@ $("btnScrollToStorage")?.addEventListener("click", () => {
   }
 });
 
-// L-03: 社媒单链接输入变动自动清除错误样式
-$("toolSocialUrl")?.addEventListener("input", () => {
-  clearAdminFieldValidation($("toolSocialUrl"));
-});
+// L-03 / V2-08: 社媒单链接输入与聚焦变动自动清除错误样式
+const socialUrlInput = $("toolSocialUrl");
+if (socialUrlInput) {
+  ["input", "focus", "keydown", "paste"].forEach((evt) => {
+    socialUrlInput.addEventListener(evt, () => {
+      clearAdminFieldValidation(socialUrlInput);
+    });
+  });
+}
 </script>
-<script src="/static/admin_tasks.js?v=20261026_2"></script>
+<script src="/static/admin_tasks.js?v=20261031_2"></script>
 <script src="/static/admin_route_diagnostics.js?v=20261027_1"></script>
 </body>
 </html>

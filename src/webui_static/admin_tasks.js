@@ -702,8 +702,7 @@
     } else if (integrityMessage) {
       setIntegrityStatus(integrityMessage, "ok");
     } else if (integrityReportData) {
-      const meta = integrityReportMeta(integrityReportData);
-      setIntegrityStatus(meta.label, meta.tone === "err" ? "error" : meta.tone === "warn" ? "warn" : meta.tone);
+      setIntegrityStatus("已加载最近一次只读完整性检查报告：", "ok");
     } else if (hasLoadedIntegrity) {
       setIntegrityStatus("尚无历史完整性报告。点击“开始只读检查”发起一次检查。");
     }
@@ -1014,9 +1013,19 @@
     card.badge.textContent = meta.label;
     card.badge.className = `admin-status-badge admin-task-status-badge ${meta.tone}`;
     const rawPhase = String(task.phase || "");
-    card.phase.textContent = task.kind === "archive_integrity"
-      ? (INTEGRITY_PHASE_LABELS[rawPhase] || "正在检查")
-      : (TASK_PHASE_LABELS[rawPhase] || INTEGRITY_PHASE_LABELS[rawPhase] || asText(task.phase));
+    if (task.status === "stale") {
+      card.phase.textContent = "已中断";
+    } else if (task.status === "cancelled") {
+      card.phase.textContent = "已取消";
+    } else if (task.status === "failed") {
+      card.phase.textContent = "已失败";
+    } else if (task.status === "completed") {
+      card.phase.textContent = INTEGRITY_PHASE_LABELS[rawPhase] || "已完成";
+    } else {
+      card.phase.textContent = task.kind === "archive_integrity"
+        ? (INTEGRITY_PHASE_LABELS[rawPhase] || "正在检查")
+        : (TASK_PHASE_LABELS[rawPhase] || INTEGRITY_PHASE_LABELS[rawPhase] || asText(task.phase) || "处理中");
+    }
     const done = task.done === null || task.done === undefined ? "—" : asText(task.done);
     const total = task.total === null || task.total === undefined ? "—" : asText(task.total);
     const failures = task.failure_count === null || task.failure_count === undefined ? "0" : asText(task.failure_count);

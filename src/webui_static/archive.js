@@ -1133,6 +1133,7 @@ function setHtmlViewClass(mode) {
   const root = document.documentElement;
   root.classList.remove("view-home", "view-msg", "view-blog", "view-letter", "view-gallery");
   if (mode) root.classList.add("view-" + mode);
+  updateArchiveDocumentTitle(mode);
 }
 
 function syncNavTabs(activeTabName) {
@@ -7537,7 +7538,7 @@ async function loadGalleryPhotos(reset = true) {
     }
 
     if (statsBox) {
-      statsBox.textContent = "共 " + curGalleryTotal.toLocaleString() + " 张图片";
+      statsBox.textContent = "共 " + curGalleryTotal.toLocaleString() + " 张图片" + "（写真与博客插图；全站媒体另包含语音与视频）";
     }
 
     if (reset && !list.length) {
@@ -7923,12 +7924,12 @@ window.addEventListener("resize", () => {
 
 function updateArchiveDocumentTitle(mode) {
   const titles = {
-    home: "归档首页",
+    home: "归档总览",
     msg: "消息归档",
     blog: "博客归档",
-    gallery: "写真相册",
-    letter: "成员信件",
+    gallery: "媒体写真",
+    letter: "信件归档",
   };
-  const pageName = titles[mode] || "消息归档";
-  document.title = `${pageName} · 坂道监控`;
+  const pageName = titles[mode] || "归档总览";
+  document.title = `坂道监控 · ${pageName}`;
 }

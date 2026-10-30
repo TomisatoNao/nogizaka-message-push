@@ -5,32 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <link rel="icon" href="/static/admin_icon.svg" type="image/svg+xml">
 <title>登录 · 坂道监控</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260921_2">
-<script src="/static/theme.js?v=20260831_1">
-// 中文友好表单校验与找回密码说明（M-02）
-const uInput = document.getElementById("u");
-const pInput = document.getElementById("p");
-if (uInput) {
-  uInput.addEventListener("invalid", (e) => {
-    e.target.setCustomValidity("请填写用户名");
-  });
-  uInput.addEventListener("input", (e) => {
-    e.target.setCustomValidity("");
-  });
-}
-if (pInput) {
-  pInput.addEventListener("invalid", (e) => {
-    e.target.setCustomValidity("请填写登录密码");
-  });
-  pInput.addEventListener("input", (e) => {
-    e.target.setCustomValidity("");
-  });
-}
-document.getElementById("btnForgotPwd")?.addEventListener("click", () => {
-  alert("【账号申请与密码找回说明】\n\n本系统为私有内容归档与运维服务，不开放外部公开注册。\n如需分配新账号或重置密码，请直接联系系统运维管理员。");
-});
-
-</script>
+<link rel="stylesheet" href="/static/theme.css?v=20261031_2">
+<script src="/static/theme.js?v=20261031_2"></script>
 <style>
   :root {
     --accent2: var(--accent-2, #a78bfa);
@@ -42,13 +18,17 @@ document.getElementById("btnForgotPwd")?.addEventListener("click", () => {
   }
   body {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     min-height: 100vh;
-    padding: 24px;
+    padding: 24px 24px 0;
     box-sizing: border-box;
     position: relative;
     overflow-x: hidden;
+  }
+  .card {
+    margin: auto 0;
   }
 
   /* 顶部全局主题切换按钮 */
@@ -451,6 +431,21 @@ document.getElementById("btnForgotPwd")?.addEventListener("click", () => {
   </div>
 </div>
 
+<!-- 统一登录页全局页脚 (V2-04) -->
+<footer class="app-global-footer login-global-footer">
+  <div class="app-global-footer-inner">
+    <div class="footer-brand-info">
+      <div class="footer-brand-name">坂道监控运维平台</div>
+      <div class="footer-brand-desc">乃木坂46 · 樱坂46 · 日向坂46 消息与官方博客自动化归档运维</div>
+    </div>
+    <div class="footer-quick-links">
+      <a href="/archive" class="footer-link">消息归档</a>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/TomisatoNao/nogizaka-message-push" target="_blank" rel="noopener noreferrer" class="footer-link">GitHub</a>
+    </div>
+  </div>
+</footer>
+
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -528,9 +523,40 @@ $("pwToggle").addEventListener("click", () => {
     : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
 });
 
+// M-02 / V2-04: 中文友好表单校验与找回密码绑定
+$("u")?.addEventListener("invalid", (e) => {
+  e.target.setCustomValidity("请填写用户名");
+});
+$("u")?.addEventListener("input", (e) => {
+  e.target.setCustomValidity("");
+});
+$("p")?.addEventListener("invalid", (e) => {
+  e.target.setCustomValidity("请填写登录密码");
+});
+$("p")?.addEventListener("input", (e) => {
+  e.target.setCustomValidity("");
+});
+$("btnForgotPwd")?.addEventListener("click", () => {
+  alert("【账号申请与密码找回说明】\n\n本系统为私有内容归档与运维服务，不开放外部公开注册。\n如需分配新账号或重置密码，请直接联系系统运维管理员。");
+});
+
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const btn = $("btn"), msg = $("msg");
+  const uVal = ($("u").value || "").trim();
+  const pVal = $("p").value || "";
+  if (!uVal) {
+    msg.className = "msg err";
+    msg.textContent = "请输入用户名";
+    $("u").focus();
+    return;
+  }
+  if (!pVal) {
+    msg.className = "msg err";
+    msg.textContent = "请输入登录密码";
+    $("p").focus();
+    return;
+  }
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const requestTimer = controller ? window.setTimeout(() => controller.abort(), 30000) : null;
   btn.disabled = true;

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/static/archive_icon.svg" type="image/svg+xml">
 <title>404 页面迷失 · 坂道监控归档系统</title>
-<link rel="stylesheet" href="/static/theme.css?v=20260921_2">
-<script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/theme.css?v=20261031_2">
+<script src="/static/theme.js?v=20261031_2"></script>
 <style>
   :root {
     --accent2: var(--accent-2, #a78bfa);
@@ -291,9 +291,9 @@
   </div>
 
   <div class="countdown-bar">
-    <span>将在 <strong id="timer">30</strong> 秒后自动返回归档首页</span>
+    <span>💡 建议通过上方快捷导航返回相应页面，或直接使用浏览器返回</span>
     <span>·</span>
-    <button type="button" id="btnCancelTimer" class="nav-btn-cancel">取消自动跳转</button>
+    <button type="button" id="btnAutoRedirect" class="nav-btn-cancel">开启 10 秒后自动返回</button>
   </div>
 </div>
 
@@ -306,32 +306,28 @@ if (targetPathEl) {
   targetPathEl.textContent = fromUrl || (location.pathname + location.search + location.hash) || "/404-not-found";
 }
 
-let timeLeft = 30;
-const timerEl = document.getElementById("timer");
-const cancelBtn = document.getElementById("btnCancelTimer");
 let countdownInterval = null;
-
-if (timerEl) {
-  countdownInterval = setInterval(() => {
-    timeLeft--;
-    if (timerEl) timerEl.textContent = String(timeLeft);
-    if (timeLeft <= 0) {
-      clearInterval(countdownInterval);
-      location.href = "/archive";
-    }
-  }, 1000);
-}
-
-if (cancelBtn) {
-  cancelBtn.addEventListener("click", () => {
+let timeLeft = 10;
+const btnAuto = document.getElementById("btnAutoRedirect");
+if (btnAuto) {
+  btnAuto.addEventListener("click", () => {
     if (countdownInterval) {
       clearInterval(countdownInterval);
       countdownInterval = null;
+      timeLeft = 10;
+      btnAuto.textContent = "开启 10 秒后自动返回";
+      return;
     }
-    const bar = document.querySelector(".countdown-bar");
-    if (bar) {
-      bar.innerHTML = '<span>已暂停自动跳转，请选择上方入口继续浏览。</span>';
-    }
+    btnAuto.textContent = `取消（${timeLeft} 秒后自动返回）`;
+    countdownInterval = setInterval(() => {
+      timeLeft--;
+      if (timeLeft <= 0) {
+        clearInterval(countdownInterval);
+        location.href = "/archive";
+      } else {
+        btnAuto.textContent = `取消（${timeLeft} 秒后自动返回）`;
+      }
+    }, 1000);
   });
 }
 </script>
