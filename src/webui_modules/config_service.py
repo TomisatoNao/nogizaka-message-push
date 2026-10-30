@@ -6,6 +6,7 @@ src/webui_modules/config_service.py — Web 管理端配置校验、序列化、
 """
 
 from datetime import datetime
+from typing import Any
 import hashlib
 import hmac
 import json
@@ -977,3 +978,127 @@ def _qq_bot_status(raw: dict) -> list[dict]:
         if entry["app_id"]:
             bots.append(entry)
     return bots
+
+
+# ── 敏感信息脱敏与还原（H-01 安全止血） ───────────────────────
+
+def mask_secret_value(val: Any, prefix_len: int = 4, suffix_len: int = 4) -> str:
+    """对敏感字符串做脱敏遮蔽（前后保留几位，中间星号；较短则全星号）。"""
+    if not isinstance(val, str) or not val:
+        return ""
+    s = val.strip()
+    if not s:
+        return ""
+    if len(s) <= 8:
+        return "*" * max(4, len(s))
+    return s[:prefix_len] + "****" + s[-suffix_len:]
+
+
+def is_masked_secret(val: Any) -> bool:
+    """判断是否为脱敏遮罩字符串。"""
+    if not isinstance(val, str) or not val:
+        return False
+    return "****" in val or val == "****"
+
+
+def redact_sensitive_config(config_dict: dict) -> dict:
+    """将配置对象中的敏感密钥与 OpenID 字段脱敏返回（页面与源码均不含明文）。"""
+    import copy
+    redacted = copy.deepcopy(config_dict)
+
+    # 1. OneBot 密钥与媒体签名
+    if "napcat_api_token" in redacted and redacted["napcat_api_token"]:
+        redacted["napcat_api_token"] = mask_secret_value(redacted["napcat_api_token"])
+    if "napcat_media_signing_secret" in redacted and redacted["napcat_media_signing_secret"]:
+        redacted["napcat_media_signing_secret"] = mask_secret_value(redacted["napcat_media_signing_secret"])
+
+    # 2. QQ 官方 Bot 的 OpenID
+    bots = redacted.get("qq_official_bots")
+    if isinstance(bots, list):
+        for b in bots:
+            if isinstance(b, dict):
+                if b.get("target_openid"):
+                    b["target_openid"] = mask_secret_value(b["target_openid"])
+                if b.get("group_openid"):
+                    b["group_openid"] = mask_secret_value(b["group_openid"])
+
+    # 3. 白名单 OpenID
+    whitelist = redacted.get("cmd_whitelist_openids")
+    if isinstance(whitelist, list):
+        new_wl = []
+        for item in whitelist:
+            if isinstance(item, str) and item:
+                new_wl.append(mask_secret_value(item))
+            elif isinstance(item, dict):
+                d = dict(item)
+                if d.get("openid"):
+                    d["openid"] = mask_secret_value(d["openid"])
+                new_wl.append(d)
+            else:
+                new_wl.append(item)
+        redacted["cmd_whitelist_openids"] = new_wl
+
+    return redacted
+
+
+def restore_sensitive_config(submitted_raw: dict, existing_raw: dict) -> dict:
+    """在保存配置前，如果提交的敏感字段是脱敏掩码，则自动恢复为现有真实值。"""
+    import copy
+    restored = copy.deepcopy(submitted_raw)
+
+    # 1. OneBot 密钥与媒体签名
+    for key in ("napcat_api_token", "napcat_media_signing_secret"):
+        if key in restored:
+            sub_val = restored[key]
+            old_val = existing_raw.get(key)
+            if is_masked_secret(sub_val) and old_val:
+                restored[key] = old_val
+
+    # 2. QQ 官方 Bot 的 OpenID
+    sub_bots = restored.get("qq_official_bots")
+    old_bots = existing_raw.get("qq_official_bots") or []
+    old_bots_by_name = {
+        str(b.get("name", "")).strip().lower(): b
+        for b in old_bots if isinstance(b, dict) and b.get("name")
+    }
+    old_bots_by_idx = {
+        i: b for i, b in enumerate(old_bots) if isinstance(b, dict)
+    }
+
+    if isinstance(sub_bots, list):
+        for i, b in enumerate(sub_bots):
+            if not isinstance(b, dict):
+                continue
+            name = str(b.get("name", "")).strip().lower()
+            old_b = old_bots_by_name.get(name) or old_bots_by_idx.get(i)
+            if old_b and isinstance(old_b, dict):
+                if is_masked_secret(b.get("target_openid")) and old_b.get("target_openid"):
+                    b["target_openid"] = old_b["target_openid"]
+                if is_masked_secret(b.get("group_openid")) and old_b.get("group_openid"):
+                    b["group_openid"] = old_b["group_openid"]
+
+    # 3. 白名单 OpenID
+    sub_wl = restored.get("cmd_whitelist_openids")
+    old_wl = existing_raw.get("cmd_whitelist_openids") or []
+    if isinstance(sub_wl, list) and isinstance(old_wl, list):
+        old_mask_map = {}
+        for item in old_wl:
+            if isinstance(item, str) and item:
+                old_mask_map[mask_secret_value(item)] = item
+            elif isinstance(item, dict) and item.get("openid"):
+                old_mask_map[mask_secret_value(item["openid"])] = item["openid"]
+
+        new_wl = []
+        for item in sub_wl:
+            if isinstance(item, str):
+                new_wl.append(old_mask_map.get(item, item))
+            elif isinstance(item, dict):
+                d = dict(item)
+                if d.get("openid") and d["openid"] in old_mask_map:
+                    d["openid"] = old_mask_map[d["openid"]]
+                new_wl.append(d)
+            else:
+                new_wl.append(item)
+        restored["cmd_whitelist_openids"] = new_wl
+
+    return restored

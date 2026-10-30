@@ -19,6 +19,8 @@ from src.audit import record_event
 from src.runtime_info import runtime_metadata
 
 from src.webui_modules.config_service import (
+    redact_sensitive_config,
+    restore_sensitive_config,
     _FORBIDDEN_ENV_KEYS,
     _HISTORY_KEEP,
     _HISTORY_NAME_RE,
@@ -307,7 +309,14 @@ def _validate_secret_commit_operations(body: dict) -> tuple[dict, dict, list[str
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "SakamichiWebUI/1.0"
+    sys_version = ""
     timeout = 30
+
+    def version_string(self) -> str:
+        return self.server_version
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.do_GET()
     _ARCHIVE_TYPES = ARCHIVE_TYPES
 
     def handle(self) -> None:
@@ -550,6 +559,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_html(ARCHIVE_HTML_PATH)
             return
 
+        if path == "/favicon.ico":
+            self._send_static("admin_icon.svg")
+            return
+
         if path in ("/login", "/login.html"):
             self._send_html(LOGIN_HTML_PATH)
             return
@@ -632,7 +645,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {type(e).__name__}"]}, 500)
                 return
             self._send_json({
-                "ok": True, "config": raw, "revision": revision,
+                "ok": True, "config": redact_sensitive_config(raw), "revision": revision,
                 "cred_status": _cred_status(raw), "qq_bot_status": _qq_bot_status(raw),
                 "env_status": _env_status(raw),
                 # 只返回稳定的逻辑名称，避免暴露容器内绝对路径。
@@ -1054,6 +1067,12 @@ class _Handler(BaseHTTPRequestHandler):
             if expected_revision is None:
                 return
             raw, updates, removes, renames, op_errors = _validate_secret_commit_operations(body)
+            try:
+                with _mutation_lock:
+                    _curr_raw = _load_raw_config()
+                raw = restore_sensitive_config(raw, _curr_raw)
+            except Exception:
+                pass
             errors = redact_config_error_messages(
                 list(op_errors) + validate_config(raw, schema_path=SCHEMA_PATH),
                 raw,
@@ -1109,6 +1128,19 @@ class _Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == "/api/config/reveal":
+            if not self._guard(need_admin=True):
+                return
+            try:
+                with _mutation_lock:
+                    raw = _load_raw_config()
+            except Exception as e:
+                self._send_json({"ok": False, "errors": [f"读取 config.json 失败: {type(e).__name__}"]}, 500)
+                return
+            self._audit("config.reveal_sensitive", details={"reason": "admin_requested"})
+            self._send_json({"ok": True, "config": raw})
+            return
+
         if path == "/api/config":
             if not self._check_auth():
                 return
@@ -1118,6 +1150,12 @@ class _Handler(BaseHTTPRequestHandler):
             expected_revision = _read_expected_revision(self, raw)
             if expected_revision is None:
                 return
+            try:
+                with _mutation_lock:
+                    _curr_raw = _load_raw_config()
+                raw = restore_sensitive_config(raw, _curr_raw)
+            except Exception:
+                pass
             errors = redact_config_error_messages(
                 validate_config(raw, schema_path=SCHEMA_PATH), raw,
             )

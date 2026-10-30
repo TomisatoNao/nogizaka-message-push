@@ -688,6 +688,9 @@
             : `${INTEGRITY_PHASE_LABELS[phase] || "正在检查"} · 进度统计准备中`;
       }
       if (stale) {
+        if (integrityProgressText) {
+          integrityProgressText.textContent = "检查已中断 · 等待手动重试";
+        }
         const restartNote = integrityRestartNote(integrityTaskData);
         const staleMessage = integrityMessage ? `${integrityMessage} ${restartNote}` : restartNote;
         setIntegrityStatus(staleMessage, "warn");

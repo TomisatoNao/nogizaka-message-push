@@ -109,7 +109,8 @@ def send_json(handler, obj: dict, code: int = 200) -> None:
         for sc in pending_cookies:
             handler.send_header("Set-Cookie", sc)
         handler.end_headers()
-        handler.wfile.write(body)
+        if getattr(handler, "command", "") != "HEAD":
+            handler.wfile.write(body)
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
         pass
 
@@ -151,7 +152,8 @@ def send_static(handler, name: str) -> None:
     for k, v in enc_headers.items():
         handler.send_header(k, v)
     handler.end_headers()
-    handler.wfile.write(body)
+    if getattr(handler, "command", "") != "HEAD":
+            handler.wfile.write(body)
 
 
 def send_html(handler, file_path: Path, code: int = 200) -> None:
@@ -175,7 +177,8 @@ def send_html(handler, file_path: Path, code: int = 200) -> None:
     for sc in pending_cookies:
         handler.send_header("Set-Cookie", sc)
     handler.end_headers()
-    handler.wfile.write(body)
+    if getattr(handler, "command", "") != "HEAD":
+            handler.wfile.write(body)
 
 
 def send_html_text(handler, title: str, message: str, code: int = 200, redirect_url: str = "") -> None:
@@ -217,7 +220,8 @@ def send_html_text(handler, title: str, message: str, code: int = 200, redirect_
     for sc in pending_cookies:
         handler.send_header("Set-Cookie", sc)
     handler.end_headers()
-    handler.wfile.write(body)
+    if getattr(handler, "command", "") != "HEAD":
+            handler.wfile.write(body)
 
 
 def send_404(handler, message: str = "未知路径") -> None:

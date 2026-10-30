@@ -291,7 +291,7 @@
   </div>
 
   <div class="countdown-bar">
-    <span>将在 <strong id="timer">10</strong> 秒后自动返回归档首页</span>
+    <span>将在 <strong id="timer">30</strong> 秒后自动返回归档首页</span>
     <span>·</span>
     <button type="button" id="btnCancelTimer" class="nav-btn-cancel">取消自动跳转</button>
   </div>
@@ -306,7 +306,7 @@ if (targetPathEl) {
   targetPathEl.textContent = fromUrl || (location.pathname + location.search + location.hash) || "/404-not-found";
 }
 
-let timeLeft = 10;
+let timeLeft = 30;
 const timerEl = document.getElementById("timer");
 const cancelBtn = document.getElementById("btnCancelTimer");
 let countdownInterval = null;

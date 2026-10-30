@@ -138,6 +138,7 @@ let searchQuery = "";    // 非空 = 搜索模式
 let dayCounts = {};      // "YYYY-MM-DD" -> 条数（日历用）
 let calYM = null;        // 日历当前显示的 {year, month}（可独立于时间线翻页）
 let blogCalendarError = "";
+let calendarLoading = false;
 let blogGroupsError = "";
 let contentVersion = 0;  // 成员 / 月份 / 筛选变化后，旧响应不应覆盖新页面
 let contentAbort = null;
@@ -751,6 +752,7 @@ async function loadBlogCalendar() {
   if (blogCalendarCache.has(cacheKey)) {
     dayCounts = blogCalendarCache.get(cacheKey) || {};
     blogCalendarError = "";
+    calendarLoading = false;
     if (searchQuery) {
       syncSearchCalendarMonth();
     } else if (!curBlogDate && (!calYM || Object.keys(dayCounts).length > 0)) {
@@ -764,6 +766,10 @@ async function loadBlogCalendar() {
     renderCalendar();
   }
 
+  if (!blogCalendarCache.has(cacheKey)) {
+    calendarLoading = true;
+    renderCalendar();
+  }
   try {
     let url = "/api/archive/blog_calendar?group=" + encodeURIComponent(curBlogGroup) +
               "&author=" + encodeURIComponent(curBlogAuthor || "");
@@ -772,6 +778,7 @@ async function loadBlogCalendar() {
     if (version !== calendarVersion) return;
     if (!data.ok || typeof data.days !== "object") throw new Error("博客日历接口返回无效数据");
     blogCalendarError = "";
+    calendarLoading = false;
     dayCounts = data.days || {};
     blogCalendarCache.set(cacheKey, dayCounts);
   } catch (e) {
@@ -780,6 +787,7 @@ async function loadBlogCalendar() {
       dayCounts = {};
       blogCalendarError = "日历暂时不可用，请稍后重试";
     }
+    calendarLoading = false;
   }
   if (version !== calendarVersion) return;
   
@@ -842,9 +850,11 @@ function renderCalendar() {
   }
   $("calFoot").textContent = (curMode === "blog" && blogCalendarError)
     ? blogCalendarError
-    : (monthTotal > 0
-      ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
-      : (curMode === "blog" ? (searchQuery ? "本月无匹配博客" : "本月无博客") : (searchQuery ? "本月无匹配消息" : "本月无消息")));
+    : (calendarLoading
+      ? "正在同步本月博客日历…"
+      : (monthTotal > 0
+        ? "本月 " + monthTotal + " " + entryNoun + " · 点日期跳转"
+        : (curMode === "blog" ? (searchQuery ? "本月无匹配博客" : "本月无博客") : (searchQuery ? "本月无匹配消息" : "本月无消息"))));
 }
 
 $("calPrev").addEventListener("click", () => {
@@ -5598,7 +5608,7 @@ function renderHome(data) {
   heroHTML += '<div class="portal-metric-card">';
   heroHTML += '<div class="pm-top"><span class="pm-icon media">📸</span><span class="pm-tag">全站媒体</span></div>';
   heroHTML += '<div class="pm-val">' + totalMedia.toLocaleString() + ' <small>项</small></div>';
-  heroHTML += '<div class="pm-sub">Message ' + messageMedia.toLocaleString() + ' · 博客图片 ' +
+  heroHTML += '<div class="pm-sub">Message ' + messageMedia.toLocaleString() + ' (含图片/视频/语音) · 博客图片 ' +
     blogImages.toLocaleString() + '</div>';
   heroHTML += '</div>';
 
@@ -5783,7 +5793,7 @@ function renderHome(data) {
 
   // 3.2 监控成员快捷入口网格 (Member Quick Bento Grid)
   secHTML += '<div class="portal-member-section">';
-  secHTML += '<div class="pms-header"><span>👥 监控成员快捷通道</span><span class="pms-sub">点击直达对应成员消息时间线</span></div>';
+  secHTML += '<div class="pms-header"><span>👥 归档成员快捷通道（共 ' + members.length + ' 位 · 含历史归档与毕业成员）</span><span class="pms-sub">点击直达对应成员消息时间线</span></div>';
   secHTML += '<div class="portal-members-grid">';
   members.forEach(m => {
     const gKey = inferMemberGroup(m);
@@ -6787,7 +6797,7 @@ async function loadLetters(mName) {
       cardsBox.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--muted);background:var(--card);border:1px dashed var(--border);border-radius:16px;">' +
         '<div style="font-size:36px;margin-bottom:12px;">✉️</div>' +
         '<div style="font-size:15px;font-weight:600;color:var(--text-strong);">暂无已归档信件</div>' +
-        '<div style="font-size:13px;margin-top:6px;">可点击上方「🔄 同步信件」从官方接口拉取，或在终端运行 <code>python tools/archive_letters.py ' + esc(mName) + '</code></div>' +
+        '<div style="font-size:13px;margin-top:6px;">可点击上方「🔄 同步信件」从官方接口拉取最新信件</div>' +
         '</div>';
       return;
     }
@@ -7462,7 +7472,11 @@ async function loadGalleryPhotos(reset = true) {
     curGalleryImages = [];
     curGalleryPerPage = getGalleryPerPage();
     cardsBox.classList.remove("layout-masonry");
-    cardsBox.innerHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:50px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;">正在加载相册图片...</div></div>';
+    let skelHTML = '<div class="gallery-status-msg" style="grid-column:1/-1;width:100%;text-align:center;padding:32px 20px;color:var(--muted);"><span class="sync-icon" style="display:inline-block;animation:spin 1s linear infinite;font-size:24px;">🔄</span><div style="margin-top:10px;font-weight:600;font-size:14px;color:var(--text);">正在加载相册媒体写真...</div><div style="font-size:12px;margin-top:4px;opacity:0.8;">高分辨率写真索引检索中</div></div>';
+    for (let i = 0; i < 8; i++) {
+      skelHTML += '<div class="gallery-card skeleton" style="min-height:220px;background:color-mix(in srgb, var(--card-soft) 80%, transparent);border-radius:var(--radius-sm);border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;"><span style="opacity:0.25;font-size:26px;">📷</span></div>';
+    }
+    cardsBox.innerHTML = skelHTML;
     if (statsBox) statsBox.textContent = "";
     if (loadMoreBtn) {
       loadMoreBtn.style.display = "none";
@@ -7894,3 +7908,16 @@ window.addEventListener("resize", () => {
     }
   }, 150);
 });
+
+
+function updateArchiveDocumentTitle(mode) {
+  const titles = {
+    home: "归档首页",
+    msg: "消息归档",
+    blog: "博客归档",
+    gallery: "写真相册",
+    letter: "成员信件",
+  };
+  const pageName = titles[mode] || "消息归档";
+  document.title = `${pageName} · 坂道监控`;
+}

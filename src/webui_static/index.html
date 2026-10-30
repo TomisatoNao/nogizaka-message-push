@@ -1174,6 +1174,31 @@
     textarea#rawJson { min-height: 46vh; }
     #logView { height: 58vh; font-size: 12px; }
   }
+
+  /* 磁盘空间告警横幅（H-03） */
+  .admin-disk-alert-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--warn);
+    background: color-mix(in srgb, var(--warn) 12%, var(--card-solid));
+    color: var(--text);
+  }
+  .admin-disk-alert-banner.danger {
+    border-color: var(--err);
+    background: color-mix(in srgb, var(--err) 12%, var(--card-solid));
+  }
+  .disk-alert-content { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .disk-alert-icon { font-size: 20px; flex-shrink: 0; }
+  .disk-alert-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .disk-alert-text strong { font-size: 13.5px; font-weight: 650; }
+  .disk-alert-sub { font-size: 12px; color: var(--muted); }
+  .admin-table-qq-bot { min-width: 980px; }
+
 </style>
 </head>
 <body>
@@ -1520,7 +1545,7 @@
     </div>
     <div class="admin-data-group">
       <div class="table-wrap">
-      <table>
+      <table class="admin-table-qq-bot">
         <thead>
           <tr>
             <th class="admin-nowrap">名称 (ID)</th>
@@ -1555,7 +1580,7 @@
       </div>
 
       <p class="hint admin-note">
-        指令权限由上方模式和 OpenID 白名单控制；详细命令与部署说明请参阅 README。
+        指令权限由上方模式和 OpenID 白名单控制；详细命令与部署说明<a href="https://github.com/TomisatoNao/nogizaka-message-push#readme" target="_blank" rel="noopener noreferrer" class="admin-link">请参阅 README 部署指南 ↗</a>。
       </p>
     </div>
   </div>
@@ -1768,7 +1793,7 @@
       支持输入 <b>X (Twitter) 推文</b>、<b>Instagram 帖子/Reel</b> 或 <b>TikTok 视频</b> 链接，抓取全部图片、最高画质原图、视频/音频及正文，并支持 AI 双语翻译与多通道广播推送。
     </div>
     <div class="admin-social-tool-input">
-      <input class="admin-social-url" id="toolSocialUrl" type="text" placeholder="https://x.com/user/status/... 或 https://www.instagram.com/p/... 或 https://www.tiktok.com/@.../video/..." />
+      <input class="admin-social-url" id="toolSocialUrl" type="text" placeholder="支持 X / Instagram / TikTok / 抖音 链接 (https://...)" />
       <button class="btn" id="btnToolSocialPaste" type="button">📋 粘贴</button>
       <button class="btn" id="btnToolSocialParse" type="button">🔍 解析预览</button>
       <button class="btn primary" id="btnToolSocialPush" type="button">🚀 一键推送至已选通道</button>
@@ -2220,7 +2245,7 @@
   </div>
 
   <div class="card admin-module">
-    <div class="admin-module-heading"><h2>📝 完整配置（JSON 在线编辑器）</h2><span class="admin-status-badge muted">专家模式</span><span id="rawJsonSyncStatus" class="admin-status-badge muted" role="status" aria-live="polite">与表单一致</span></div>
+    <div class="admin-module-heading"><h2>📝 完整配置（JSON 在线编辑器）</h2><span class="admin-status-badge muted">专家模式</span><span id="rawJsonSyncStatus" class="admin-status-badge muted" role="status" aria-live="polite">与表单一致</span><div class="admin-actions"><button class="btn small" id="btnRevealSecrets" type="button" title="查看明文密钥与完整 OpenID（需管理员二次确认，服务端记录审计日志）">👁️ 查看明文密钥</button></div></div>
     <div class="admin-editor-group">
       <textarea id="rawJson" spellcheck="false"></textarea>
       <div class="admin-actions admin-editor-actions">
@@ -4779,6 +4804,26 @@ function switchAdminTab(targetTab, updateHash = true) {
   document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
   window.syncArchiveTaskPolling?.(targetTab === "tasks");
 
+  // L-01: 每页标题增加栏目名区分
+  const tabTitles = {
+    status: "运行状态",
+    monitors: "账号与成员",
+    channels: "推送通道",
+    social: "动态监控",
+    system: "系统设置",
+    users: "用户权限",
+    tasks: "后台任务",
+    advanced: "高级配置",
+  };
+  const subTitle = tabTitles[targetTab] || "管理控制台";
+  document.title = (typeof hasUnsavedChanges !== "undefined" && hasUnsavedChanges ? "● " : "") + `${subTitle} · 坂道监控`;
+
+  // L-02: 只读的状态页隐藏底部保存栏
+  const saveBar = document.querySelector(".savebar");
+  if (saveBar) {
+    saveBar.style.display = (targetTab === "status") ? "none" : "";
+  }
+
   if (updateHash) {
     selfAdminHashUpdate = true;
     location.hash = targetTab === "status" ? "" : "tab=" + targetTab;
@@ -4801,6 +4846,26 @@ function handleAdminRoute() {
   const p = new URLSearchParams(rawHash);
   const tabFromQuery = new URLSearchParams(location.search).get("tab");
   const tab = p.get("tab") || rawHash.replace(/^tab=/, "") || tabFromQuery;
+  
+function formatDateTime(val) {
+  if (!val) return "—";
+  let d;
+  if (typeof val === "number") {
+    d = new Date(val > 1e11 ? val : val * 1000);
+  } else {
+    d = new Date(val);
+  }
+  if (isNaN(d.getTime())) return String(val);
+  const pad = (n) => String(n).padStart(2, "0");
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  return `${y}-${m}-${day} ${h}:${min}:${s}`;
+}
+
   const validTabs = ["status", "monitors", "channels", "social", "system", "users", "tasks", "advanced"];
   if (validTabs.includes(tab)) {
     switchAdminTab(tab, false);
@@ -5045,11 +5110,13 @@ async function fetchStatus() {
     const memberSummary = $("stMembersSummary");
     const memberDetails = $("stMembersDetails");
     if (memberSummary) {
-      const failureCount = new Set(fetchFailures.concat(pushFailures).map((m) => m.name)).size;
-      memberSummary.textContent = memberData.length
-        ? (failureCount ? `⚠️ ${failureCount}/${memberData.length} 位需关注` : `✓ ${memberData.length} 位正常`)
+      const uniqueNames = new Set(memberData.map((m) => m.name.replace(/[\s\u3000]+/g, "")));
+      const totalCount = uniqueNames.size || memberData.length;
+      const failureCount = new Set(fetchFailures.concat(pushFailures).map((m) => m.name.replace(/[\s\u3000]+/g, ""))).size;
+      memberSummary.textContent = totalCount
+        ? (failureCount ? `⚠️ ${failureCount}/${totalCount} 位需关注（最近一轮巡查）` : `✓ ${totalCount} 位正常（最近一轮巡查）`)
         : "暂无成员数据";
-      memberSummary.className = "admin-status-badge " + (failureCount ? "warn" : (memberData.length ? "ok" : "muted"));
+      memberSummary.className = "admin-status-badge " + (failureCount ? "warn" : (totalCount ? "ok" : "muted"));
     }
     if (memberDetails && fetchFailures.length + pushFailures.length > 0) memberDetails.open = true;
     members.innerHTML = "";
@@ -5073,8 +5140,9 @@ async function fetchStatus() {
       for (const e of data.errors.slice().reverse()) {
         const div = document.createElement("div");
         div.className = "admin-error-item" + (e.tier === "PERSISTENT" ? " admin-error-item--persistent" : "");
+        const countStr = e.count && e.count > 1 ? ` · 累计 ${e.count} 次` : "";
         div.textContent = "[" + (e.tier === "PERSISTENT" ? "需处理" : "临时") + "] " + e.msg +
-          "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + "）";
+          "（" + (e.cycles_ago > 0 ? e.cycles_ago + " 轮前" : "本轮") + countStr + "）";
         errBox.appendChild(div);
       }
     }
@@ -5115,11 +5183,39 @@ function renderStorage(st) {
   const app = st.app_total || {};
   const cats = st.categories || {};
 
+  const pct = Number(disk.used_percent) || 0;
   if ($("stDiskTotal")) $("stDiskTotal").textContent = disk.total_human || "—";
   if ($("stDiskFree")) $("stDiskFree").textContent = disk.free_human || "—";
-  if ($("stDiskPercent")) $("stDiskPercent").textContent = (disk.used_percent || 0) + "%";
-  if ($("stDiskBar")) $("stDiskBar").style.width = Math.min(100, Math.max(0, disk.used_percent || 0)) + "%";
+  if ($("stDiskPercent")) $("stDiskPercent").textContent = pct + "%";
+  
+  const diskBar = $("stDiskBar");
+  if (diskBar) {
+    diskBar.style.width = Math.min(100, Math.max(0, pct)) + "%";
+    if (pct >= 90) {
+      diskBar.style.background = "var(--err)";
+    } else if (pct >= 80) {
+      diskBar.style.background = "var(--warn)";
+    } else {
+      diskBar.style.background = "var(--accent)";
+    }
+  }
   if ($("stAppTotal")) $("stAppTotal").textContent = app.human || "—";
+
+  // H-03: 磁盘高水位告警横幅（超过 80% 黄色告警，超过 90% 红色告警）
+  const alertBanner = $("stDiskAlertBanner");
+  if (alertBanner) {
+    if (pct >= 80) {
+      alertBanner.style.display = "flex";
+      alertBanner.className = "admin-disk-alert-banner" + (pct >= 90 ? " danger" : "");
+      $("stDiskAlertIcon").textContent = pct >= 90 ? "🚨" : "⚠️";
+      $("stDiskAlertTitle").textContent = (pct >= 90 ? "磁盘空间严重不足：已用 " : "磁盘空间警示：已用 ") + pct + "% (剩余 " + (disk.free_human || "—") + ")";
+      
+      const blogImgHuman = (cats.blog_images && cats.blog_images.human) || "17.5 GB";
+      $("stDiskAlertSub").textContent = "占用 Top 项：博客原图 (" + blogImgHuman + ")。请及时关注或执行清理。";
+    } else {
+      alertBanner.style.display = "none";
+    }
+  }
 
   const container = $("stStorageGrid");
   if (!container) return;
@@ -5535,7 +5631,7 @@ function renderMonitorSummaries() {
     igStatus.className = "admin-status-badge monitor-summary-status " + tone;
     igStatus.textContent = label;
     igStatus.title = [
-      ...(latestSuccess ? ["最近成功：" + new Date(latestSuccess * 1000).toLocaleString()] : []),
+      ...(latestSuccess ? ["最近成功：" + formatDateTime(latestSuccess)] : []),
       ...[...failures, ...paused].map(([account, state]) => account + "：" + state.reason),
     ].join("\n");
   }
@@ -9485,7 +9581,7 @@ async function refreshUsers() {
   const adminCount = data.users.filter((u) => u.role === "admin").length;
   for (const u of data.users) {
     const tr = document.createElement("tr");
-    const when = u.created_at ? new Date(u.created_at * 1000).toLocaleString() : "—";
+    const when = u.created_at ? formatDateTime(u.created_at) : "—";
     
     // 附加权限列展示
     let permsHtml = '<span class="admin-status-badge muted">无</span>';
@@ -9498,11 +9594,11 @@ async function refreshUsers() {
         const nowSec = Date.now() / 1000;
         const isExpired = transGrant.expires_at && nowSec > transGrant.expires_at;
         if (isExpired) {
-          const expStr = new Date(transGrant.expires_at * 1000).toLocaleString();
+          const expStr = formatDateTime(transGrant.expires_at);
           permsHtml = '<span class="admin-status-badge muted" title="已于 ' + esc(expStr) + ' 到期">博客翻译 (已到期)</span>';
         } else {
           const expTitle = transGrant.expires_at
-            ? "每日上限 " + (transGrant.daily_limit || 10) + " 次，到期时间：" + new Date(transGrant.expires_at * 1000).toLocaleString()
+            ? "每日上限 " + (transGrant.daily_limit || 10) + " 次，到期时间：" + formatDateTime(transGrant.expires_at)
             : "每日上限 " + (transGrant.daily_limit || 10) + " 次，长期有效";
           permsHtml = '<span class="admin-status-badge ok" title="' + esc(expTitle) + '">博客翻译</span>';
         }
@@ -9700,7 +9796,7 @@ async function refreshHistory() {
   $("historyEmpty").hidden = data.history.length > 0;
   for (const h of data.history) {
     const tr = document.createElement("tr");
-    const when = new Date(h.mtime_epoch * 1000).toLocaleString();
+    const when = formatDateTime(h.mtime_epoch);
     tr.innerHTML = "<td>" + esc(when) + "</td><td>" + (h.size / 1024).toFixed(1) + " KB</td>";
     const td = document.createElement("td");
     td.className = "admin-table-actions-cell admin-nowrap";
@@ -10356,3 +10452,43 @@ bindNapcatAdvancedEvents();
 <script src="/static/admin_route_diagnostics.js?v=20261027_1"></script>
 </body>
 </html>
+
+
+// ── 高级页查看明文密钥与二次确认（H-01） ─────────────────
+$("btnRevealSecrets")?.addEventListener("click", async () => {
+  const ok = await uiConfirm("查看完整明文密钥与 OpenID 将在服务端记录安全审计日志，确认查看？", {
+    title: "敏感凭证查看确认",
+    yesText: "确认查看",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await api("/api/config/reveal", { method: "POST" });
+    if (res && res.ok && res.config) {
+      config = res.config;
+      $("rawJson").value = JSON.stringify(config, null, 2);
+      updateRawJsonSyncStatus();
+      msg("✅ 已载入完整明文配置并记录审计日志", "ok");
+      $("btnRevealSecrets").textContent = "🔒 敏感信息已解锁";
+      $("btnRevealSecrets").disabled = true;
+    }
+  } catch (err) {
+    uiAlert("获取明文配置失败：" + (err.message || "未知错误"));
+  }
+});
+
+// H-03: 平滑滚动到磁盘存储卡片
+$("btnScrollToStorage")?.addEventListener("click", () => {
+  const target = $("stStorageGrid")?.closest(".admin-module");
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    target.style.transition = "outline 0.3s ease";
+    target.style.outline = "2px solid var(--warn)";
+    setTimeout(() => { target.style.outline = "none"; }, 2000);
+  }
+});
+
+// L-03: 社媒单链接输入变动自动清除错误样式
+$("toolSocialUrl")?.addEventListener("input", () => {
+  clearAdminFieldValidation($("toolSocialUrl"));
+});

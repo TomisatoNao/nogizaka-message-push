@@ -1,3 +1,4 @@
+import re
 # ============================================================
 # health.py — 运行时健康状态追踪（纯内存，不持久化）
 # ============================================================
@@ -45,6 +46,24 @@ class MemberStats:
 
 
 # ── HealthTracker ─────────────────────────────────────
+
+
+def normalize_member_health_name(name: str) -> str:
+    """规范化成员姓名，去除全角/半角空格，确保带空格与不带空格映射到同一统计对象。"""
+    if not name:
+        return ""
+    return re.sub(r"[\s\u3000]+", "", str(name))
+
+
+@dataclass
+class _ErrorEntry:
+    msg: str
+    tier: ErrorTier
+    cycle: int
+    count: int = 1
+    last_cycle: int = 0
+
+
 class HealthTracker:
     """全局健康状态追踪器。
 
@@ -59,7 +78,8 @@ class HealthTracker:
         self._channels: dict[str, ChannelStats] = {}
         self._tokens: dict[str, TokenInfo] = {}
         self._members: dict[str, MemberStats] = {}
-        self._errors: deque[tuple[str, ErrorTier, int]] = deque()  # (msg, tier, cycle)
+        self._errors: deque[tuple[str, ErrorTier, int]] = deque()  # 兼容保留
+        self._error_entries: list[_ErrorEntry] = []
         self._alert_cooldowns: dict[str, float] = {}
         self._alert_last_sent: dict[str, float] = {}
 
@@ -383,19 +403,31 @@ class HealthTracker:
                              tier: ErrorTier | None = None,
                              err: str | None = None) -> None:
         with self._lock:
-            stats = self._members.setdefault(name, MemberStats(name=name))
+            key = normalize_member_health_name(name)
+            if key in self._members:
+                stats = self._members[key]
+                if (" " in name or "\u3000" in name) and " " not in stats.name and "\u3000" not in stats.name:
+                    stats.name = name
+            else:
+                stats = self._members.setdefault(key, MemberStats(name=name))
             stats.fetch_ok = ok
             if err:
                 stats.last_error = err
             if not ok and tier is not None:
-                self.record_error(f"{name} 拉取失败: {err or '未知错误'}", tier)
+                self.record_error(f"{stats.name} 拉取失败: {err or '未知错误'}", tier)
 
     def record_member_push(self, name: str, ok: bool) -> None:
         with self._lock:
-            stats = self._members.setdefault(name, MemberStats(name=name))
+            key = normalize_member_health_name(name)
+            if key in self._members:
+                stats = self._members[key]
+                if (" " in name or "\u3000" in name) and " " not in stats.name and "\u3000" not in stats.name:
+                    stats.name = name
+            else:
+                stats = self._members.setdefault(key, MemberStats(name=name))
             stats.push_ok = ok
             if not ok:
-                self.record_error(f"{name} 推送失败", ErrorTier.TRANSIENT)
+                self.record_error(f"{stats.name} 推送失败", ErrorTier.TRANSIENT)
 
     def record_token(self, acc_id: str, remaining: float) -> None:
         with self._lock:
@@ -441,6 +473,24 @@ class HealthTracker:
             while len(self._errors) >= self._error_buffer:
                 self._errors.popleft()
             self._errors.append((msg, tier, self._cycle_count))
+
+            # 聚合相同错误（按 msg + tier 聚合计数）
+            found = None
+            for e in self._error_entries:
+                if e.msg == msg and e.tier == tier:
+                    found = e
+                    break
+            if found is not None:
+                found.count += 1
+                found.last_cycle = self._cycle_count
+                self._error_entries.remove(found)
+                self._error_entries.append(found)
+            else:
+                self._error_entries.append(
+                    _ErrorEntry(msg=msg, tier=tier, cycle=self._cycle_count, count=1, last_cycle=self._cycle_count)
+                )
+                while len(self._error_entries) > self._error_buffer:
+                    self._error_entries.pop(0)
 
     def record_next_cycle(
         self,
@@ -499,7 +549,15 @@ class HealthTracker:
                     for m in self._members.values()
                 ],
                 "errors": [
-                    {"msg": msg, "tier": tier.name, "cycles_ago": self._cycle_count - cyc}
+                    {
+                        "msg": e.msg,
+                        "tier": e.tier.name,
+                        "cycles_ago": self._cycle_count - e.last_cycle,
+                        "count": e.count,
+                    }
+                    for e in self._error_entries[-20:]
+                ] if self._error_entries else [
+                    {"msg": msg, "tier": tier.name, "cycles_ago": self._cycle_count - cyc, "count": 1}
                     for msg, tier, cyc in list(self._errors)[-20:]
                 ],
             }
