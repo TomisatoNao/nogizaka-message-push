@@ -1736,10 +1736,7 @@ dialog.archive-dialog::backdrop {
 .footer-back-top:hover {
   color: var(--accent);
 }
-.admin-global-footer {
-  margin-top: auto;
-  padding-bottom: 76px; /* 避让底部可能出现的浮动保存条 */
-}
+.admin-global-footer,
 .login-global-footer,
 .notfound-global-footer {
   margin-top: auto;
@@ -1747,9 +1744,6 @@ dialog.archive-dialog::backdrop {
 @media (max-width: 640px) {
   .app-global-footer {
     padding: 24px 16px 28px;
-  }
-  .admin-global-footer {
-    padding-bottom: 84px;
   }
   .app-global-footer-inner {
     flex-direction: column;

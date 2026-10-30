@@ -13,7 +13,7 @@ def test_admin_task_center_resumes_persisted_tasks_after_page_reload():
     # the task-center controller exactly once.
     assert 'id="tabTasks"' in page and 'data-tab="tasks"' in page
     assert 'id="tab-tasks"' in page
-    assert page.count('/static/admin_tasks.js?v=20261031_3') == 1
+    assert page.count('/static/admin_tasks.js?v=20261031_4') == 1
     assert '"tasks"' in page[page.index("const validTabs") : page.index("const validTabs") + 180]
 
     # Auth controls the entry point, while the task controller waits for the
