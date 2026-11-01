@@ -2,12 +2,15 @@
 # napcat.py — NapCat/OneBot HTTP QQ 消息发送 & 消息链构造
 # ============================================================
 import asyncio
+import contextvars
 import json
 import re
 import threading
 import time
+from contextlib import contextmanager
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Iterator
 from src.utils import utc_to_jst
 
 import httpx
@@ -19,6 +22,50 @@ from src.logger import format_httpx_error, log_all
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
 _client: httpx.AsyncClient = None   # type: ignore
 _client_loop: asyncio.AbstractEventLoop | None = None
+
+
+@dataclass
+class NapCatDeliveryProgress:
+    """Per-route submission progress shared with an outer timeout task.
+
+    ``asyncio.wait_for`` copies the current context into its child task. The
+    mutable instance is intentionally route-local, so cancellation can report
+    whether this particular route had entered a POST without global state.
+    """
+
+    possible_submission: bool = False
+    confirmed_batches: int = 0
+    last_error_code: str = ""
+
+
+_delivery_progress: contextvars.ContextVar[NapCatDeliveryProgress | None] = (
+    contextvars.ContextVar("napcat_delivery_progress", default=None)
+)
+
+
+@contextmanager
+def track_delivery_progress(
+    progress: NapCatDeliveryProgress | None = None,
+) -> Iterator[NapCatDeliveryProgress]:
+    """Bind or reuse route-local progress for one NapCat send operation."""
+
+    current = _delivery_progress.get()
+    if progress is None and current is not None:
+        yield current
+        return
+    progress = progress or NapCatDeliveryProgress()
+    token = _delivery_progress.set(progress)
+    try:
+        yield progress
+    finally:
+        _delivery_progress.reset(token)
+
+
+def current_delivery_error() -> str:
+    """Return the detailed result retained for the current legacy send call."""
+
+    progress = _delivery_progress.get()
+    return progress.last_error_code if progress is not None else ""
 
 
 @dataclass(frozen=True)
@@ -392,6 +439,18 @@ def record_send_timeout(group_id: object | None = None, elapsed_ms: float | None
     _record_send_health(outcome, group_id, elapsed)
 
 
+def record_send_unconfirmed(
+    group_id: object | None = None,
+    elapsed_ms: float | None = None,
+) -> None:
+    """Record an outer cancellation after a NapCat POST may have been submitted."""
+
+    outcome = NapCatSendOutcome(True, "delivery_unconfirmed")
+    elapsed = max(0.0, float(elapsed_ms)) if elapsed_ms is not None else None
+    _send_gate.record(outcome, target=group_id, elapsed_ms=elapsed)
+    _record_send_health(outcome, group_id, elapsed)
+
+
 def set_session_state(state: str) -> None:
     """由 NapCat 会话监控同步在线/离线状态。"""
 
@@ -576,6 +635,20 @@ def _strip_payload_internal(value: object) -> object:
     return value
 
 
+def _mark_confirmed_batch() -> None:
+    progress = _delivery_progress.get()
+    if progress is not None:
+        progress.confirmed_batches += 1
+
+
+def _mark_pre_submission_failure() -> None:
+    """Clear a possible POST when the transport proves it never began."""
+
+    progress = _delivery_progress.get()
+    if progress is not None and progress.confirmed_batches == 0:
+        progress.possible_submission = False
+
+
 async def _post_payload_detailed(
     group_id: int,
     payload: Mapping[str, object],
@@ -651,6 +724,11 @@ async def _post_payload_detailed(
                         write=35.0,
                         pool=10.0,
                     )
+                progress = _delivery_progress.get()
+                if progress is not None:
+                    # Count only at the HTTP boundary; route planning, lock
+                    # acquisition, and the account rate limit are not sends.
+                    progress.possible_submission = True
                 resp = await request_client.post(api_url, **request_kwargs)
                 if resp.status_code == 200:
                     try:
@@ -661,11 +739,13 @@ async def _post_payload_detailed(
                             f"{_safe_excerpt(getattr(resp, 'text', ''))}",
                             is_error=True,
                         )
+                        _mark_confirmed_batch()
                         return NapCatSendOutcome(True)
                     if isinstance(response_body, dict) and (
                         response_body.get("status") == "ok"
                         or response_body.get("retcode") == 0
                     ):
+                        _mark_confirmed_batch()
                         return NapCatSendOutcome(True)
                     last_error = _classify_error(
                         resp.status_code,
@@ -694,25 +774,39 @@ async def _post_payload_detailed(
                 )
                 if resp.status_code == 502:
                     log_all("🔥 502，代理/协议问题", is_error=True)
+                if resp.status_code < 500:
+                    # A 4xx/429 response proves this attempt was rejected.
+                    # If a confirmed earlier batch exists, keep its progress
+                    # so an outer timeout still holds the aggregate route.
+                    _mark_pre_submission_failure()
                 # 4xx（除 429）不可重试，直接放弃
                 if resp.status_code < 500 and resp.status_code != 429:
                     return NapCatSendOutcome(False, last_error)
 
-            except httpx.ReadTimeout as e:
-                if action == "send_group_forward_msg":
-                    # 读取超时时请求体已经交给 NapCat，实际群消息很可能已
-                    # 发出。合并转发没有幂等键，重试只会产生重复卡片。
-                    log_all(
-                        "⚠️ OneBot 合并转发回包超时；请求已提交，送达未确认，"
-                        "禁止自动重试以避免重复消息 | "
-                        f"{_safe_excerpt(format_httpx_error(e))}",
-                        is_warning=True,
-                    )
-                    return NapCatSendOutcome(True, "delivery_unconfirmed")
-                last_error = "timeout"
+            except (
+                httpx.ReadTimeout,
+                httpx.WriteTimeout,
+                httpx.ReadError,
+                httpx.WriteError,
+                httpx.RemoteProtocolError,
+            ) as e:
+                # Once the POST has entered transport, losing the response or
+                # the connection during a read/write does not prove NapCat
+                # rejected it. The action has no idempotency key, so retrying
+                # can duplicate both normal messages and forward cards.
+                log_all(
+                    f"⚠️ OneBot {action_label}传输状态不确定；请求可能已提交，送达未确认，"
+                    "禁止自动重试以避免重复消息 | "
+                    f"{_safe_excerpt(format_httpx_error(e))}",
+                    is_warning=True,
+                )
+                return NapCatSendOutcome(True, "delivery_unconfirmed")
+            except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as e:
+                _mark_pre_submission_failure()
+                last_error = "timeout" if isinstance(e, httpx.TimeoutException) else "network_error"
                 log_all(
                     f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
-                    f"error_code=timeout | {_safe_excerpt(format_httpx_error(e))}",
+                    f"error_code={last_error} | {_safe_excerpt(format_httpx_error(e))}",
                     is_error=True,
                 )
             except httpx.TimeoutException as e:
@@ -846,11 +940,13 @@ async def _post_message(group_id: int, message_chain: list[dict], max_retries: i
     )
 
 
-async def send_qq_message(
+async def send_qq_message_detailed(
     group_id: int,
     message_chain: list[dict],
     max_retries: int = 3,
-) -> bool:
+) -> NapCatSendOutcome:
+    """Send message batches and retain an unknown receipt result."""
+
     batches = _split_video_record_chain(message_chain)
     started = time.monotonic()
     async with _send_gate:
@@ -872,10 +968,19 @@ async def send_qq_message(
                 attempted=False,
             )
             _record_send_health(outcome, group_id, elapsed_ms, attempted=False)
-            return False
+            progress = _delivery_progress.get()
+            if progress is not None:
+                progress.last_error_code = outcome.error_code
+            return outcome
 
+        confirmed_batches = 0
         for batch in batches:
             outcome = await _post_message_detailed(group_id, batch, max_retries)
+            if not outcome.ok and confirmed_batches:
+                # A later batch failed after an earlier one was confirmed.
+                # The whole route cannot safely be retried because it would
+                # repeat that confirmed prefix, so hold it as partial/unknown.
+                outcome = NapCatSendOutcome(True, "delivery_unconfirmed")
             _send_gate.record(
                 outcome,
                 target=group_id,
@@ -888,11 +993,39 @@ async def send_qq_message(
                     f"❌ QQ 消息发送彻底失败 | error_code={outcome.error_code}",
                     is_error=True,
                 )
-                return False
+                progress = _delivery_progress.get()
+                if progress is not None:
+                    progress.last_error_code = outcome.error_code
+                return outcome
+            if outcome.error_code == "delivery_unconfirmed":
+                # Do not send subsequent batches when the prior batch may
+                # already be visible; that can turn one unknown receipt into
+                # multiple duplicate messages.
+                elapsed_ms = (time.monotonic() - started) * 1000
+                _record_send_health(outcome, group_id, elapsed_ms)
+                progress = _delivery_progress.get()
+                if progress is not None:
+                    progress.last_error_code = outcome.error_code
+                return outcome
+            confirmed_batches += 1
 
     elapsed_ms = (time.monotonic() - started) * 1000
     _record_send_health(NapCatSendOutcome(True), group_id, elapsed_ms)
-    return True
+    progress = _delivery_progress.get()
+    if progress is not None:
+        progress.last_error_code = ""
+    return NapCatSendOutcome(True)
+
+
+async def send_qq_message(
+    group_id: int,
+    message_chain: list[dict],
+    max_retries: int = 3,
+) -> bool:
+    """Legacy accepted/not-accepted API; route state uses the detailed result."""
+
+    outcome = await send_qq_message_detailed(group_id, message_chain, max_retries)
+    return outcome.ok and outcome.error_code != "delivery_unconfirmed"
 
 
 async def send_group_forward_message(
@@ -933,15 +1066,20 @@ async def send_group_forward_message_detailed(
 
 
 __all__ = [
+    "NapCatDeliveryProgress",
     "NapCatSendGate",
     "NapCatSendOutcome",
     "build_message_chain",
+    "current_delivery_error",
     "get_send_gate_snapshot",
     "initialize",
     "record_send_timeout",
+    "record_send_unconfirmed",
     "send_group_forward_message",
     "send_group_forward_message_detailed",
     "send_qq_message",
+    "send_qq_message_detailed",
     "set_session_state",
     "strip_internal_keys",
+    "track_delivery_progress",
 ]

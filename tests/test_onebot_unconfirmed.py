@@ -1,4 +1,4 @@
-"""Unknown forward receipts are not success and never automatically resent."""
+"""Unknown OneBot receipts are held and never automatically resent."""
 from types import SimpleNamespace
 
 import httpx
@@ -29,6 +29,39 @@ class UncertainAdapter:
     async def send_post(self, *_args):
         self.calls += 1
         raise SocialDeliveryUnconfirmed('delivery_unconfirmed')
+
+
+class _OkResponse:
+    status_code = 200
+    text = '{"status":"ok"}'
+
+    @staticmethod
+    def json():
+        return {"status": "ok"}
+
+
+class _ScriptedClient:
+    def __init__(self, actions):
+        self.actions = list(actions)
+        self.calls = 0
+
+    async def post(self, *_args, **_kwargs):
+        self.calls += 1
+        action = self.actions.pop(0) if self.actions else _OkResponse()
+        if callable(action):
+            return await action()
+        if isinstance(action, BaseException):
+            raise action
+        return action
+
+    async def aclose(self):
+        pass
+
+
+def _napcat_target(group_id="100"):
+    return DeliveryTarget("napcat", group_id, "groups").bind_runtime(
+        {"group_id": int(group_id), "self_id": "10001"}
+    )
 
 
 def test_unknown_receipt_is_held_after_restart_not_marked_success(tmp_path):
@@ -97,3 +130,87 @@ def test_inbound_summary_does_not_label_unknown_as_success():
     assert '送达未确认' in lines[0][0]
     assert '成功' not in lines[0][0]
     assert lines[0][1]['is_warning']
+
+
+@pytest.mark.asyncio
+async def test_ordinary_read_timeout_is_one_post_and_legacy_false(monkeypatch):
+    client = _ScriptedClient([httpx.ReadTimeout("reply lost")])
+    monkeypatch.setattr(napcat.cfg, "QQ_BOT_API", "http://gateway:3000")
+    monkeypatch.setattr(napcat.cfg, "QQ_SEND_INTERVAL", 0)
+    napcat.initialize(client)
+
+    detailed = await napcat.send_qq_message_detailed(
+        100, [{"type": "text", "data": {"text": "hello"}}], max_retries=3
+    )
+    assert detailed.error_code == "delivery_unconfirmed"
+    assert detailed.ok is True  # accepted projection retained for detailed callers
+    assert client.calls == 1
+    assert napcat.get_send_gate_snapshot()["last_error"] == "delivery_unconfirmed"
+
+    client = _ScriptedClient([httpx.ReadTimeout("reply lost")])
+    napcat.initialize(client)
+    legacy = await napcat.send_qq_message(
+        100, [{"type": "text", "data": {"text": "hello"}}], max_retries=3
+    )
+    assert legacy is False
+    assert client.calls == 1
+    assert health.get_tracker().napcat_send_snapshot()["state"] == "unconfirmed"
+
+
+@pytest.mark.asyncio
+async def test_read_timeout_in_split_message_halts_remaining_batches(monkeypatch):
+    client = _ScriptedClient([_OkResponse(), httpx.ReadTimeout("video reply lost")])
+    monkeypatch.setattr(napcat.cfg, "QQ_BOT_API", "http://gateway:3000")
+    monkeypatch.setattr(napcat.cfg, "QQ_SEND_INTERVAL", 0)
+    napcat.initialize(client)
+    progress = napcat.NapCatDeliveryProgress()
+
+    with napcat.track_delivery_progress(progress):
+        outcome = await napcat.send_qq_message_detailed(
+            100,
+            [
+                {"type": "text", "data": {"text": "caption"}},
+                {"type": "video", "data": {"file": "video-1"}},
+                {"type": "record", "data": {"file": "audio-2"}},
+            ],
+            max_retries=3,
+        )
+    assert outcome.error_code == "delivery_unconfirmed"
+    assert client.calls == 2
+    assert progress.confirmed_batches == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_adapter_propagates_ordinary_unknown_receipt(monkeypatch):
+    client = _ScriptedClient([httpx.ReadTimeout("reply lost")])
+    monkeypatch.setattr(napcat.cfg, "QQ_BOT_API", "http://gateway:3000")
+    monkeypatch.setattr(napcat.cfg, "QQ_SEND_INTERVAL", 0)
+    napcat.initialize(client)
+
+    with pytest.raises(SocialDeliveryUnconfirmed):
+        await NapCatAdapter().send_text(_napcat_target(), "hello")
+    assert client.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ReadTimeout("read"),
+        httpx.WriteTimeout("write timeout"),
+        httpx.ReadError("read lost"),
+        httpx.WriteError("write lost"),
+        httpx.RemoteProtocolError("connection closed"),
+    ],
+)
+async def test_ambiguous_transport_error_is_not_retried(monkeypatch, error):
+    client = _ScriptedClient([error])
+    monkeypatch.setattr(napcat.cfg, "QQ_BOT_API", "http://gateway:3000")
+    monkeypatch.setattr(napcat.cfg, "QQ_SEND_INTERVAL", 0)
+    napcat.initialize(client)
+
+    outcome = await napcat.send_qq_message_detailed(
+        100, [{"type": "text", "data": {"text": "hello"}}], max_retries=3
+    )
+    assert outcome.error_code == "delivery_unconfirmed"
+    assert client.calls == 1

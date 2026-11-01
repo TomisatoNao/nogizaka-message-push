@@ -129,6 +129,17 @@ class NapCatAdapter:
         route = _target_value(target)
         return route.get("group_id") if isinstance(route, Mapping) else route
 
+    async def _send_message(self, target: DeliveryTarget, chain: list[dict]) -> bool:
+        """Keep the legacy adapter seam while retaining detailed route status."""
+
+        # Service-managed routes already have a progress context. Direct adapter
+        # callers get a local one so an unknown receipt cannot collapse to True.
+        with napcat.track_delivery_progress() as progress:
+            sent = await napcat.send_qq_message(self._group_id(target), chain)
+            if progress.last_error_code == "delivery_unconfirmed":
+                raise SocialDeliveryUnconfirmed("delivery_unconfirmed")
+            return bool(sent)
+
     @staticmethod
     def _forward_identity(target: DeliveryTarget) -> tuple[int, str] | None:
         """读取合并转发节点所需的机器人身份。
@@ -340,11 +351,9 @@ class NapCatAdapter:
 
     async def send_text(self, target: DeliveryTarget, text: str) -> bool:
         try:
-            return bool(
-                await napcat.send_qq_message(
-                    self._group_id(target),
-                    [{"type": "text", "data": {"text": text}}],
-                )
+            return await self._send_message(
+                target,
+                [{"type": "text", "data": {"text": text}}],
             )
         except (OSError, ValueError) as exc:
             self._log(
@@ -359,12 +368,7 @@ class NapCatAdapter:
             # 与旧版广播一致：媒体文件尚未落地时仍允许正文路由成功。
             return True
         try:
-            return bool(
-                await napcat.send_qq_message(
-                    self._group_id(target),
-                    [item],
-                )
-            )
+            return await self._send_message(target, [item])
         except (OSError, ValueError) as exc:
             self._log(
                 f"⚠️ NapCat 发送媒体失败: {type(exc).__name__}",
@@ -418,7 +422,7 @@ class NapCatAdapter:
                     "ℹ️ NapCat 多媒体缺少有效转发身份，回退普通消息链",
                     is_debug=True,
                 )
-            return bool(await napcat.send_qq_message(self._group_id(target), chain))
+            return await self._send_message(target, chain)
         except (OSError, ValueError) as exc:
             self._log(
                 f"⚠️ NapCat 发送动态失败: {type(exc).__name__}",
