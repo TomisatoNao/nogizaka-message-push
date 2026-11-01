@@ -2338,6 +2338,57 @@ function renderBlocks(blocks, mode) {
   return parts.join("<br><br>");
 }
 
+function updateTranslateButtonUI(post) {
+  const transBtn = $("brTranslate");
+  if (!transBtn || !post) return;
+
+  const canTranslate = !!(window._isArchiveAdmin || window._canTranslateBlog);
+  let quotaHint = "";
+  if (window._translationQuota && !window._isArchiveAdmin) {
+    const q = window._translationQuota;
+    quotaHint = "（今日剩余 " + q.remaining + "/" + q.daily_limit + " 次）";
+  }
+
+  // 统一通过 data-status 状态属性与 hidden 控制显隐，移除内联 style.display
+  transBtn.style.display = "";
+
+  if (!canTranslate) {
+    if (hasTranslation(post)) {
+      transBtn.dataset.status = "hidden";
+      transBtn.hidden = true;
+      transBtn.disabled = true;
+    } else {
+      transBtn.dataset.status = "no-perm";
+      transBtn.hidden = false;
+      transBtn.disabled = true;
+      transBtn.innerHTML = '<span class="btn-icon">🔒</span><span>需翻译权限</span>';
+      transBtn.title = "暂无译文，发起翻译需要管理员授予博客翻译权限";
+      transBtn.classList.remove("primary");
+    }
+    return;
+  }
+
+  transBtn.hidden = false;
+  transBtn.classList.add("primary");
+
+  if (hasTranslation(post) && post.translation_status !== "partial") {
+    transBtn.dataset.status = "completed";
+    transBtn.disabled = true;
+    transBtn.innerHTML = '<span class="btn-icon">✓</span><span>已翻译</span>';
+    transBtn.title = "该博客已包含完整译文";
+  } else if (hasTranslation(post)) {
+    transBtn.dataset.status = "partial";
+    transBtn.disabled = false;
+    transBtn.innerHTML = '<span class="btn-icon">↻</span><span>补齐翻译</span>';
+    transBtn.title = "补齐未翻译段落" + quotaHint;
+  } else {
+    transBtn.dataset.status = "untranslated";
+    transBtn.disabled = false;
+    transBtn.innerHTML = '<span class="btn-icon">🌐</span><span>翻译为中文</span>';
+    transBtn.title = "触发智能模型翻译" + quotaHint;
+  }
+}
+
 function updateModeSelectorUI() {
   const selector = $("brModeSelector");
   const delBtn = $("brDeleteTranslate");
@@ -2345,7 +2396,7 @@ function updateModeSelectorUI() {
   
   if (selector) {
     if (hasTrans) {
-      selector.style.display = "inline-flex";
+      selector.style.display = "";
       const btns = selector.querySelectorAll(".brm-btn");
       btns.forEach(btn => {
         btn.classList.toggle("active", btn.dataset.mode === currentTransMode);
@@ -2357,12 +2408,13 @@ function updateModeSelectorUI() {
 
   if (delBtn) {
     if (window._isArchiveAdmin && hasTrans) {
-      delBtn.style.display = "inline-flex";
+      delBtn.style.display = "";
     } else {
       delBtn.style.display = "none";
     }
   }
   updateFuriganaUI();
+  updateTranslateButtonUI(currentBlogReaderPost);
 }
 
 function updateFuriganaUI() {
@@ -2637,42 +2689,7 @@ function openBlogReader(post, bodyHtml, returnHash) {
     authorBadge.style.display = "";
   }
   
-  const transBtn = $("brTranslate");
-  if (transBtn) {
-    const canTranslate = !!(window._isArchiveAdmin || window._canTranslateBlog);
-    if (!canTranslate) {
-      if (hasTranslation(post)) {
-        transBtn.style.display = "none";
-      } else {
-        transBtn.style.display = "inline-flex";
-        transBtn.innerHTML = '<span class="btn-icon">🔒</span><span>需翻译权限</span>';
-        transBtn.disabled = true;
-        transBtn.title = "暂无译文，发起翻译需要管理员授予博客翻译权限";
-        transBtn.classList.remove("primary");
-      }
-    } else {
-      transBtn.style.display = "inline-flex";
-      transBtn.classList.add("primary");
-      let quotaHint = "";
-      if (window._translationQuota && !window._isArchiveAdmin) {
-        const q = window._translationQuota;
-        quotaHint = "（今日剩余 " + q.remaining + "/" + q.daily_limit + " 次）";
-      }
-      if (hasTranslation(post) && post.translation_status !== "partial") {
-        transBtn.innerHTML = '<span class="btn-icon">✓</span><span>已翻译</span>';
-        transBtn.disabled = true;
-        transBtn.title = "该博客已包含完整译文";
-      } else if (hasTranslation(post)) {
-        transBtn.innerHTML = '<span class="btn-icon">↻</span><span>补齐翻译</span>';
-        transBtn.disabled = false;
-        transBtn.title = "补齐未翻译段落" + quotaHint;
-      } else {
-        transBtn.innerHTML = '<span class="btn-icon">🌐</span><span>翻译为中文</span>';
-        transBtn.disabled = false;
-        transBtn.title = "触发智能模型翻译" + quotaHint;
-      }
-    }
-  }
+  updateTranslateButtonUI(post);
 
   renderCurrentBlogContent();
   if (isFuriganaActive && !post._furigana_html) {
@@ -3011,6 +3028,7 @@ if (brTranslateBtn) {
       showToast("翻译结果将保存到公共归档供所有读者查看", "info", 4500);
     }
 
+    brTranslateBtn.dataset.status = "translating";
     brTranslateBtn.innerHTML = '<span class="btn-icon">⏳</span><span>正在翻译...</span>';
     brTranslateBtn.disabled = true;
     
@@ -3028,6 +3046,7 @@ if (brTranslateBtn) {
       if (res.status === 409) {
         showToast(data.msg || "该博客正在翻译中，完成后刷新即可查看", "info", 4000);
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
+          brTranslateBtn.dataset.status = "other-translating";
           brTranslateBtn.innerHTML = '<span class="btn-icon">⏳</span><span>他人翻译中</span>';
           brTranslateBtn.disabled = false;
         }
@@ -3037,6 +3056,7 @@ if (brTranslateBtn) {
       if (res.status === 429) {
         showToast(data.msg || "今日翻译配额已用完或已有进行中的翻译任务", "warning", 5000);
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId) {
+          brTranslateBtn.dataset.status = "retry";
           brTranslateBtn.innerHTML = '<span class="btn-icon">🌐</span><span>重试翻译</span>';
           brTranslateBtn.disabled = false;
         }
@@ -3067,13 +3087,9 @@ if (brTranslateBtn) {
         if (currentBlogReaderPost && currentBlogReaderPost.id === reqBlogId && $("blogReader").style.display !== "none") {
           currentTransMode = "ja-zh";
           renderCurrentBlogContent();
+          updateTranslateButtonUI(targetPost);
           if (data.translation_status === "partial" || data.translation_complete === false) {
-            brTranslateBtn.innerHTML = '<span class="btn-icon">↻</span><span>补齐翻译</span>';
-            brTranslateBtn.disabled = false;
             showToast("部分段落翻译成功，可再次点击补齐", "info");
-          } else {
-            brTranslateBtn.innerHTML = '<span class="btn-icon">✓</span><span>已翻译</span>';
-            brTranslateBtn.disabled = true;
           }
         }
       } else {

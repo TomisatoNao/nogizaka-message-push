@@ -503,9 +503,45 @@
 }
 
 @media (max-width: 640px) {
-  .admin-route-toolbar { flex-direction: column; align-items: stretch; }
-  .admin-route-search-wrap { max-width: 100%; }
-  .admin-route-collapse-actions { margin-left: 0; justify-content: flex-end; }
+  .admin-route-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .admin-route-search-wrap {
+    flex: none;
+    width: 100%;
+    max-width: none;
+  }
+  .admin-route-search {
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: var(--text-sm);
+    box-sizing: border-box;
+  }
+  .admin-route-filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .admin-route-filter-group .admin-task-filter-pill {
+    min-height: 36px;
+    padding: 6px 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .admin-route-collapse-actions {
+    margin-left: 0;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .admin-route-collapse-actions .btn {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
   .admin-route-member-header { flex-direction: column; align-items: flex-start; gap: 8px; min-height: 44px; }
   .admin-route-member-tail { width: 100%; justify-content: flex-end; }
   .admin-route-channel-grid { grid-template-columns: minmax(0, 1fr); }

@@ -2193,53 +2193,84 @@ body {
   }
   @media (max-width: 768px) {
     .br-header {
-      padding: 4px 10px;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      align-items: center;
+      padding: 6px 10px;
+      gap: 6px 8px;
       height: auto;
       min-height: 52px;
-      flex-wrap: wrap;
     }
     .br-header-left {
+      grid-column: 1;
+      grid-row: 1;
       flex: none;
+      display: flex;
+      align-items: center;
     }
     .br-divider,
     .br-title-wrap {
       display: none !important;
     }
     .br-back-btn {
-      padding: 6px 10px;
+      min-width: 44px;
+      height: 44px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       font-size: 13px;
     }
     .br-back-btn span:not(.br-back-icon) {
       display: none;
     }
     .br-header-actions {
-      flex: 1 1 auto;
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
       justify-content: flex-end;
-      gap: 5px;
-      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
       min-width: 0;
     }
-    .br-mode-selector {
-      padding: 2px;
-      gap: 1px;
-    }
-    .brm-btn {
-      padding: 4px 7px;
-      font-size: 11px;
+    .br-action-btn {
+      min-width: 44px;
+      height: 44px;
+      padding: 0;
+      font-size: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     .br-action-btn span:not(.btn-icon) {
       display: none;
     }
-    .br-action-btn {
-      padding: 5px 8px;
-      font-size: 13px;
-      min-width: 44px;
-      height: 44px;
+    .br-mode-selector {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      display: flex;
       justify-content: center;
+      width: 100%;
+      margin-top: 2px;
+      border-radius: var(--radius-pill);
+      padding: 2px;
+      gap: 2px;
     }
-    /* 已翻译状态在正文仍有模型标记；窄屏隐藏禁用按钮，避免独占第三行。 */
-    #brTranslate:disabled { display: none; }
+    .brm-btn {
+      flex: 1 1 auto;
+      max-width: 120px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      padding: 0 8px;
+    }
+    /* 完整译文在窄屏隐藏“已翻译”完成按钮（正文已有模型标注与模式切换），避免占用头部空间；其余未译/补齐/处理中/无权限状态均保持可见 */
+    #brTranslate[data-status="completed"] {
+      display: none !important;
+    }
   }
 
   .br-content { padding: 30px 20px 80px; max-width: 760px; margin: 0 auto; width: 100%; line-height: 1.8; font-size: 16px; background: var(--card); min-height: 100vh; border-left: 1px solid var(--border); border-right: 1px solid var(--border); box-shadow: var(--shadow-sm); }

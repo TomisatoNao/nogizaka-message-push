@@ -651,3 +651,153 @@ def test_archive_home_cache_notice_and_reader_restore_across_viewports_and_theme
             assert page.evaluate("activeReadingRouteKey") == route_key
             context.close()
         browser.close()
+
+
+def test_blog_reader_mobile_header_geometry_and_states_across_viewports_and_themes(archive_reader_static_server):
+    playwright = pytest.importorskip("playwright.sync_api")
+
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        for width in (320, 360, 390, 402, 430):
+            for theme in ("dark", "light"):
+                ctx = browser.new_context(
+                    viewport={"width": width, "height": 844},
+                    color_scheme=theme,
+                )
+                page = ctx.new_page()
+
+                def mock_api(route):
+                    url = route.request.url
+                    if "/api/auth/me" in url:
+                        route.fulfill(
+                            status=200,
+                            content_type="application/json",
+                            body=json.dumps({"ok": True, "auth_enabled": True, "user": {"username": "admin", "role": "admin"}}),
+                        )
+                    else:
+                        route.fulfill(status=200, content_type="application/json", body="{}")
+
+                page.route("**/api/**", mock_api)
+                page.goto(f"{archive_reader_static_server}/archive.html")
+                page.evaluate(f"document.documentElement.setAttribute('data-theme', '{theme}')")
+                page.wait_for_function("window._canDownloadBlogCard !== undefined")
+
+                # State 1: 完整译文（管理员已翻译）
+                page.evaluate("""() => {
+                    window._isArchiveAdmin = true;
+                    openBlogReader({
+                        id: 201,
+                        group_key: 'nogizaka',
+                        author: '井上和',
+                        title: '移动端阅读器测试博客',
+                        date: '2026-11-01',
+                        url: 'https://example.invalid/blog/201',
+                        body_html: '<p>正文内容测试段落</p>',
+                        images_json: '[]',
+                        image_paths_json: '[]',
+                        content_json: '[{"type":"text","jp":"原文","zh":"译文"}]',
+                        translation_status: 'succeeded'
+                    });
+                }""")
+                page.wait_for_selector("#blogReader", state="visible")
+                page.wait_for_selector("#brModeSelector", state="visible")
+
+                header_box = page.locator(".br-header").bounding_box()
+                assert header_box["height"] <= 112, (
+                    f"[{width}px {theme}] Reader header height must be <=112px (at most 2 rows), got {header_box['height']}"
+                )
+
+                # 窄屏完整译文下，已翻译按钮应干净隐藏，避免独占第三行
+                trans_loc = page.locator("#brTranslate")
+                assert not trans_loc.is_visible(), f"[{width}px {theme}] Translate button should be hidden for fully translated post on mobile"
+
+                close_box = page.locator("#brClose").bounding_box()
+                share_box = page.locator("#brShare").bounding_box()
+                mode_box = page.locator("#brModeSelector").bounding_box()
+                # 返回按钮与动作按钮必须处于第一行（纵向对齐）
+                assert abs(close_box["y"] - share_box["y"]) <= 4, f"[{width}px {theme}] Close and Share must be on row 1"
+                # 模式选择器处于第二行
+                assert mode_box["y"] > close_box["y"] + 28, f"[{width}px {theme}] Mode selector must be on row 2"
+                assert mode_box["y"] + mode_box["height"] <= header_box["y"] + header_box["height"] + 2
+
+                # 触控区域必须达标（>=44px）
+                assert close_box["height"] >= 44, f"Close button height should be >=44px, got {close_box['height']}"
+                assert share_box["height"] >= 44, f"Share button height should be >=44px, got {share_box['height']}"
+
+                # State 2: 未翻译博客（发起翻译按钮可见且处于第一行，总高度 <= 112px）
+                page.evaluate("""() => {
+                    openBlogReader({
+                        id: 202,
+                        group_key: 'nogizaka',
+                        author: '井上和',
+                        title: '未翻译博客',
+                        date: '2026-11-01',
+                        url: 'https://example.invalid/blog/202',
+                        body_html: '<p>未翻译正文</p>',
+                        images_json: '[]',
+                        image_paths_json: '[]'
+                    });
+                }""")
+                page.wait_for_timeout(200)
+                assert trans_loc.is_visible(), f"[{width}px {theme}] Translate button should be visible for untranslated post"
+                trans_box = trans_loc.bounding_box()
+                h2_box = page.locator(".br-header").bounding_box()
+                assert h2_box["height"] <= 112, f"[{width}px {theme}] Untranslated header height <= 112px, got {h2_box['height']}"
+                assert abs(trans_box["y"] - close_box["y"]) <= 4, f"[{width}px {theme}] Translate button must be on row 1 with Close"
+                assert trans_box["height"] >= 44
+
+                # State 3: 部分译文（补齐翻译按钮可见且模式切换可见）
+                page.evaluate("""() => {
+                    openBlogReader({
+                        id: 203,
+                        group_key: 'nogizaka',
+                        author: '井上和',
+                        title: '部分翻译博客',
+                        date: '2026-11-01',
+                        url: 'https://example.invalid/blog/203',
+                        body_html: '<p>部分正文</p>',
+                        images_json: '[]',
+                        image_paths_json: '[]',
+                        content_json: '[{"type":"text","jp":"原文","zh":"译文"}]',
+                        translation_status: 'partial'
+                    });
+                }""")
+                page.wait_for_timeout(200)
+                assert trans_loc.is_visible(), f"[{width}px {theme}] Partial translate button should be visible"
+                assert "补齐" in (trans_loc.get_attribute("title") or "")
+                h3_box = page.locator(".br-header").bounding_box()
+                assert h3_box["height"] <= 112, f"[{width}px {theme}] Partial header height <= 112px, got {h3_box['height']}"
+
+                # 确保无横向滚动条
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                ctx.close()
+
+        # Desktop 验证保持单行优雅布局
+        ctx_desk = browser.new_context(viewport={"width": 1440, "height": 900})
+        page_d = ctx_desk.new_page()
+        page_d.route("**/api/**", mock_api)
+        page_d.goto(f"{archive_reader_static_server}/archive.html")
+        page_d.evaluate("""() => {
+            window._isArchiveAdmin = true;
+            openBlogReader({
+                id: 204,
+                group_key: 'nogizaka',
+                author: '井上和',
+                title: '桌面端博客',
+                date: '2026-11-01',
+                url: 'https://example.invalid/blog/204',
+                body_html: '<p>桌面正文</p>',
+                images_json: '[]',
+                image_paths_json: '[]',
+                content_json: '[{"type":"text","jp":"原文","zh":"译文"}]',
+                translation_status: 'succeeded'
+            });
+        }""")
+        page_d.wait_for_selector("#blogReader", state="visible")
+        desk_header = page_d.locator(".br-header").bounding_box()
+        assert desk_header["height"] <= 65, f"Desktop reader header must be single row (<=65px), got {desk_header['height']}"
+        # 桌面端完整译文展示已翻译按钮
+        assert page_d.locator("#brTranslate").is_visible()
+        assert page_d.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        ctx_desk.close()
+        browser.close()

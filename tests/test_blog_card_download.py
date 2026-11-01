@@ -360,7 +360,7 @@ def test_reader_download_button_layout_and_single_download(viewport, tmp_path):
                 }""")
                 assert page.locator("#brModeSelector").is_visible()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-                assert page.evaluate("document.querySelector('.br-header').getBoundingClientRect().height < 160")
+                assert page.evaluate("document.querySelector('.br-header').getBoundingClientRect().height <= 112")
                 page.screenshot(path=str(tmp_path / f"reader-{viewport[0]}-translated.png"))
             finally:
                 browser.close()
