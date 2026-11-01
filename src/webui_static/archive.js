@@ -3630,7 +3630,7 @@ function renderBubble(msg, container = $("timeline"), suppressDaySeparator = fal
     const isFav = Boolean(msg.is_favorite);
     const favLabel = isFav ? "取消收藏" : "收藏";
     favHtml =
-      '<button type="button" class="msg-action-btn fav-btn' + (isFav ? ' active' : '') + '" title="' + favLabel + '" aria-label="' + favLabel + '">' +
+      '<button type="button" class="msg-action-btn fav-btn' + (isFav ? ' active' : '') + '" title="' + favLabel + '" aria-label="' + favLabel + '" aria-pressed="' + (isFav ? 'true' : 'false') + '">' +
         '<span class="btn-icon">' + (isFav ? '⭐' : '☆') + '</span>' +
       '</button>';
   }
@@ -4550,6 +4550,7 @@ function syncFavoriteButton(msg, button) {
   button.classList.toggle("active", isFavorite);
   button.title = isFavorite ? "取消收藏" : "收藏";
   button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-pressed", isFavorite ? "true" : "false");
   const icon = button.querySelector(".btn-icon");
   if (icon) icon.textContent = isFavorite ? "⭐" : "☆";
 }

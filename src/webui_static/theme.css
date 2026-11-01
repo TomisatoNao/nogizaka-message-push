@@ -620,6 +620,9 @@ body { min-height: 100vh; min-height: 100dvh; overflow-x: clip; width: 100%; max
 
 /* ── 全局弹窗与对话框（Dialog & Modal） ── */
 dialog {
+  box-sizing: border-box;
+  max-height: min(90vh, 90dvh);
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card-solid);
@@ -943,6 +946,14 @@ dialog {
   .admin-task-actions { align-items: stretch; }
   .admin-task-actions .btn { min-height: 44px; }
   .admin-module .admin-actions .admin-task-refresh { min-height: 44px; }
+  .admin-task-filter-pill {
+    min-height: 38px;
+    padding: 6px 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
 }
 
 /* ── 归档任务筛选胶囊与进度条 ─────────────────────────────── */

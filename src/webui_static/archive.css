@@ -553,7 +553,7 @@ body {
     .cal-day { aspect-ratio: auto; height: 44px; font-size: 14px; }
     .cal-day .n { font-size: 11px; }
     .cal-dow { font-size: 11.5px; }
-    .cal-head button { padding: 6px 10px; min-height: 40px; font-size: 13px; }
+    .cal-head button { padding: 6px 10px; min-height: 44px; font-size: 13px; }
 
     /* 搜索栏紧凑单行合并 */
     #searchBox { flex: 1 1 auto; min-width: 0; }
@@ -569,7 +569,24 @@ body {
     .day-sep { width: 100%; }
     .bubble img { max-height: min(50vh, 480px); }
     .tag-chip { padding: 3px 12px; font-size: 13px; }
-    .copy-btn { padding: 7px 12px; font-size: 12.5px; }
+    .copy-btn {
+      padding: 0 12px;
+      min-height: 44px;
+      font-size: 12.5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+    }
+    .msg-action-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      font-size: 16px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
 
     /* 回到顶部：44px + 底部安全区 */
     #backTop {

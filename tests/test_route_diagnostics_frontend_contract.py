@@ -13,7 +13,7 @@ def test_route_diagnostics_panel_is_admin_gated_and_uses_one_script():
 
     script_url = "/static/admin_route_diagnostics.js?v=20261027_1"
     assert page.count(script_url) == 1
-    assert page.count('/static/admin_route_diagnostics.css?v=20261102_1') == 1
+    assert page.count('/static/admin_route_diagnostics.css?v=20261102_2') == 1
     assert 'id="routeDiagnosticsPanel" hidden' in page
     assert 'window.webAdminRole === "admin"' in script
     assert 'window.addEventListener("webadminauthready", syncAuthorization' in script

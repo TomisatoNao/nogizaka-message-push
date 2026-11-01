@@ -7,7 +7,7 @@
 <link href="/static/admin_icon.svg" rel="icon" type="image/svg+xml"/>
 <title>坂道监控 · 配置管理</title>
 <link href="/static/theme.css?v=20261031_4" rel="stylesheet"/>
-<link href="/static/admin_route_diagnostics.css?v=20261102_1" rel="stylesheet"/>
+<link href="/static/admin_route_diagnostics.css?v=20261102_2" rel="stylesheet"/>
 <script src="/static/theme.js?v=20260905_3"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
@@ -1128,7 +1128,7 @@
     .cmd-openid-card > .cmd-openid-actions {
       width: 100%; flex: 0 0 auto; justify-content: flex-start; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-soft);
     }
-    .cmd-openid-card > .cmd-openid-actions .btn { flex: 0 0 auto; min-height: 40px; }
+    .cmd-openid-card > .cmd-openid-actions .btn { flex: 0 0 auto; min-height: 44px; }
 
     /* 弹窗不溢出窄屏 */
     dialog { min-width: 0; width: min(92vw, 600px); padding: 16px 14px; }
@@ -1139,13 +1139,13 @@
     .member-pick-steps { grid-template-columns: 1fr; gap: 10px; margin-top: 14px; }
     .member-pick-step { padding: 12px; }
     .member-pick-account-row { align-items: stretch; flex-direction: column; gap: 8px; }
-    .member-pick-fetch { width: 100%; justify-content: center; min-height: 40px; }
+    .member-pick-fetch { width: 100%; justify-content: center; min-height: 44px; }
     .member-pick-toolbar { align-items: stretch; }
     .member-pick-toolbar-actions { width: 100%; }
-    .member-pick-toolbar-actions .btn { flex: 1 1 auto; min-height: 40px; }
+    .member-pick-toolbar-actions .btn { flex: 1 1 auto; min-height: 44px; }
     .member-pick-row { align-items: flex-start; gap: 8px; padding: 9px; }
     .member-pick-avatar { width: 32px; height: 32px; flex-basis: 32px; }
-    .member-pick-row .member-pick-add { align-self: center; min-height: 38px; }
+    .member-pick-row .member-pick-add { align-self: center; min-height: 44px; }
     .member-pick-footer { margin-top: 14px !important; }
 
     /* 底部保存条 + 安全区 */
@@ -1172,7 +1172,8 @@
     .config-save-states { gap: 5px 6px; }
 
     textarea#rawJson { min-height: 46vh; }
-    #logView { height: 58vh; font-size: 12px; }
+    #logView { height: 58vh; min-height: 140px; font-size: 12px; }
+    #logView:empty { height: auto; min-height: 80px; }
   }
 
   /* 磁盘空间告警横幅（H-03） */
