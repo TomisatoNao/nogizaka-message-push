@@ -219,6 +219,7 @@ class DeliveryService:
             f"route_id={route.route_id}"
         )
         self._log(f"📤 [社媒推送] 开始投递 | {context}", is_debug=True)
+        napcat_progress = None
 
         async def _invoke_adapter() -> bool:
             send_post = getattr(route.adapter, "send_post", None)
@@ -242,6 +243,14 @@ class DeliveryService:
             timeout = self._route_timeout_seconds(route)
             if timeout is None:
                 sent = await _invoke_adapter()
+            elif getattr(route.target, "channel", "") == "napcat":
+                from src.platforms import napcat
+
+                napcat_progress = napcat.NapCatDeliveryProgress()
+                # wait_for runs the adapter in a child task; the context carries
+                # this route-local progress object into NapCat's POST boundary.
+                with napcat.track_delivery_progress(napcat_progress):
+                    sent = await asyncio.wait_for(_invoke_adapter(), timeout=timeout)
             else:
                 sent = await asyncio.wait_for(_invoke_adapter(), timeout=timeout)
             attempt = _RouteAttempt(route.route_id, bool(sent))
@@ -260,11 +269,38 @@ class DeliveryService:
         except asyncio.TimeoutError:
             if getattr(route.target, "channel", "") == "napcat":
                 try:
-                    from src.platforms.napcat import record_send_timeout
+                    from src.platforms import napcat
 
-                    record_send_timeout(getattr(route.target, "target_id", None))
+                    uncertain = bool(
+                        napcat_progress
+                        and (
+                            napcat_progress.possible_submission
+                            or napcat_progress.confirmed_batches
+                        )
+                    )
+                    record = (
+                        napcat.record_send_unconfirmed
+                        if uncertain
+                        else napcat.record_send_timeout
+                    )
+                    record(getattr(route.target, "target_id", None))
                 except Exception:
-                    pass
+                    uncertain = bool(
+                        napcat_progress
+                        and (
+                            napcat_progress.possible_submission
+                            or napcat_progress.confirmed_batches
+                        )
+                    )
+            else:
+                uncertain = False
+            if uncertain:
+                self._log(
+                    f"⚠️ [社媒推送] 路由超时后提交状态未确认 | {context} "
+                    "| error=delivery_unconfirmed | 禁止自动重发",
+                    is_warning=True,
+                )
+                return _RouteAttempt(route.route_id, False, "delivery_unconfirmed")
             self._log(
                 f"⏱️ [社媒推送] 路由超时 | {context} | error=timeout",
                 is_error=True,
