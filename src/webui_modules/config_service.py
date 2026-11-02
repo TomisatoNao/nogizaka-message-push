@@ -7,6 +7,7 @@ src/webui_modules/config_service.py — Web 管理端配置校验、序列化、
 
 from datetime import datetime
 from typing import Any
+import errno
 import hashlib
 import hmac
 import json
@@ -507,6 +508,43 @@ def list_config_history(path: Path | None = None) -> list[dict]:
     return out
 
 
+def _replace_or_inplace_write(
+    target_path: Path,
+    content: str | bytes,
+    *,
+    tmp_path: Path,
+    newline: str | None = None,
+) -> None:
+    """写入临时文件并优先执行原子替换；对 Linux 单文件 bind mount (EBUSY/EXDEV/EPERM) 降级为原地截断覆盖写入。"""
+    try:
+        if isinstance(content, str):
+            with open(tmp_path, "w", encoding="utf-8", newline=newline) as f:
+                f.write(content)
+        else:
+            tmp_path.write_bytes(content)
+        try:
+            os.replace(tmp_path, target_path)
+        except OSError as exc:
+            if exc.errno in (errno.EBUSY, errno.EXDEV, errno.EPERM):
+                try:
+                    from src.logger import log_all
+                    log_all(f"⚠️ 原子替换受限 (errno={exc.errno})，降级为原地覆盖写入: {target_path}")
+                except Exception:
+                    pass
+                if isinstance(content, str):
+                    with open(target_path, "w", encoding="utf-8", newline=newline) as f:
+                        f.write(content)
+                else:
+                    target_path.write_bytes(content)
+            else:
+                raise
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def save_config(raw: dict, path: Path | None = None) -> None:
     """序列化并原子写回 config.json（写入前把旧版本快照进 history/）。"""
     from src.logger import log_all
@@ -543,18 +581,11 @@ def save_config(raw: dict, path: Path | None = None) -> None:
 
     tmp = target_path.with_suffix(".json.tmp")
     try:
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        os.replace(tmp, target_path)
+        _replace_or_inplace_write(target_path, text, tmp_path=tmp, newline="\n")
     except Exception:
         _restore_file_bytes(target_path, before_config)
         restore_history()
         raise
-    finally:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 _on_reload_cb = None
@@ -720,15 +751,7 @@ def update_env_file(values: dict[str, str], path: Path | None = None,
         lines.append(f"{key}={_quote_env(val)}")
     content = "\n".join(lines) + "\n"
     tmp = target_path.with_suffix(target_path.suffix + ".tmp")
-    try:
-        tmp.write_text(content, encoding="utf-8")
-        os.replace(tmp, target_path)
-    except Exception:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+    _replace_or_inplace_write(target_path, content, tmp_path=tmp)
     try:
         os.chmod(target_path, 0o600)
     except OSError:
@@ -744,14 +767,7 @@ def _restore_file_bytes(path: Path, content: bytes | None) -> None:
             pass
         return
     tmp = path.with_suffix(path.suffix + ".rollback.tmp")
-    try:
-        tmp.write_bytes(content)
-        os.replace(tmp, path)
-    finally:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+    _replace_or_inplace_write(path, content, tmp_path=tmp)
 
 
 def _read_env_assignments(path: Path) -> dict[str, str]:

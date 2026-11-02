@@ -819,3 +819,61 @@ def test_reload_report_does_not_claim_component_effectiveness(monkeypatch: pytes
     assert not_loaded["reload"]["config"] == "failed"
     assert not_loaded["reload"]["components"] == "not_scheduled"
     assert not_loaded["reload"]["application"]["state"] == "not_started"
+
+
+def test_env_save_ebusy_mountpoint_fallback_inplace_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import errno
+    from src.webui_modules import config_service
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("OLD_KEY=old_value\n", encoding="utf-8")
+
+    real_replace = config_service.os.replace
+    replaced_targets = []
+
+    def mock_replace(src, dst):
+        replaced_targets.append(Path(dst))
+        if Path(dst) == env_path:
+            raise OSError(errno.EBUSY, "Device or resource busy")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(config_service.os, "replace", mock_replace)
+
+    config_service.update_env_file({"NEW_KEY": "new_value"}, path=env_path)
+
+    assert env_path in replaced_targets
+    env_content = env_path.read_text(encoding="utf-8")
+    assert "OLD_KEY=old_value" in env_content
+    assert "NEW_KEY=" in env_content
+    assert "new_value" in env_content
+    temp_files = list(tmp_path.glob("*.tmp"))
+    assert len(temp_files) == 0
+
+
+def test_config_save_ebusy_mountpoint_fallback_inplace_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import errno
+    from src.webui_modules import config_service
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    real_replace = config_service.os.replace
+    replaced_targets = []
+
+    def mock_replace(src, dst):
+        replaced_targets.append(Path(dst))
+        if Path(dst) == config_path:
+            raise OSError(errno.EBUSY, "Device or resource busy")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(config_service.os, "replace", mock_replace)
+
+    test_data = {"version": 2, "groups": {"nogi": {"enabled": True}}}
+    config_service.save_config(test_data, path=config_path)
+
+    assert config_path in replaced_targets
+    content = config_path.read_text(encoding="utf-8")
+    assert '"version": 2' in content
+    assert '"nogi"' in content
+    temp_files = list(tmp_path.glob("*.tmp"))
+    assert len(temp_files) == 0
