@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import sys as _sys
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 from anyio import BrokenResourceError, ClosedResourceError
+from src import http_pool
 
 # 统一通过 cfg.X 访问，热重载后标量值（告警冷却、刷新阈值等）才能生效
 import src.config.config as cfg
@@ -241,15 +243,15 @@ async def _report_refresh_failure(
     previous_kind = _refresh_state.get(account_id, {}).get("kind")
     state = _record_refresh_failure(account_id, kind, detail)
     if kind == "transient_network":
-        cooldown = int(state.get("cooldown_remaining", 0))
+        cooldown = math.ceil(max(0.0, state["blocked_until"] - time.monotonic()))
         log_all(
             f"⚠️ 账号 {account_id} {platform} 续期暂时失败（{detail}），"
-            f"未判定凭据失效；{cooldown}s 后自动重试",
-            is_error=True,
+            f"未判定凭据失效；冷却 {cooldown}s 后允许巡查重试",
+            is_warning=True,
         )
         alert_text = (
-            f"📢 提示：账号 {account_id} {platform} 续期网络失败（{detail}）。"
-            f"未判定 Cookie/Token 失效，将在约 {cooldown}s 后自动重试。"
+            f"📢 提示：账号 {account_id} {platform} 续期遇到临时网络故障。"
+            f"未判定 Cookie/Token 失效，冷却约 {cooldown} 秒后将在后续巡查中重试。"
         )
     elif kind == "credential_invalid":
         log_all(
@@ -312,10 +314,11 @@ async def _post(url: str, *, headers: dict,
                 break
 
     if client_to_use is not None:
+        request_kwargs = dict(headers=headers, json=json_body, content=content, timeout=15)
         try:
-            return await client_to_use.post(
-                url, headers=headers, json=json_body, content=content, timeout=15,
-            )
+            if using_auth_client:
+                return await http_pool.post_auth_request(client_to_use, url, **request_kwargs)
+            return await client_to_use.post(url, **request_kwargs)
         except (httpx.PoolTimeout, httpx.ConnectError, httpx.ConnectTimeout) as exc:
             # 代理短暂中断后，httpcore 连接池可能继续持有不可用连接/槽位。
             # 认证池由主程序托管时原子替换它，并仅对「尚未获得连接」或
@@ -324,8 +327,6 @@ async def _post(url: str, *, headers: dict,
             if using_auth_client:
                 replacement = client_to_use
                 try:
-                    from src import http_pool
-
                     replacement = await http_pool.reset_auth_client(
                         expected_client=client_to_use,
                     )
@@ -343,21 +344,13 @@ async def _post(url: str, *, headers: dict,
                         f"error={type(exc).__name__}",
                         is_warning=True,
                     )
-                    return await replacement.post(
-                        url,
-                        headers=headers,
-                        json=json_body,
-                        content=content,
-                        timeout=15,
-                    )
+                    return await http_pool.post_auth_request(replacement, url, **request_kwargs)
             raise
         except (ClosedResourceError, BrokenResourceError):
             # 传输关闭可能发生在 POST 已发出之后；修复供后续使用，但不立即
             # 重放可能已经消费 refresh_token 的请求，交由现有账号冷却处理。
             if using_auth_client:
                 try:
-                    from src import http_pool
-
                     await http_pool.reset_auth_client(expected_client=client_to_use)
                 except asyncio.CancelledError:
                     raise
