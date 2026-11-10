@@ -21,6 +21,7 @@ def _configure_web_account(monkeypatch):
 
 def test_web_token_refresh_network_failure_returns_false_and_alerts(monkeypatch):
     _configure_web_account(monkeypatch)
+    monkeypatch.setattr(credentials.cfg, "TOKEN_REFRESH_NETWORK_COOLDOWN_SECONDS", 90)
     alerted = []
 
     async def fail_post(*_args, **_kwargs):
@@ -36,6 +37,9 @@ def test_web_token_refresh_network_failure_returns_false_and_alerts(monkeypatch)
     assert not asyncio.run(credentials.refresh_token("demo", 12345))
     assert alerted and alerted[0][0] == 12345
     assert "未判定" in alerted[0][1]
+    assert "冷却约 90 秒" in alerted[0][1]
+    assert "后续巡查" in alerted[0][1]
+    assert "simulated timeout" not in alerted[0][1]
 
 
 def test_web_token_refresh_persistence_failure_is_not_reported_as_success(monkeypatch):
@@ -371,3 +375,71 @@ async def test_auth_closed_transport_repairs_pool_without_replaying_post(monkeyp
         await credentials._post("https://api.test/update_token", headers={}, json_body={"refresh_token": "test"})
     assert calls == [1]
     assert repaired == [client]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_pending", [False, True])
+async def test_auth_pool_recovery_does_not_interrupt_another_account(monkeypatch, cancel_pending):
+    """A connection failure must not close a sibling's in-flight TLS stream."""
+    from anyio import ClosedResourceError
+    from src import http_pool
+
+    pending_started = asyncio.Event()
+    finish_pending = asyncio.Event()
+    calls = []
+
+    class OriginalClient:
+        is_closed = False
+
+        async def post(self, url, **_kwargs):
+            calls.append(("old", url))
+            if url.endswith("/failing"):
+                raise httpx.ConnectError("connection failed")
+            pending_started.set()
+            await finish_pending.wait()
+            if self.is_closed:
+                raise ClosedResourceError()
+            return httpx.Response(200)
+
+        async def aclose(self):
+            self.is_closed = True
+
+    class ReplacementClient(OriginalClient):
+        async def post(self, url, **_kwargs):
+            calls.append(("new", url))
+            return httpx.Response(200)
+
+    original, replacement = OriginalClient(), ReplacementClient()
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(http_pool, "_auth_client", original)
+    monkeypatch.setattr(http_pool, "_auth_loop", loop)
+    monkeypatch.setattr(http_pool, "new_auth_client", lambda: replacement)
+    monkeypatch.setattr(credentials, "_auth_http_client", original)
+    monkeypatch.setattr(credentials, "_client_loop", loop)
+
+    def rebind(client):
+        credentials.initialize(auth_client=client)
+
+    http_pool.register_auth_client_rebind(rebind)
+    sibling_url = "https://api.test/pending"
+    failing_url = "https://api.test/failing"
+    sibling = asyncio.create_task(credentials._post(sibling_url, headers={}))
+    try:
+        await asyncio.wait_for(pending_started.wait(), timeout=2)
+        assert (await credentials._post(failing_url, headers={})).status_code == 200
+        assert not original.is_closed
+        assert calls == [("old", sibling_url), ("old", failing_url), ("new", failing_url)]
+        if cancel_pending:
+            sibling.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await sibling
+        else:
+            finish_pending.set()
+            assert (await sibling).status_code == 200
+        assert original.is_closed
+        assert not replacement.is_closed
+    finally:
+        finish_pending.set()
+        await asyncio.gather(sibling, return_exceptions=True)
+        http_pool.unregister_auth_client_rebind(rebind)
+        await replacement.aclose()

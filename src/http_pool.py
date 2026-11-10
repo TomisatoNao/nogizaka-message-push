@@ -28,6 +28,8 @@ _thread_lock = threading.Lock()
 _lifecycle_locks: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
 _general_rebind_callbacks: list[Callable[[httpx.AsyncClient], None]] = []
 _auth_rebind_callbacks: list[Callable[[httpx.AsyncClient], None]] = []
+_auth_in_flight: dict[httpx.AsyncClient, int] = {}
+_retired_auth_clients: set[httpx.AsyncClient] = set()
 
 # 连接池关闭属于恢复路径，不能因为坏掉的 transport 无限阻塞主循环。
 CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
@@ -260,6 +262,33 @@ async def get_auth_client() -> httpx.AsyncClient:
         return current
 
 
+async def post_auth_request(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """Keep a managed auth client alive until its in-flight POSTs finish."""
+    loop = asyncio.get_running_loop()
+    with _thread_lock:
+        managed = client is _auth_client and loop is _auth_loop
+        if managed:
+            _auth_in_flight[client] = _auth_in_flight.get(client, 0) + 1
+    if not managed:
+        return await client.post(url, **kwargs)
+
+    try:
+        return await client.post(url, **kwargs)
+    finally:
+        close_retired = False
+        with _thread_lock:
+            remaining = _auth_in_flight[client] - 1
+            if remaining:
+                _auth_in_flight[client] = remaining
+            else:
+                del _auth_in_flight[client]
+                if client in _retired_auth_clients:
+                    _retired_auth_clients.remove(client)
+                    close_retired = True
+        if close_retired:
+            await _close_quietly(client)
+
+
 async def get_qq_client() -> httpx.AsyncClient:
     """获取或自愈重建 QQ 专属 HTTP 异步客户端（强制直连）。"""
     global _qq_client, _qq_loop
@@ -350,12 +379,15 @@ async def reset_auth_client(
             _auth_client = new_auth_client()
             _auth_loop = loop
             current = _auth_client
+            draining = stale is not None and stale in _auth_in_flight
+            if draining:
+                _retired_auth_clients.add(stale)
         _notify_auth_rebind(current)
-        closed = await _close_quietly(stale)
-        log.info(
-            "auth HTTP client reset complete (old_client_closed=%s)",
-            closed,
-        )
+        if draining:
+            log.info("auth HTTP client reset complete (old_client_draining=True)")
+        else:
+            closed = await _close_quietly(stale)
+            log.info("auth HTTP client reset complete (old_client_closed=%s)", closed)
         return current
 
 
@@ -389,6 +421,7 @@ __all__ = [
     "get_qq_client",
     "new_auth_client",
     "new_general_client",
+    "post_auth_request",
     "register_auth_client_rebind",
     "register_general_client_rebind",
     "reset_auth_client",
