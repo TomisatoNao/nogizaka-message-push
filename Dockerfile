@@ -15,11 +15,13 @@ ENV PYTHONUNBUFFERED=1 \
     WEB_ADMIN_HOST=0.0.0.0
 
 # 安装运行时系统依赖：ffmpeg (视频压制/转码/直播录制)、ca-certificates (HTTPS)、tzdata (时区)、curl (健康检查)、中日文字体 (博客长图渲染)
+# Playwright 自带的 Node 需要 libatomic.so.1 才能启动并安装 Chromium。
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
     tzdata \
     curl \
+    libatomic1 \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
