@@ -14,6 +14,10 @@ import time
 from src.logger import log_all
 
 
+class DeliveryStateError(RuntimeError):
+    """Required delivery state could not be read or persisted."""
+
+
 def _conn() -> sqlite3.Connection | None:
     from src.archive import init_db
     conn = init_db()
@@ -93,7 +97,7 @@ def _conn() -> sqlite3.Connection | None:
 def successful_routes(group_type: str, member_id: str, message_id: str) -> set[str]:
     conn = _conn()
     if conn is None:
-        return set()
+        raise DeliveryStateError("路由投递状态不可用")
     try:
         rows = conn.execute(
             "SELECT route_id FROM delivered_routes WHERE group_type=? AND member_id=? AND message_id=?",
@@ -102,7 +106,7 @@ def successful_routes(group_type: str, member_id: str, message_id: str) -> set[s
         return {str(row[0]) for row in rows}
     except sqlite3.Error as exc:
         log_all(f"⚠️ 读取路由投递状态失败: {type(exc).__name__}", is_error=True)
-        return set()
+        raise DeliveryStateError("读取路由投递状态失败") from exc
 
 
 def mark_successful_routes(
@@ -116,7 +120,7 @@ def mark_successful_routes(
         return
     conn = _conn()
     if conn is None:
-        return
+        raise DeliveryStateError("路由投递状态不可用")
     try:
         with conn:
             conn.executemany(
@@ -208,6 +212,7 @@ def mark_successful_routes(
                     )
     except sqlite3.Error as exc:
         log_all(f"⚠️ 保存路由投递状态失败: {type(exc).__name__}", is_error=True)
+        raise DeliveryStateError("保存路由投递状态失败") from exc
 
 
 def mark_pending_routes(
@@ -229,7 +234,7 @@ def mark_pending_routes(
         return
     conn = _conn()
     if conn is None:
-        return
+        raise DeliveryStateError("待投递路由状态不可用")
     errors = errors or {}
     attempted_route_ids = attempted_route_ids or set()
     now = time.time()
@@ -302,6 +307,7 @@ def mark_pending_routes(
                 )
     except sqlite3.Error as exc:
         log_all(f"⚠️ 保存待投递路由失败: {type(exc).__name__}", is_error=True)
+        raise DeliveryStateError("保存待投递路由失败") from exc
 
 
 def reconcile_pending_routes(
@@ -367,7 +373,7 @@ def pending_routes_for_member(
 
     conn = _conn()
     if conn is None:
-        return []
+        raise DeliveryStateError("待投递路由状态不可用")
     try:
         params: list[object] = [group_type, member_id]
         where = "group_type=? AND member_id=?"
@@ -403,7 +409,7 @@ def pending_routes_for_member(
         ]
     except (sqlite3.Error, TypeError, ValueError) as exc:
         log_all(f"⚠️ 读取待投递路由失败: {type(exc).__name__}", is_error=True)
-        return []
+        raise DeliveryStateError("读取待投递路由失败") from exc
 
 
 def route_lane_snapshot(
