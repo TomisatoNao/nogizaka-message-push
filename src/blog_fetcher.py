@@ -346,8 +346,9 @@ def _load_records(db: sqlite3.Connection | None = None) -> dict[str, str]:
         cur = conn.execute("SELECT group_key, last_url FROM blog_watermarks;")
         for row in cur.fetchall():
             records[row[0]] = row[1]
-    except Exception:  # nosec B110
-        pass
+    except sqlite3.Error as exc:
+        log_all(f"⚠️ 读取博客水位失败: {type(exc).__name__}", is_error=True)
+        raise
 
     # 若数据库中暂无记录，尝试从旧版 JSON 文件自动无缝迁移
     if not any(records.values()):
@@ -523,142 +524,130 @@ async def _process_single_post(post: dict, key: str, group_name: str,
     return post
 
 
+def _store_blog_post(db: sqlite3.Connection, post: dict) -> bool:
+    """Commit one article before the group's watermark can advance."""
+    with db:
+        cursor = db.execute("""
+            INSERT OR IGNORE INTO blog_posts
+            (group_key, author, title, url, date, body_html, body_text, translation, content_json, translation_model,
+             translation_status, translation_error, translation_request_id, translation_updated_at,
+             images_json, image_paths_json, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            post.get("group_key", ""), post.get("author", ""), post.get("title", ""), post["url"],
+            _normalize_date(post.get("date", "")),
+            post.get("body_html", ""), post.get("body", ""),
+            post.get("translation", ""),
+            post.get("content_json", ""),
+            post.get("translation_model", ""),
+            post.get("translation_status", "skipped"),
+            post.get("translation_error", ""),
+            post.get("translation_request_id", ""),
+            post.get("translation_updated_at", ""),
+            json.dumps(post.get("images") or [], ensure_ascii=False),
+            json.dumps(post.get("image_paths") or [], ensure_ascii=False),
+            json.dumps(post, ensure_ascii=False, default=str),
+        ))
+    return cursor.rowcount > 0
+
+
 async def run_blog_cycle(client: httpx.AsyncClient, db: sqlite3.Connection,
                          raw_config: dict) -> list[dict]:
-    """并发执行博客巡查（乃木坂46 / 樱坂46 / 日向坂46 多协程并发拉取与解析）。
-
-    返回的每个 post 额外包含 group_key 和 group_name。
-    """
+    """Fetch and archive blogs, advancing only across durably stored articles."""
     blog_cfg = raw_config.get("blog_monitor") or {}
     if not blog_cfg.get("enabled", True):
         return []
-
     records = _load_records(db)
-    records_dirty = False
-    new_posts = []
 
-    async def _check_group(group_name: str, fetch_fn, fetch_img_fn, key: str, need_detail: bool):
-        nonlocal records_dirty
+    async def _check_group(group_name, fetch_fn, fetch_img_fn, key, need_detail):
         if not blog_cfg.get(key, True):
-            return []  # 该团体被禁用
-
+            return []
         try:
             posts = await fetch_fn(client)
         except Exception:
             return []
-
         if not posts:
             return []
 
         last_url = records.get(key, "")
         unseen = []
-        for p in posts:
-            if p["url"] == last_url:
+        for post in posts:
+            if post["url"] == last_url:
                 break
-            unseen.append(p)
+            unseen.append(post)
 
-        # 首轮初始化：只记最新水印，不做推送
+        # First-run and out-of-window skips are deliberate anti-flood policies.
         if not last_url:
-            records[key] = posts[0]["url"]
-            records_dirty = True
+            _save_records({key: posts[0]["url"]}, db)
             log_all(f"📝 [{group_name}] 首轮初始化，记录水印: {posts[0]['url'][:60]}...")
             return []
-        # 离线恢复：持久化记录之后很久没抓取（水印脱节），直接重置水印，不推送积压
-        elif len(unseen) == len(posts):
-            records[key] = posts[0]["url"]
-            records_dirty = True
+        if len(unseen) == len(posts):
+            _save_records({key: posts[0]["url"]}, db)
             log_all(f"📝 [{group_name}] 水印已脱节，重置水印到最新，忽略中间积压的推送...")
             return []
 
-        # 双重防御：过滤掉数据库中已经存在（已归档过）以及正在处理中的博客
-        real_unseen = []
-        for p in unseen:
-            url = p["url"]
-            if url in _in_flight_blogs:
-                continue
-            try:
-                cur = db.execute("SELECT 1 FROM blog_posts WHERE url = ? LIMIT 1;", (url,))
-                if not cur.fetchone():
-                    real_unseen.append(p)
-                    _in_flight_blogs.add(url)
-            except Exception:
-                real_unseen.append(p)
-                _in_flight_blogs.add(url)
-
-        # 推进最新水印
-        if posts[0]["url"] != records.get(key):
-            records[key] = posts[0]["url"]
-            records_dirty = True
-
-        if not real_unseen:
+        try:
+            real_unseen = [
+                post for post in reversed(unseen)
+                if post["url"] not in _in_flight_blogs
+                and not db.execute(
+                    "SELECT 1 FROM blog_posts WHERE url=? LIMIT 1", (post["url"],)
+                ).fetchone()
+            ]
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ [{group_name}] 读取博客归档状态失败: {type(exc).__name__}", is_error=True)
             return []
 
-        log_all(f"📝 [{group_name}] 发现 {len(real_unseen)} 篇新博客，并发解析中...")
-
-        # 并发解析新博客
-        tasks = [
-            _process_single_post(post, key, group_name, client, need_detail, fetch_img_fn)
-            for post in reversed(real_unseen)
-        ]
-        return await gather_cancel_safe(tasks, cleanup_timeout=5.0)
-
-    # 3 大团博客并行并发拉取
-    group_tasks = [
-        _check_group(group_name, fetch_fn, fetch_img_fn, key, need_detail)
-        for group_name, fetch_fn, fetch_img_fn, key, need_detail in TASKS
-    ]
-    results = await gather_cancel_safe(group_tasks, cleanup_timeout=5.0)
-
-    # 汇总并安全写入 SQLite 归档
-    for group_posts in results:
-        for post in group_posts:
-            persisted = False
+        async def _process_and_store(post):
+            url = post["url"]
+            if url in _in_flight_blogs:
+                return None
+            _in_flight_blogs.add(url)
             try:
-                db.execute("""
-                    INSERT OR IGNORE INTO blog_posts
-                    (group_key, author, title, url, date, body_html, body_text, translation, content_json, translation_model,
-                     translation_status, translation_error, translation_request_id, translation_updated_at,
-                     images_json, image_paths_json, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    post.get("group_key", ""), post.get("author", ""), post.get("title", ""), post["url"],
-                    _normalize_date(post.get("date", "")),
-                    post.get("body_html", ""), post.get("body", ""),
-                    post.get("translation", ""),
-                    post.get("content_json", ""),
-                    post.get("translation_model", ""),
-                    post.get("translation_status", "skipped"),
-                    post.get("translation_error", ""),
-                    post.get("translation_request_id", ""),
-                    post.get("translation_updated_at", ""),
-                    json.dumps(post.get("images") or [], ensure_ascii=False),
-                    json.dumps(post.get("image_paths") or [], ensure_ascii=False),
-                    json.dumps(post, ensure_ascii=False, default=str),
-                ))
-                db.commit()
-                persisted = True
-            except Exception:  # nosec B110
+                parsed = await _process_single_post(
+                    post, key, group_name, client, need_detail, fetch_img_fn
+                )
+                return parsed if _store_blog_post(db, parsed) else None
+            except Exception as exc:
                 log_all(
-                    f"⚠️ 博客归档落库失败 | trace={post.get('translation_request_id', '') or '-'} | "
-                    f"url={post.get('url', '')[:80]}",
+                    f"⚠️ 博客解析或归档失败 | group={key} | "
+                    f"url={url[:80]} | error={type(exc).__name__}",
                     is_error=True,
                 )
+                return None
             finally:
-                # 只在当前巡查批次内去重；落库后允许后续巡查正常处理新的 URL，
-                # 也避免一次 SQLite 异常把 URL 永久卡在内存集合中。
-                _in_flight_blogs.discard(post.get("url", ""))
+                # The owning task releases its reservation even on cancellation.
+                # A task still cleaning up keeps ownership until it actually exits.
+                _in_flight_blogs.discard(url)
 
-            if not persisted:
-                # 落库失败时不推进水印，下一轮才能自动重试，而不是静默丢失博客。
-                continue
-            records[post.get("group_key", "")] = post["url"]
-            new_posts.append(post)
+        if real_unseen:
+            log_all(f"📝 [{group_name}] 发现 {len(real_unseen)} 篇新博客，并发解析中...")
+        results = await gather_cancel_safe(
+            [_process_and_store(post) for post in real_unseen], cleanup_timeout=5.0
+        )
 
-    # 写回水印到 SQLite 数据库
-    if records_dirty:
-        _save_records(records, db)
+        # A newer article may finish first. Advance only over the contiguous
+        # oldest-first prefix, leaving failures and other owners' work behind.
+        safe_url = last_url
+        try:
+            for post in reversed(unseen):
+                if not db.execute(
+                    "SELECT 1 FROM blog_posts WHERE url=? LIMIT 1", (post["url"],)
+                ).fetchone():
+                    break
+                safe_url = post["url"]
+        except sqlite3.Error as exc:
+            log_all(f"⚠️ [{group_name}] 检查博客安全水位失败: {type(exc).__name__}", is_error=True)
+            safe_url = last_url
+        if safe_url != last_url:
+            _save_records({key: safe_url}, db)
+        return [post for post in results if post is not None]
 
-    return new_posts
+    results = await gather_cancel_safe([
+        _check_group(group_name, fetch_fn, fetch_img_fn, key, need_detail)
+        for group_name, fetch_fn, fetch_img_fn, key, need_detail in TASKS
+    ], cleanup_timeout=5.0)
+    return [post for group_posts in results for post in group_posts]
 
 
 def _is_night_jst() -> bool:

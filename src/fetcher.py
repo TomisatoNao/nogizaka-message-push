@@ -25,6 +25,7 @@ from src.dedup import load_sent_ids, save_sent_id
 from src.translator import translate_text_with_model
 from src.notifier import matching_member_route_ids, send_member_message_detailed
 from src.delivery_state import (
+    DeliveryStateError,
     mark_pending_routes,
     mark_successful_routes,
     pending_routes_for_member,
@@ -648,6 +649,17 @@ async def _push_member_messages(member: dict, new_msgs: list,
                     await write_time_record(time_file, file_lock, l_time_ref[0])
                 _health_tracker().record_member_push(m_name, False)
                 return False
+    except DeliveryStateError as exc:
+        # l_time_ref advances only after this message's route state is durable.
+        # Stop before a later message can move the watermark across this gap.
+        archive.set_timeline_watermark(member["group_type"], member["m_id"], l_time_ref[0])
+        log_all(
+            f"⚠️ [{m_name}] 投递状态保存或读取失败，保留安全水位 | "
+            f"error={type(exc).__name__}",
+            is_error=True,
+        )
+        _health_tracker().record_member_push(m_name, False)
+        return False
     except asyncio.CancelledError:
         # 路由状态和 sent_id 在单条消息成功后已落盘；取消可能发生在
         # 后续发送间隔或下一条消息等待期间。先 checkpoint 最后一条成功
