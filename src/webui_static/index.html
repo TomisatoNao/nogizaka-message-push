@@ -4305,6 +4305,13 @@ function validateAdminSocialAccounts(id, errors) {
 function validateAdminConfig() {
   clearAdminValidation();
   const errors = [];
+  // 仅接受最近加载/保存快照中的原有脱敏值；真实的新输入仍须通过格式校验。
+  let saved = {};
+  try { saved = JSON.parse(baseline || "{}"); } catch (_) {}
+  const unchangedMask = (value, previous) => value.includes("****") && value === previous;
+  const savedBots = Array.isArray(saved.qq_official_bots) ? saved.qq_official_bots : [];
+  const savedCommandOpenids = (Array.isArray(saved.qq_commands?.allow_openids) ? saved.qq_commands.allow_openids : [])
+    .map(item => typeof item === "string" ? item : item?.openid);
 
   // 所有可见数字输入均走同一套严格规则；区间再做一次跨字段校验。
   for (const id of Object.keys(ADMIN_NUMBER_RULES)) validateAdminNumberField(id, errors);
@@ -4422,7 +4429,8 @@ function validateAdminConfig() {
     }
     for (const [key, label] of [["target_openid", "个人 OpenID"], ["group_openid", "群 OpenID"]]) {
       const value = String(bot?.[key] || "").trim();
-      if (value && !/^[A-Za-z0-9_-]{4,256}$/.test(value)) {
+      const previous = savedBots.find(item => item?.name === name)?.[key];
+      if (value && !unchangedMask(value, previous) && !/^[A-Za-z0-9_-]{4,256}$/.test(value)) {
         const input = document.querySelectorAll("#qqBotRows .admin-table-input--" + (key === "target_openid" ? "openid" : "group-openid"))[index];
         adminValidationError(errors, input, label + "只能包含字母、数字、下划线或连字符（4–256 位）");
       }
@@ -4460,7 +4468,7 @@ function validateAdminConfig() {
   const commandOpenids = window._cmdOpenids || [];
   commandOpenids.forEach((item, index) => {
     const value = String(item?.openid || "").trim();
-    if (!/^[A-Za-z0-9_-]{4,256}$/.test(value)) errors.push("第 " + (index + 1) + " 个指令授权 OpenID 格式无效");
+    if (!savedCommandOpenids.some(previous => unchangedMask(value, previous)) && !/^[A-Za-z0-9_-]{4,256}$/.test(value)) errors.push("第 " + (index + 1) + " 个指令授权 OpenID 格式无效");
   });
   return Array.from(new Set(errors));
 }
