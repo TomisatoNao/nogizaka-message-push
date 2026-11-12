@@ -888,3 +888,56 @@ def test_config_application_pagehide_clears_poll_timer(admin_config_server):
         if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
             pytest.skip(f"Playwright Chromium 不可用：{exc}")
         raise
+
+@pytest.mark.parametrize("viewport_name,theme", [("desktop", "light"), ("desktop", "dark"), ("mobile", "light"), ("mobile", "dark")])
+def test_add_account_preserves_existing_masked_openids(admin_config_server, viewport_name, theme):
+    from src.webui_modules.config_service import redact_sensitive_config, restore_sensitive_config
+
+    playwright = pytest.importorskip("playwright.sync_api")
+    original = _fixture_config()
+    original["qq_commands"]["allow_openids"] = [
+        {"openid": "EXISTING_USER_OPENID", "type": "user"},
+        {"openid": "EXISTING_GROUP_OPENID", "type": "group"},
+    ]
+    config = redact_sensitive_config(original)
+    writes = []
+
+    def handle(route):
+        path = urlsplit(route.request.url).path
+        if route.request.method == "PUT" and path == "/api/config":
+            submitted = route.request.post_data_json
+            writes.append(restore_sensitive_config(submitted, original))
+            _fulfill(route, {"ok": True, "revision": "revision-local-2"})
+            return
+        _fulfill(route, _response_for(path, config))
+
+    with playwright.sync_playwright() as p:
+        browser, context, page = _new_page(p, admin_config_server, handle, viewport_name, theme)
+        try:
+            page.locator('.header-nav .nav-tab[data-tab="monitors"], nav.tabs button[data-tab="monitors"]').first.click()
+            page.locator("#btnAddAccount").click()
+            page.locator("#accId").fill("huoer")
+            page.locator("#accSave").click()
+            page.locator("#accountDialog").wait_for(state="hidden")
+            page.locator("#btnSave").click()
+            page.locator("#confirmDialog").wait_for(state="visible")
+            page.locator("#confirmYes").click()
+            page.wait_for_function("document.querySelector('#saveOutcome')?.hidden === false")
+            assert len(writes) == 1
+            assert "huoer" in writes[0]["accounts"]
+            for key in ("target_openid", "group_openid"):
+                assert writes[0]["qq_official_bots"][0][key] == original["qq_official_bots"][0][key]
+            assert [(item["openid"], item["type"]) for item in writes[0]["qq_commands"]["allow_openids"]] == [(item["openid"], item["type"]) for item in original["qq_commands"]["allow_openids"]]
+            # Newly typed invalid values and invented masks must still fail validation.
+            for value in ("bad value", "fake****mask", "abc"):
+                errors = page.evaluate("""value => {
+                    config.qq_official_bots[0].target_openid = value;
+                    window._cmdOpenids = [{openid: value, type: 'user'}];
+                    return validateAdminConfig();
+                }""", value)
+                assert any("个人 OpenID" in error for error in errors)
+                assert any("指令授权 OpenID" in error for error in errors)
+            assert len(writes) == 1
+        finally:
+            context.close()
+            browser.close()

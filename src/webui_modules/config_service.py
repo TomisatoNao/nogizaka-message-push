@@ -303,6 +303,11 @@ def validate_config(raw: dict, schema_path: Path | None = None) -> list[str]:
     if len(napcat_token) > 512 or any(ch.isspace() for ch in napcat_token) or "\x00" in napcat_token:
         errors.append("NapCat 访问密钥不能包含空白字符，且最多 512 个字符")
 
+    for index, item in enumerate((raw.get("qq_commands") or {}).get("allow_openids", [])):
+        openid = item if isinstance(item, str) else item.get("openid", "")
+        if is_masked_secret(openid):
+            errors.append(f"第 {index + 1} 个指令授权 OpenID 无法唯一还原，请重新填写完整 OpenID")
+
     accounts = raw.get("accounts", {})
     seen: set[tuple[str, str]] = set()
     social_patterns = {
@@ -1142,33 +1147,30 @@ def restore_sensitive_config(submitted_raw: dict, existing_raw: dict) -> dict:
         sub_allow = sub_qq.get("allow_openids")
         old_allow = old_qq.get("allow_openids") or []
         if isinstance(sub_allow, list) and isinstance(old_allow, list):
-            old_allow_mask_map = {}
-            for item in old_allow:
-                if isinstance(item, str) and item:
-                    old_allow_mask_map[mask_secret_value(item)] = item
-                elif isinstance(item, dict) and item.get("openid"):
-                    old_allow_mask_map[mask_secret_value(item["openid"])] = item["openid"]
+            def restore_allowed_openid(oid, submitted_item):
+                if not is_masked_secret(oid):
+                    return oid
+                candidates = set()
+                for old_item in old_allow:
+                    candidate = old_item if isinstance(old_item, str) else old_item.get("openid")
+                    if not candidate or mask_secret_value(candidate) != oid:
+                        continue
+                    # 相同遮罩可能对应不同用户/群，不能让字典后项覆盖前项。
+                    if isinstance(submitted_item, dict) and isinstance(old_item, dict):
+                        if submitted_item.get("type", "group") != old_item.get("type", "group"):
+                            continue
+                    candidates.add(candidate)
+                # 无法唯一还原时保留遮罩，由正式格式校验拒绝，避免误授权。
+                return next(iter(candidates)) if len(candidates) == 1 else oid
 
             new_allow = []
-            for i, item in enumerate(sub_allow):
+            for item in sub_allow:
                 if isinstance(item, str):
-                    orig = old_allow_mask_map.get(item)
-                    if not orig and is_masked_secret(item) and i < len(old_allow):
-                        cand = old_allow[i] if isinstance(old_allow[i], str) else old_allow[i].get("openid")
-                        if cand and mask_secret_value(cand) == item:
-                            orig = cand
-                    new_allow.append(orig or item)
+                    new_allow.append(restore_allowed_openid(item, item))
                 elif isinstance(item, dict):
                     d = dict(item)
-                    oid = d.get("openid")
-                    if oid:
-                        orig = old_allow_mask_map.get(oid)
-                        if not orig and is_masked_secret(oid) and i < len(old_allow):
-                            cand = old_allow[i] if isinstance(old_allow[i], str) else old_allow[i].get("openid")
-                            if cand and mask_secret_value(cand) == oid:
-                                orig = cand
-                        if orig:
-                            d["openid"] = orig
+                    if d.get("openid"):
+                        d["openid"] = restore_allowed_openid(d["openid"], d)
                     new_allow.append(d)
                 else:
                     new_allow.append(item)
