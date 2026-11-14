@@ -10,7 +10,7 @@ import httpx
 
 import src.config.config as cfg
 from src.logger import log_all
-from src.platforms.napcat import record_send_timeout, send_qq_message
+from src.platforms.napcat import record_send_timeout, send_qq_message, track_delivery_progress
 from src.platforms import qq_official
 from src.platforms.qq_official import get_configured_bots, has_bots
 from src.platforms import tgbot
@@ -115,12 +115,22 @@ async def _run_delivery(
     """执行单个路由，确保一个协程异常不会吞掉同批其他通道。"""
     if known_error:
         return DeliveryAttempt(channel, route_id, label, target, False, known_error)
+
+    async def invoke_sender() -> tuple[bool, str]:
+        if channel == "napcat":
+            # 布尔兼容接口会丢失底层错误；上下文随 wait_for 子任务传递，
+            # 每个路由各自保存结果，不能读取全局熔断器猜测本次错误。
+            with track_delivery_progress() as progress:
+                ok = bool(await sender())
+                return ok, progress.last_error_code
+        return bool(await sender()), ""
+
     try:
         budget = _route_timeout_seconds(channel) if timeout_seconds is None else timeout_seconds
         if budget is not None:
-            ok = bool(await asyncio.wait_for(sender(), timeout=budget))
+            ok, error_code = await asyncio.wait_for(invoke_sender(), timeout=budget)
         else:
-            ok = bool(await sender())
+            ok, error_code = await invoke_sender()
     except asyncio.TimeoutError:
         # 整条 NapCat 路由预算到期时，send_qq_message 可能正在等待
         # QQNT，取消路径不会回到其正常结果分支；补记一次超时，驱动
@@ -132,7 +142,7 @@ async def _run_delivery(
         error_code = _classify_delivery_exception(exc)
         return DeliveryAttempt(channel, route_id, label, target, False, error_code)
     return DeliveryAttempt(
-        channel, route_id, label, target, ok, None if ok else "delivery_failed"
+        channel, route_id, label, target, ok, None if ok else error_code or "delivery_failed"
     )
 
 
