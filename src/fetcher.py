@@ -87,11 +87,27 @@ async def _maybe_alert_napcat_lane_failure(
         from src.notifier import send_alert_message
 
         member_name = str(member.get("m_name") or member.get("name") or "未知成员")
-        error_codes = sorted({errors.get(route) for route in napcat_routes if errors.get(route)})
+        gate_error = str(gate.get("last_error") or "")
+        error_codes = sorted({
+            gate_error if errors.get(route) in {None, "", "delivery_failed", "circuit_open"} and gate_error
+            else errors.get(route)
+            for route in napcat_routes
+            if errors.get(route) or gate_error
+        })
         error_text = ", ".join(error_codes[:3]) or str(gate.get("last_error") or "delivery_failed")
+        if "network_error" in error_codes:
+            guidance = "无法连接 OneBot HTTP 服务，请检查桥接服务及监听端口；容器运行不代表发送接口可用。"
+        elif "auth_failed" in error_codes:
+            guidance = "OneBot 接口鉴权失败，请核对访问令牌配置。"
+        elif "qq_offline" in error_codes:
+            guidance = "QQ 会话离线，请在桥接服务管理界面恢复登录。"
+        elif "timeout" in error_codes:
+            guidance = "OneBot 请求超时，请检查接口响应及 QQ 会话状态。"
+        else:
+            guidance = "请检查桥接服务的发送状态和具体错误日志。"
         text = (
             f"NapCat 路由已连续失败（成员：{member_name}，路由：{', '.join(napcat_routes[:3])}）。"
-            f"错误：{error_text}；当前待补偿消息将按顺序保留。请检查 NapCat/QQNT 会话。"
+            f"错误：{error_text}；当前待补偿消息将按顺序保留。{guidance}"
         )
         try:
             delivered = await asyncio.wait_for(send_alert_message(0, text), timeout=10.0)
