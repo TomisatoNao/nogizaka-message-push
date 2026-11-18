@@ -129,12 +129,13 @@
 .admin-route-member-lead {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   min-width: 0;
 }
 
 .admin-route-chevron {
+  flex-shrink: 0;
   display: inline-block;
   font-size: 11px;
   color: var(--muted);
@@ -148,6 +149,8 @@
 }
 
 .admin-route-member-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: var(--text-md);
   font-weight: 700;
   color: var(--text-strong);
@@ -155,6 +158,7 @@
 }
 
 .admin-route-badge {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
@@ -187,6 +191,9 @@
 }
 
 .admin-route-member-mid {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -543,6 +550,8 @@
     justify-content: center;
   }
   .admin-route-member-header { flex-direction: column; align-items: flex-start; gap: 8px; min-height: 44px; }
+  .admin-route-member-lead { max-width: 100%; }
+  .admin-route-member-mid { flex: none; width: 100%; }
   .admin-route-member-tail { width: 100%; justify-content: flex-end; }
   .admin-route-channel-grid { grid-template-columns: minmax(0, 1fr); }
   .admin-route-meta-bar { flex-direction: column; align-items: flex-start; }
