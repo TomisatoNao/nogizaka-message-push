@@ -41,6 +41,8 @@ def _prepare_channels(monkeypatch):
     tracker = health.HealthTracker()
     tracker.initialize()
     monkeypatch.setattr(notifier.health, "get_tracker", lambda: tracker)
+    # These scheduler tests isolate route reporting, not persisted F2 holds.
+    monkeypatch.setattr(notifier, "held_member_routes", lambda *_args: set(), raising=False)
     monkeypatch.setattr(notifier.cfg, "ENABLE_NAPCAT_QQ", True)
     monkeypatch.setattr(notifier.cfg, "ENABLE_QQ_OFFICIAL_BOT", True)
     monkeypatch.setattr(notifier.cfg, "ENABLE_TG_BOT", True)

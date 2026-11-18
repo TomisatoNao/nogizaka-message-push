@@ -109,6 +109,34 @@ def successful_routes(group_type: str, member_id: str, message_id: str) -> set[s
         raise DeliveryStateError("读取路由投递状态失败") from exc
 
 
+def held_member_routes(group_type: str | None, member_id: str) -> set[str]:
+    """Return member route lanes containing a state this version cannot send.
+
+    ``pending`` and ``suspended`` are the only states understood by this
+    compatibility reader. Any other value is treated as held so an older
+    sender cannot replay a route written by a newer version. Callers without a
+    canonical group type use a member-wide lookup to fail closed across groups.
+    """
+
+    try:
+        conn = _conn()
+        if conn is None:
+            raise DeliveryStateError("路由投递状态不可用")
+        params: list[object] = [member_id]
+        where = "member_id=? AND COALESCE(route_state, '') NOT IN ('pending', 'suspended')"
+        if group_type is not None:
+            where = "group_type=? AND " + where
+            params.insert(0, group_type)
+        rows = conn.execute(
+            f"SELECT DISTINCT route_id FROM delivery_pending_routes WHERE {where}",
+            params,
+        ).fetchall()
+        return {str(row[0]) for row in rows}
+    except (sqlite3.Error, OSError) as exc:
+        log_all(f"⚠️ 读取成员暂挂路由失败: {type(exc).__name__}", is_error=True)
+        raise DeliveryStateError("读取成员暂挂路由失败") from exc
+
+
 def mark_successful_routes(
     group_type: str,
     member_id: str,
@@ -121,8 +149,24 @@ def mark_successful_routes(
     conn = _conn()
     if conn is None:
         raise DeliveryStateError("路由投递状态不可用")
+    requested_routes = sorted(route_ids)
     try:
         with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            route_placeholders = ",".join("?" for _ in requested_routes)
+            protected = conn.execute(
+                f"""
+                SELECT route_id FROM delivery_pending_routes
+                WHERE group_type=? AND member_id=? AND route_id IN ({route_placeholders})
+                  AND COALESCE(route_state, '') NOT IN ('pending', 'suspended')
+                LIMIT 1
+                """,
+                (group_type, member_id, *requested_routes),
+            ).fetchone()
+            if protected:
+                raise DeliveryStateError(
+                    "路由处于暂挂或未知状态，拒绝旧版成功确认"
+                )
             conn.executemany(
                 "INSERT OR IGNORE INTO delivered_routes VALUES (?, ?, ?, ?, ?)",
                 [(group_type, member_id, message_id, route_id, time.time()) for route_id in route_ids],
@@ -252,6 +296,8 @@ def mark_pending_routes(
                     attempts=delivery_pending_routes.attempts + excluded.attempts,
                     route_state='pending',
                     updated_at=excluded.updated_at
+                WHERE COALESCE(delivery_pending_routes.route_state, '')
+                    IN ('pending', 'suspended')
                 """,
                 [
                     (
@@ -271,6 +317,19 @@ def mark_pending_routes(
             for route_id in route_ids:
                 attempted = route_id in attempted_route_ids
                 error = errors.get(route_id)
+                protected = conn.execute(
+                    """
+                    SELECT 1 FROM delivery_pending_routes
+                    WHERE group_type=? AND member_id=? AND route_id=?
+                      AND COALESCE(route_state, '') NOT IN ('pending', 'suspended')
+                    LIMIT 1
+                    """,
+                    (group_type, member_id, route_id),
+                ).fetchone()
+                if protected:
+                    # Keep the lane's held error/block/counters intact even if
+                    # another message in the same lane also failed.
+                    continue
                 conn.execute(
                     """
                     INSERT INTO delivery_lane_state (
@@ -338,19 +397,24 @@ def reconcile_pending_routes(
         with conn:
             for row in rows:
                 route_id = str(row[0])
-                previous = str(row[1] or "pending")
+                previous = str(row[1]) if row[1] is not None else ""
+                if previous not in {"pending", "suspended"}:
+                    continue
                 desired = "pending" if route_id in active else "suspended"
                 if previous == desired:
                     continue
-                conn.execute(
+                changed = conn.execute(
                     "UPDATE delivery_pending_routes SET route_state=?, updated_at=? "
-                    "WHERE group_type=? AND member_id=? AND route_id=?",
-                    (desired, time.time(), group_type, member_id, route_id),
-                )
+                    "WHERE group_type=? AND member_id=? AND route_id=? "
+                    "AND route_state IN ('pending', 'suspended') AND route_state=?",
+                    (desired, time.time(), group_type, member_id, route_id, previous),
+                ).rowcount
+                if not changed:
+                    continue
                 if desired == "suspended":
-                    suspended += 1
+                    suspended += changed
                 else:
-                    resumed += 1
+                    resumed += changed
         return {"suspended": suspended, "resumed": resumed}
     except sqlite3.Error as exc:
         log_all(f"⚠️ 同步待投递路由状态失败: {type(exc).__name__}", is_error=True)

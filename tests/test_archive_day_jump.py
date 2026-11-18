@@ -476,8 +476,23 @@ def test_unfavorite_in_filtered_timeline_preserves_sparse_pages_and_reading_anch
             visible_ids = page.locator("#timeline > .bubble").evaluate_all("nodes => nodes.map((node) => node.dataset.msgId)")
             assert len(visible_ids) == len(set(visible_ids)), f"duplicate messages after sync at {width}px/{theme}"
             assert page.locator("#loadMore").is_visible()
-            page.locator("#loadMore").click()
+            # Scrolling a Playwright click to the button can itself trigger
+            # initInfiniteScroll and load page 5. Reuse the button's click
+            # entry point without scrolling; if autoload already started or
+            # finished page 5, do not request the same cursor a second time.
+            continuation = page.evaluate("""() => {
+                if (loadedMessagePages.has(5) || (pageLoading && page === 5)) {
+                    return "automatic";
+                }
+                const button = document.querySelector("#loadMore");
+                if (!button || button.hidden || button.disabled) return "unavailable";
+                button.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+                return "manual";
+            }""")
+            assert continuation in {"automatic", "manual"}
             page.wait_for_function("page === 5 && loadedMessagePages.has(5)")
+            assert sorted(state["message_requests"]) == [1, 2, 4, 5]
+            assert state["message_requests"].count(5) == 1
             assert state["message_requests"][-1] == 5
             visible_ids = page.locator("#timeline > .bubble").evaluate_all("nodes => nodes.map((node) => node.dataset.msgId)")
             assert len(visible_ids) == len(set(visible_ids)), f"duplicate messages after page 5 at {width}px/{theme}"

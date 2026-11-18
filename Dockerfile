@@ -64,3 +64,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # 启动入口
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "main.py"]
+
+# Image-level compatibility capability for safe rollback-floor checks.
+LABEL io.github.tomisatonao.delivery-reader-epoch="1" \
+      io.github.tomisatonao.delivery-writer-epoch="0"

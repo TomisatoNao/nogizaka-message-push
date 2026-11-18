@@ -23,7 +23,11 @@ from src.config.credentials import (
 )
 from src.dedup import load_sent_ids, save_sent_id
 from src.translator import translate_text_with_model
-from src.notifier import matching_member_route_ids, send_member_message_detailed
+from src.notifier import (
+    PREFLIGHT_DELIVERY_ERROR_CODES,
+    matching_member_route_ids,
+    send_member_message_detailed,
+)
 from src.delivery_state import (
     DeliveryStateError,
     mark_pending_routes,
@@ -303,6 +307,11 @@ async def _handle_message(member: dict, msg: dict,
             group_type, m_id, msg_id, successful, message_time=updated
         )
     if pending:
+        attempted_failed_routes = {
+            attempt.route_id
+            for attempt in report.attempts
+            if not attempt.ok and attempt.error_code not in PREFLIGHT_DELIVERY_ERROR_CODES
+        }
         mark_pending_routes(
             group_type,
             m_id,
@@ -310,7 +319,7 @@ async def _handle_message(member: dict, msg: dict,
             updated,
             pending,
             errors=failed_attempts,
-            attempted_route_ids=set(failed_attempts),
+            attempted_route_ids=attempted_failed_routes,
         )
         # 失败路由及其后续消息都留在该 lane 的队列中，不能乱序越过。
         lane_context.blocked_routes.update(failed_attempts)

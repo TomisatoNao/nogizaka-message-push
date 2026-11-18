@@ -17,6 +17,14 @@ from src.platforms import tgbot
 from src import health
 from src.health import ErrorTier
 from src.utils import match_member_filter
+from src.delivery_state import DeliveryStateError, held_member_routes
+
+
+PREFLIGHT_DELIVERY_ERROR_CODES = frozenset({
+    "delivery_held",
+    "delivery_state_unavailable",
+    "delivery_identity_missing",
+})
 
 
 @dataclass(frozen=True)
@@ -67,7 +75,10 @@ class DeliveryReport:
 
     @property
     def attempted_count(self) -> int:
-        return len(self.attempts)
+        return sum(
+            attempt.error_code not in PREFLIGHT_DELIVERY_ERROR_CODES
+            for attempt in self.attempts
+        )
 
     @property
     def skipped_count(self) -> int:
@@ -232,6 +243,28 @@ def matching_member_route_ids(member: dict) -> tuple[str, ...]:
     return tuple(sorted(matched))
 
 
+def _route_attempt_identity(route_id: str) -> tuple[str, str, str]:
+    """Build safe display metadata for a route before any sender is invoked."""
+
+    if route_id.startswith("napcat:"):
+        target = route_id.partition(":")[2]
+        return "napcat", "NapCat", f"群 {target}"
+    if route_id.startswith("official:"):
+        channel, separator, destination = route_id.rpartition(":")
+        name = channel.removeprefix("official:") if separator else route_id.removeprefix("official:")
+        target_kind = "群聊" if destination == "group" else "私聊"
+        return channel or "official", f"官方Bot:{name}", f"官方Bot {name} {target_kind}"
+    if route_id.startswith("tg:"):
+        name = route_id.removeprefix("tg:")
+        return route_id, f"TG:{name}", f"Telegram {name}"
+    return route_id.partition(":")[0], route_id, route_id
+
+
+def _failed_route_attempt(route_id: str, error_code: str) -> DeliveryAttempt:
+    channel, label, target = _route_attempt_identity(route_id)
+    return DeliveryAttempt(channel, route_id, label, target, False, error_code)
+
+
 async def send_member_message_detailed(
     member: dict, message_chain: list[dict], *, skip_route_ids: set[str] | None = None
 ) -> DeliveryReport:
@@ -244,6 +277,41 @@ async def send_member_message_detailed(
     m_id = member.get("m_id") or member.get("id")
     skip_route_ids = skip_route_ids or set()
     matched_route_ids = matching_member_route_ids(member)
+    candidate_route_ids = set(matched_route_ids) - skip_route_ids
+    held_attempts: list[DeliveryAttempt] = []
+
+    # Read compatibility state before media preparation or any external send.
+    # Without an identity we cannot scope that read safely, so fail every
+    # otherwise eligible route closed.
+    if candidate_route_ids and (m_id is None or not str(m_id).strip()):
+        held_attempts = [
+            _failed_route_attempt(route_id, "delivery_identity_missing")
+            for route_id in sorted(candidate_route_ids)
+        ]
+        report = DeliveryReport(tuple(held_attempts), matched_route_ids)
+        _record_delivery_report(f"成员消息 | {m_name}", report)
+        return report
+
+    if candidate_route_ids:
+        raw_group_type = member.get("group_type")
+        normalized_group_type = str(raw_group_type).strip() if raw_group_type is not None else ""
+        group_type = normalized_group_type or None
+        normalized_member_id = str(m_id).strip()
+        try:
+            protected_route_ids = held_member_routes(group_type, normalized_member_id)
+        except DeliveryStateError:
+            held_attempts = [
+                _failed_route_attempt(route_id, "delivery_state_unavailable")
+                for route_id in sorted(candidate_route_ids)
+            ]
+            report = DeliveryReport(tuple(held_attempts), matched_route_ids)
+            _record_delivery_report(f"成员消息 | {m_name}", report)
+            return report
+        held_attempts = [
+            _failed_route_attempt(route_id, "delivery_held")
+            for route_id in sorted(candidate_route_ids & protected_route_ids)
+        ]
+    protected_route_ids = {attempt.route_id for attempt in held_attempts}
     tasks: list[Awaitable[DeliveryAttempt]] = []
 
     # 1. NapCat QQ 路由并发任务
@@ -257,7 +325,7 @@ async def send_member_message_detailed(
                 gid = route.get("group_id")
                 if gid:
                     route_id = f"napcat:{gid}"
-                    if route_id in skip_route_ids:
+                    if route_id in skip_route_ids or route_id in protected_route_ids:
                         continue
                     r_label = f"NapCat:{route['remark']}" if route.get("remark") else "NapCat"
                     tasks.append(_run_delivery(
@@ -270,7 +338,19 @@ async def send_member_message_detailed(
         bots = get_configured_bots()
         media_payloads = None
         media_error = None
-        if bots:
+        official_routes_to_send: set[str] = set()
+        for bot in bots:
+            if not bot.push_message or not match_member_filter(m_name, bot.member_filter, m_id):
+                continue
+            if bot.target_openid:
+                route_id = f"official:{bot.name}:private"
+                if route_id not in skip_route_ids and route_id not in protected_route_ids:
+                    official_routes_to_send.add(route_id)
+            if bot.group_openid:
+                route_id = f"official:{bot.name}:group"
+                if route_id not in skip_route_ids and route_id not in protected_route_ids:
+                    official_routes_to_send.add(route_id)
+        if official_routes_to_send:
             try:
                 media_payloads = await qq_official.download_media_payloads(member, message_chain)
             except (asyncio.TimeoutError, httpx.RequestError, OSError, ValueError):
@@ -281,7 +361,7 @@ async def send_member_message_detailed(
                 # 单聊目标（target_openid）
                 if bot.target_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
                     route_id = f"official:{bot.name}:private"
-                    if route_id in skip_route_ids:
+                    if route_id in skip_route_ids or route_id in protected_route_ids:
                         continue
                     tasks.append(_run_delivery(
                         f"official:{bot.name}", route_id, b_label,
@@ -295,7 +375,7 @@ async def send_member_message_detailed(
                 # 群聊目标（group_openid）
                 if bot.group_openid and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
                     route_id = f"official:{bot.name}:group"
-                    if route_id in skip_route_ids:
+                    if route_id in skip_route_ids or route_id in protected_route_ids:
                         continue
                     tasks.append(_run_delivery(
                         f"official:{bot.name}:group", route_id, b_label,
@@ -313,7 +393,7 @@ async def send_member_message_detailed(
         for bot in tg_bots:
             if bot.target_chat and bot.push_message and match_member_filter(m_name, bot.member_filter, m_id):
                 route_id = f"tg:{bot.name}"
-                if route_id in skip_route_ids:
+                if route_id in skip_route_ids or route_id in protected_route_ids:
                     continue
                 tg_label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
                 tasks.append(_run_delivery(
@@ -321,10 +401,11 @@ async def send_member_message_detailed(
                     lambda b=bot: b.send_member_message(message_chain),
                 ))
 
-    if not tasks:
+    if not tasks and not held_attempts:
         return DeliveryReport((), matched_route_ids)
 
-    report = DeliveryReport(tuple(await asyncio.gather(*tasks)), matched_route_ids)
+    normal_attempts = tuple(await asyncio.gather(*tasks)) if tasks else ()
+    report = DeliveryReport(tuple(held_attempts) + normal_attempts, matched_route_ids)
     _record_delivery_report(f"成员消息 | {m_name}", report)
     return report
 
