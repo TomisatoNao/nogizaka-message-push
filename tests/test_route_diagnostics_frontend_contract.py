@@ -13,7 +13,7 @@ def test_route_diagnostics_panel_is_admin_gated_and_uses_one_script():
 
     script_url = "/static/admin_route_diagnostics.js?v=20261027_1"
     assert page.count(script_url) == 1
-    assert page.count('/static/admin_route_diagnostics.css?v=20261102_2') == 1
+    assert page.count('/static/admin_route_diagnostics.css?v=20261118_1') == 1
     assert 'id="routeDiagnosticsPanel" hidden' in page
     assert 'window.webAdminRole === "admin"' in script
     assert 'window.addEventListener("webadminauthready", syncAuthorization' in script
@@ -55,7 +55,7 @@ def test_route_diagnostics_does_not_render_targets_bot_names_or_raw_config():
         assert safe_label in script
 
 
-def test_route_diagnostics_mobile_toolbar_geometry_across_viewports_and_themes():
+def test_route_diagnostics_mobile_toolbar_geometry_across_viewports_and_themes(tmp_path):
     import json
     import threading
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -84,7 +84,7 @@ def test_route_diagnostics_mobile_toolbar_geometry_across_viewports_and_themes()
     try:
         with playwright.sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            for width in (320, 360, 390, 402, 430):
+            for width in (320, 360, 390, 402, 430, 768, 1024, 1280, 1440):
                 for theme in ("dark", "light"):
                     ctx = browser.new_context(
                         viewport={"width": width, "height": 844},
@@ -113,8 +113,14 @@ def test_route_diagnostics_mobile_toolbar_geometry_across_viewports_and_themes()
                                 body=json.dumps({
                                     "ok": True,
                                     "diagnostics": [
-                                        {"group": "nogizaka", "member_id": "m1", "member_name": "井上和", "avatar": "", "is_subscribed": True, "delivery_enabled": True, "routes": []},
-                                        {"group": "nogizaka", "member_id": "m2", "member_name": "一ノ瀬美空", "avatar": "", "is_subscribed": False, "delivery_enabled": False, "routes": []},
+                                        {
+                                            "member_id": str(i), "member_name": name,
+                                            "fetch_account": {"status": "configured", "account_id": "hinatazaka_main"},
+                                            "subscription": {"state": "active"},
+                                            "routes": [{"channel": "qq_official", "status": "applicable", "label": "Official bot 1 group"}],
+                                            "channels": [{"channel": "qq_official", "applicable_route_count": 3}],
+                                        }
+                                        for i, name in enumerate(("金村 美玖", "小坂 菜緒", "五百城 茉央", "長い名前のメンバー表示確認"))
                                     ],
                                 }),
                             )
@@ -132,17 +138,26 @@ def test_route_diagnostics_mobile_toolbar_geometry_across_viewports_and_themes()
                     filter_box = page.locator(".admin-route-filter-group").bounding_box()
                     toolbar_box = page.locator("#routeDiagnosticsToolbar").bounding_box()
 
-                    # 1. 窄屏搜索容器必须是自然高度，禁止保留 200px 造成空隙
-                    assert wrap_box["height"] <= 52, f"[{width}px {theme}] Search wrap height must be <=52px, got {wrap_box['height']}"
-                    # 2. 搜索框触控高度必须达标（>=44px）
-                    assert input_box["height"] >= 44, f"[{width}px {theme}] Search input height must be >=44px, got {input_box['height']}"
-                    # 3. 搜索框底部到筛选组的纵向间隙必须 <=16px（严禁出现 159px 留白）
-                    gap = filter_box["y"] - (input_box["y"] + input_box["height"])
-                    assert 0 <= gap <= 16, f"[{width}px {theme}] Gap between search and filter should be <=16px, got {gap}"
-                    # 4. 工具栏整体高度紧凑合理，建议 <=160px
-                    assert toolbar_box["height"] <= 160, f"[{width}px {theme}] Toolbar height should be <=160px, got {toolbar_box['height']}"
-                    # 5. 无全页横向溢出
+                    if width <= 640:
+                        # 1. 窄屏搜索容器必须是自然高度，禁止保留 200px 造成空隙
+                        assert wrap_box["height"] <= 52, f"[{width}px {theme}] Search wrap height must be <=52px, got {wrap_box['height']}"
+                        # 2. 搜索框触控高度必须达标（>=44px）
+                        assert input_box["height"] >= 44, f"[{width}px {theme}] Search input height must be >=44px, got {input_box['height']}"
+                        # 3. 搜索框底部到筛选组的纵向间隙必须 <=16px（严禁出现 159px 留白）
+                        gap = filter_box["y"] - (input_box["y"] + input_box["height"])
+                        assert 0 <= gap <= 16, f"[{width}px {theme}] Gap between search and filter should be <=16px, got {gap}"
+                        # 4. 工具栏整体高度紧凑合理，建议 <=160px
+                        assert toolbar_box["height"] <= 160, f"[{width}px {theme}] Toolbar height should be <=160px, got {toolbar_box['height']}"
+                        # 5. 无全页横向溢出
+                        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    for card in page.locator(".admin-route-member").all():
+                        name_box = card.locator(".admin-route-member-name").bounding_box()
+                        badge_box = card.locator(".admin-route-member-lead > .admin-route-badge").bounding_box()
+                        assert badge_box["x"] >= name_box["x"] + name_box["width"] + 4, f"Badge wrapped below name at {width}px/{theme}"
+                        assert abs((badge_box["y"] + badge_box["height"] / 2) - (name_box["y"] + name_box["height"] / 2)) <= 1
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    if width in (390, 1280) and theme == "dark":
+                        page.locator("#routeDiagnosticsPanel").screenshot(path=str(tmp_path / f"member-badges-{width}.png"))
                     ctx.close()
 
             # 6. 验证桌面端（1440px）保持横排弹性伸缩
