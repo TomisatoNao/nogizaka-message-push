@@ -587,3 +587,157 @@ async def test_fetcher_continues_healthy_lane_in_order_while_held_qq_stays_idle(
         "tg:main"
     }
 
+
+def test_send_intent_survives_reopen_and_blocks_newer_messages(state_db):
+    from src.delivery_state import held_member_routes, successful_routes
+    from src.member_send_intent import begin_send_intent, finish_send_intent
+
+    first = ("group", "member", "1", "napcat:123", "2026-11-19T00:00:00Z")
+    later = ("group", "member", "2", "napcat:123", "2026-11-19T00:01:00Z")
+    token = begin_send_intent(*first)
+    assert token
+    state_db["conn"].close()
+    state_db["conn"] = sqlite3.connect(state_db["path"])
+    assert held_member_routes("group", "member") == {"napcat:123"}
+    assert begin_send_intent(*first) is None
+    assert begin_send_intent(*later) is None
+    assert finish_send_intent(token, "not_submitted")
+    assert begin_send_intent(*later) is None
+    retry = begin_send_intent(*first)
+    assert retry and retry != token
+    assert not finish_send_intent(token, "confirmed")
+    assert finish_send_intent(retry, "confirmed")
+    assert successful_routes("group", "member", "1") == {"napcat:123"}
+    assert begin_send_intent(*first) is None
+    token = begin_send_intent(*later)
+    assert token and finish_send_intent(token, "unconfirmed")
+    assert begin_send_intent(*later) is None
+
+
+def test_receipt_write_failure_preserves_send_intent(state_db):
+    from src.delivery_state import DeliveryStateError, held_member_routes
+    from src.member_send_intent import begin_send_intent, finish_send_intent
+
+    token = begin_send_intent("group", "member", "1", "napcat:123", "2026-11-19T00:00:00Z")
+    state_db["conn"].execute("""
+        CREATE TRIGGER reject_receipt BEFORE INSERT ON delivered_routes
+        BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END
+    """)
+    with pytest.raises(DeliveryStateError):
+        finish_send_intent(token, "confirmed")
+    assert held_member_routes("group", "member") == {"napcat:123"}
+
+@pytest.mark.parametrize("behavior", ["cancel", "timeout", "success"])
+@pytest.mark.asyncio
+async def test_member_notifier_persists_intent_before_sending(state_db, monkeypatch, behavior):
+    from src.delivery_state import held_member_routes, successful_routes
+
+    notifier, calls = _configure_channels(monkeypatch)
+    monkeypatch.setattr(notifier.cfg, "ENABLE_QQ_OFFICIAL_BOT", False)
+    monkeypatch.setattr(notifier.cfg, "ENABLE_TG_BOT", False)
+    member = {"group_type": "group", "m_id": "member", "m_name": "Member"}
+    identity = ("group", "member", "1", "2026-11-19T00:00:00Z")
+
+    async def send(*args):
+        calls["napcat_send"] += 1
+        assert held_member_routes("group", "member") == {"napcat:123"}
+        if behavior == "cancel":
+            raise asyncio.CancelledError()
+        if behavior == "timeout":
+            raise asyncio.TimeoutError()
+        return True
+
+    monkeypatch.setattr(notifier, "send_qq_message", send)
+    if behavior == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await notifier.send_member_message_detailed(member, [], intent_identity=identity)
+    else:
+        report = await notifier.send_member_message_detailed(member, [], intent_identity=identity)
+        assert report.ok == (behavior == "success")
+        if behavior == "timeout":
+            assert report.attempts[0].error_code == "delivery_unconfirmed"
+    state_db["conn"].close()
+    state_db["conn"] = sqlite3.connect(state_db["path"])
+    await notifier.send_member_message_detailed(member, [], intent_identity=identity)
+    assert calls["napcat_send"] == 1
+    assert bool(successful_routes("group", "member", "1")) == (behavior == "success")
+
+@pytest.mark.parametrize("action", ["confirm_delivered", "authorize_resend"])
+def test_admin_resolution_is_audited_and_cannot_repeat(state_db, action):
+    from src.delivery_state import successful_routes
+    from src.member_send_intent import begin_send_intent, finish_send_intent, resolve_held_intent
+
+    identity = ("group", "member", "message", "napcat:123", "2026-11-19T00:00:00Z")
+    token = begin_send_intent(*identity)
+    assert not resolve_held_intent(token, action, actor="admin", reason="Checked group history")
+    assert finish_send_intent(token, "unconfirmed")
+    assert resolve_held_intent(token, action, actor="admin", reason="Checked group history")
+    assert not resolve_held_intent(token, action, actor="admin", reason="Repeated request")
+    assert state_db["conn"].execute("SELECT actor, action FROM member_send_resolutions").fetchall() == [
+        ("admin", action),
+    ]
+    assert bool(successful_routes(*identity[:3])) == (action == "confirm_delivered")
+    assert bool(begin_send_intent(*identity)) == (action == "authorize_resend")
+
+
+def test_protected_intents_list_tracks_active_and_resolved_attempts(state_db):
+    from src.member_send_intent import begin_send_intent, finish_send_intent
+    from src.member_send_intent import list_protected_send_intents, resolve_held_intent
+
+    assert list_protected_send_intents() == []
+    token = begin_send_intent("group", "member", "message", "napcat:123", "2026-11-19T00:00:00Z")
+    assert list_protected_send_intents()[0]["state"] == "in_flight"
+    assert finish_send_intent(token, "unconfirmed")
+    assert list_protected_send_intents()[0]["state"] == "held"
+    assert resolve_held_intent(token, "confirm_delivered", actor="admin", reason="Verified receipt")
+    assert list_protected_send_intents() == []
+
+
+def test_startup_recovery_holds_interrupted_intents_and_allows_resolution(state_db):
+    from src.member_send_intent import begin_send_intent, recover_interrupted_send_intents
+    from src.member_send_intent import resolve_held_intent, list_protected_send_intents
+
+    identity = ("group", "member", "message", "napcat:123", "2026-11-19T00:00:00Z")
+    token = begin_send_intent(*identity)
+    state_db["conn"].close()
+    state_db["conn"] = sqlite3.connect(state_db["path"])
+    assert recover_interrupted_send_intents() == 1
+    assert recover_interrupted_send_intents() == 0
+    assert list_protected_send_intents()[0]["state"] == "held"
+    assert begin_send_intent(*identity) is None
+    assert resolve_held_intent(token, "confirm_delivered", actor="admin", reason="Checked group history")
+    assert not resolve_held_intent(token, "authorize_resend", actor="admin", reason="Stale request")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["cancel", "timeout", "connection"])
+@pytest.mark.parametrize("submitted", [False, True])
+async def test_member_intent_uses_submission_evidence(state_db, failure, submitted):
+    from src.notifier import _run_member_delivery_with_intent
+    from src.platforms.napcat import track_delivery_progress
+
+    async def sender():
+        with track_delivery_progress() as progress:
+            progress.submission_tracked = True
+            progress.possible_submission = submitted
+            if failure == "cancel":
+                raise asyncio.CancelledError()
+            if failure == "timeout":
+                raise asyncio.TimeoutError()
+            return False
+
+    operation = _run_member_delivery_with_intent(
+        ("group", "member", "1", "2026-11-19T00:00:00Z"),
+        "napcat", "napcat:123", "QQ", "123", sender,
+    )
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+    else:
+        attempt = await operation
+        assert not attempt.ok
+        assert (attempt.error_code == "delivery_unconfirmed") is submitted
+    row = state_db["conn"].execute(
+        "SELECT route_state FROM delivery_pending_routes WHERE message_id='1'"
+    ).fetchone()
+    assert row[0] == ("held" if submitted else "pending")

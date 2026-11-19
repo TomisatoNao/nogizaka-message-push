@@ -433,6 +433,23 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
 
+        if path == "/api/member-delivery/intents":
+            if not self._guard(need_admin=True):
+                return
+            if not (self._current_user() or {}).get("username"):
+                self._send_json({"ok": False, "error": "authenticated_actor_required"}, 403)
+                return
+            from src.delivery_state import DeliveryStateError
+            from src.member_send_intent import list_protected_send_intents
+
+            try:
+                intents = list_protected_send_intents()
+            except DeliveryStateError:
+                self._send_json({"ok": False, "error": "delivery_state_unavailable"}, 503)
+            else:
+                self._send_json({"ok": True, "intents": intents}, 200)
+            return
+
         # 0. 健康与就绪探针（免鉴权放行）
         if path in ("/api/health", "/api/health/status", "/api/health/live"):
             is_live_probe = path == "/api/health/live"
@@ -739,6 +756,36 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         # 1. 登录认证
+        if path == "/api/member-delivery/resolve":
+            if not self._guard(need_admin=True):
+                return
+            actor = (self._current_user() or {}).get("username")
+            if not actor:
+                self._send_json({"ok": False, "error": "authenticated_actor_required"}, 403)
+                return
+            body = self._read_body_json()
+            if body is None:
+                return
+            from src.delivery_state import DeliveryStateError
+            from src.member_send_intent import resolve_held_intent
+
+            try:
+                if not isinstance(body, dict):
+                    raise ValueError
+                token, action, reason = (body.get(key) for key in ("token", "action", "reason"))
+                if not all(isinstance(value, str) for value in (token, action, reason)):
+                    raise ValueError
+                if action == "authorize_resend" and body.get("acknowledge_duplicate_risk") is not True:
+                    raise ValueError
+                changed = resolve_held_intent(token, action, actor=actor, reason=reason)
+            except ValueError:
+                self._send_json({"ok": False, "error": "invalid_resolution"}, 400)
+            except DeliveryStateError:
+                self._send_json({"ok": False, "error": "delivery_state_unavailable"}, 503)
+            else:
+                self._send_json({"ok": changed}, 200 if changed else 409)
+            return
+
         if path == "/api/auth/login":
             body = self._read_body_json()
             if body is not None:

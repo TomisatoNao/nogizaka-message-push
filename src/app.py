@@ -923,6 +923,9 @@ async def main() -> None:
         # 1. 基础设施
         init_loggers()
         _acquire_instance_lock()
+        if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED") == "1":
+            from src.member_send_intent import recover_interrupted_send_intents
+            recover_interrupted_send_intents()
         log_all("🌸 坂道联合监控系统已启动")
         from datetime import datetime
         from src.runtime_info import runtime_metadata

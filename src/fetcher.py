@@ -265,9 +265,12 @@ async def _handle_message(member: dict, msg: dict,
         # 同一成员本轮内，某路由一旦在较早消息失败，就不能越过它发送
         # 后续消息；其它路由不受影响。
         skip_routes.update(lane_context.blocked_routes)
-    report = await send_member_message_detailed(
-        member, chain, skip_route_ids=skip_routes
-    )
+    delivery_options = {"skip_route_ids": skip_routes}
+    if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED") == "1":
+        if not all((group_type, m_id, msg_id, updated)):
+            raise DeliveryStateError("成员消息缺少持久投递所需的标识或时间")
+        delivery_options["intent_identity"] = (str(group_type), str(m_id), msg_id, str(updated))
+    report = await send_member_message_detailed(member, chain, **delivery_options)
     successful = {attempt.route_id for attempt in report.attempts if attempt.ok}
     attempted = {attempt.route_id for attempt in report.attempts}
     failed_attempts = {

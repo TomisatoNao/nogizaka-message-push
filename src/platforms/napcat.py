@@ -33,6 +33,7 @@ class NapCatDeliveryProgress:
     whether this particular route had entered a POST without global state.
     """
 
+    submission_tracked: bool = False
     possible_submission: bool = False
     confirmed_batches: int = 0
     last_error_code: str = ""
@@ -947,6 +948,9 @@ async def send_qq_message_detailed(
 ) -> NapCatSendOutcome:
     """Send message batches and retain an unknown receipt result."""
 
+    progress = _delivery_progress.get()
+    if progress is not None:
+        progress.submission_tracked = True
     batches = _split_video_record_chain(message_chain)
     started = time.monotonic()
     async with _send_gate:
