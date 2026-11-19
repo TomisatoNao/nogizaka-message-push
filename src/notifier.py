@@ -801,7 +801,8 @@ async def send_blog_post(post: dict) -> bool:
                                 card_bytes = f.read()
                             sent_card = await b.send_media_file(scope, target, "image", card_bytes)
                         if not sent_card and pairs:
-                            await b.send_translation_qq(scope, target, pairs)
+                            if not await b.send_translation_qq(scope, target, pairs):
+                                return False
 
                     elif mode == "card_and_images":
                         sent_card = False
@@ -820,13 +821,15 @@ async def send_blog_post(post: dict) -> bool:
                                 if not await _send_qq_official_raw_images(b, scope, target):
                                     return False
                             if pairs:
-                                await b.send_translation_qq(scope, target, pairs)
+                                if not await b.send_translation_qq(scope, target, pairs):
+                                    return False
                     else:
                         if media_urls:
                             if not await _send_qq_official_raw_images(b, scope, target):
                                 return False
                         if pairs:
-                            await b.send_translation_qq(scope, target, pairs)
+                            if not await b.send_translation_qq(scope, target, pairs):
+                                return False
                     return True
                 except (OSError, httpx.HTTPError, ValueError, RuntimeError) as e:
                     b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
@@ -864,10 +867,10 @@ async def send_blog_post(post: dict) -> bool:
                             card_file_uri = f"file:///{card_path.resolve().as_posix()}"
                             sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
                         if not sent_card and pairs:
-                            from src.platforms.qq_official import _escape_qq_md
-                            blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
+                            blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
                             body_txt = "\n\n".join(blocks)
-                            await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
+                            if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
+                                return False
 
                     elif mode == "card_and_images":
                         sent_card = False
@@ -879,27 +882,30 @@ async def send_blog_post(post: dict) -> bool:
                         if sent_card:
                             if media_urls:
                                 raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                                await send_qq_message(int(target_gid), raw_chain)
+                                if not await send_qq_message(int(target_gid), raw_chain):
+                                    return False
                         else:
                             if media_urls:
                                 raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                                await send_qq_message(int(target_gid), raw_chain)
+                                if not await send_qq_message(int(target_gid), raw_chain):
+                                    return False
                                 await asyncio.sleep(0.3)
                             if pairs:
-                                from src.platforms.qq_official import _escape_qq_md
-                                blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
+                                blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
                                 body_txt = "\n\n".join(blocks)
-                                await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
+                                if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
+                                    return False
                     else:
                         if media_urls:
                             raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                            await send_qq_message(int(target_gid), raw_chain)
+                            if not await send_qq_message(int(target_gid), raw_chain):
+                                return False
                             await asyncio.sleep(0.3)
                         if pairs:
-                            from src.platforms.qq_official import _escape_qq_md
-                            blocks = [f"*{_escape_qq_md(ja)}*\n{_escape_qq_md(zh)}" if zh else f"*{_escape_qq_md(ja)}*" for ja, zh in pairs]
+                            blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
                             body_txt = "\n\n".join(blocks)
-                            await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}])
+                            if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
+                                return False
                     return True
                 except (OSError, ValueError, RuntimeError) as e:
                     r_label = f"{r.get('remark')} ({target_gid})" if r.get("remark") else f"群 {target_gid}"
@@ -949,7 +955,8 @@ async def send_blog_post(post: dict) -> bool:
                         if card_path and card_path.exists():
                             sent_card = await b.send_photo_file(str(card_path))
                         if not sent_card and pairs:
-                            await b.send_translation_tg(pairs)
+                            if not await b.send_translation_tg(pairs):
+                                return False
 
                     elif mode == "card_and_images":
                         sent_card = False
@@ -959,21 +966,26 @@ async def send_blog_post(post: dict) -> bool:
 
                         if sent_card:
                             if media_urls:
-                                await b.send_media_group_photos(media_urls)
+                                if not await b.send_media_group_photos(media_urls):
+                                    return False
                         else:
                             if media_urls:
-                                await b.send_media_group_photos(media_urls)
+                                if not await b.send_media_group_photos(media_urls):
+                                    return False
                                 await asyncio.sleep(0.3)
                             if pairs:
-                                await b.send_translation_tg(pairs)
+                                if not await b.send_translation_tg(pairs):
+                                    return False
                     else:
                         if media_urls:
-                            await b.send_media_group_photos(
+                            if not await b.send_media_group_photos(
                                 media_urls, caption=header_text if inline_header else ""
-                            )
+                            ):
+                                return False
                             await asyncio.sleep(0.3)
                         if pairs:
-                            await b.send_translation_tg(pairs)
+                            if not await b.send_translation_tg(pairs):
+                                return False
                     return True
                 except (OSError, ValueError, RuntimeError) as e:
                     b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
@@ -989,4 +1001,4 @@ async def send_blog_post(post: dict) -> bool:
     failures = [type(r).__name__ for r in results if isinstance(r, Exception)]
     if failures:
         log_all(f"⚠️ 博客路由任务异常: {' · '.join(failures)}", is_error=True)
-    return any(r is True for r in results)
+    return all(r is True for r in results)
