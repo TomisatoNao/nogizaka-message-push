@@ -23,6 +23,8 @@ class Handler:
 @pytest.fixture(autouse=True)
 def clear_blog_backfill_state(monkeypatch, tmp_path):
     """每个路由测试独立运行，避免模拟进程没有真实 collector 时残留锁。"""
+    monkeypatch.setattr(blog_backfill.archive_tasks, "_db_path",
+                        lambda: tmp_path / "archive-tasks.sqlite3")
     with blog_backfill._BACKFILL_LOCK:
         blog_backfill._clear_active_locked()
     yield
