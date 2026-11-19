@@ -691,3 +691,19 @@ def test_protected_intents_list_tracks_active_and_resolved_attempts(state_db):
     assert list_protected_send_intents()[0]["state"] == "held"
     assert resolve_held_intent(token, "confirm_delivered", actor="admin", reason="Verified receipt")
     assert list_protected_send_intents() == []
+
+
+def test_startup_recovery_holds_interrupted_intents_and_allows_resolution(state_db):
+    from src.member_send_intent import begin_send_intent, recover_interrupted_send_intents
+    from src.member_send_intent import resolve_held_intent, list_protected_send_intents
+
+    identity = ("group", "member", "message", "napcat:123", "2026-11-19T00:00:00Z")
+    token = begin_send_intent(*identity)
+    state_db["conn"].close()
+    state_db["conn"] = sqlite3.connect(state_db["path"])
+    assert recover_interrupted_send_intents() == 1
+    assert recover_interrupted_send_intents() == 0
+    assert list_protected_send_intents()[0]["state"] == "held"
+    assert begin_send_intent(*identity) is None
+    assert resolve_held_intent(token, "confirm_delivered", actor="admin", reason="Checked group history")
+    assert not resolve_held_intent(token, "authorize_resend", actor="admin", reason="Stale request")

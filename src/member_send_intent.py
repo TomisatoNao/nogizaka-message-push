@@ -173,3 +173,38 @@ def list_protected_send_intents(limit=100):
         return [dict(zip(fields, row)) for row in rows]
     except (sqlite3.Error, OSError) as exc:
         raise DeliveryStateError("无法读取待核实投递") from exc
+
+
+def recover_interrupted_send_intents():
+    """Run after exclusive process ownership, before starting send workers."""
+    try:
+        conn = _conn()
+        if conn is None:
+            raise DeliveryStateError("投递数据库不可用")
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='member_send_intents'").fetchone():
+                return 0
+            rows = conn.execute(
+                """SELECT token, group_type, member_id, message_id, route_id
+                   FROM member_send_intents WHERE outcome IS NULL"""
+            ).fetchall()
+            recovered = 0
+            for token, group, member, message, route in rows:
+                changed = conn.execute(
+                    """UPDATE delivery_pending_routes
+                       SET route_state='held', last_error='delivery_unconfirmed', updated_at=?
+                       WHERE group_type=? AND member_id=? AND message_id=? AND route_id=?
+                         AND route_state='in_flight'""",
+                    (time.time(), group, member, message, route),
+                ).rowcount
+                if changed:
+                    conn.execute(
+                        """UPDATE member_send_intents SET outcome='unconfirmed', finished_at=?
+                           WHERE token=? AND outcome IS NULL""",
+                        (time.time(), token),
+                    )
+                    recovered += 1
+        return recovered
+    except (sqlite3.Error, OSError) as exc:
+        raise DeliveryStateError("无法恢复中断的发送意图") from exc
