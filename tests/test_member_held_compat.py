@@ -707,3 +707,37 @@ def test_startup_recovery_holds_interrupted_intents_and_allows_resolution(state_
     assert begin_send_intent(*identity) is None
     assert resolve_held_intent(token, "confirm_delivered", actor="admin", reason="Checked group history")
     assert not resolve_held_intent(token, "authorize_resend", actor="admin", reason="Stale request")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["cancel", "timeout", "connection"])
+@pytest.mark.parametrize("submitted", [False, True])
+async def test_member_intent_uses_submission_evidence(state_db, failure, submitted):
+    from src.notifier import _run_member_delivery_with_intent
+    from src.platforms.napcat import track_delivery_progress
+
+    async def sender():
+        with track_delivery_progress() as progress:
+            progress.submission_tracked = True
+            progress.possible_submission = submitted
+            if failure == "cancel":
+                raise asyncio.CancelledError()
+            if failure == "timeout":
+                raise asyncio.TimeoutError()
+            return False
+
+    operation = _run_member_delivery_with_intent(
+        ("group", "member", "1", "2026-11-19T00:00:00Z"),
+        "napcat", "napcat:123", "QQ", "123", sender,
+    )
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+    else:
+        attempt = await operation
+        assert not attempt.ok
+        assert (attempt.error_code == "delivery_unconfirmed") is submitted
+    row = state_db["conn"].execute(
+        "SELECT route_state FROM delivery_pending_routes WHERE message_id='1'"
+    ).fetchone()
+    assert row[0] == ("held" if submitted else "pending")

@@ -280,19 +280,27 @@ async def _run_member_delivery_with_intent(identity, channel, route_id, label, t
     if token is None:
         return DeliveryAttempt(channel, route_id, label, target, False, "delivery_held")
 
-    # Cancellation leaves the committed in-flight row as a replay barrier.
-    try:
-        attempt = await _run_delivery(channel, route_id, label, target, sender)
-    except asyncio.CancelledError:
+    # The mutable progress survives wait_for cancellation and distinguishes
+    # waiting for the send gate from a request whose receipt may be lost.
+    with track_delivery_progress() as progress:
         try:
-            finish_send_intent(token, "unconfirmed")
-        except DeliveryStateError:
-            # A committed in-flight intent still protects the route.
-            pass
-        raise
+            attempt = await _run_delivery(channel, route_id, label, target, sender)
+        except asyncio.CancelledError:
+            safe = (channel == "napcat" and progress.submission_tracked
+                    and not progress.possible_submission and not progress.confirmed_batches)
+            try:
+                finish_send_intent(token, "not_submitted" if safe else "unconfirmed")
+            except DeliveryStateError:
+                # A committed in-flight intent still protects the route.
+                pass
+            raise
     if attempt.ok:
         outcome = "confirmed"
-    elif channel == "napcat" and attempt.error_code == "circuit_open":
+    elif channel == "napcat" and (
+        attempt.error_code == "circuit_open"
+        or (progress.submission_tracked and not progress.possible_submission
+            and not progress.confirmed_batches)
+    ):
         outcome = "not_submitted"
     else:
         # Legacy channel results cannot prove non-submission for every failure.
