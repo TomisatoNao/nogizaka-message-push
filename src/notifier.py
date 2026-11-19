@@ -1001,4 +1001,4 @@ async def send_blog_post(post: dict) -> bool:
     failures = [type(r).__name__ for r in results if isinstance(r, Exception)]
     if failures:
         log_all(f"⚠️ 博客路由任务异常: {' · '.join(failures)}", is_error=True)
-    return any(r is True for r in results)
+    return all(r is True for r in results)

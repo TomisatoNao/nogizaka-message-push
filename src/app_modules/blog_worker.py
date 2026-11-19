@@ -141,7 +141,7 @@ class BlogWorker:
                 else:
                     all_ok = False
                     log_all(
-                        f"⚠️ 博客 [{post.get('title', '无题')}] 推送失败（无可用通道）",
+                        f"⚠️ 博客 [{post.get('title', '无题')}] 推送未全部完成，请查看通道错误日志",
                         is_error=True,
                     )
                     health.get_tracker().record_member_push("博客 (全局)", False)

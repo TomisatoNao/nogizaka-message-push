@@ -45,3 +45,38 @@ async def test_telegram_blog_body_failure(mode):
          patch("src.notifier.asyncio.sleep", AsyncMock()):
         assert await send_blog_post(post) is False
     bot.send_translation_tg.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_blog_partial_route_success_is_not_complete():
+    sender = AsyncMock(side_effect=[True, True, False])
+    post = {"group_key": "nogizaka", "body": "original body"}
+    routes = [{"group_id": str(i), "push_blog": True,
+               "blog_card_mode": "text_and_images"} for i in (123, 456)]
+    with patch("config.config.ENABLE_QQ_OFFICIAL_BOT", False), \
+         patch("config.config.ENABLE_TG_BOT", False), \
+         patch("config.config.ENABLE_NAPCAT_QQ", True), \
+         patch("config.config.NAPCAT_ROUTES", routes), \
+         patch("src.platforms.napcat.send_qq_message", sender), \
+         patch("src.blog_card_renderer.render_blog_card", AsyncMock(return_value=None)), \
+         patch("src.notifier.asyncio.sleep", AsyncMock()):
+        assert await send_blog_post(post) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["card_only", "card_and_images", "text_and_images"])
+async def test_official_blog_body_failure(mode):
+    from src.platforms.qq_official import QQOfficialBot
+
+    bot = QQOfficialBot(name="test", app_id="", client_secret="", target_openid="target",
+                        push_blog=True, blog_card_mode=mode)
+    bot.send_private_text = AsyncMock(return_value=True)
+    bot.send_translation_qq = AsyncMock(return_value=False)
+    with patch("config.config.ENABLE_QQ_OFFICIAL_BOT", True), \
+         patch("config.config.ENABLE_NAPCAT_QQ", False), \
+         patch("config.config.ENABLE_TG_BOT", False), \
+         patch("src.platforms.qq_official.get_configured_bots", return_value=[bot]), \
+         patch("src.blog_card_renderer.render_blog_card", AsyncMock(return_value=None)), \
+         patch("src.notifier.asyncio.sleep", AsyncMock()):
+        assert await send_blog_post({"group_key": "nogizaka", "body": "body"}) is False
+    bot.send_translation_qq.assert_awaited_once()
