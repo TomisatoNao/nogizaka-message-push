@@ -45,6 +45,13 @@ COMPOSE_BACKUP=.deploy-compose.previous
 ACTIVE_COMPOSE_FILE=$COMPOSE_FILE
 
 cd "$REMOTE_DIR" || exit 20
+# Hold the lock for preparation, replacement, health checks and rollback.
+umask 077
+exec 9>.deploy-lock || exit 36
+if ! flock -n 9; then
+  echo "ERROR: another deployment holds the deployment lock (or flock is unavailable)" >&2
+  exit 36
+fi
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "ERROR: compose file not found: $REMOTE_DIR/$COMPOSE_FILE" >&2
   exit 21
@@ -288,6 +295,22 @@ if ! compose pull "$SERVICE"; then
   echo "Deployment failed: image pull failed; the running container was not changed" >&2
   exit 32
 fi
+reader_epoch() {
+  epoch=$("$DOCKER_BIN" image inspect --format '{{index .Config.Labels "io.github.tomisatonao.delivery-reader-epoch"}}' "$1") || return 1
+  case "$epoch" in
+    ''|'<no value>') echo 0 ;;
+    *[!0-9]*|??????????*) return 1 ;;
+    *) echo "$epoch" ;;
+  esac
+}
+if ! current_epoch=$(reader_epoch "$CURRENT_IMAGE_ID") ||
+   ! target_epoch=$(reader_epoch "$IMAGE_REPO:$TARGET_TAG") ||
+   [ "$target_epoch" -lt "$current_epoch" ]; then
+  "$DOCKER_BIN" image rm "$ROLLBACK_REF" >/dev/null 2>&1 || true
+  echo "ERROR: target image cannot preserve the current delivery reader capability" >&2
+  exit 37
+fi
+
 if ! compose up -d --no-deps "$SERVICE"; then
   rollback "container replacement failed"
   exit 33

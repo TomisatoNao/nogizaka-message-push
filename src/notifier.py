@@ -265,8 +265,51 @@ def _failed_route_attempt(route_id: str, error_code: str) -> DeliveryAttempt:
     return DeliveryAttempt(channel, route_id, label, target, False, error_code)
 
 
+async def _run_member_delivery_with_intent(identity, channel, route_id, label, target, sender, *, known_error=None):
+    """Protect a member route before invoking its sender."""
+    from src.member_send_intent import begin_send_intent, finish_send_intent
+
+    if known_error:
+        return DeliveryAttempt(channel, route_id, label, target, False, known_error)
+
+    group, member_id, message_id, message_time = identity
+    try:
+        token = begin_send_intent(group, member_id, message_id, route_id, message_time)
+    except DeliveryStateError:
+        return DeliveryAttempt(channel, route_id, label, target, False, "delivery_state_unavailable")
+    if token is None:
+        return DeliveryAttempt(channel, route_id, label, target, False, "delivery_held")
+
+    # Cancellation leaves the committed in-flight row as a replay barrier.
+    try:
+        attempt = await _run_delivery(channel, route_id, label, target, sender)
+    except asyncio.CancelledError:
+        try:
+            finish_send_intent(token, "unconfirmed")
+        except DeliveryStateError:
+            # A committed in-flight intent still protects the route.
+            pass
+        raise
+    if attempt.ok:
+        outcome = "confirmed"
+    elif channel == "napcat" and attempt.error_code == "circuit_open":
+        outcome = "not_submitted"
+    else:
+        # Legacy channel results cannot prove non-submission for every failure.
+        outcome = "unconfirmed"
+    try:
+        if not finish_send_intent(token, outcome):
+            return DeliveryAttempt(channel, route_id, label, target, False, "delivery_held")
+    except DeliveryStateError:
+        return DeliveryAttempt(channel, route_id, label, target, False, "delivery_receipt_write_failed")
+    if outcome == "unconfirmed":
+        return DeliveryAttempt(channel, route_id, label, target, False, "delivery_unconfirmed")
+    return attempt
+
+
 async def send_member_message_detailed(
-    member: dict, message_chain: list[dict], *, skip_route_ids: set[str] | None = None
+    member: dict, message_chain: list[dict], *, skip_route_ids: set[str] | None = None,
+    intent_identity: tuple[str, str, str, str] | None = None,
 ) -> DeliveryReport:
     """向已匹配的通道并发广播成员消息，并返回每个目标的结果。
 
@@ -312,6 +355,11 @@ async def send_member_message_detailed(
             for route_id in sorted(candidate_route_ids & protected_route_ids)
         ]
     protected_route_ids = {attempt.route_id for attempt in held_attempts}
+    def run_route(*args, **kwargs):
+        if intent_identity is not None:
+            return _run_member_delivery_with_intent(intent_identity, *args, **kwargs)
+        return _run_delivery(*args, **kwargs)
+
     tasks: list[Awaitable[DeliveryAttempt]] = []
 
     # 1. NapCat QQ 路由并发任务
@@ -328,7 +376,7 @@ async def send_member_message_detailed(
                     if route_id in skip_route_ids or route_id in protected_route_ids:
                         continue
                     r_label = f"NapCat:{route['remark']}" if route.get("remark") else "NapCat"
-                    tasks.append(_run_delivery(
+                    tasks.append(run_route(
                         "napcat", route_id, r_label, f"群 {gid}",
                         lambda target_gid=gid: send_qq_message(target_gid, message_chain),
                     ))
@@ -363,7 +411,7 @@ async def send_member_message_detailed(
                     route_id = f"official:{bot.name}:private"
                     if route_id in skip_route_ids or route_id in protected_route_ids:
                         continue
-                    tasks.append(_run_delivery(
+                    tasks.append(run_route(
                         f"official:{bot.name}", route_id, b_label,
                         f"用户 {bot.target_openid[:10]}...",
                         lambda b=bot: b.send_message_chain(
@@ -377,7 +425,7 @@ async def send_member_message_detailed(
                     route_id = f"official:{bot.name}:group"
                     if route_id in skip_route_ids or route_id in protected_route_ids:
                         continue
-                    tasks.append(_run_delivery(
+                    tasks.append(run_route(
                         f"official:{bot.name}:group", route_id, b_label,
                         f"群 {bot.group_openid[:10]}...",
                         lambda b=bot: b.send_message_chain_to_group(
@@ -396,7 +444,7 @@ async def send_member_message_detailed(
                 if route_id in skip_route_ids or route_id in protected_route_ids:
                     continue
                 tg_label = f"TG:{bot.remark} ({bot.name})" if getattr(bot, "remark", None) else f"TG:{bot.name}"
-                tasks.append(_run_delivery(
+                tasks.append(run_route(
                     f"tg:{bot.name}", route_id, tg_label, f"Chat {bot.target_chat}",
                     lambda b=bot: b.send_member_message(message_chain),
                 ))

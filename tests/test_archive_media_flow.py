@@ -76,3 +76,28 @@ async def test_download_media_with_headers(tmp_path):
     finally:
         cfg.ARCHIVE_DIR = orig_dir
         archive._media_sem = orig_sem
+
+
+def test_head_media_preserves_range_headers_without_writing_body(tmp_path):
+    from io import BytesIO
+    from types import SimpleNamespace
+
+    from src.webui_modules.media_service import serve_file_range
+
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"0123456789")
+    for method, expected in (("HEAD", b""), ("GET", b"234")):
+        response = {}
+        handler = SimpleNamespace(
+            command=method,
+            headers={"Range": "bytes=2-4"},
+            wfile=BytesIO(),
+            send_response=lambda status: response.update(status=status),
+            send_header=lambda key, value: response.update({key: value}),
+            end_headers=lambda: None,
+        )
+        serve_file_range(handler, path)
+        assert response["status"] == 206
+        assert response["Content-Range"] == "bytes 2-4/10"
+        assert response["Content-Length"] == "3"
+        assert handler.wfile.getvalue() == expected
