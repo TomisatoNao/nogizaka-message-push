@@ -79,3 +79,46 @@ def test_container_build_exposes_release_metadata_to_health_endpoint():
     assert "APP_VERSION=${APP_VERSION}" in dockerfile
     assert "APP_GIT_SHA=${APP_GIT_SHA}" in dockerfile
     assert "APP_BUILD_TIME=${APP_BUILD_TIME}" in dockerfile
+
+
+@pytest.mark.parametrize("current,target,stored,allowed,expected", [
+    (1, 1, None, True, "1"),
+    (1, 0, None, False, None),
+    (0, 0, "1", False, "1"),
+    (0, 1, "1", True, "1"),
+    (2, 3, "1", True, "2"),
+    (1, 1, "invalid", False, "invalid"),
+    (1, 1, "", False, ""),
+])
+def test_persistent_reader_floor_executes_in_shell(tmp_path, current, target, stored, allowed, expected):
+    import os
+    import shutil
+    import subprocess
+
+    bash = shutil.which("sh")
+    if not bash:
+        pytest.skip("A POSIX shell is required for deployment script execution")
+    floor_path = tmp_path / ".deploy-delivery-reader-floor"
+    if stored is not None:
+        floor_path.write_text(stored, encoding="utf-8")
+    script = deploy_release.REMOTE_DEPLOY_SCRIPT
+    functions = script[script.index("reader_epoch() {"):script.index("if ! check_delivery_reader_floor;")]
+    stub = """
+set -u
+fake_docker() {
+  for value in "$@"; do last=$value; done
+  case "$last" in current) echo "$CURRENT_EPOCH" ;; *) echo "$TARGET_EPOCH" ;; esac
+}
+DOCKER_BIN=fake_docker
+CURRENT_IMAGE_ID=current
+IMAGE_REPO=image
+TARGET_TAG=target
+"""
+    result = subprocess.run([bash, "-c",
+                             stub + functions + "\ncheck_delivery_reader_floor"],
+                            cwd=tmp_path, env={**os.environ, "CURRENT_EPOCH": str(current),
+                                               "TARGET_EPOCH": str(target)},
+                            capture_output=True, text=True, timeout=15)
+    assert (result.returncode == 0) is allowed, result.stderr
+    actual = floor_path.read_text(encoding="utf-8").strip() if floor_path.exists() else None
+    assert actual == expected
