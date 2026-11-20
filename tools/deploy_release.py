@@ -303,11 +303,34 @@ reader_epoch() {
     *) echo "$epoch" ;;
   esac
 }
-if ! current_epoch=$(reader_epoch "$CURRENT_IMAGE_ID") ||
-   ! target_epoch=$(reader_epoch "$IMAGE_REPO:$TARGET_TAG") ||
-   [ "$target_epoch" -lt "$current_epoch" ]; then
+check_delivery_reader_floor() {
+  floor_file=.deploy-delivery-reader-floor
+  floor=0
+  if [ -f "$floor_file" ]; then
+    floor=$(cat "$floor_file") || return 1
+    case "$floor" in
+      ''|*[!0-9]*|??????????*) return 1 ;;
+    esac
+  fi
+  current_epoch=$(reader_epoch "$CURRENT_IMAGE_ID") || return 1
+  target_epoch=$(reader_epoch "$IMAGE_REPO:$TARGET_TAG") || return 1
+  if [ "$current_epoch" -gt "$floor" ]; then floor=$current_epoch; fi
+  if [ "$target_epoch" -lt "$floor" ]; then
+    echo "ERROR: target image is below the persistent delivery reader floor" >&2
+    return 1
+  fi
+  # Persist the observed capability before replacing the container. Preserve
+  # this floor across rollbacks; never derive it solely from the current image.
+  floor_temp="$floor_file.$$"
+  if ! printf '%s\n' "$floor" > "$floor_temp" ||
+     ! mv "$floor_temp" "$floor_file"; then
+    rm -f "$floor_temp"
+    return 1
+  fi
+}
+if ! check_delivery_reader_floor; then
   "$DOCKER_BIN" image rm "$ROLLBACK_REF" >/dev/null 2>&1 || true
-  echo "ERROR: target image cannot preserve the current delivery reader capability" >&2
+  echo "ERROR: unable to verify or preserve delivery reader compatibility" >&2
   exit 37
 fi
 
