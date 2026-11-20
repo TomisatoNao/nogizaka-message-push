@@ -19,3 +19,18 @@
   width: 100%;
   resize: vertical;
 }
+#memberRecoveryRiskLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+#memberRecoveryRiskLabel[hidden],
+#memberDeliveryRecovery[hidden] {
+  display: none;
+}
+#memberRecoveryRisk {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  flex-shrink: 0;
+}

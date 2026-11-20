@@ -2390,7 +2390,7 @@
         <select id="memberRecoveryAction"><option value="confirm_delivered">已核实：确认已送达</option><option value="authorize_resend">已核实：允许重新发送</option></select>
       </label>
       <label class="field">核实依据（必填）<textarea id="memberRecoveryReason" required maxlength="500" rows="3"></textarea></label>
-      <label id="memberRecoveryRiskLabel" class="switch" hidden><input id="memberRecoveryRisk" type="checkbox"/><span class="track"></span>我了解重发可能造成重复消息，仍授权重发</label>
+      <label id="memberRecoveryRiskLabel" class="member-recovery-risk" hidden><input id="memberRecoveryRisk" type="checkbox"/>我了解重发可能造成重复消息，仍授权重发</label>
       <p id="memberRecoveryResult" role="status" aria-live="polite"></p>
     </div>
     <div class="dialog-actions monitor-dialog-actions"><button class="btn primary" id="btnSubmitMemberRecovery" type="submit">记录决定</button></div>

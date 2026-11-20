@@ -917,7 +917,7 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
                     assert {dialog["id"] for dialog in summary["dialogs"]} == {
                         "monitorMessageDialog", "monitorBlogDialog", "monitorXDialog",
                         "monitorInstagramDialog", "monitorTiktokDialog", "monitorLiveDialog",
-                        "qqCommandSettingsDialog",
+                        "qqCommandSettingsDialog", "memberRecoveryDialog",
                     }
                     assert all(dialog["fieldCount"] > 0 and dialog["hasScroll"] for dialog in summary["dialogs"])
                     dialog_fields = {dialog["id"]: set(dialog["fieldIds"]) for dialog in summary["dialogs"]}
@@ -1890,6 +1890,7 @@ def test_member_recovery_decision_and_layout(admin_static_server, viewport_name,
         page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
         page.locator("#memberRecoveryItems button").click()
         assert page.locator("#memberRecoveryDialog").is_visible()
+        assert not page.locator("#memberRecoveryRiskLabel").is_visible()
         page.locator("#memberRecoveryAction").select_option("authorize_resend")
         page.locator("#memberRecoveryReason").fill("Checked target conversation")
         page.locator("#btnSubmitMemberRecovery").click()
