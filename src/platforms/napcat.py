@@ -736,12 +736,11 @@ async def _post_payload_detailed(
                         response_body = resp.json()
                     except Exception:
                         log_all(
-                            f"⚠️ Bot 返回非 JSON 响应（HTTP 200，按成功处理）: "
+                            f"⚠️ Bot 返回非 JSON 响应（HTTP 200，送达未确认）: "
                             f"{_safe_excerpt(getattr(resp, 'text', ''))}",
                             is_error=True,
                         )
-                        _mark_confirmed_batch()
-                        return NapCatSendOutcome(True)
+                        return NapCatSendOutcome(True, "delivery_unconfirmed")
                     if isinstance(response_body, dict) and (
                         response_body.get("status") == "ok"
                         or response_body.get("retcode") == 0

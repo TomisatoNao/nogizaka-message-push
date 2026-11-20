@@ -305,3 +305,19 @@ async def test_http_403_is_classified_as_auth_failure(monkeypatch):
     assert await napcat.send_qq_message(100, [{"type": "text", "data": {"text": "auth"}}], max_retries=3) is False
     assert client.calls == 1
     assert napcat.get_send_gate_snapshot()["blocked_reason"] == "auth_failed"
+
+
+@pytest.mark.asyncio
+async def test_http_200_without_json_receipt_is_unconfirmed_and_not_retried(monkeypatch):
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    client = _FakeClient([_Response(body=ValueError("invalid JSON"), text="not a receipt")])
+    napcat.initialize(client)
+    with napcat.track_delivery_progress() as progress:
+        outcome = await napcat.send_qq_message_detailed(100, [
+            {"type": "text", "data": {"text": "first"}},
+            {"type": "video", "data": {"file": "https://example.invalid/a.mp4"}},
+        ], max_retries=3)
+        assert outcome.error_code == "delivery_unconfirmed"
+        assert progress.possible_submission
+        assert progress.confirmed_batches == 0
+    assert client.calls == 1
