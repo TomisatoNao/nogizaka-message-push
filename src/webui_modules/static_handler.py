@@ -30,6 +30,8 @@ _STATIC_MIME = {
     "archive.css": "text/css",
     "archive.js": "application/javascript",
     "admin_tasks.js": "application/javascript",
+    "admin_member_recovery.js": "application/javascript",
+    "admin_member_recovery.css": "text/css",
     "admin_route_diagnostics.js": "application/javascript",
     "admin_route_diagnostics.css": "text/css",
     "admin_icon.svg": "image/svg+xml",
