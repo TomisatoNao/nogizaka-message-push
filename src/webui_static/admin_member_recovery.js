@@ -28,7 +28,7 @@
   }
 
   function identity(item) {
-    const members = typeof config === "object" && Array.isArray(config.monitor) ? config.monitor : [];
+    const members = typeof config === "object" && config && Array.isArray(config.monitor) ? config.monitor : [];
     const member = members.find((entry) => String(entry.m_id) === String(item.member_id)
       && (!entry.group_type || entry.group_type === item.group_type));
     const name = member?.m_name || `成员 ${item.member_id}`;

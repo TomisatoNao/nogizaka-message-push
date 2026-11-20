@@ -1888,6 +1888,11 @@ def test_member_recovery_decision_and_layout(admin_static_server, viewport_name,
 
         page.route("**/api/**", handle_api)
         page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
+        page.wait_for_function("document.querySelector('#memberRecoveryItems button') !== null")
+        page.evaluate("window.recoveryTestConfig = config; config = null")
+        page.locator("#btnRefreshMemberRecovery").click()
+        page.wait_for_function("document.querySelector('#memberRecoveryItems button') !== null")
+        page.evaluate("config = window.recoveryTestConfig; delete window.recoveryTestConfig")
         page.locator("#memberRecoveryItems button").click()
         assert page.locator("#memberRecoveryDialog").is_visible()
         assert not page.locator("#memberRecoveryRiskLabel").is_visible()
