@@ -8,6 +8,7 @@
 <title>坂道监控 · 配置管理</title>
 <link href="/static/theme.css?v=20261031_4" rel="stylesheet"/>
 <link href="/static/admin_route_diagnostics.css?v=20261118_1" rel="stylesheet"/>
+<link href="/static/admin_member_recovery.css?v=20261120_1" rel="stylesheet"/>
 <script src="/static/theme.js?v=20260905_3"></script>
 <style>
   :root { --danger-soft: var(--err-soft); }
@@ -1383,6 +1384,15 @@
     <div id="stDeliveryBacklog" class="delivery-backlog" role="status" aria-live="polite">
       🧭 路由补偿：暂无待处理数据
     </div>
+    <section id="memberDeliveryRecovery" class="admin-data-group" hidden aria-labelledby="memberRecoveryTitle">
+      <div class="admin-module-heading">
+        <h3 id="memberRecoveryTitle">需要核实的成员投递</h3>
+        <button class="btn small" id="btnRefreshMemberRecovery" type="button">刷新记录</button>
+      </div>
+      <p class="admin-note">送达未确认的消息不会自动重发。请先核对群聊或目标会话，再记录处理决定。</p>
+      <p id="memberRecoveryStatus" role="status" aria-live="polite"></p>
+      <div id="memberRecoveryItems"></div>
+    </section>
     <div class="admin-actions delivery-backlog-actions">
       <button class="btn small" id="btnCopyDeliveryDiag" type="button">📋 复制脱敏诊断摘要</button>
     </div>
@@ -2366,6 +2376,25 @@
   <div class="dialog-actions monitor-dialog-actions">
     <button class="btn" type="button" data-qq-command-dialog-close>完成</button>
   </div>
+</dialog>
+<dialog id="memberRecoveryDialog" class="monitor-settings-dialog" aria-labelledby="memberRecoveryDialogTitle" aria-describedby="memberRecoveryNote">
+  <div class="monitor-dialog-header">
+    <h3 id="memberRecoveryDialogTitle">核实投递结果</h3>
+    <button class="btn small" id="btnCloseMemberRecovery" type="button" aria-label="关闭核实投递结果">关闭</button>
+  </div>
+  <form id="memberRecoveryForm">
+    <div class="monitor-dialog-scroll member-recovery-fields">
+      <p id="memberRecoveryNote" class="admin-note">确认已送达只补记成功；允许重发会交给后续正常巡查处理，不会立即发送。</p>
+      <p id="memberRecoveryIdentity"></p>
+      <label class="field">处理决定
+        <select id="memberRecoveryAction"><option value="confirm_delivered">已核实：确认已送达</option><option value="authorize_resend">已核实：允许重新发送</option></select>
+      </label>
+      <label class="field">核实依据（必填）<textarea id="memberRecoveryReason" required maxlength="500" rows="3"></textarea></label>
+      <label id="memberRecoveryRiskLabel" class="switch" hidden><input id="memberRecoveryRisk" type="checkbox"/><span class="track"></span>我了解重发可能造成重复消息，仍授权重发</label>
+      <p id="memberRecoveryResult" role="status" aria-live="polite"></p>
+    </div>
+    <div class="dialog-actions monitor-dialog-actions"><button class="btn primary" id="btnSubmitMemberRecovery" type="submit">记录决定</button></div>
+  </form>
 </dialog>
 <!-- 通用确认 / 提示对话框（替代原生 confirm/alert） -->
 <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
@@ -10559,5 +10588,6 @@ if (socialUrlInput) {
 </script>
 <script src="/static/admin_tasks.js?v=20261031_4"></script>
 <script src="/static/admin_route_diagnostics.js?v=20261027_1"></script>
+<script src="/static/admin_member_recovery.js?v=20261120_1"></script>
 </body>
 </html>

@@ -1860,3 +1860,85 @@ def test_admin_config_controls_update_dirty_state_once(admin_static_server):
         if exc.__class__.__name__ in {"Error", "PlaywrightError"} and "executable" in str(exc).lower():
             pytest.skip(f"Playwright Chromium 不可用：{exc}")
         raise
+
+
+@pytest.mark.parametrize("viewport_name", ("desktop", "tablet", "mobile"))
+@pytest.mark.parametrize("theme", ("dark", "light"))
+def test_member_recovery_decision_and_layout(admin_static_server, viewport_name, theme, tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport=VIEWPORTS[viewport_name], color_scheme=theme)
+        context.add_init_script(f"localStorage.setItem('sakamichiTheme', '{theme}');")
+        page = context.new_page()
+        page.set_default_timeout(5000)
+        submitted = []
+        item = {"token": "attempt-token", "group_type": "nogizaka46", "member_id": "55",
+                "message_id": "message-123", "route_id": "napcat:123", "state": "held"}
+
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            payload = _api_payload(path)
+            if path == "/api/member-delivery/intents":
+                payload = {"ok": True, "intents": [] if submitted else [item]}
+            if path == "/api/member-delivery/resolve":
+                submitted.append(route.request.post_data_json)
+                payload = {"ok": True}
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
+        page.locator("#memberRecoveryItems button").click()
+        assert page.locator("#memberRecoveryDialog").is_visible()
+        page.locator("#memberRecoveryAction").select_option("authorize_resend")
+        page.locator("#memberRecoveryReason").fill("Checked target conversation")
+        page.locator("#btnSubmitMemberRecovery").click()
+        assert submitted == []
+        page.locator("#memberRecoveryRiskLabel").click()
+        assert page.locator("#memberRecoveryRisk").is_checked()
+        assert page.locator("#btnSubmitMemberRecovery").bounding_box()["height"] >= 44
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        bounds = page.locator("#memberRecoveryDialog").bounding_box()
+        assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= VIEWPORTS[viewport_name]["width"] + 1
+        page.screenshot(path=str(tmp_path / f"member-recovery-{viewport_name}-{theme}.png"))
+        page.locator("#btnSubmitMemberRecovery").click()
+        page.wait_for_function("document.querySelector('#memberRecoveryDialog').open === false")
+        assert submitted == [{"token": "attempt-token", "action": "authorize_resend",
+                              "reason": "Checked target conversation", "acknowledge_duplicate_risk": True}]
+        page.wait_for_function("document.querySelector('#memberDeliveryRecovery').hidden")
+        assert page.evaluate("dirty") is False
+        context.close()
+        browser.close()
+
+
+def test_member_recovery_stale_result_never_resubmits_automatically(admin_static_server):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_default_timeout(5000)
+        submitted = []
+
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            payload = _api_payload(path)
+            code = 200
+            if path == "/api/member-delivery/intents":
+                payload = {"ok": True, "intents": [{"token": "stale", "group_type": "group",
+                    "member_id": "1", "message_id": "2", "route_id": "napcat:123", "state": "held"}]}
+            if path == "/api/member-delivery/resolve":
+                submitted.append(route.request.post_data_json)
+                payload, code = {"ok": False}, 409
+            route.fulfill(status=code, content_type="application/json", body=json.dumps(payload))
+
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
+        page.locator("#memberRecoveryItems button").click()
+        page.locator("#memberRecoveryReason").fill("Checked receipt")
+        page.locator("#btnSubmitMemberRecovery").click()
+        page.wait_for_function("document.querySelector('#memberRecoveryResult').textContent.includes('记录已发生变化')")
+        assert len(submitted) == 1
+        page.keyboard.press("Escape")
+        assert not page.locator("#memberRecoveryDialog").is_visible()
+        assert page.evaluate("dirty") is False
+        browser.close()

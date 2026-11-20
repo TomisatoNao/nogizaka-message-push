@@ -1,0 +1,21 @@
+#memberDeliveryRecovery p,
+#memberRecoveryIdentity {
+  overflow-wrap: anywhere;
+}
+#memberRecoveryDialog .member-recovery-fields {
+  display: grid;
+  gap: var(--space-4);
+}
+#memberRecoveryDialog .member-recovery-fields > p {
+  margin: 0;
+}
+#memberRecoveryDialog .btn,
+#memberDeliveryRecovery .btn,
+#memberRecoveryRiskLabel {
+  min-height: 44px;
+}
+#memberRecoveryDialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+}
