@@ -48,6 +48,17 @@ async def test_startup_failure_cleanup_releases_pid_and_closes_clients(tmp_path:
     monkeypatch.setattr(app, "_init_accounts", AsyncMock())
     monkeypatch.setattr(app, "init_credentials", lambda *a, **k: None)
 
+    # Recovery remains necessary when new intent writes have been disabled.
+    from src import member_send_intent
+    from src.app_modules import process_lock
+    monkeypatch.setenv("MEMBER_DELIVERY_INTENTS_ENABLED", "0")
+    recovery_calls = []
+    def observe_recovery():
+        assert process_lock._instance_lock_handle is not None
+        recovery_calls.append(True)
+        return 0
+    monkeypatch.setattr(member_send_intent, "recover_interrupted_send_intents", observe_recovery)
+
     # 运行 main()，应触发异常并通过 finally 清理
     with pytest.raises(RuntimeError, match="模拟健康检查致命崩溃"):
         await app.main()
@@ -58,6 +69,7 @@ async def test_startup_failure_cleanup_releases_pid_and_closes_clients(tmp_path:
     assert len(closed_clients) >= 3, "启动异常终止后，创建的 HTTP 客户端均应被 aclose"
     # 验证主事件循环引用被重置
     assert app.get_main_loop() is None
+    assert recovery_calls == [True]
 
 
 # ============================================================

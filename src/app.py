@@ -923,9 +923,6 @@ async def main() -> None:
         # 1. 基础设施
         init_loggers()
         _acquire_instance_lock()
-        if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED") == "1":
-            from src.member_send_intent import recover_interrupted_send_intents
-            recover_interrupted_send_intents()
         log_all("🌸 坂道联合监控系统已启动")
         from datetime import datetime
         from src.runtime_info import runtime_metadata
@@ -985,6 +982,19 @@ async def main() -> None:
         init_credentials(http_client, auth_client=auth_http_client)
         translator.initialize(http_client)
         archive.initialize(http_client)
+        # Disabling new intent writes must not leave interrupted attempts
+        # permanently displayed as active sends after a restart.
+        from src.member_send_intent import recover_interrupted_send_intents
+        from src.delivery_state import DeliveryStateError
+        try:
+            recovered = recover_interrupted_send_intents()
+        except DeliveryStateError:
+            if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED") == "1":
+                raise
+            log_all("⚠️ 无法读取中断投递状态，请检查归档数据库；发送前仍会执行状态保护检查", is_error=True)
+        else:
+            if recovered:
+                log_all(f"⚠️ 已将 {recovered} 条中断投递转为待核实，禁止自动重发")
         # 自动检查并纠正历史归档中因旧版 UTC 导致的跨月错位数据（全自动无损自愈）
         try:
             archive.realign_archive_timezones()
