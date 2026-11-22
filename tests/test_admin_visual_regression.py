@@ -1948,3 +1948,30 @@ def test_member_recovery_stale_result_never_resubmits_automatically(admin_static
         assert not page.locator("#memberRecoveryDialog").is_visible()
         assert page.evaluate("dirty") is False
         browser.close()
+
+
+@pytest.mark.parametrize("viewport_name,theme", [("desktop", "light"), ("mobile", "dark")])
+@pytest.mark.parametrize("backlog,label", [
+    ({"protected_routes": 2, "protected_messages": 1, "available": True}, "2 个路由待核实或发送中"),
+    ({"available": False}, "不能判断是否存在积压"),
+])
+def test_member_backlog_never_hides_protected_or_unavailable_state(admin_static_server, viewport_name, theme, backlog, label):
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport=VIEWPORTS[viewport_name], color_scheme=theme)
+        context.add_init_script(f"localStorage.setItem('sakamichiTheme', '{theme}');")
+        page = context.new_page()
+        def handle_api(route):
+            path = urlsplit(route.request.url).path
+            payload = _api_payload(path)
+            if path == "/api/status":
+                payload["delivery_backlog"] = backlog
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+        page.route("**/api/**", handle_api)
+        page.goto(f"{admin_static_server}/#tab=status", wait_until="domcontentloaded")
+        page.wait_for_function("label => document.querySelector('#stDeliveryBacklog').textContent.includes(label)", arg=label)
+        assert page.locator("#stDeliveryBacklog").get_attribute("data-tone") == "warn"
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        context.close()
+        browser.close()

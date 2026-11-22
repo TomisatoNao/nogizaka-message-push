@@ -570,7 +570,7 @@ def pending_route_count(
 def pending_backlog_summary(
     group_type: str | None = None,
     member_id: str | None = None,
-) -> dict[str, int]:
+) -> dict[str, int | bool]:
     """返回当前待补偿与暂停保留的路由摘要，供状态页/诊断使用。
 
     ``routes/messages/members`` 只统计会参与下一轮补偿的 pending 记录；
@@ -587,6 +587,10 @@ def pending_backlog_summary(
             "suspended_routes": 0,
             "suspended_messages": 0,
             "suspended_members": 0,
+            "protected_routes": 0,
+            "protected_messages": 0,
+            "protected_members": 0,
+            "available": False,
         }
     try:
         clauses: list[str] = []
@@ -610,6 +614,11 @@ def pending_backlog_summary(
                 COUNT(DISTINCT CASE WHEN route_state='suspended'
                     THEN group_type || ':' || member_id || ':' || message_id END),
                 COUNT(DISTINCT CASE WHEN route_state='suspended'
+                    THEN group_type || ':' || member_id END),
+                SUM(CASE WHEN route_state NOT IN ('pending', 'suspended') THEN 1 ELSE 0 END),
+                COUNT(DISTINCT CASE WHEN route_state NOT IN ('pending', 'suspended')
+                    THEN group_type || ':' || member_id || ':' || message_id END),
+                COUNT(DISTINCT CASE WHEN route_state NOT IN ('pending', 'suspended')
                     THEN group_type || ':' || member_id END)
             FROM delivery_pending_routes{where}
             """,
@@ -622,6 +631,10 @@ def pending_backlog_summary(
             "suspended_routes": int(row[3] or 0) if row else 0,
             "suspended_messages": int(row[4] or 0) if row else 0,
             "suspended_members": int(row[5] or 0) if row else 0,
+            "protected_routes": int(row[6] or 0) if row else 0,
+            "protected_messages": int(row[7] or 0) if row else 0,
+            "protected_members": int(row[8] or 0) if row else 0,
+            "available": True,
         }
     except sqlite3.Error as exc:
         log_all(f"⚠️ 统计待补偿摘要失败: {type(exc).__name__}", is_error=True)
@@ -632,4 +645,8 @@ def pending_backlog_summary(
             "suspended_routes": 0,
             "suspended_messages": 0,
             "suspended_members": 0,
+            "protected_routes": 0,
+            "protected_messages": 0,
+            "protected_members": 0,
+            "available": False,
         }

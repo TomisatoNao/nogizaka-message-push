@@ -5164,7 +5164,16 @@ async function fetchStatus() {
     const members = Math.max(0, Number(backlog.members) || 0);
     const suspendedRoutes = Math.max(0, Number(backlog.suspended_routes) || 0);
     const suspendedMessages = Math.max(0, Number(backlog.suspended_messages) || 0);
-    if (!routes && !suspendedRoutes) {
+    const protectedRoutes = Math.max(0, Number(backlog.protected_routes) || 0);
+    const protectedMessages = Math.max(0, Number(backlog.protected_messages) || 0);
+    if (backlog.available === false) {
+      backlogBox.textContent = "🧭 路由补偿：暂时无法读取投递状态，请检查数据库；不能判断是否存在积压";
+      backlogBox.dataset.tone = "warn";
+    } else if (protectedRoutes) {
+      backlogBox.textContent = "🧭 成员投递：" + protectedMessages + " 条消息 · " + protectedRoutes +
+        " 个路由待核实或发送中；自动补偿 " + messages + " 条；暂停保留 " + suspendedMessages + " 条";
+      backlogBox.dataset.tone = "warn";
+    } else if (!routes && !suspendedRoutes) {
       backlogBox.textContent = "🧭 路由补偿：暂无待处理数据";
       backlogBox.dataset.tone = "ok";
     } else if (routes) {
@@ -5455,6 +5464,9 @@ function buildDeliveryDiagnosticSummary() {
       String(Number(backlog.routes) || 0) + " routes / " + String(Number(backlog.members) || 0) + " members",
     "暂停保留: " + String(Number(backlog.suspended_messages) || 0) + " messages / " +
       String(Number(backlog.suspended_routes) || 0) + " routes",
+    "受保护投递: " + String(Number(backlog.protected_messages) || 0) + " messages / " +
+      String(Number(backlog.protected_routes) || 0) + " routes",
+    "投递状态读取: " + (backlog.available === false ? "unavailable" : "available"),
   ].join("\n");
 }
 
