@@ -81,7 +81,7 @@ def serve_file_range(
     handler.send_header("Last-Modified", last_modified)
     handler.send_header("Cache-Control", cache_control)
     handler.end_headers()
-    if getattr(handler, "command", None) == "HEAD":
+    if getattr(handler, "command", "").upper() == "HEAD":
         return
     try:
         with open(path, "rb") as f:

@@ -12,6 +12,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import tarfile
 import tempfile
 from datetime import datetime, timezone
@@ -32,8 +33,41 @@ def _included_file(root: Path, path: Path) -> bool:
         and not path.is_symlink()
         and not any(part in _EXCLUDED_PARTS for part in relative.parts)
         and path.name not in _EXCLUDED_FILES
-        and not path.name.endswith((".pyc", ".tmp"))
+        and not path.name.endswith((".pyc", ".tmp", "-wal", "-shm"))
     )
+
+
+def _is_sqlite_database(path: Path) -> bool:
+    """检查文件是否为有效的 SQLite 数据库（避免纯文本或模拟文件误判）。"""
+    if not path.is_file() or path.stat().st_size < 100:
+        return False
+    try:
+        with path.open("rb") as f:
+            header = f.read(16)
+            return header == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
+def _backup_sqlite_database(source_path: Path, target_path: Path) -> None:
+    """利用 SQLite Online Backup API 导出 WAL 模式活跃数据库一致性快照并执行校验。"""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    src_uri = f"file:{source_path.resolve().as_posix()}?mode=ro"
+    src_conn = sqlite3.connect(src_uri, uri=True)
+    dst_conn = sqlite3.connect(target_path)
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+        src_conn.close()
+
+    check_conn = sqlite3.connect(target_path)
+    try:
+        row = check_conn.execute("PRAGMA quick_check;").fetchone()
+        if not row or row[0] != "ok":
+            raise RuntimeError(f"Database snapshot quick_check failed for {source_path}: {row}")
+    finally:
+        check_conn.close()
 
 
 def _hash_file(path: Path) -> str:
@@ -53,21 +87,6 @@ def _collect_files(root: Path) -> list[Path]:
     return sorted(files, key=lambda path: path.relative_to(root).as_posix())
 
 
-def _manifest(root: Path, files: list[Path]) -> dict:
-    return {
-        "format": "sakamichi-backup-v1",
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "files": [
-            {
-                "path": path.relative_to(root).as_posix(),
-                "size": path.stat().st_size,
-                "sha256": _hash_file(path),
-            }
-            for path in files
-        ],
-    }
-
-
 def _prune(destination: Path, keep: int) -> None:
     archives = sorted(destination.glob("sakamichi-backup-*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
     for old in archives[max(1, keep):]:
@@ -79,7 +98,7 @@ def create_backup(root: Path = PROJECT_ROOT, destination: Path = BACKUP_DIR, kee
     root = root.resolve()
     destination.mkdir(parents=True, exist_ok=True)
     files = _collect_files(root)
-    manifest = _manifest(root, files)
+
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     archive = destination / f"sakamichi-backup-{stamp}.tar.gz"
     suffix = 1
@@ -87,19 +106,63 @@ def create_backup(root: Path = PROJECT_ROOT, destination: Path = BACKUP_DIR, kee
         archive = destination / f"sakamichi-backup-{stamp}-{suffix}.tar.gz"
         suffix += 1
 
-    with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as tar:
-        for path in files:
-            tar.add(path, arcname=path.relative_to(root).as_posix(), recursive=False)
-        raw_manifest = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
-        info = tarfile.TarInfo(_MANIFEST_NAME)
-        info.size = len(raw_manifest)
-        info.mtime = int(datetime.now().timestamp())
-        tar.addfile(info, io.BytesIO(raw_manifest))
+    tmp_archive = archive.with_name(f"{archive.name}.tmp")
 
-    try:
-        os.chmod(archive, 0o600)
-    except OSError:
-        pass
+    with tempfile.TemporaryDirectory(prefix="sakamichi-backup-") as tmp_dir:
+        staging_root = Path(tmp_dir) / "staging"
+        staging_root.mkdir(parents=True, exist_ok=True)
+
+        file_map: dict[str, Path] = {}
+        for path in files:
+            arcname = path.relative_to(root).as_posix()
+            if _is_sqlite_database(path):
+                staged_db = staging_root / arcname
+                _backup_sqlite_database(path, staged_db)
+                file_map[arcname] = staged_db
+            else:
+                file_map[arcname] = path
+
+        manifest = {
+            "format": "sakamichi-backup-v1",
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "files": [
+                {
+                    "path": arcname,
+                    "size": fpath.stat().st_size,
+                    "sha256": _hash_file(fpath),
+                }
+                for arcname, fpath in sorted(file_map.items())
+            ],
+        }
+
+        try:
+            with tarfile.open(tmp_archive, "w:gz", format=tarfile.PAX_FORMAT) as tar:
+                for arcname, fpath in sorted(file_map.items()):
+                    tar.add(fpath, arcname=arcname, recursive=False)
+                raw_manifest = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+                info = tarfile.TarInfo(_MANIFEST_NAME)
+                info.size = len(raw_manifest)
+                info.mtime = int(datetime.now().timestamp())
+                tar.addfile(info, io.BytesIO(raw_manifest))
+
+            try:
+                os.chmod(tmp_archive, 0o600)
+            except OSError:
+                pass
+
+            # 归档完成前必须通过严格校验，确保打包包体无损且哈希一致
+            ok, errors, _ = verify_backup(tmp_archive)
+            if not ok:
+                raise RuntimeError(f"备份生成自检校验失败: {'; '.join(errors)}")
+
+            # 校验无误后原子替换为最终归档
+            os.replace(tmp_archive, archive)
+        finally:
+            try:
+                tmp_archive.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     _prune(destination, keep)
     return archive, manifest
 
@@ -160,6 +223,7 @@ def restore_backup(archive: Path, root: Path = PROJECT_ROOT, *, apply: bool = Fa
         return result
 
     root = root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="sakamichi-restore-", dir=root) as temp_dir:
         staging = Path(temp_dir)
         with tarfile.open(archive, "r:gz") as tar:

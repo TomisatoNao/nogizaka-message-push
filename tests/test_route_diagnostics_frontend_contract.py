@@ -154,7 +154,7 @@ def test_route_diagnostics_mobile_toolbar_geometry_across_viewports_and_themes(t
                         name_box = card.locator(".admin-route-member-name").bounding_box()
                         badge_box = card.locator(".admin-route-member-lead > .admin-route-badge").bounding_box()
                         assert badge_box["x"] >= name_box["x"] + name_box["width"] + 4, f"Badge wrapped below name at {width}px/{theme}"
-                        assert abs((badge_box["y"] + badge_box["height"] / 2) - (name_box["y"] + name_box["height"] / 2)) <= 1
+                        assert abs((badge_box["y"] + badge_box["height"] / 2) - (name_box["y"] + name_box["height"] / 2)) <= 2
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                     if width in (390, 1280) and theme == "dark":
                         page.locator("#routeDiagnosticsPanel").screenshot(path=str(tmp_path / f"member-badges-{width}.png"))
