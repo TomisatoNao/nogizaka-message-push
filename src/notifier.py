@@ -18,6 +18,7 @@ from src import health
 from src.health import ErrorTier
 from src.utils import match_member_filter
 from src.delivery_state import DeliveryStateError, held_member_routes
+from src.delivery_receipts import durable_delivery_receipts
 
 
 PREFLIGHT_DELIVERY_ERROR_CODES = frozenset({
@@ -282,7 +283,7 @@ async def _run_member_delivery_with_intent(identity, channel, route_id, label, t
 
     # The mutable progress survives wait_for cancellation and distinguishes
     # waiting for the send gate from a request whose receipt may be lost.
-    with track_delivery_progress() as progress, tgbot.durable_delivery_receipts(channel.startswith("tg:")):
+    with track_delivery_progress() as progress, durable_delivery_receipts(channel.startswith(("tg:", "official:"))):
         try:
             attempt = await _run_delivery(channel, route_id, label, target, sender)
         except asyncio.CancelledError:
