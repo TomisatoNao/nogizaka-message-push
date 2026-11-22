@@ -741,3 +741,26 @@ async def test_member_intent_uses_submission_evidence(state_db, failure, submitt
         "SELECT route_state FROM delivery_pending_routes WHERE message_id='1'"
     ).fetchone()
     assert row[0] == ("held" if submitted else "pending")
+
+
+@pytest.mark.asyncio
+async def test_telegram_timeout_is_held_not_recorded_delivered(state_db):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from telegram.error import TimedOut
+    from src.notifier import _run_member_delivery_with_intent
+    from src.platforms.tgbot import TGBot
+    from src.delivery_state import successful_routes, held_member_routes
+
+    bot = TGBot("test", "", "123")
+    bot._bot = SimpleNamespace(send_message=AsyncMock(side_effect=TimedOut()))
+    async def sender():
+        return await bot.send_member_message([{"type": "text", "data": {"text": "body"}}])
+    attempt = await _run_member_delivery_with_intent(
+        ("group", "member", "1", "2026-11-22T00:00:00Z"),
+        "tg:test", "tg:test", "Telegram", "123", sender,
+    )
+    assert not attempt.ok and attempt.error_code == "delivery_unconfirmed"
+    assert successful_routes("group", "member", "1") == set()
+    assert held_member_routes("group", "member") == {"tg:test"}
+    assert bot._bot.send_message.await_count == 1

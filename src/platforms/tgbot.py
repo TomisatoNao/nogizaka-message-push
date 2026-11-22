@@ -2,12 +2,27 @@
 # tgbot.py — Telegram Bot 推送（HTML 格式化，支持多 Bot 实例）
 # ============================================================
 import asyncio
+import contextvars
+from contextlib import contextmanager
 import os
 import re
 
 import src.config.config as cfg
 from src.constants import ROLE_KEY, ROLE_TRANSLATION
 from src.logger import log_all
+
+_durable_receipts = contextvars.ContextVar("tg_durable_receipts", default=False)
+
+
+@contextmanager
+def durable_delivery_receipts(enabled=True):
+    """Use conservative receipts only within a durable member send attempt."""
+    token = _durable_receipts.set(enabled)
+    try:
+        yield
+    finally:
+        _durable_receipts.reset(token)
+
 
 # ---- 模块级状态 ----
 _bots: list["TGBot"] = []
@@ -96,6 +111,9 @@ class TGBot:
                 await action()
                 return True
             except TimedOut:
+                if _durable_receipts.get():
+                    log_all(f"⚠️ TG Bot [{self.name}] {label}送达未确认，停止后续发送并等待核实", is_error=True)
+                    return False
                 log_all(f"⚠️ TG Bot [{self.name}] {label}超时（服务端可能已收到），视为成功", is_error=True)
                 return True
             except RetryAfter as e:
@@ -107,6 +125,9 @@ class TGBot:
                     log_all(f"❌ TG Bot [{self.name}] {label} flood control 重试耗尽 ({attempt}/3)", is_error=True)
                     return False
             except Exception as e:
+                if _durable_receipts.get():
+                    log_all(f"⚠️ TG Bot [{self.name}] {label}未确认完成 ({type(e).__name__})，禁止自动重试", is_error=True)
+                    return False
                 if attempt < 3:
                     wait = _retry_wait(e) or (2 ** attempt)
                     log_all(f"⚠️ TG Bot [{self.name}] {label}失败 ({attempt}/3): {e}，{wait:.1f}s 后重试", is_error=True)
@@ -294,12 +315,16 @@ class TGBot:
         caption_fits = len(_escape_html(full_text)) <= _TELEGRAM_CAPTION_MAX
         if not caption_fits and full_text:
             if not await self._post_message(self.target_chat, full_text):
+                if _durable_receipts.get():
+                    return False
                 ok = False
             await asyncio.sleep(0.5)
 
         for i, (media_type, file_url) in enumerate(media_list):
             cap = full_text if (caption_fits and i == 0) else ""
             if not await self._post_media(self.target_chat, media_type, file_url, cap):
+                if _durable_receipts.get():
+                    return False
                 ok = False
             if i < len(media_list) - 1:
                 await asyncio.sleep(0.5)
