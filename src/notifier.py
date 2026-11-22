@@ -665,11 +665,14 @@ async def send_blog_post(post: dict) -> bool:
     import httpx
     import src.config.config as cfg
     from src.logger import log_all
+    from src.delivery_receipts import durable_receipts_enabled
+    from src.blog_fetcher import get_blog_delivery_receipts, record_blog_delivery_receipt
 
     group_key = post.get("group_key", "")
     group_name = post.get("group_name", "")
     emoji = EMOJI_MAP.get(group_key, "🤖")
     blog_url = post.get("url", "")
+    durable_enabled = bool(blog_url) and (durable_receipts_enabled() or bool(post.get("durable_receipts", False)))
     author = post.get("author", "")
     title = post.get("title", "")
     date = post.get("date", "")
@@ -785,52 +788,61 @@ async def send_blog_post(post: dict) -> bool:
                 try:
                     scope = "groups" if b.group_openid else "users"
                     target = b.group_openid if b.group_openid else b.target_openid
+                    route_id = f"qq_official:{b.name}:{target}"
+                    receipts = get_blog_delivery_receipts(blog_url, route_id) if durable_enabled else set()
                     mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
 
-                    if scope == "groups":
-                        if not await b.send_group_text(target, header_text):
-                            return False
-                    else:
-                        if not await b.send_private_text(target, header_text):
-                            return False
-                    await asyncio.sleep(0.3)
-
-                    if mode == "card_only":
-                        sent_card = False
-                        if card_path and card_path.exists():
-                            with open(card_path, "rb") as f:
-                                card_bytes = f.read()
-                            sent_card = await b.send_media_file(scope, target, "image", card_bytes)
-                        if not sent_card and pairs:
-                            if not await b.send_translation_qq(scope, target, pairs):
+                    if "header" not in receipts:
+                        if scope == "groups":
+                            if not await b.send_group_text(target, header_text):
                                 return False
-
-                    elif mode == "card_and_images":
-                        sent_card = False
-                        if card_path and card_path.exists():
-                            with open(card_path, "rb") as f:
-                                card_bytes = f.read()
-                            sent_card = await b.send_media_file(scope, target, "image", card_bytes)
-                            await asyncio.sleep(0.3)
-
-                        if sent_card:
-                            if media_urls:
-                                if not await _send_qq_official_raw_images(b, scope, target):
-                                    return False
                         else:
-                            if media_urls:
-                                if not await _send_qq_official_raw_images(b, scope, target):
+                            if not await b.send_private_text(target, header_text):
+                                return False
+                        if durable_enabled:
+                            record_blog_delivery_receipt(blog_url, route_id, "header")
+                        await asyncio.sleep(0.3)
+
+                    if "card_or_body" not in receipts and "card" not in receipts and "body" not in receipts:
+                        if mode == "card_only":
+                            sent_card = False
+                            if card_path and card_path.exists():
+                                with open(card_path, "rb") as f:
+                                    card_bytes = f.read()
+                                sent_card = await b.send_media_file(scope, target, "image", card_bytes)
+                            if not sent_card and pairs:
+                                if not await b.send_translation_qq(scope, target, pairs):
                                     return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                        elif mode == "card_and_images":
+                            sent_card = False
+                            if card_path and card_path.exists():
+                                with open(card_path, "rb") as f:
+                                    card_bytes = f.read()
+                                sent_card = await b.send_media_file(scope, target, "image", card_bytes)
+                                await asyncio.sleep(0.3)
+                            if not sent_card and pairs:
+                                if not await b.send_translation_qq(scope, target, pairs):
+                                    return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                        else:
                             if pairs:
                                 if not await b.send_translation_qq(scope, target, pairs):
                                     return False
-                    else:
-                        if media_urls:
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                    if mode in ("card_and_images", "text_and_images") and media_urls:
+                        if "images" not in receipts:
                             if not await _send_qq_official_raw_images(b, scope, target):
                                 return False
-                        if pairs:
-                            if not await b.send_translation_qq(scope, target, pairs):
-                                return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "images")
+
                     return True
                 except (OSError, httpx.HTTPError, ValueError, RuntimeError) as e:
                     b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
@@ -857,56 +869,62 @@ async def send_blog_post(post: dict) -> bool:
             async def _send_napcat_blog(r=route, target_gid=gid):
                 from src.platforms.napcat import send_qq_message
                 try:
+                    route_id = f"napcat:{target_gid}"
+                    receipts = get_blog_delivery_receipts(blog_url, route_id) if durable_enabled else set()
                     mode = r.get("blog_card_mode") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
-                    if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": header_text}}]):
-                        return False
-                    await asyncio.sleep(0.3)
 
-                    if mode == "card_only":
-                        sent_card = False
-                        if card_path and card_path.exists():
-                            card_file_uri = f"file:///{card_path.resolve().as_posix()}"
-                            sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
-                        if not sent_card and pairs:
-                            blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
-                            body_txt = "\n\n".join(blocks)
-                            if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
-                                return False
+                    if "header" not in receipts:
+                        if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": header_text}}]):
+                            return False
+                        if durable_enabled:
+                            record_blog_delivery_receipt(blog_url, route_id, "header")
+                        await asyncio.sleep(0.3)
 
-                    elif mode == "card_and_images":
-                        sent_card = False
-                        if card_path and card_path.exists():
-                            card_file_uri = f"file:///{card_path.resolve().as_posix()}"
-                            sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
-                            await asyncio.sleep(0.3)
-
-                        if sent_card:
-                            if media_urls:
-                                raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                                if not await send_qq_message(int(target_gid), raw_chain):
+                    if "card_or_body" not in receipts and "card" not in receipts and "body" not in receipts:
+                        if mode == "card_only":
+                            sent_card = False
+                            if card_path and card_path.exists():
+                                card_file_uri = f"file:///{card_path.resolve().as_posix()}"
+                                sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
+                            if not sent_card and pairs:
+                                blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
+                                body_txt = "\n\n".join(blocks)
+                                if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
                                     return False
-                        else:
-                            if media_urls:
-                                raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
-                                if not await send_qq_message(int(target_gid), raw_chain):
-                                    return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                        elif mode == "card_and_images":
+                            sent_card = False
+                            if card_path and card_path.exists():
+                                card_file_uri = f"file:///{card_path.resolve().as_posix()}"
+                                sent_card = await send_qq_message(int(target_gid), [{"type": "image", "data": {"file": card_file_uri}}])
                                 await asyncio.sleep(0.3)
+                            if not sent_card and pairs:
+                                blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
+                                body_txt = "\n\n".join(blocks)
+                                if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
+                                    return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                        else:  # text_and_images
                             if pairs:
                                 blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
                                 body_txt = "\n\n".join(blocks)
                                 if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
                                     return False
-                    else:
-                        if media_urls:
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                    if mode in ("card_and_images", "text_and_images") and media_urls:
+                        if "images" not in receipts:
                             raw_chain = [{"type": "image", "data": {"file": u}} for u in media_urls]
                             if not await send_qq_message(int(target_gid), raw_chain):
                                 return False
-                            await asyncio.sleep(0.3)
-                        if pairs:
-                            blocks = [f"{ja}\n{zh}" if zh else ja for ja, zh in pairs]
-                            body_txt = "\n\n".join(blocks)
-                            if not await send_qq_message(int(target_gid), [{"type": "text", "data": {"text": body_txt}}]):
-                                return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "images")
+
                     return True
                 except (OSError, ValueError, RuntimeError) as e:
                     r_label = f"{r.get('remark')} ({target_gid})" if r.get("remark") else f"群 {target_gid}"
@@ -944,49 +962,65 @@ async def send_blog_post(post: dict) -> bool:
 
             async def _send_tg_blog(b=bot):
                 try:
+                    route_id = f"telegram:{b.name}:{b.target_chat}"
+                    receipts = get_blog_delivery_receipts(blog_url, route_id) if durable_enabled else set()
                     mode = getattr(b, "blog_card_mode", "") or getattr(cfg, "BLOG_CARD_MODE", "card_and_images")
                     inline_header = mode == "text_and_images" and media_urls and tgbot.media_caption_fits(header_text)
-                    if not inline_header:
+                    if not inline_header and "header" not in receipts:
                         if not await b._post_message(b.target_chat, header_text):
                             return False
+                        if durable_enabled:
+                            record_blog_delivery_receipt(blog_url, route_id, "header")
                         await asyncio.sleep(0.3)
 
-                    if mode == "card_only":
-                        sent_card = False
-                        if card_path and card_path.exists():
-                            sent_card = await b.send_photo_file(str(card_path))
-                        if not sent_card and pairs:
-                            if not await b.send_translation_tg(pairs):
-                                return False
-
-                    elif mode == "card_and_images":
-                        sent_card = False
-                        if card_path and card_path.exists():
-                            sent_card = await b.send_photo_file(str(card_path))
-                            await asyncio.sleep(0.3)
-
-                        if sent_card:
-                            if media_urls:
-                                if not await b.send_media_group_photos(media_urls):
-                                    return False
-                        else:
-                            if media_urls:
-                                if not await b.send_media_group_photos(media_urls):
-                                    return False
-                                await asyncio.sleep(0.3)
-                            if pairs:
-                                if not await b.send_translation_tg(pairs):
-                                    return False
-                    else:
-                        if media_urls:
+                    if mode == "text_and_images":
+                        if media_urls and "images" not in receipts:
+                            caption = header_text if (inline_header and "header" not in receipts) else ""
                             if not await b.send_media_group_photos(
-                                media_urls, caption=header_text if inline_header else ""
+                                media_urls, caption=caption
                             ):
                                 return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "images")
+                                if inline_header:
+                                    record_blog_delivery_receipt(blog_url, route_id, "header")
                             await asyncio.sleep(0.3)
-                        if pairs:
+
+                        if pairs and "card_or_body" not in receipts and "card" not in receipts and "body" not in receipts:
                             if not await b.send_translation_tg(pairs):
                                 return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                    elif mode == "card_only":
+                        if "card_or_body" not in receipts and "card" not in receipts and "body" not in receipts:
+                            sent_card = False
+                            if card_path and card_path.exists():
+                                sent_card = await b.send_photo_file(str(card_path))
+                            if not sent_card and pairs:
+                                if not await b.send_translation_tg(pairs):
+                                    return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                    else:  # card_and_images
+                        if "card_or_body" not in receipts and "card" not in receipts and "body" not in receipts:
+                            sent_card = False
+                            if card_path and card_path.exists():
+                                sent_card = await b.send_photo_file(str(card_path))
+                                await asyncio.sleep(0.3)
+                            if not sent_card and pairs:
+                                if not await b.send_translation_tg(pairs):
+                                    return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "card_or_body")
+
+                        if media_urls and "images" not in receipts:
+                            if not await b.send_media_group_photos(media_urls):
+                                return False
+                            if durable_enabled:
+                                record_blog_delivery_receipt(blog_url, route_id, "images")
+
                     return True
                 except (OSError, ValueError, RuntimeError) as e:
                     b_label = f"{b.remark} ({b.name})" if getattr(b, "remark", None) else b.name
