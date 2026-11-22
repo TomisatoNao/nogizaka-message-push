@@ -6,6 +6,12 @@ import pytest
 from src.notifier import send_blog_post
 
 
+@pytest.fixture(autouse=True)
+def _isolate_blog_db(tmp_path, monkeypatch):
+    test_db = tmp_path / "test_blogs.db"
+    monkeypatch.setattr("src.blog_fetcher.BLOG_DB_PATH", test_db)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["card_only", "card_and_images", "text_and_images"])
 @pytest.mark.parametrize("body_ok", [False, True])

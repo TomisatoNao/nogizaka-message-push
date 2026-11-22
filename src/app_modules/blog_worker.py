@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Awaitable
 
 from src import blog_fetcher, health
+from src.delivery_receipts import durable_delivery_receipts
 from src.app_modules.daily_summary import _get_jst_now
 from src.logger import log_all
 from src.monitor_schedule import MonitorSchedule
@@ -70,6 +71,8 @@ class BlogWorker:
         self._cycle_lock = asyncio.Lock()
         self._sleep_logged = False
         self._failure_count = 0
+        self._pending_posts: list[dict] = []
+        self._pending_attempts: dict[str, int] = {}
 
     @property
     def config(self) -> Mapping[str, Any]:
@@ -123,7 +126,18 @@ class BlogWorker:
         """运行一次抓取、归档和博客推送；锁住 worker 内的 DB 边界。"""
         async with self._cycle_lock:
             posts = await self._cycle_runner(self._client, self._db, dict(config))
-        if not posts:
+
+        pending = list(self._pending_posts)
+        seen_urls = {p.get("url") for p in pending if p.get("url")}
+        all_posts = list(pending)
+        for post in (posts or []):
+            u = post.get("url")
+            if not u or u not in seen_urls:
+                all_posts.append(post)
+                if u:
+                    seen_urls.add(u)
+
+        if not all_posts:
             health.get_tracker().record_member_fetch("博客 (全局)", True)
             return
 
@@ -131,30 +145,61 @@ class BlogWorker:
         if sender is None:
             from src.notifier import send_blog_post
             sender = send_blog_post
-        log_all(f"📝 博客更新：{len(posts)} 篇")
+        if posts:
+            log_all(f"📝 博客更新：{len(posts)} 篇")
+        if pending:
+            log_all(f"🔄 正在补发未完成博客：{len(pending)} 篇", is_debug=True)
+
         all_ok = True
-        for post in posts:
-            try:
-                ok = await sender(post)
-                if ok:
-                    log_all(f"✅ 博客 [{post.get('title', '无题')}] 推送完成")
-                else:
+        with durable_delivery_receipts():
+            for post in all_posts:
+                url = post.get("url")
+                try:
+                    ok = await sender(post)
+                    if ok:
+                        log_all(f"✅ 博客 [{post.get('title', '无题')}] 推送完成")
+                        if url:
+                            self._pending_posts = [p for p in self._pending_posts if p.get("url") != url]
+                            self._pending_attempts.pop(url, None)
+                    else:
+                        all_ok = False
+                        log_all(
+                            f"⚠️ 博客 [{post.get('title', '无题')}] 推送未全部完成，请查看通道错误日志",
+                            is_error=True,
+                        )
+                        health.get_tracker().record_member_push("博客 (全局)", False)
+                        if url:
+                            attempts = self._pending_attempts.get(url, 0) + 1
+                            self._pending_attempts[url] = attempts
+                            if attempts >= 10:
+                                log_all(
+                                    f"⚠️ 博客 [{post.get('title', '无题')}] 补发达到上限 (10次)，移出自动重试队列",
+                                    is_error=True,
+                                )
+                                self._pending_posts = [p for p in self._pending_posts if p.get("url") != url]
+                                self._pending_attempts.pop(url, None)
+                            elif not any(p.get("url") == url for p in self._pending_posts):
+                                if len(self._pending_posts) < 20:
+                                    self._pending_posts.append(post)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # nosec B110 - 单篇失败不丢后续博客
                     all_ok = False
                     log_all(
-                        f"⚠️ 博客 [{post.get('title', '无题')}] 推送未全部完成，请查看通道错误日志",
+                        f"💥 博客推送异常 | phase=blog | error={type(exc).__name__}: {exc}",
                         is_error=True,
                     )
                     health.get_tracker().record_member_push("博客 (全局)", False)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # nosec B110 - 单篇失败不丢后续博客
-                all_ok = False
-                log_all(
-                    f"💥 博客推送异常 | phase=blog | error={type(exc).__name__}: {exc}",
-                    is_error=True,
-                )
-                health.get_tracker().record_member_push("博客 (全局)", False)
-            await asyncio.sleep(0.5)
+                    if url:
+                        attempts = self._pending_attempts.get(url, 0) + 1
+                        self._pending_attempts[url] = attempts
+                        if attempts >= 10:
+                            self._pending_posts = [p for p in self._pending_posts if p.get("url") != url]
+                            self._pending_attempts.pop(url, None)
+                        elif not any(p.get("url") == url for p in self._pending_posts):
+                            if len(self._pending_posts) < 20:
+                                self._pending_posts.append(post)
+                await asyncio.sleep(0.5)
         health.get_tracker().record_member_push("博客 (全局)", all_ok)
 
     async def run(self) -> None:

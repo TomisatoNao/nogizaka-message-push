@@ -317,6 +317,16 @@ def init_blog_db() -> sqlite3.Connection:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_url ON blog_posts(url);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_author ON blog_posts(author);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_author_date ON blog_posts(author, date DESC);")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS blog_delivery_receipts (
+            blog_url TEXT NOT NULL,
+            route_id TEXT NOT NULL,
+            segment TEXT NOT NULL,
+            delivered_at REAL NOT NULL,
+            PRIMARY KEY (blog_url, route_id, segment)
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_delivery_receipts ON blog_delivery_receipts(blog_url, route_id);")
     # 增量升级：旧表可能没有这些列
     for col in [
         "body_html", "body_text", "translation", "content_json", "translation_model", "image_paths_json",
@@ -333,6 +343,74 @@ def init_blog_db() -> sqlite3.Connection:
         heal_corrupt_blog_images(conn)
 
     return conn
+
+
+def get_blog_delivery_receipts(blog_url: str, route_id: str, db: sqlite3.Connection | None = None) -> set[str]:
+    """获取指定博文和路由已确认送达的分段集合。"""
+    if not blog_url or not route_id:
+        return set()
+    try:
+        conn = db or init_blog_db()
+        cur = conn.execute(
+            "SELECT segment FROM blog_delivery_receipts WHERE blog_url=? AND route_id=?",
+            (blog_url, route_id),
+        )
+        return {str(row[0]) for row in cur.fetchall()}
+    except Exception as exc:
+        log_all(f"⚠️ 读取博客分段回执失败: {type(exc).__name__}", is_debug=True)
+        return set()
+
+
+def record_blog_delivery_receipt(
+    blog_url: str,
+    route_id: str,
+    segment: str,
+    delivered_at: float | None = None,
+    db: sqlite3.Connection | None = None,
+) -> bool:
+    """持久化记录一条博客分段送达回执。"""
+    if not blog_url or not route_id or not segment:
+        return False
+    now = delivered_at if delivered_at is not None else time.time()
+    try:
+        conn = db or init_blog_db()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO blog_delivery_receipts (blog_url, route_id, segment, delivered_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (blog_url, route_id, segment, now),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        log_all(f"⚠️ 记录博客分段回执失败: {type(exc).__name__}", is_debug=True)
+        return False
+
+
+def clear_blog_delivery_receipts(
+    blog_url: str,
+    route_id: str | None = None,
+    db: sqlite3.Connection | None = None,
+) -> None:
+    """清理指定博客（或指定路由）的回执。"""
+    if not blog_url:
+        return
+    try:
+        conn = db or init_blog_db()
+        if route_id:
+            conn.execute(
+                "DELETE FROM blog_delivery_receipts WHERE blog_url=? AND route_id=?",
+                (blog_url, route_id),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM blog_delivery_receipts WHERE blog_url=?",
+                (blog_url,),
+            )
+        conn.commit()
+    except Exception as exc:
+        log_all(f"⚠️ 清理博客分段回执失败: {type(exc).__name__}", is_debug=True)
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 _RECORDS_PATH = _BASE_DIR / "data" / "blog_records.json"
