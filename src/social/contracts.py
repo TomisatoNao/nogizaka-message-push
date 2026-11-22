@@ -16,7 +16,7 @@ import weakref
 # layer bind a client without adding non-contract dataclass fields.
 _TARGET_RUNTIME: dict[int, tuple[weakref.ReferenceType["DeliveryTarget"], Any, str]] = {}
 _RESULT_OBSERVATIONS: dict[
-    int, tuple[weakref.ReferenceType["DeliveryResult"], int, int, tuple[bool, ...]]
+    int, tuple[weakref.ReferenceType["DeliveryResult"], int, int, tuple[bool, ...], bool]
 ] = {}
 
 
@@ -113,6 +113,7 @@ class DeliveryResult:
         media_sent: int = 0,
         media_total: int = 0,
         route_results: tuple[bool, ...] = (),
+        archived: bool = False,
     ) -> None:
         object.__setattr__(self, "outcome", str(outcome))
         object.__setattr__(self, "matched_routes", int(matched_routes))
@@ -126,13 +127,14 @@ class DeliveryResult:
             int(media_sent),
             int(media_total),
             tuple(bool(item) for item in route_results),
+            bool(archived),
         )
 
-    def _observation(self) -> tuple[int, int, tuple[bool, ...]]:
+    def _observation(self) -> tuple[int, int, tuple[bool, ...], bool]:
         entry = _RESULT_OBSERVATIONS.get(id(self))
         if entry and entry[0]() is self:
-            return entry[1], entry[2], entry[3]
-        return 0, 0, ()
+            return entry[1], entry[2], entry[3], entry[4]
+        return 0, 0, (), False
 
     @property
     def media_sent(self) -> int:
@@ -147,12 +149,20 @@ class DeliveryResult:
         return self._observation()[2]
 
     @property
+    def archived(self) -> bool:
+        return self._observation()[3]
+
+    @property
     def any_success(self) -> bool:
         return self.success_routes > 0
 
     @property
     def complete(self) -> bool:
-        return self.outcome in {"success", "no_route", "already_delivered"}
+        if self.outcome not in {"success", "no_route", "already_delivered"}:
+            return False
+        if any(": state_" in e or e.startswith("archive:") for e in self.errors):
+            return False
+        return True
 
 
 # 旧导入路径的明确兼容别名。核心模块统一导入 DeliveryResult，避免继续
