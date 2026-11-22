@@ -283,7 +283,7 @@ async def _run_member_delivery_with_intent(identity, channel, route_id, label, t
 
     # The mutable progress survives wait_for cancellation and distinguishes
     # waiting for the send gate from a request whose receipt may be lost.
-    with track_delivery_progress() as progress, durable_delivery_receipts(channel.startswith(("tg:", "official:"))):
+    with track_delivery_progress() as progress, durable_delivery_receipts():
         try:
             attempt = await _run_delivery(channel, route_id, label, target, sender)
         except asyncio.CancelledError:

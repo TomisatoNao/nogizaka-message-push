@@ -18,6 +18,7 @@ import httpx
 import src.config.config as cfg
 from src.constants import ROLE_KEY, ROLE_TRANSLATION
 from src.logger import format_httpx_error, log_all
+from src.delivery_receipts import durable_receipts_enabled
 
 # ---- 模块级状态（由 initialize() 在 main() 中注入） ----
 _client: httpx.AsyncClient = None   # type: ignore
@@ -758,6 +759,8 @@ async def _post_payload_detailed(
                         f"{_body_excerpt(response_body, getattr(resp, 'text', ''))}",
                         is_error=True,
                     )
+                    if durable_receipts_enabled() and last_error in {"auth_failed", "qq_offline"}:
+                        _mark_pre_submission_failure()
                     return NapCatSendOutcome(False, last_error)
 
                 last_error = _classify_error(
@@ -772,6 +775,8 @@ async def _post_payload_detailed(
                     f"{_safe_excerpt(getattr(resp, 'text', ''))}",
                     is_error=True,
                 )
+                if durable_receipts_enabled() and resp.status_code >= 500:
+                    return NapCatSendOutcome(True, "delivery_unconfirmed")
                 if resp.status_code == 502:
                     log_all("🔥 502，代理/协议问题", is_error=True)
                 if resp.status_code < 500:
@@ -810,6 +815,8 @@ async def _post_payload_detailed(
                     is_error=True,
                 )
             except httpx.TimeoutException as e:
+                if durable_receipts_enabled():
+                    return NapCatSendOutcome(True, "delivery_unconfirmed")
                 last_error = "timeout"
                 log_all(
                     f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
@@ -817,6 +824,8 @@ async def _post_payload_detailed(
                     is_error=True,
                 )
             except (httpx.RequestError, OSError) as e:
+                if durable_receipts_enabled():
+                    return NapCatSendOutcome(True, "delivery_unconfirmed")
                 last_error = "network_error"
                 log_all(
                     f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "
@@ -824,6 +833,8 @@ async def _post_payload_detailed(
                     is_error=True,
                 )
             except Exception as e:
+                if durable_receipts_enabled():
+                    return NapCatSendOutcome(True, "delivery_unconfirmed")
                 last_error = "unexpected_error"
                 log_all(
                     f"🔥 发送异常 ({attempt + 1}/{retries}) | 方式={action_label} | "

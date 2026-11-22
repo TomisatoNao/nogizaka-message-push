@@ -321,3 +321,53 @@ async def test_http_200_without_json_receipt_is_unconfirmed_and_not_retried(monk
         assert progress.possible_submission
         assert progress.confirmed_batches == 0
     assert client.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [503, httpx.TimeoutException("unknown timeout"), OSError("lost transport"), RuntimeError("unknown transport failure")])
+async def test_durable_onebot_unknown_failure_never_reposts(monkeypatch, failure):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from src.delivery_receipts import durable_delivery_receipts
+
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    response = _Response(status_code=failure, body={"message": "gateway failure"}) if isinstance(failure, int) else None
+    post = AsyncMock(return_value=response) if response else AsyncMock(side_effect=failure)
+    client = SimpleNamespace(post=post)
+    napcat.initialize(client)
+    with durable_delivery_receipts(), napcat.track_delivery_progress() as progress:
+        outcome = await napcat.send_qq_message_detailed(100, [{"type": "text", "data": {"text": "body"}}], max_retries=3)
+    assert outcome.error_code == "delivery_unconfirmed"
+    assert progress.possible_submission and progress.confirmed_batches == 0
+    assert post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_durable_onebot_proven_connect_failure_keeps_safe_retries(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from src.delivery_receipts import durable_delivery_receipts
+
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    monkeypatch.setattr(napcat.asyncio, "sleep", AsyncMock())
+    post = AsyncMock(side_effect=httpx.ConnectError("not connected"))
+    napcat.initialize(SimpleNamespace(post=post))
+    with durable_delivery_receipts(), napcat.track_delivery_progress() as progress:
+        outcome = await napcat.send_qq_message_detailed(100, [{"type": "text", "data": {"text": "body"}}], max_retries=3)
+    assert not outcome.ok and outcome.error_code == "network_error"
+    assert not progress.possible_submission and progress.confirmed_batches == 0
+    assert post.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message,code", [("token verify failed!", "auth_failed"), ("EventChecker KickedOffLine: account offline", "qq_offline")])
+async def test_durable_onebot_explicit_login_rejection_is_not_submission(monkeypatch, message, code):
+    from src.delivery_receipts import durable_delivery_receipts
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    client = _FakeClient([_Response(body={"status": "failed", "retcode": 200, "message": message})])
+    napcat.initialize(client)
+    with durable_delivery_receipts(), napcat.track_delivery_progress() as progress:
+        outcome = await napcat.send_qq_message_detailed(100, [{"type": "text", "data": {"text": "body"}}])
+    assert not outcome.ok and outcome.error_code == code
+    assert not progress.possible_submission and progress.confirmed_batches == 0
+    assert client.calls == 1
