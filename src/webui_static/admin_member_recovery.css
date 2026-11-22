@@ -1,0 +1,36 @@
+#memberDeliveryRecovery p,
+#memberRecoveryIdentity {
+  overflow-wrap: anywhere;
+}
+#memberRecoveryDialog .member-recovery-fields {
+  display: grid;
+  gap: var(--space-4);
+}
+#memberRecoveryDialog .member-recovery-fields > p {
+  margin: 0;
+}
+#memberRecoveryDialog .btn,
+#memberDeliveryRecovery .btn,
+#memberRecoveryRiskLabel {
+  min-height: 44px;
+}
+#memberRecoveryDialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+}
+#memberRecoveryRiskLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+#memberRecoveryRiskLabel[hidden],
+#memberDeliveryRecovery[hidden] {
+  display: none;
+}
+#memberRecoveryRisk {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  flex-shrink: 0;
+}
