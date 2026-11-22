@@ -20,16 +20,20 @@ import http.server
 import json
 import os
 import queue
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import src.config.config as cfg
 
 from src.logger import log_all
 from src.social.url_utils import extract_social_urls
+
+DEFAULT_INBOUND_DB_PATH = Path("data/archive/napcat_inbound_queue.db")
 
 
 DEFAULT_SETTINGS: dict[str, object] = {
@@ -267,6 +271,115 @@ class NapCatInboundJob:
     # 事件中的机器人 QQ 号；用于合并转发自定义节点的 user_id。
     # 放在末尾并提供默认值，兼容旧版插件/测试的五参数构造。
     self_id: str = ""
+    item_key: str = ""
+
+
+def init_inbound_db(db_path: Path | str | None = None) -> sqlite3.Connection:
+    path = Path(db_path) if db_path else DEFAULT_INBOUND_DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=30.0, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS napcat_inbound_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_key TEXT UNIQUE NOT NULL,
+            event_key TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            self_id TEXT NOT NULL,
+            received_at REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at REAL NOT NULL
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inbound_pending ON napcat_inbound_jobs(status, id ASC);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inbound_event ON napcat_inbound_jobs(event_key);")
+    conn.commit()
+    return conn
+
+
+def save_inbound_job(
+    conn: sqlite3.Connection,
+    item_key: str,
+    event_key: str,
+    job: NapCatInboundJob,
+) -> bool:
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO napcat_inbound_jobs
+            (item_key, event_key, group_id, user_id, message_id, url, self_id, received_at, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                item_key,
+                event_key,
+                job.group_id,
+                job.user_id,
+                job.message_id,
+                job.url,
+                job.self_id,
+                job.received_at,
+                time.time(),
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        log_all(f"⚠️ 保存入站任务失败: {type(exc).__name__}", is_debug=True)
+        return False
+
+
+def mark_inbound_job_completed(
+    conn: sqlite3.Connection,
+    item_key: str,
+) -> None:
+    try:
+        conn.execute(
+            "UPDATE napcat_inbound_jobs SET status='completed' WHERE item_key=?",
+            (item_key,),
+        )
+        conn.commit()
+    except Exception as exc:
+        log_all(f"⚠️ 更新入站任务状态失败: {type(exc).__name__}", is_debug=True)
+
+
+def load_pending_inbound_jobs(
+    conn: sqlite3.Connection,
+    limit: int = 32,
+) -> list[tuple[str, NapCatInboundJob]]:
+    try:
+        cur = conn.execute(
+            """
+            SELECT item_key, group_id, user_id, message_id, url, self_id, received_at
+            FROM napcat_inbound_jobs
+            WHERE status='pending'
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+        jobs = []
+        for r in rows:
+            job = NapCatInboundJob(
+                group_id=str(r["group_id"]),
+                user_id=str(r["user_id"]),
+                message_id=str(r["message_id"]),
+                url=str(r["url"]),
+                received_at=float(r["received_at"]),
+                self_id=str(r["self_id"]),
+                item_key=str(r["item_key"]),
+            )
+            jobs.append((str(r["item_key"]), job))
+        return jobs
+    except Exception as exc:
+        log_all(f"⚠️ 加载待处理入站任务失败: {type(exc).__name__}", is_debug=True)
+        return []
 
 
 class _InboundHTTPServer(http.server.ThreadingHTTPServer):
@@ -284,6 +397,7 @@ class NapCatInboundListener:
         service_provider: Callable[[], object | None] | None = None,
         logger: Callable[..., object] | None = None,
         event_token: str | None = None,
+        db_path: Path | str | None = None,
     ) -> None:
         self._config_provider = config_provider or self._default_config
         self._uses_default_config = config_provider is None
@@ -295,7 +409,9 @@ class NapCatInboundListener:
             else os.getenv("NAPCAT_EVENT_TOKEN", "").strip()
         )
         self._event_token_from_env = event_token is None
-        self._queue: queue.Queue[NapCatInboundJob | None] = queue.Queue(maxsize=32)
+        self._settings_snapshot: dict[str, object] = dict(self._settings())
+        initial_qsize = int(self._settings_snapshot.get("queue_size", 32))
+        self._queue: queue.Queue[NapCatInboundJob | None] = queue.Queue(maxsize=initial_qsize)
         from src.platforms.napcat_chat import NapCatChatService
         from src.platforms.napcat_commands import NapCatCommandHandler
 
@@ -312,8 +428,11 @@ class NapCatInboundListener:
         self._server_thread: threading.Thread | None = None
         self._ws_server = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._settings_snapshot: dict[str, object] = dict(DEFAULT_SETTINGS)
+        self._db_path = db_path
+        self._db: sqlite3.Connection | None = None
         self._seen: OrderedDict[str, float] = OrderedDict()
+        self._seen_items: set[str] = set()
+        self._in_flight_events: set[str] = set()
         self._last_group_at: dict[str, float] = {}
         self._last_sender_at: dict[tuple[str, str], float] = {}
         self._state_lock = threading.RLock()
@@ -334,6 +453,11 @@ class NapCatInboundListener:
             self._settings_snapshot = self._settings()
         except Exception:
             self._settings_snapshot = dict(DEFAULT_SETTINGS)
+
+    def _ensure_db(self) -> sqlite3.Connection:
+        if self._db is None:
+            self._db = init_inbound_db(self._db_path)
+        return self._db
 
     @staticmethod
     def _default_config() -> Mapping[str, object]:
@@ -651,110 +775,149 @@ class NapCatInboundListener:
 
         with self._state_lock:
             self._prune_state(now, dedupe_ttl)
+            if event_key in self._in_flight_events:
+                self._mark("duplicate")
+                return "duplicate"
             if event_key in self._seen and now - self._seen[event_key] <= dedupe_ttl:
                 self._mark("duplicate")
                 return "duplicate"
-            self._seen[event_key] = now
+            self._in_flight_events.add(event_key)
 
-        max_links = int(settings.get("max_links_per_message", 1))
-        text = event_message_text(event.get("message"), event.get("raw_message"))
-        urls = extract_social_urls(text, max_urls=max_links)
-        if urls:
-            if not self._feature_group_allowed("inbound", group_id):
+        try:
+            max_links = int(settings.get("max_links_per_message", 1))
+            text = event_message_text(event.get("message"), event.get("raw_message"))
+            urls = extract_social_urls(text, max_urls=max_links)
+            if urls:
+                if not self._feature_group_allowed("inbound", group_id):
+                    self._mark("ignored")
+                    self._log_feature_skip("入站解析", group_id, "group_not_allowed")
+                    return "inbound_group_not_allowed"
+            else:
+                # 优先处理本地指令（如 /抽张美图）。美图有独立的开关和群范围，
+                # 但仍受 napcat_routes 的基础群号边界保护。
+                if getattr(self, "_cmd_handler", None) and self._cmd_handler.is_command(text):
+                    photo_settings = self._photo_settings()
+                    if not _as_bool(photo_settings.get("enabled"), True):
+                        self._mark("ignored")
+                        self._log_feature_skip("美图指令", group_id, "feature_disabled")
+                        return "photo_disabled"
+                    if not self._feature_group_allowed("photo", group_id):
+                        self._mark("ignored")
+                        self._log_feature_skip("美图指令", group_id, "group_not_allowed")
+                        return "photo_group_not_allowed"
+                    self._cmd_handler.update_cooldowns(
+                        user_seconds=float(photo_settings.get("cooldown_user_seconds", 8.0)),
+                        group_seconds=float(photo_settings.get("cooldown_group_seconds", 4.0)),
+                    )
+                    cmd_handled, cmd_status = self._cmd_handler.try_handle_command(
+                        group_id=group_id,
+                        user_id=user_id,
+                        raw_text=text,
+                        self_id=self_id,
+                    )
+                    if cmd_handled:
+                        self._mark("succeeded" if cmd_status == "command_executed" else "rate_limited")
+                        with self._state_lock:
+                            self._seen[event_key] = now
+                        return cmd_status
+
+                if self._chat_service and self._chat_service.is_enabled():
+                    chat_queued, chat_status = self._chat_service.try_accept_event(event, source=source)
+                    if chat_queued:
+                        self._mark("queued")
+                        with self._state_lock:
+                            self._seen[event_key] = now
+                        return "chat_queued"
+                    if chat_status in {"rate_limited", "self_message", "group_not_allowed", "duplicate"}:
+                        self._mark("ignored")
+                        return chat_status
+                    if chat_status == "queue_full":
+                        self._mark("queue_full")
+                        return chat_status
                 self._mark("ignored")
-                self._log_feature_skip("入站解析", group_id, "group_not_allowed")
-                return "inbound_group_not_allowed"
-        else:
-            # 优先处理本地指令（如 /抽张美图）。美图有独立的开关和群范围，
-            # 但仍受 napcat_routes 的基础群号边界保护。
-            if getattr(self, "_cmd_handler", None) and self._cmd_handler.is_command(text):
-                photo_settings = self._photo_settings()
-                if not _as_bool(photo_settings.get("enabled"), True):
-                    self._mark("ignored")
-                    self._log_feature_skip("美图指令", group_id, "feature_disabled")
-                    return "photo_disabled"
-                if not self._feature_group_allowed("photo", group_id):
-                    self._mark("ignored")
-                    self._log_feature_skip("美图指令", group_id, "group_not_allowed")
-                    return "photo_group_not_allowed"
-                self._cmd_handler.update_cooldowns(
-                    user_seconds=float(photo_settings.get("cooldown_user_seconds", 8.0)),
-                    group_seconds=float(photo_settings.get("cooldown_group_seconds", 4.0)),
-                )
-                cmd_handled, cmd_status = self._cmd_handler.try_handle_command(
+                return "no_social_url"
+
+            # 链接项级去重检查：仅入队此前尚未入队的链接
+            pending_items = []
+            for index, url in enumerate(urls):
+                item_key = f"{event_key}:{index}:{url}"
+                if item_key not in self._seen_items:
+                    pending_items.append((index, url, item_key))
+
+            if not pending_items:
+                with self._state_lock:
+                    self._seen[event_key] = now
+                self._mark("duplicate")
+                return "duplicate"
+
+            cooldown = float(settings.get("cooldown_seconds", 10.0))
+            with self._state_lock:
+                group_last = self._last_group_at.get(group_id, 0.0)
+                sender_key = (group_id, user_id)
+                sender_last = self._last_sender_at.get(sender_key, 0.0)
+                if cooldown and (now - group_last < cooldown or now - sender_last < cooldown):
+                    self._mark("rate_limited")
+                    return "rate_limited"
+
+            queued = 0
+            for index, url, item_key in pending_items:
+                if self._queue.full():
+                    self._mark("queue_full")
+                    break
+                job = NapCatInboundJob(
                     group_id=group_id,
                     user_id=user_id,
-                    raw_text=text,
+                    message_id=(message_id or event_key) + (f":{index}" if len(urls) > 1 else ""),
+                    url=url,
+                    received_at=time.time(),
                     self_id=self_id,
+                    item_key=item_key,
                 )
-                if cmd_handled:
-                    self._mark("succeeded" if cmd_status == "command_executed" else "rate_limited")
-                    return cmd_status
-
-            if self._chat_service and self._chat_service.is_enabled():
-                chat_queued, chat_status = self._chat_service.try_accept_event(event, source=source)
-                if chat_queued:
-                    self._mark("queued")
-                    return "chat_queued"
-                if chat_status in {"rate_limited", "self_message", "group_not_allowed", "duplicate"}:
-                    self._mark("ignored")
-                    return chat_status
-                if chat_status == "queue_full":
+                save_inbound_job(self._ensure_db(), item_key, event_key, job)
+                try:
+                    self._queue.put_nowait(job)
+                except queue.Full:
                     self._mark("queue_full")
-                    return chat_status
-            self._mark("ignored")
-            return "no_social_url"
+                    break
+                self._seen_items.add(item_key)
+                queued += 1
+                self._mark("queued")
 
-        cooldown = float(settings.get("cooldown_seconds", 10.0))
-        with self._state_lock:
-            group_last = self._last_group_at.get(group_id, 0.0)
-            sender_key = (group_id, user_id)
-            sender_last = self._last_sender_at.get(sender_key, 0.0)
-            if cooldown and (now - group_last < cooldown or now - sender_last < cooldown):
-                self._mark("rate_limited")
-                return "rate_limited"
-            self._last_group_at[group_id] = now
-            if user_id:
-                self._last_sender_at[sender_key] = now
+            if queued > 0:
+                with self._state_lock:
+                    self._last_group_at[group_id] = now
+                    if user_id:
+                        self._last_sender_at[sender_key] = now
+                    total_enqueued = sum(
+                        1 for i, u in enumerate(urls) if f"{event_key}:{i}:{u}" in self._seen_items
+                    )
+                    if total_enqueued == len(urls):
+                        self._seen[event_key] = now
 
-        queued = 0
-        for index, url in enumerate(urls):
-            job = NapCatInboundJob(
-                group_id=group_id,
-                user_id=user_id,
-                message_id=(message_id or event_key) + (f":{index}" if len(urls) > 1 else ""),
-                url=url,
-                received_at=time.time(),
-                self_id=self_id,
-            )
-            try:
-                self._queue.put_nowait(job)
-            except queue.Full:
-                self._mark("queue_full")
-                break
-            queued += 1
-            self._mark("queued")
-        request_id = f"napcat-inbound-{_safe_log_fragment(message_id or event_key)}"[:96]
-        sender_label = user_id or "unknown"
-        if isinstance(sender, Mapping):
-            display_name = str(sender.get("card") or sender.get("nickname") or "").strip()
-            if display_name:
-                sender_label = f"{display_name}/{sender_label}"
-        source_label = _safe_log_text(source or "unknown", limit=12)
-        if queued:
-            queue_state = "已入队" if queued == len(urls) else f"部分入队{queued}/{len(urls)}"
-            self._emit(
-                f"📥 NapCat 收到链接 | 来自群{group_id}/{_safe_log_text(sender_label, limit=32)} | "
-                f"入口={source_label} | {_safe_url_preview(urls[0])} | {queue_state} | "
-                f"req={_safe_log_text(request_id, limit=34)}"
-            )
-        else:
-            self._emit(
-                f"⚠️ NapCat 链接入队失败 | 群{group_id} | 入口={source_label} | "
-                f"原因=queue_full | req={_safe_log_text(request_id, limit=34)}",
-                is_warning=True,
-            )
-        return "queued" if queued else "queue_full"
+            request_id = f"napcat-inbound-{_safe_log_fragment(message_id or event_key)}"[:96]
+            sender_label = user_id or "unknown"
+            if isinstance(sender, Mapping):
+                display_name = str(sender.get("card") or sender.get("nickname") or "").strip()
+                if display_name:
+                    sender_label = f"{display_name}/{sender_label}"
+            source_label = _safe_log_text(source or "unknown", limit=12)
+            if queued:
+                queue_state = "已入队" if queued == len(urls) else f"部分入队{queued}/{len(urls)}"
+                self._emit(
+                    f"📥 NapCat 收到链接 | 来自群{group_id}/{_safe_log_text(sender_label, limit=32)} | "
+                    f"入口={source_label} | {_safe_url_preview(urls[0])} | {queue_state} | "
+                    f"req={_safe_log_text(request_id, limit=34)}"
+                )
+            else:
+                self._emit(
+                    f"⚠️ NapCat 链接入队失败 | 群{group_id} | 入口={source_label} | "
+                    f"原因=queue_full | req={_safe_log_text(request_id, limit=34)}",
+                    is_warning=True,
+                )
+            return "queued" if queued else "queue_full"
+        finally:
+            with self._state_lock:
+                self._in_flight_events.discard(event_key)
 
     async def _process_job(self, job: NapCatInboundJob) -> object:
         config = self._raw_config()
@@ -828,6 +991,8 @@ class NapCatInboundListener:
                     error=f"{type(exc).__name__}: {_safe_log_text(exc, limit=140)}",
                 )
             finally:
+                if self._db is not None and getattr(job, "item_key", ""):
+                    mark_inbound_job_completed(self._db, job.item_key)
                 self._queue.task_done()
 
     def _response(self, handler: http.server.BaseHTTPRequestHandler, code: int, payload: Mapping[str, object]) -> None:
@@ -875,6 +1040,18 @@ class NapCatInboundListener:
             return
 
         result = self.accept_event(event, source="http")
+        if result == "queue_full":
+            self._response(
+                handler,
+                503,
+                {
+                    "status": "error",
+                    "retcode": 1400,
+                    "message": "queue_full",
+                    "accepted": False,
+                },
+            )
+            return
         # 对已鉴权但被过滤/限流的事件返回 200，避免 NapCat 因业务过滤
         # 自动重试；真正的失败只记录在本地统计和日志中。
         self._response(
@@ -997,6 +1174,17 @@ class NapCatInboundListener:
             )
 
         self._resize_queue(int(self._settings_snapshot.get("queue_size", 32)))
+        if self._db is None:
+            self._db = init_inbound_db(self._db_path)
+            recovered = load_pending_inbound_jobs(self._db, limit=self._queue.maxsize)
+            for item_key, job in recovered:
+                try:
+                    self._queue.put_nowait(job)
+                    self._seen_items.add(item_key)
+                except queue.Full:
+                    break
+            if recovered:
+                self._emit(f"🔄 NapCat 恢复了 {len(recovered)} 条未完成入站任务")
         self._loop = asyncio.get_running_loop()
         self._stop_event = asyncio.Event()
         self._workers = [
@@ -1056,6 +1244,12 @@ class NapCatInboundListener:
         self._loop = None
         if self._chat_service:
             await self._chat_service.stop()
+        if self._db is not None:
+            try:
+                self._db.close()
+            except Exception:
+                pass
+            self._db = None
 
     async def reconcile(self) -> bool:
         """配置热重载后启停监听器；已运行时只刷新运行时安全参数。"""
