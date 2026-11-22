@@ -289,12 +289,17 @@ class SocialService:
             self._download_post(post)
         prepared = self._prepare_details(post, translate=translate)
         delivery = self.deliver_post(post, targets, archive=archive)
+        if self._legacy_forwarder is not None:
+            actual_archived = archive
+        else:
+            actual_archived = getattr(delivery, "archived", False) if archive else False
+        is_completed = delivery.complete and (not archive or actual_archived)
         return SocialOperationResult(
             post=post,
             delivery=delivery,
             prepared=prepared,
-            archived=archive,
-            completed=delivery.complete,
+            archived=actual_archived,
+            completed=is_completed,
         )
 
     def process_url(

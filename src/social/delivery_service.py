@@ -55,13 +55,27 @@ class SocialStoreDeliveryState:
 
     def __init__(self, store: DeliveryStateRepository):
         self._store = store
+        self._in_memory_unconfirmed: dict[tuple[str, str], set[str]] = {}
 
     def delivered_routes(self, platform: str, item_id: str) -> set[str]:
         return set(self._store.delivered_routes(platform, item_id))
 
     def unconfirmed_routes(self, platform: str, item_id: str) -> set[str]:
         method = getattr(self._store, "unconfirmed_routes", None)
-        return set(method(platform, item_id)) if callable(method) else set()
+        persisted = set(method(platform, item_id)) if callable(method) else set()
+        in_mem = self._in_memory_unconfirmed.get((platform.lower(), item_id), set())
+        return persisted | in_mem
+
+    def hold_unconfirmed(self, platform: str, item_id: str, route_id: str) -> None:
+        self._in_memory_unconfirmed.setdefault(
+            (platform.lower(), item_id), set()
+        ).add(route_id)
+
+    def release_held(self, platform: str = "", item_id: str = "") -> None:
+        if platform and item_id:
+            self._in_memory_unconfirmed.pop((platform.lower(), item_id), None)
+        else:
+            self._in_memory_unconfirmed.clear()
 
     def mark_route_result(
         self,
@@ -71,6 +85,10 @@ class SocialStoreDeliveryState:
         ok: bool,
         error: str = "",
     ) -> None:
+        if ok:
+            held = self._in_memory_unconfirmed.get((platform.lower(), item_id))
+            if held:
+                held.discard(route_id)
         self._store.mark_route_result(platform, item_id, route_id, ok, error)
 
 
@@ -139,6 +157,7 @@ class DeliveryService:
             else SocialStoreDeliveryState(raw_state)
         )
         self._archive = archive_service or ArchiveService(logger=self._log)
+        self._in_memory_held: dict[tuple[str, str], set[str]] = {}
         self._planner = planner or RoutePlanner(
             config,
             config_view=self._runtime,
@@ -169,6 +188,15 @@ class DeliveryService:
     @property
     def archive_service(self) -> ArchiveService:
         return self._archive
+
+    def release_held(self, platform: str = "", item_id: str = "") -> None:
+        """释放内存中的暂挂路由（供测试和管理员核实入口使用）。"""
+        if platform and item_id:
+            self._in_memory_held.pop((platform.lower(), item_id), None)
+        else:
+            self._in_memory_held.clear()
+        if hasattr(self._state, "release_held"):
+            self._state.release_held(platform, item_id)
 
     def _route_timeout_seconds(self, route: PlannedRoute) -> float | None:
         """返回社交投递路由的总预算；目前只约束 NapCat。"""
@@ -335,6 +363,7 @@ class DeliveryService:
         )
 
         errors: list[str] = [f"{route_id}: delivery_unconfirmed" for route_id in sorted(held)]
+        state_failures = 0
         for attempt in attempts:
             if attempt.error:
                 errors.append(f"{attempt.route_id}: {attempt.error}")
@@ -356,8 +385,16 @@ class DeliveryService:
                 except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                     state_error = f"state_{type(exc).__name__}"
                     errors.append(f"{attempt.route_id}: {state_error}")
+                    state_failures += 1
+                    self._in_memory_held.setdefault(
+                        (post.platform.lower(), post.post_id), set()
+                    ).add(attempt.route_id)
+                    if hasattr(self._state, "hold_unconfirmed"):
+                        self._state.hold_unconfirmed(
+                            post.platform.lower(), post.post_id, attempt.route_id
+                        )
                     self._log(
-                        f"⚠️ [社媒推送] 路由状态持久化失败 | request_id={post.request_id or '-'} "
+                        f"⚠️ [社媒推送] 路由状态持久化失败转暂挂 | request_id={post.request_id or '-'} "
                         f"| post_id={post.post_id} | route_id={attempt.route_id} "
                         f"| error={state_error}",
                         is_error=True,
@@ -366,7 +403,11 @@ class DeliveryService:
         matched_routes = len(routes)
         attempted_routes = len(attempts)
         success_routes = sum(attempt.ok for attempt in attempts)
-        uncertain_count = len(held) + sum(a.error == "delivery_unconfirmed" for a in attempts)
+        uncertain_count = (
+            len(held)
+            + sum(a.error == "delivery_unconfirmed" for a in attempts)
+            + state_failures
+        )
         failed_routes = sum(not a.ok and a.error != "delivery_unconfirmed" for a in attempts)
         if matched_routes == 0:
             outcome = "no_route"
@@ -473,16 +514,21 @@ class DeliveryService:
                 if self._state is not None
                 else set()
             )
+            state_unconfirmed = (
+                self._state.unconfirmed_routes(post.platform.lower(), post.post_id)
+                if hasattr(self._state, "unconfirmed_routes")
+                else set()
+            )
+            in_mem_unconfirmed = self._in_memory_held.get(
+                (post.platform.lower(), post.post_id), set()
+            )
             result = self._dispatch_async(
                 self._deliver_routes(
                     post,
                     full_text,
                     routes,
                     delivered_routes,
-                    unconfirmed_routes=(
-                        self._state.unconfirmed_routes(post.platform.lower(), post.post_id)
-                        if isinstance(self._state, SocialStoreDeliveryState) else set()
-                    ),
+                    unconfirmed_routes=state_unconfirmed | in_mem_unconfirmed,
                 )
             )
         except SocialDeliveryError:
@@ -499,9 +545,49 @@ class DeliveryService:
                 post_id=post.post_id,
             ) from exc
 
-        self._log_summary(post, result)
+        archive_ok = True
         if archive:
-            self._archive.archive(post)
+            try:
+                archive_ok = bool(self._archive.archive(post))
+            except Exception as exc:
+                self._log(
+                    f"⚠️ [社媒归档] 写入异常 | request_id={post.request_id or '-'} "
+                    f"| post_id={post.post_id} | error={type(exc).__name__}",
+                    is_error=True,
+                )
+                archive_ok = False
+
+        if archive and not archive_ok:
+            errors = (*result.errors, "archive: archive_failed")
+            result = DeliveryResult(
+                outcome=result.outcome,
+                matched_routes=result.matched_routes,
+                attempted_routes=result.attempted_routes,
+                success_routes=result.success_routes,
+                failed_routes=result.failed_routes,
+                skipped_routes=result.skipped_routes,
+                errors=errors,
+                media_sent=result.media_sent,
+                media_total=result.media_total,
+                route_results=result.route_results,
+                archived=False,
+            )
+        elif archive:
+            result = DeliveryResult(
+                outcome=result.outcome,
+                matched_routes=result.matched_routes,
+                attempted_routes=result.attempted_routes,
+                success_routes=result.success_routes,
+                failed_routes=result.failed_routes,
+                skipped_routes=result.skipped_routes,
+                errors=result.errors,
+                media_sent=result.media_sent,
+                media_total=result.media_total,
+                route_results=result.route_results,
+                archived=True,
+            )
+
+        self._log_summary(post, result)
         return result
 
     async def deliver_text(self, target: DeliveryTarget, text: str) -> bool:
@@ -582,6 +668,31 @@ class DeliveryService:
         complete = text_ok and media_sent == media_total and not errors
         partial = (text_ok or media_sent > 0) and not complete
         outcome = "success" if complete else "partial" if partial else "failed"
+
+        archive_ok = True
+        if archive:
+            if archive_callback is not None:
+                try:
+                    archive_ok = bool(archive_callback(post))
+                except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                    self._log(
+                        f"⚠️ [社媒归档] 写入失败: {type(exc).__name__}",
+                        is_debug=True,
+                    )
+                    archive_ok = False
+            else:
+                try:
+                    archive_ok = bool(self._archive.archive(post))
+                except Exception as exc:
+                    self._log(
+                        f"⚠️ [社媒归档] 写入失败: {type(exc).__name__}",
+                        is_debug=True,
+                    )
+                    archive_ok = False
+
+        if archive and not archive_ok:
+            errors.append("archive: archive_failed")
+
         result = DeliveryResult(
             outcome=outcome,
             matched_routes=1,
@@ -592,21 +703,11 @@ class DeliveryService:
             media_sent=media_sent,
             media_total=media_total,
             route_results=(complete,),
+            archived=archive_ok if archive else False,
         )
         for error in result.errors:
             self._log(f"⚠️ [社媒推送] {error}", is_error=True)
 
-        if archive:
-            if archive_callback is not None:
-                try:
-                    archive_callback(post)
-                except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                    self._log(
-                        f"⚠️ [社媒归档] 写入失败: {type(exc).__name__}",
-                        is_debug=True,
-                    )
-            else:
-                self._archive.archive(post)
         return result
 
 
