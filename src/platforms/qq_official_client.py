@@ -10,6 +10,7 @@ import httpx
 
 import src.config.config as cfg
 from src.logger import log_all
+from src.delivery_receipts import durable_receipts_enabled
 from src.platforms.qq_official_media import (
     _MEDIA_FILE_TYPES,
     _compress_image_if_needed,
@@ -92,6 +93,8 @@ class QQOfficialClient:
             try:
                 return await self._client.post(url, json=json_body, headers=headers, timeout=t)
             except RuntimeError as ex:
+                if durable_receipts_enabled() and urlparse(url).path.endswith("/messages"):
+                    raise
                 if "different event loop" not in str(ex).lower() and "event loop" not in str(ex).lower():
                     raise
                 # 只有确定是事件循环绑定错误时才换用临时 client；网络
@@ -175,6 +178,7 @@ class QQOfficialClient:
         }
 
     async def _post_json(self, url: str, payload: dict, max_retries: int = 3, timeout: float | None = None) -> httpx.Response | None:
+        durable_message = durable_receipts_enabled() and urlparse(url).path.endswith("/messages")
         t = timeout or cfg.QQ_OFFICIAL_TIMEOUT
         total_attempts = max(1, int(max_retries or 1))
         for attempt in range(total_attempts):
@@ -200,6 +204,8 @@ class QQOfficialClient:
                     f"HTTP {resp.status_code} | {resp.text[:200]}",
                     is_error=True,
                 )
+                if durable_message and resp.status_code >= 500:
+                    return None
                 if resp.status_code == 401:
                     self._access_token = ""  # nosec B105
                     if not await self.ensure_access_token():
@@ -210,6 +216,9 @@ class QQOfficialClient:
                     return None
 
             except Exception as e:
+                if durable_message:
+                    log_all(f"⚠️ 官方 QQ Bot [{self.name}] 消息送达未确认 ({type(e).__name__})，禁止自动重试", is_error=True)
+                    return None
                 log_all(
                     f"🔥 官方 QQ Bot [{self.name}] 请求异常 ({attempt + 1}/{total_attempts}): "
                     f"{type(e).__name__}: {e}",

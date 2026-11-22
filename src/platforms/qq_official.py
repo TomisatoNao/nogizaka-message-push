@@ -5,6 +5,7 @@ import httpx
 # 统一通过 cfg.X 访问，热重载后标量值（超时、限速间隔等）才能生效
 import src.config.config as cfg
 from src.logger import log_all
+from src.delivery_receipts import durable_receipts_enabled
 
 from src.platforms import qq_official_media
 from src.platforms.qq_official_media import (
@@ -101,6 +102,8 @@ class QQOfficialBot(QQOfficialClient):
             if text:
                 url = f"{self._target_base(scope, target_openid)}/messages"
                 if await self._post_json(url, {"content": text[:1900], "msg_type": 0}) is None:
+                    if durable_receipts_enabled():
+                        return False
                     ok = False
 
             if media_payloads is None:
@@ -137,6 +140,8 @@ class QQOfficialBot(QQOfficialClient):
                     source_url=str(source_url or ""),
                 )
                 if not file_info or not await self._send_uploaded_media(file_info, scope=scope, target_openid=target_openid):
+                    if durable_receipts_enabled():
+                        return False
                     ok = False
 
             return ok

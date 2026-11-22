@@ -2,27 +2,13 @@
 # tgbot.py — Telegram Bot 推送（HTML 格式化，支持多 Bot 实例）
 # ============================================================
 import asyncio
-import contextvars
-from contextlib import contextmanager
 import os
 import re
 
 import src.config.config as cfg
 from src.constants import ROLE_KEY, ROLE_TRANSLATION
 from src.logger import log_all
-
-_durable_receipts = contextvars.ContextVar("tg_durable_receipts", default=False)
-
-
-@contextmanager
-def durable_delivery_receipts(enabled=True):
-    """Use conservative receipts only within a durable member send attempt."""
-    token = _durable_receipts.set(enabled)
-    try:
-        yield
-    finally:
-        _durable_receipts.reset(token)
-
+from src.delivery_receipts import durable_delivery_receipts as durable_delivery_receipts, durable_receipts_enabled
 
 # ---- 模块级状态 ----
 _bots: list["TGBot"] = []
@@ -111,7 +97,7 @@ class TGBot:
                 await action()
                 return True
             except TimedOut:
-                if _durable_receipts.get():
+                if durable_receipts_enabled():
                     log_all(f"⚠️ TG Bot [{self.name}] {label}送达未确认，停止后续发送并等待核实", is_error=True)
                     return False
                 log_all(f"⚠️ TG Bot [{self.name}] {label}超时（服务端可能已收到），视为成功", is_error=True)
@@ -125,7 +111,7 @@ class TGBot:
                     log_all(f"❌ TG Bot [{self.name}] {label} flood control 重试耗尽 ({attempt}/3)", is_error=True)
                     return False
             except Exception as e:
-                if _durable_receipts.get():
+                if durable_receipts_enabled():
                     log_all(f"⚠️ TG Bot [{self.name}] {label}未确认完成 ({type(e).__name__})，禁止自动重试", is_error=True)
                     return False
                 if attempt < 3:
@@ -303,7 +289,7 @@ class TGBot:
 
     async def send_member_message(self, message_chain: list[dict]) -> bool:
         if not self._bot or not self.target_chat:
-            return not _durable_receipts.get()
+            return not durable_receipts_enabled()
 
         caption, media_list, translation = _chain_extract(message_chain)
         full_text = caption + translation
@@ -315,7 +301,7 @@ class TGBot:
         caption_fits = len(_escape_html(full_text)) <= _TELEGRAM_CAPTION_MAX
         if not caption_fits and full_text:
             if not await self._post_message(self.target_chat, full_text):
-                if _durable_receipts.get():
+                if durable_receipts_enabled():
                     return False
                 ok = False
             await asyncio.sleep(0.5)
@@ -323,7 +309,7 @@ class TGBot:
         for i, (media_type, file_url) in enumerate(media_list):
             cap = full_text if (caption_fits and i == 0) else ""
             if not await self._post_media(self.target_chat, media_type, file_url, cap):
-                if _durable_receipts.get():
+                if durable_receipts_enabled():
                     return False
                 ok = False
             if i < len(media_list) - 1:
