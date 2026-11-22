@@ -117,7 +117,9 @@ def _authorize_archive(handler, sub: str, guard_fn) -> bool:
                 return False
     elif need_admin is not None and not guard_fn(need_admin=need_admin):
         return False
-    if handler.command != method:
+    req_cmd = getattr(handler, "command", "")
+    is_valid_method = (req_cmd in ("GET", "HEAD")) if method == "GET" else (req_cmd == method)
+    if not is_valid_method:
         handler._pending_headers = [*getattr(handler, "_pending_headers", []), ("Allow", method)]
         _send_json_resp(handler, {"ok": False, "errors": [f"请使用 {method} 请求"]}, 405)
         return False
