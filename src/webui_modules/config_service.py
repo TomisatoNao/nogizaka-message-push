@@ -520,27 +520,74 @@ def _replace_or_inplace_write(
     tmp_path: Path,
     newline: str | None = None,
 ) -> None:
-    """写入临时文件并优先执行原子替换；对 Linux 单文件 bind mount (EBUSY/EXDEV/EPERM) 降级为原地截断覆盖写入。"""
+    """写入临时文件并优先执行原子替换；对 Linux 单文件 bind mount (EBUSY/EXDEV/EPERM) 降级为原地安全覆盖写入。
+
+    原地安全覆盖保证：
+    1. 临时文件和最终目标在写入后均强制执行 flush + fsync 刷盘；
+    2. 原地覆盖前对存在的目标文件保留 .bak 保护副本；
+    3. 原地写入使用 r+b 模式，先全量写入再 truncate 截断多余字节，绝不在打开瞬间执行 O_TRUNC
+       将文件截断为 0 字节，消除掉电或进程被强杀时的空文件窗口；
+    4. 遇不可抗力写入失败时，自动尝试从 .bak 保护副本静默自愈复原。
+    """
+    bak_path = target_path.with_name(f"{target_path.name}.bak")
     try:
         if isinstance(content, str):
             with open(tmp_path, "w", encoding="utf-8", newline=newline) as f:
                 f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            raw_bytes = tmp_path.read_bytes()
         else:
-            tmp_path.write_bytes(content)
+            with open(tmp_path, "wb") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            raw_bytes = content
+
         try:
             os.replace(tmp_path, target_path)
         except OSError as exc:
             if exc.errno in (errno.EBUSY, errno.EXDEV, errno.EPERM):
                 try:
                     from src.logger import log_all
-                    log_all(f"⚠️ 原子替换受限 (errno={exc.errno})，降级为原地覆盖写入: {target_path}")
+                    log_all(f"⚠️ 原子替换受限 (errno={exc.errno})，降级为原地安全覆盖写入: {target_path}")
                 except Exception:
                     pass
-                if isinstance(content, str):
-                    with open(target_path, "w", encoding="utf-8", newline=newline) as f:
-                        f.write(content)
+
+                # 降级分支：为防止掉电或崩溃产生 0 字节空文件，写入前保留一致性 .bak 保护副本
+                if target_path.exists() and target_path.stat().st_size > 0:
+                    try:
+                        shutil.copyfile(target_path, bak_path)
+                    except OSError:
+                        pass
+
+                # 原地安全覆盖：使用 r+b（若文件存在）避免打开瞬间被截断为 0 字节
+                # 先 seek(0) 覆写全部内容，再根据实际字节数 truncate，最后 fsync 强制物理落盘
+                mode = "r+b" if target_path.exists() else "w+b"
+                try:
+                    with open(target_path, mode) as f:
+                        f.seek(0)
+                        f.write(raw_bytes)
+                        f.truncate(len(raw_bytes))
+                        f.flush()
+                        os.fsync(f.fileno())
+                except Exception:
+                    # 写入若发生不可抗力异常，尝试用 .bak 副本静默自愈恢复
+                    if bak_path.exists() and bak_path.stat().st_size > 0:
+                        try:
+                            with open(target_path, "wb") as f:
+                                f.write(bak_path.read_bytes())
+                                f.flush()
+                                os.fsync(f.fileno())
+                        except Exception:
+                            pass
+                    raise
                 else:
-                    target_path.write_bytes(content)
+                    # 写入成功后清理临时 .bak 文件
+                    try:
+                        bak_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
             else:
                 raise
     finally:

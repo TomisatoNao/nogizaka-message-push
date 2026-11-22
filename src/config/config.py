@@ -897,6 +897,33 @@ def _load_config() -> dict:
         except Exception:
             pass
 
+    # 2.5 启动自愈：若 config.json 存在但为 0 字节，自动尝试从 .bak 或 history/ 自愈恢复
+    if _CONFIG_PATH.exists() and _CONFIG_PATH.stat().st_size == 0:
+        _healed = False
+        _bak = _CONFIG_PATH.with_name(f"{_CONFIG_PATH.name}.bak")
+        if _bak.exists() and _bak.stat().st_size > 0:
+            try:
+                import shutil as _shutil
+                _shutil.copyfile(_bak, _CONFIG_PATH)
+                print(f"[WARN ] ⚠️ 检测到 {_CONFIG_PATH.name} 为空文件（疑似异常掉电），已从备份 {_bak.name} 自动自愈恢复")
+                _healed = True
+            except Exception:
+                pass
+        if not _healed:
+            _hist = _CONFIG_PATH.parent / "history"
+            if _hist.exists():
+                _snapshots = sorted(_hist.glob("config-*.json"), reverse=True)
+                for _s in _snapshots:
+                    if _s.stat().st_size > 0:
+                        try:
+                            import shutil as _shutil
+                            _shutil.copyfile(_s, _CONFIG_PATH)
+                            print(f"[WARN ] ⚠️ 检测到 {_CONFIG_PATH.name} 为空文件，已从配置历史 {_s.name} 自动自愈恢复")
+                            _healed = True
+                            break
+                        except Exception:
+                            pass
+
     # 3. 读 JSONC
     try:
         import json5 as _json5
@@ -912,7 +939,36 @@ def _load_config() -> dict:
     except FileNotFoundError:
         _sys.exit(f"❌ 找不到配置文件: {_CONFIG_PATH}")
     except Exception as e:
-        _sys.exit(f"❌ config.json 解析失败: {e}")
+        # 若解析失败（半写损坏），尝试从 .bak 或 history/ 自愈
+        _bak = _CONFIG_PATH.with_name(f"{_CONFIG_PATH.name}.bak")
+        _healed_raw = None
+        if _bak.exists() and _bak.stat().st_size > 0:
+            try:
+                with open(_bak, "r", encoding="utf-8") as f:
+                    _healed_raw = _json5.load(f)
+                import shutil as _shutil
+                _shutil.copyfile(_bak, _CONFIG_PATH)
+                print(f"[WARN ] ⚠️ config.json 解析失败 ({e})，已从 {_bak.name} 自动自愈恢复")
+            except Exception:
+                pass
+        if _healed_raw is None:
+            _hist = _CONFIG_PATH.parent / "history"
+            if _hist.exists():
+                for _s in sorted(_hist.glob("config-*.json"), reverse=True):
+                    if _s.stat().st_size > 0:
+                        try:
+                            with open(_s, "r", encoding="utf-8") as f:
+                                _healed_raw = _json5.load(f)
+                            import shutil as _shutil
+                            _shutil.copyfile(_s, _CONFIG_PATH)
+                            print(f"[WARN ] ⚠️ config.json 解析失败 ({e})，已从配置历史 {_s.name} 自动自愈恢复")
+                            break
+                        except Exception:
+                            pass
+        if _healed_raw is not None:
+            raw = _healed_raw
+        else:
+            _sys.exit(f"❌ config.json 解析失败: {e}")
 
     # 3. 校验 Schema（对新格式配置进行校验）
     #    Schema 现在定义新格式键名（channels / monitor / sleep_hours 等），

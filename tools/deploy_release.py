@@ -34,6 +34,10 @@ SERVICE=sakamichi-push
 CONTAINER=sakamichi-push
 ENV_FILE=.env
 STATE_FILE=.deploy-state
+LOCK_FILE=.deploy-lock
+LOCK_META=.deploy-lock.meta
+LOCK_TIMEOUT=300
+DEPLOY_ID="deploy-$(date +%s)-$$"
 COMPOSE_ENV_FILE=.deploy-compose-env.$$
 COMPOSE_ENV_TEMP="$COMPOSE_ENV_FILE.tmp"
 COMPOSE_TEMP=.deploy-compose.$$
@@ -47,11 +51,47 @@ ACTIVE_COMPOSE_FILE=$COMPOSE_FILE
 cd "$REMOTE_DIR" || exit 20
 # Hold the lock for preparation, replacement, health checks and rollback.
 umask 077
-exec 9>.deploy-lock || exit 36
+exec 9>"$LOCK_FILE" || exit 36
 if ! flock -n 9; then
-  echo "ERROR: another deployment holds the deployment lock (or flock is unavailable)" >&2
-  exit 36
+  # Check whether the existing lock is stale, dead, or timed out (>300s)
+  STALE_HEALED=0
+  if [ -f "$LOCK_META" ]; then
+    HOLDER_PID=$(grep -E '^PID=' "$LOCK_META" 2>/dev/null | cut -d= -f2 || true)
+    LOCK_TS=$(grep -E '^TIMESTAMP=' "$LOCK_META" 2>/dev/null | cut -d= -f2 || true)
+    NOW=$(date +%s)
+    AGE=$((NOW - ${LOCK_TS:-0}))
+    IS_ALIVE=0
+    if [ -n "$HOLDER_PID" ] && kill -0 "$HOLDER_PID" 2>/dev/null; then
+      IS_ALIVE=1
+    fi
+    if [ "$IS_ALIVE" = 0 ] || [ "$AGE" -gt "$LOCK_TIMEOUT" ]; then
+      echo "WARNING: recovering abandoned or timed out deploy lock (PID=${HOLDER_PID:-unknown}, age=${AGE}s)" >&2
+      if [ "$IS_ALIVE" = 1 ]; then
+        kill -TERM "$HOLDER_PID" 2>/dev/null || true
+        sleep 1
+        kill -KILL "$HOLDER_PID" 2>/dev/null || true
+      fi
+      rm -f "$LOCK_META"
+      exec 9>&-
+      exec 9>"$LOCK_FILE" || exit 36
+      if flock -n 9; then
+        STALE_HEALED=1
+      fi
+    fi
+  fi
+  if [ "$STALE_HEALED" = 0 ]; then
+    echo "ERROR: another deployment holds the deployment lock (or flock is unavailable)" >&2
+    exit 36
+  fi
 fi
+
+# Record metadata for this lock holder
+{
+  echo "DEPLOY_ID=$DEPLOY_ID"
+  echo "PID=$$"
+  echo "TIMESTAMP=$(date +%s)"
+  echo "CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$LOCK_META.tmp" && mv "$LOCK_META.tmp" "$LOCK_META"
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "ERROR: compose file not found: $REMOTE_DIR/$COMPOSE_FILE" >&2
   exit 21
@@ -63,7 +103,7 @@ fi
 
 umask 077
 cleanup() {
-  rm -f "$COMPOSE_ENV_FILE" "$COMPOSE_ENV_TEMP" "$COMPOSE_TEMP" "$COMPOSE_TEMP_TMP" "$PINNED_COMPOSE_TEMP" "$PINNED_COMPOSE_TMP" "$STATE_TEMP" "$COMPOSE_BACKUP.tmp"
+  rm -f "$COMPOSE_ENV_FILE" "$COMPOSE_ENV_TEMP" "$COMPOSE_TEMP" "$COMPOSE_TEMP_TMP" "$PINNED_COMPOSE_TEMP" "$PINNED_COMPOSE_TMP" "$STATE_TEMP" "$COMPOSE_BACKUP.tmp" "$LOCK_META" "$LOCK_META.tmp"
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
@@ -248,8 +288,11 @@ record_state() {
   current=$2
   previous=$3
   digest=$4
+  stage=${5:-$outcome}
   {
     echo "DEPLOY_OUTCOME=$outcome"
+    echo "DEPLOY_STAGE=$stage"
+    echo "DEPLOY_ID=$DEPLOY_ID"
     echo "CURRENT_IMAGE_TAG=$current"
     echo "PREVIOUS_IMAGE_TAG=$previous"
     echo "IMAGE_DIGEST=$digest"
@@ -269,13 +312,13 @@ rollback() {
      probe "$ROLLBACK_TAG" 0; then
     RESTORED_IMAGE_ID=$("$DOCKER_BIN" inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)
     if [ "$RESTORED_IMAGE_ID" = "$CURRENT_IMAGE_ID" ] && pin_main_compose "$PREVIOUS_TAG"; then
-      record_state rollback "$PREVIOUS_TAG" "$PREVIOUS_TAG" "$CURRENT_IMAGE_ID" || true
+      record_state rollback "$PREVIOUS_TAG" "$PREVIOUS_TAG" "$CURRENT_IMAGE_ID" rolled_back || true
       "$DOCKER_BIN" image rm "$ROLLBACK_REF" >/dev/null 2>&1 || true
       echo "Rollback succeeded; restored image ID $CURRENT_IMAGE_ID" >&2
       return 0
     fi
   fi
-  record_state rollback_failed unknown "$PREVIOUS_TAG" "$CURRENT_IMAGE_ID" || true
+  record_state rollback_failed unknown "$PREVIOUS_TAG" "$CURRENT_IMAGE_ID" rollback_failed || true
   echo "ERROR: automatic rollback failed; manual recovery is required" >&2
   return 1
 }
@@ -288,10 +331,11 @@ fi
   echo "ERROR: unable to preserve current image for rollback" >&2
   exit 31
 }
+record_state in_progress "$TARGET_TAG" "$PREVIOUS_TAG" "" prepared || true
 
 if ! compose pull "$SERVICE"; then
   "$DOCKER_BIN" image rm "$ROLLBACK_REF" >/dev/null 2>&1 || true
-  record_state failed_no_change "$PREVIOUS_TAG" "$PREVIOUS_TAG" "$CURRENT_IMAGE_ID" || true
+  record_state failed_no_change "$PREVIOUS_TAG" "$PREVIOUS_TAG" "$CURRENT_IMAGE_ID" failed_pull || true
   echo "Deployment failed: image pull failed; the running container was not changed" >&2
   exit 32
 fi
@@ -334,14 +378,17 @@ if ! check_delivery_reader_floor; then
   exit 37
 fi
 
+record_state in_progress "$TARGET_TAG" "$PREVIOUS_TAG" "" replacing || true
 if ! compose up -d --no-deps "$SERVICE"; then
   rollback "container replacement failed"
   exit 33
 fi
+record_state in_progress "$TARGET_TAG" "$PREVIOUS_TAG" "" replaced || true
 if ! probe "$TARGET_TAG" 1; then
   rollback "health/version verification timed out"
   exit 34
 fi
+record_state in_progress "$TARGET_TAG" "$PREVIOUS_TAG" "" verified || true
 if ! pin_main_compose "$TARGET_TAG"; then
   rollback "unable to persist the verified image tag in Compose"
   exit 35
@@ -349,7 +396,7 @@ fi
 
 TARGET_REF="$IMAGE_REPO:$TARGET_TAG"
 DIGEST=$("$DOCKER_BIN" image inspect --format '{{index .RepoDigests 0}}' "$TARGET_REF" 2>/dev/null || true)
-record_state success "$TARGET_TAG" "$PREVIOUS_TAG" "$DIGEST" || {
+record_state success "$TARGET_TAG" "$PREVIOUS_TAG" "$DIGEST" verified || {
   echo "WARNING: release is healthy but deployment state could not be recorded" >&2
 }
 "$DOCKER_BIN" image rm "$ROLLBACK_REF" >/dev/null 2>&1 || true
