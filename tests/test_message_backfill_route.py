@@ -25,7 +25,9 @@ def invoke(body, guard=lambda **_: True, command="POST"):
 
 
 @pytest.fixture(autouse=True)
-def reset_active_backfill():
+def reset_active_backfill(monkeypatch, tmp_path):
+    monkeypatch.setattr(message_backfill.archive_tasks, "_db_path",
+                        lambda: tmp_path / "archive-tasks.sqlite3")
     with message_backfill._BACKFILL_LOCK:
         message_backfill._ACTIVE_BACKFILL_PROC = None
         message_backfill._ACTIVE_BACKFILL_REQ_ID = None
