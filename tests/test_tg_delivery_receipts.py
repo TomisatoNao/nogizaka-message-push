@@ -44,3 +44,11 @@ async def test_explicit_flood_rejection_can_retry_safely(monkeypatch):
     with durable_delivery_receipts():
         assert await bot._send_with_retry("test", send) is True
     assert send.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_uninitialized_bot_cannot_confirm_durable_delivery():
+    bot = TGBot("test", "", "123")
+    with durable_delivery_receipts():
+        assert await bot.send_member_message([{"type": "text", "data": {"text": "body"}}]) is False
+    assert await bot.send_member_message([]) is True

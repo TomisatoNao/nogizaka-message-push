@@ -303,7 +303,7 @@ class TGBot:
 
     async def send_member_message(self, message_chain: list[dict]) -> bool:
         if not self._bot or not self.target_chat:
-            return True
+            return not _durable_receipts.get()
 
         caption, media_list, translation = _chain_extract(message_chain)
         full_text = caption + translation
