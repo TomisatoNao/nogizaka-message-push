@@ -93,6 +93,8 @@ class QQOfficialClient:
             try:
                 return await self._client.post(url, json=json_body, headers=headers, timeout=t)
             except RuntimeError as ex:
+                if durable_receipts_enabled() and urlparse(url).path.endswith("/messages"):
+                    raise
                 if "different event loop" not in str(ex).lower() and "event loop" not in str(ex).lower():
                     raise
                 # 只有确定是事件循环绑定错误时才换用临时 client；网络

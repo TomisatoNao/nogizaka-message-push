@@ -44,3 +44,17 @@ async def test_unknown_text_receipt_stops_media_tail():
                                             media_payloads=[("image", b"media")]) is False
     assert bot._safe_post.await_count == 1
     bot._upload_media.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_visible_post_runtime_error_never_uses_fallback_client(monkeypatch):
+    from types import SimpleNamespace
+    client = QQOfficialClient("", "", name="test")
+    client._client = SimpleNamespace(is_closed=False, post=AsyncMock(side_effect=RuntimeError("event loop closed")))
+    client._wait_rate_limit = AsyncMock()
+    fallback = AsyncMock(side_effect=AssertionError("unsafe fallback POST"))
+    monkeypatch.setattr("src.platforms.qq_official_client.httpx.AsyncClient", fallback)
+    with durable_delivery_receipts():
+        assert await client._post_json("https://example.test/v2/groups/target/messages", {}) is None
+    assert client._client.post.await_count == 1
+    fallback.assert_not_called()
