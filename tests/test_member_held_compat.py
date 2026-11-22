@@ -764,3 +764,23 @@ async def test_telegram_timeout_is_held_not_recorded_delivered(state_db):
     assert successful_routes("group", "member", "1") == set()
     assert held_member_routes("group", "member") == {"tg:test"}
     assert bot._bot.send_message.await_count == 1
+
+
+def test_backlog_summary_exposes_protected_states(state_db):
+    from src import delivery_state
+    for route, state in [("napcat:1", "held"), ("napcat:2", "in_flight"), ("napcat:3", "future_unknown")]:
+        _seed_protected_route(state_db["conn"], group_type="group", member_id="member",
+                              message_id="1", route_id=route, route_state=state)
+    result = delivery_state.pending_backlog_summary("group", "member")
+    assert result["available"] is True
+    assert result["routes"] == 0
+    assert result["protected_routes"] == 3
+    assert result["protected_messages"] == 1
+    assert result["protected_members"] == 1
+    assert delivery_state.pending_backlog_summary("other", "member")["protected_routes"] == 0
+
+
+def test_backlog_unavailable_is_not_reported_as_known_empty(monkeypatch):
+    from src import delivery_state
+    monkeypatch.setattr(delivery_state, "_conn", lambda: None)
+    assert delivery_state.pending_backlog_summary()["available"] is False

@@ -122,6 +122,7 @@ def handle_status(handler, on_poll_cb=None) -> None:
             "suspended_routes": 0,
             "suspended_messages": 0,
             "suspended_members": 0,
+            "available": False,
         }
 
     try:

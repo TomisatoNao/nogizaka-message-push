@@ -444,6 +444,10 @@ def test_pending_route_suspend_and_resume_preserves_recovery_state(tmp_path, mon
             "suspended_routes": 1,
             "suspended_messages": 1,
             "suspended_members": 1,
+            "protected_routes": 0,
+            "protected_messages": 0,
+            "protected_members": 0,
+            "available": True,
         }
 
         changed = delivery_state.reconcile_pending_routes(
