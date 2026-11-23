@@ -309,7 +309,7 @@ async def test_message_retry_skips_routes_persisted_as_successful(monkeypatch):
     async def archive_message(*_args, **_kwargs):
         return None
 
-    async def send_message(_member, _chain, *, skip_route_ids=None):
+    async def send_message(_member, _chain, *, skip_route_ids=None, intent_identity=None):
         seen_skip_sets.append(set(skip_route_ids or set()))
         return DeliveryReport(())
 
@@ -350,7 +350,7 @@ async def test_route_lane_failure_does_not_block_healthy_route(monkeypatch):
     async def archive_message(*_args, **_kwargs):
         return None
 
-    async def send_message(_member, _chain, *, skip_route_ids=None):
+    async def send_message(_member, _chain, *, skip_route_ids=None, intent_identity=None):
         skipped = set(skip_route_ids or set())
         message_id = str(_chain[0].get("data", {}).get("text", ""))
         attempts.append((message_id, skipped))

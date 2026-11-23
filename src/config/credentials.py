@@ -344,6 +344,9 @@ async def _post(url: str, *, headers: dict,
                         f"error={type(exc).__name__}",
                         is_warning=True,
                     )
+                    retry_delay = float(globals().get("AUTH_RESET_RETRY_DELAY_SECONDS", 0.5))
+                    if retry_delay > 0:
+                        await asyncio.sleep(retry_delay)
                     return await http_pool.post_auth_request(replacement, url, **request_kwargs)
             raise
         except (ClosedResourceError, BrokenResourceError):

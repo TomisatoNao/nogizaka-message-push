@@ -174,3 +174,101 @@ async def test_expected_unmanaged_general_client_is_not_taken_over(monkeypatch):
         assert await http_pool.reset_general_client(expected_client=external) is external
         assert http_pool._general_client is None
         assert not external.is_closed
+
+
+@pytest.mark.asyncio
+async def test_recycle_idle_clients_replaces_bound_pools_and_skips_unbound():
+    await http_pool.close_all()
+    assert await http_pool.recycle_idle_clients() == []
+    assert http_pool._auth_client is None
+    assert http_pool._general_client is None
+
+    rebound_auth = []
+    rebound_general = []
+    http_pool.register_auth_client_rebind(rebound_auth.append)
+    http_pool.register_general_client_rebind(rebound_general.append)
+    try:
+        old_auth = await http_pool.get_auth_client()
+        old_general = await http_pool.get_general_client()
+
+        recycled = await http_pool.recycle_idle_clients()
+        assert recycled == ["auth", "general"]
+        assert old_auth.is_closed
+        assert old_general.is_closed
+        assert rebound_auth[-1] is not old_auth
+        assert rebound_general[-1] is not old_general
+    finally:
+        http_pool.unregister_auth_client_rebind(rebound_auth.append)
+        http_pool.unregister_general_client_rebind(rebound_general.append)
+        await http_pool.close_all()
+
+
+@pytest.mark.asyncio
+async def test_monitor_loop_recycles_idle_clients_on_sleep_wakeup(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from src.app_modules import message_worker
+
+    jst = timezone(timedelta(hours=9))
+    stop_event = asyncio.Event()
+    poll_event = asyncio.Event()
+    recycle_calls = []
+    cycle_calls = []
+
+    async def fake_recycle():
+        recycle_calls.append(True)
+        return ["auth", "general"]
+
+    async def fake_wait(*args, **kwargs):
+        return "timeout"
+
+    async def fake_cycle(*args, **kwargs):
+        cycle_calls.append(True)
+        stop_event.set()
+        return message_worker._CycleResult()
+
+    monkeypatch.setattr(message_worker, "_get_jst_now", lambda: datetime(2026, 11, 23, 2, 0, tzinfo=jst))
+    monkeypatch.setattr(message_worker, "_wait_for_next_action", fake_wait)
+    monkeypatch.setattr(message_worker, "_stop_requested", lambda: False)
+    monkeypatch.setattr(message_worker, "_run_cycle", fake_cycle)
+    if "src.app" in sys.modules:
+        monkeypatch.setattr(sys.modules["src.app"], "_stop_requested", lambda: False)
+        monkeypatch.setattr(sys.modules["src.app"], "_run_cycle", fake_cycle)
+    monkeypatch.setattr(http_pool, "recycle_idle_clients", fake_recycle)
+    monkeypatch.setattr(message_worker.cfg, "SLEEP_START_HOUR", 1, raising=False)
+    monkeypatch.setattr(message_worker.cfg, "SLEEP_END_HOUR", 7, raising=False)
+
+    await message_worker._run_loop(None, poll_event, stop_event=stop_event)
+    assert recycle_calls == [True]
+    assert cycle_calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_member_delivery_intents_default_enabled_and_respects_kill_switch(monkeypatch):
+    from unittest.mock import AsyncMock
+    from src import fetcher
+    from src.notifier import DeliveryReport
+
+    captured_options = []
+
+    async def fake_send_detailed(member, chain, **kwargs):
+        captured_options.append(kwargs)
+        return DeliveryReport(attempts=())
+
+    monkeypatch.setattr(fetcher.archive, "archive_message", AsyncMock())
+    monkeypatch.setattr(fetcher, "build_message_chain", lambda *a, **k: [])
+    monkeypatch.setattr(fetcher, "successful_routes", lambda *a, **k: set())
+    monkeypatch.setattr(fetcher, "mark_successful_routes", lambda *a, **k: None)
+    monkeypatch.setattr(fetcher, "send_member_message_detailed", fake_send_detailed)
+
+    member = {"group_type": "nogizaka", "m_id": "55", "m_name": "冨里 奈央"}
+    msg = {"id": "m-1", "updated_at": "2026-11-23T08:00:00Z", "type": "text", "text": ""}
+
+    # 默认开启发送意图落盘
+    monkeypatch.delenv("MEMBER_DELIVERY_INTENTS_ENABLED", raising=False)
+    await fetcher._handle_message(member, msg, [], set(), [None])
+    assert captured_options[-1].get("intent_identity") == ("nogizaka", "55", "m-1", "2026-11-23T08:00:00Z")
+
+    # 显式关闭开关时回退为不携带 intent_identity
+    monkeypatch.setenv("MEMBER_DELIVERY_INTENTS_ENABLED", "0")
+    await fetcher._handle_message(member, msg, [], set(), [None])
+    assert "intent_identity" not in captured_options[-1]

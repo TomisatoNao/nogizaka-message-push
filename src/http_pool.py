@@ -391,6 +391,27 @@ async def reset_auth_client(
         return current
 
 
+async def recycle_idle_clients() -> list[str]:
+    """长休眠唤醒后主动回收当前事件循环上已绑定的空闲连接池。
+
+    仅替换已存在且归属当前事件循环的 auth/general 客户端，避免在轻量测试或
+    尚未初始化连接池的上下文中凭空创建新客户端。
+    """
+    recycled: list[str] = []
+    with _thread_lock:
+        auth_client = _auth_client if _is_current_loop_client(_auth_client, _auth_loop) else None
+        general_client = (
+            _general_client if _is_current_loop_client(_general_client, _general_loop) else None
+        )
+    if auth_client is not None:
+        await reset_auth_client(expected_client=auth_client)
+        recycled.append("auth")
+    if general_client is not None:
+        await reset_general_client(expected_client=general_client)
+        recycled.append("general")
+    return recycled
+
+
 async def close_all() -> None:
     """优雅关闭所有活跃的 HTTP 客户端连接池。"""
     global _general_client, _auth_client, _qq_client, _blog_client
@@ -422,6 +443,7 @@ __all__ = [
     "new_auth_client",
     "new_general_client",
     "post_auth_request",
+    "recycle_idle_clients",
     "register_auth_client_rebind",
     "register_general_client_rebind",
     "reset_auth_client",
