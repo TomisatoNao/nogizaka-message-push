@@ -989,7 +989,7 @@ async def main() -> None:
         try:
             recovered = recover_interrupted_send_intents()
         except DeliveryStateError:
-            if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED") == "1":
+            if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
                 raise
             log_all("⚠️ 无法读取中断投递状态，请检查归档数据库；发送前仍会执行状态保护检查", is_error=True)
         else:

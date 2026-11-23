@@ -266,7 +266,7 @@ async def _handle_message(member: dict, msg: dict,
         # 后续消息；其它路由不受影响。
         skip_routes.update(lane_context.blocked_routes)
     delivery_options = {"skip_route_ids": skip_routes}
-    if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED") == "1":
+    if os.environ.get("MEMBER_DELIVERY_INTENTS_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
         if not all((group_type, m_id, msg_id, updated)):
             raise DeliveryStateError("成员消息缺少持久投递所需的标识或时间")
         delivery_options["intent_identity"] = (str(group_type), str(m_id), msg_id, str(updated))

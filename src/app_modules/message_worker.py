@@ -703,6 +703,22 @@ async def _run_loop(
             elif action == "timeout":
                 last_trigger = "auto"
 
+            if action in ("timeout", "manual"):
+                try:
+                    recycled = await http_pool.recycle_idle_clients()
+                    if recycled:
+                        log_all(
+                            f"♻️ 休眠唤醒，已主动重建空闲 HTTP 连接池: {', '.join(recycled)}",
+                            is_debug=True,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # nosec B110 - 连接池预回收失败不阻断巡查
+                    log_all(
+                        f"⚠️ 休眠唤醒重建 HTTP 连接池失败: {type(exc).__name__}: {exc}",
+                        is_warning=True,
+                    )
+
         # 真正开始执行轮次时消费 manual_pending 意图
         current_trigger = "manual" if manual_pending else "auto"
         manual_pending = False
