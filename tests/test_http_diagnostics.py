@@ -221,3 +221,56 @@ async def test_pool_timeout_does_not_reset_shared_general_client(monkeypatch):
     with pytest.raises(httpx.PoolTimeout):
         await fetcher._fetch_get("https://api.test/", headers={}, account_id="demo", operation="timeline")
     assert not fetcher._semaphore.locked()
+
+
+def test_http_diagnostics_report_only_anomalies_suppresses_healthy_cycles():
+    from collections import Counter
+    from src.http_diagnostics import RequestTotals
+
+    diag = CycleHTTPDiagnostics("cycle-quiet")
+    diag.totals[("timeline", "api.ok", "acc_ok")] = RequestTotals(
+        calls=4,
+        peak=1,
+        queue_ms=800,
+        queue_max_ms=400,
+        request_max_ms=520,
+        results=Counter({"http_200": 4}),
+    )
+    assert diag.report(only_anomalies=True) == []
+    assert len(diag.report()) == 1
+
+    # 慢请求触发输出
+    diag.totals[("timeline", "api.slow", "acc_slow")] = RequestTotals(
+        calls=1,
+        peak=1,
+        queue_ms=100,
+        queue_max_ms=100,
+        request_max_ms=3500,
+        results=Counter({"http_200": 1}),
+    )
+    # 非 2xx / 错误触发输出
+    diag.totals[("timeline", "api.err", "acc_err")] = RequestTotals(
+        calls=2,
+        peak=1,
+        queue_ms=50,
+        queue_max_ms=50,
+        request_max_ms=200,
+        results=Counter({"http_200": 1, "connect_error": 1}),
+    )
+    # 长排队触发输出
+    diag.totals[("timeline", "api.queue", "acc_queue")] = RequestTotals(
+        calls=2,
+        peak=2,
+        queue_ms=6200,
+        queue_max_ms=5100,
+        request_max_ms=300,
+        results=Counter({"http_200": 2}),
+    )
+
+    anomalies = diag.report(only_anomalies=True)
+    joined = "\n".join(anomalies)
+    assert len(anomalies) == 3
+    assert "acc_ok" not in joined
+    assert "acc_slow" in joined
+    assert "acc_err" in joined
+    assert "acc_queue" in joined

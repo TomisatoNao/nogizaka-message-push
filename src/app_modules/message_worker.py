@@ -118,7 +118,7 @@ async def _run_cycle_bounded(run_cycle_fn, timeout_seconds: float, cycle_id: str
         await _run_cycle_with_lifecycle(run_cycle_fn, timeout_seconds, cycle_id)
     finally:
         cycle_diagnostics.reset(token)
-        for line in diagnostics.report():
+        for line in diagnostics.report(only_anomalies=True):
             log_all(line, is_debug=True)
 
 

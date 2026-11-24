@@ -81,9 +81,35 @@ class CycleHTTPDiagnostics:
     cycle_id: str
     totals: dict[tuple[str, str, str], RequestTotals] = field(default_factory=dict)
 
-    def report(self) -> list[str]:
+    @staticmethod
+    def _is_anomalous(
+        totals: RequestTotals,
+        *,
+        slow_request_ms: float = 3000.0,
+        slow_queue_ms: float = 5000.0,
+    ) -> bool:
+        if totals.request_max_ms >= slow_request_ms or totals.queue_max_ms >= slow_queue_ms:
+            return True
+        for key in totals.results:
+            if not (key.startswith("http_2") and len(key) == 8 and key[5:].isdigit()):
+                return True
+        return False
+
+    def report(
+        self,
+        *,
+        only_anomalies: bool = False,
+        slow_request_ms: float = 3000.0,
+        slow_queue_ms: float = 5000.0,
+    ) -> list[str]:
         lines = []
         for (operation, host, account), totals in sorted(self.totals.items()):
+            if only_anomalies and not self._is_anomalous(
+                totals,
+                slow_request_ms=slow_request_ms,
+                slow_queue_ms=slow_queue_ms,
+            ):
+                continue
             samples = sorted(totals.request_samples)
             p95 = samples[max(0, math.ceil(len(samples) * 0.95) - 1)] if samples else 0
             results = ",".join(f"{key}:{count}" for key, count in sorted(totals.results.items()))
