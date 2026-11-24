@@ -651,6 +651,25 @@ def _mark_pre_submission_failure() -> None:
         progress.possible_submission = False
 
 
+def _resolve_napcat_http_timeout() -> httpx.Timeout:
+    """按配置的 NAPCAT_SEND_TIMEOUT_SECONDS 计算单次 OneBot HTTP 超时。
+
+    预留 5 秒余量低于外层 route 总预算，确保视频/大图上传不会在共享
+    qq_client 的 15 秒默认超时处被提前掐断，同时仍在外层超时前收敛。
+    """
+    try:
+        budget = float(getattr(cfg, "NAPCAT_SEND_TIMEOUT_SECONDS", 45.0) or 45.0)
+    except (TypeError, ValueError):
+        budget = 45.0
+    io_timeout = max(15.0, budget - 5.0)
+    return httpx.Timeout(
+        connect=min(10.0, io_timeout),
+        read=io_timeout,
+        write=io_timeout,
+        pool=min(10.0, io_timeout),
+    )
+
+
 async def _post_payload_detailed(
     group_id: int,
     payload: Mapping[str, object],
@@ -694,11 +713,12 @@ async def _post_payload_detailed(
     current_loop = asyncio.get_running_loop()
     request_client = _client
     temporary_client: httpx.AsyncClient | None = None
+    http_timeout = _resolve_napcat_http_timeout()
     if _client_loop is not current_loop:
         # 入站链接解析会在线程内创建独立事件循环，不能复用主循环拥有的
         # httpx 连接池。为该次投递创建直连客户端，结束后立即关闭。
         temporary_client = httpx.AsyncClient(
-            timeout=35.0,
+            timeout=http_timeout,
             transport=httpx.AsyncHTTPTransport(
                 retries=0,
                 http2=False,
@@ -716,16 +736,8 @@ async def _post_payload_detailed(
                 request_kwargs: dict[str, object] = {
                     "content": payload_str,
                     "headers": req_headers,
+                    "timeout": http_timeout,
                 }
-                if action == "send_group_forward_msg":
-                    # NapCat 构造合并转发通常明显慢于普通消息；单独放宽读取
-                    # 时间，但仍低于 DeliveryService 默认 45 秒总预算。
-                    request_kwargs["timeout"] = httpx.Timeout(
-                        connect=10.0,
-                        read=35.0,
-                        write=35.0,
-                        pool=10.0,
-                    )
                 progress = _delivery_progress.get()
                 if progress is not None:
                     # Count only at the HTTP boundary; route planning, lock

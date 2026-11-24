@@ -371,3 +371,41 @@ async def test_durable_onebot_explicit_login_rejection_is_not_submission(monkeyp
     assert not outcome.ok and outcome.error_code == code
     assert not progress.possible_submission and progress.confirmed_batches == 0
     assert client.calls == 1
+
+@pytest.mark.asyncio
+async def test_send_group_msg_honors_configured_napcat_send_timeout(monkeypatch):
+    """普通消息（含视频上传）必须遵循配置的 NAPCAT_SEND_TIMEOUT_SECONDS，不被共享客户端 15s 截断。"""
+    from types import SimpleNamespace
+
+    recorded_timeouts: list[httpx.Timeout | None] = []
+
+    async def fake_post(_url, **kwargs):
+        recorded_timeouts.append(kwargs.get("timeout"))
+        return _Response(body={"status": "ok", "retcode": 0})
+
+    monkeypatch.setattr(cfg, "QQ_SEND_INTERVAL", 0)
+    monkeypatch.setattr(cfg, "NAPCAT_SEND_TIMEOUT_SECONDS", 45, raising=False)
+    napcat.initialize(SimpleNamespace(post=fake_post))
+
+    ok = await napcat.send_qq_message(
+        533072575,
+        [
+            {"type": "text", "data": {"text": "冨里 奈央"}},
+            {"type": "video", "data": {"file": "https://example.invalid/181186.mp4"}},
+        ],
+        max_retries=1,
+    )
+    assert ok is True
+    assert len(recorded_timeouts) == 2
+    for t in recorded_timeouts:
+        assert isinstance(t, httpx.Timeout)
+        assert t.read == 40.0
+        assert t.write == 40.0
+        assert t.connect == 10.0
+
+    # 提高配置后自动跟随放宽
+    monkeypatch.setattr(cfg, "NAPCAT_SEND_TIMEOUT_SECONDS", 60, raising=False)
+    ok2 = await napcat.send_qq_message(533072575, [{"type": "text", "data": {"text": "ok"}}], max_retries=1)
+    assert ok2 is True
+    assert recorded_timeouts[-1].read == 55.0
+    assert recorded_timeouts[-1].write == 55.0
