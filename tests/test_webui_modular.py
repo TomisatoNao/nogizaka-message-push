@@ -1915,3 +1915,15 @@ def test_napcat_ai_and_inbound_webui_contract():
     assert "冨里奈央" in html
     assert "btnResetAiPrompt" in html
     assert "renderAiChatAllowedGroups" in html
+
+def test_users_archive_public_toggle_and_savebar_visibility_contract():
+    """用户页「游客免登录」开关必须可弹出底部保存条，且纯筛选控件不误触发脏标记。"""
+    html = (_ROOT / "src" / "webui_static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="authArchivePublic"' in html
+    assert "config.auth.archive_public = isPublic;" in html
+    # 不再按 status/users/tasks 强行 display:none 屏蔽保存条
+    assert '["status", "users", "tasks"].includes' not in html
+    # 纯筛选/临时工具控件应被排除在配置脏标记之外
+    assert "NON_CONFIG_ADMIN_CONTROL_IDS" in html
+    for non_cfg_id in ("routeDiagnosticsSearch", "logErrOnly", "logKeyword", "toolSocialUrl"):
+        assert f'"{non_cfg_id}"' in html
