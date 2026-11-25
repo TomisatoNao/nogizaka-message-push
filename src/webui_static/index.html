@@ -3932,15 +3932,13 @@ function setDirty(v) {
   dirty = v;
   document.title = (v ? "● " : "") + "坂道监控 · 配置管理";
   const bar = document.querySelector("footer.savebar");
-  const activeTab = document.querySelector(".header-nav .nav-tab.active, nav.tabs button.active")?.dataset.tab;
-  const isReadOnlyTab = ["status", "users", "tasks"].includes(activeTab);
-  if (isReadOnlyTab) {
-    bar.style.display = "none";
-  }
-  if (v) {
-    bar.classList.add("show");
-  } else if (!window.saveMsgTimer) {
-    bar.classList.remove("show");
+  if (bar) {
+    bar.style.display = "";
+    if (v) {
+      bar.classList.add("show");
+    } else if (!window.saveMsgTimer) {
+      bar.classList.remove("show");
+    }
   }
   updateConfigSaveAvailability();
 }
@@ -4889,11 +4887,14 @@ function switchAdminTab(targetTab, updateHash = true) {
   document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("active", s.id === "tab-" + targetTab));
   window.syncArchiveTaskPolling?.(targetTab === "tasks");
 
-  // V2-07: 只读或独立维护页 (status, users, tasks) 隐藏保存条
-  const isReadOnlyTab = ["status", "users", "tasks"].includes(targetTab);
+  // 保存条仅在存在未保存修改或提示消息时通过 .show 展示；
+  // users 页包含可保存的「游客免登录」开关，不再按标签页强行 display:none。
   const savebarEl = document.querySelector("footer.savebar");
   if (savebarEl) {
-    savebarEl.style.display = isReadOnlyTab ? "none" : "";
+    savebarEl.style.display = "";
+    if (!dirty && !window.saveMsgTimer) {
+      savebarEl.classList.remove("show");
+    }
   }
 
   // L-01: 每页标题增加栏目名区分
@@ -6553,8 +6554,20 @@ function collectGeneral() {
   }
 }
 
+const NON_CONFIG_ADMIN_CONTROL_IDS = new Set([
+  "routeDiagnosticsSearch",
+  "logErrOnly",
+  "logKeyword",
+  "logFollow",
+  "toolSocialUrl",
+  "toolSocialTranslate",
+  "toolSocialArchive",
+]);
 function isAdminFormTarget(target) {
-  return Boolean(target && target.closest && target.closest("main, #napcatAdvancedDialog, #qqCommandSettingsDialog"));
+  if (!target || !target.closest) return false;
+  if (target.id && NON_CONFIG_ADMIN_CONTROL_IDS.has(target.id)) return false;
+  if (target.name === "toolSocialChannel") return false;
+  return Boolean(target.closest("main, #napcatAdvancedDialog, #qqCommandSettingsDialog"));
 }
 
 document.addEventListener("input", (e) => {
