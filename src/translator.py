@@ -209,15 +209,58 @@ _BLOG_QUALITY_PRIORITY = {
     "glm-4-flash": 100,
 }
 
+_primary_key_cooldown_until: float = 0.0
+
+def mark_primary_key_cooldown(seconds: float = 600.0, reason: str = "") -> None:
+    """主用付费 Gemini Key 鉴权/配额失效时置入冷却，自动回退至原 Key 与原模型序列。"""
+    global _primary_key_cooldown_until
+    _primary_key_cooldown_until = max(_primary_key_cooldown_until, time.monotonic() + max(1.0, float(seconds)))
+    log_all(
+        f"⚠️ 主用付费 Gemini Key 失效（{reason or '鉴权或配额异常'}），暂停 {int(seconds)}s 并自动回退至原 Gemini Key 及原模型优先级序列",
+        is_warning=True,
+    )
+
+def is_primary_key_cooling() -> bool:
+    return time.monotonic() < _primary_key_cooldown_until
+
+def clear_primary_key_cooldown() -> None:
+    global _primary_key_cooldown_until
+    _primary_key_cooldown_until = 0.0
+
+def _is_primary_key_invalid_response(status_code: int, body_text: str = "") -> bool:
+    if status_code in (401, 403):
+        return True
+    if status_code == 400:
+        upper = (body_text or "").upper()
+        return any(tok in upper for tok in ("API_KEY_INVALID", "API KEY NOT VALID", "PERMISSION_DENIED", "BILLING"))
+    return False
+
 def _get_active_models(scenario: str = "default") -> list[dict]:
-    """获取当前已配置有效 API Key 的可用模型列表（支持 Gemini 与 智谱 GLM 等多平台）。
+    """获取当前已配置有效 API Key 的可用模型列表（支持主用付费 Gemini Key + 原 Key 自动回退 + 智谱 GLM）。
 
     支持 scenario 参数区分场景：
       - "blog": 博客长篇翻译场景，质量与语境还原优先（Quality First）；
       - "message" / "default": 消息短文本推送场景，速度与配额保活优先（Speed First）。
     """
+    has_primary_gemini = bool(getattr(cfg, "GEMINI_PRIMARY_API_KEY", ""))
     has_gemini = bool(getattr(cfg, "GEMINI_API_KEY", ""))
     has_zhipu = bool(getattr(cfg, "ZHIPU_API_KEY", ""))
+
+    active: list[dict] = []
+    if has_primary_gemini and not is_primary_key_cooling():
+        if scenario == "blog":
+            primary_models = (
+                getattr(cfg, "GEMINI_PRIMARY_BLOG_MODELS", [])
+                or getattr(cfg, "GEMINI_PRIMARY_MODELS", [])
+                or []
+            )
+        else:
+            primary_models = getattr(cfg, "GEMINI_PRIMARY_MODELS", []) or []
+        for m in primary_models:
+            name = m.get("name", "")
+            if not name:
+                continue
+            active.append({**m, "provider": "gemini", "api_key_tier": "primary", "cooldown_key": f"primary:{name}"})
 
     if scenario == "blog":
         models = getattr(cfg, "GEMINI_BLOG_MODELS", []) or []
@@ -231,7 +274,6 @@ def _get_active_models(scenario: str = "default") -> list[dict]:
     else:
         models = getattr(cfg, "GEMINI_MODELS", []) or []
 
-    active: list[dict] = []
     for m in models:
         name = m.get("name", "")
         url = m.get("url", "")
@@ -243,9 +285,9 @@ def _get_active_models(scenario: str = "default") -> list[dict]:
                 provider = "gemini"
 
         if provider == "zhipu" and has_zhipu:
-            active.append({**m, "provider": "zhipu"})
+            active.append({**m, "provider": "zhipu", "api_key_tier": "default", "cooldown_key": name})
         elif provider == "gemini" and has_gemini:
-            active.append({**m, "provider": "gemini"})
+            active.append({**m, "provider": "gemini", "api_key_tier": "default", "cooldown_key": name})
 
     return active
 
@@ -283,8 +325,8 @@ def _get_ordered_models(scenario: str = "default") -> list[dict]:
     models = _get_active_models(scenario=scenario)
     if not models:
         return []
-    healthy = [m for m in models if not is_model_cooling(m.get("name", ""))]
-    cooling = [m for m in models if is_model_cooling(m.get("name", ""))]
+    healthy = [m for m in models if not is_model_cooling(m.get("cooldown_key") or m.get("name", ""))]
+    cooling = [m for m in models if is_model_cooling(m.get("cooldown_key") or m.get("name", ""))]
     if healthy:
         return healthy + cooling
     return models
@@ -376,9 +418,12 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
             return ""
     else:
         url = model["url"]
+        tier = model.get("api_key_tier", "default")
+        cooldown_key = model.get("cooldown_key") or model.get("name", "")
+        api_key = getattr(cfg, "GEMINI_PRIMARY_API_KEY", "") if tier == "primary" else getattr(cfg, "GEMINI_API_KEY", "")
         headers = {}
-        if "key=" not in url and getattr(cfg, "GEMINI_API_KEY", ""):
-            headers["x-goog-api-key"] = cfg.GEMINI_API_KEY
+        if "key=" not in url and api_key:
+            headers["x-goog-api-key"] = api_key
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
@@ -387,10 +432,15 @@ async def _call_model_text(model: dict, prompt: str, custom_client: httpx.AsyncC
         if resp.status_code == 200:
             res_txt = _extract_text_gemini(resp.json(), model["name"])
             if res_txt:
-                clear_model_cooldown(model.get("name", ""))
+                clear_model_cooldown(cooldown_key)
+                if tier == "primary":
+                    clear_primary_key_cooldown()
             return res_txt
+        elif tier == "primary" and _is_primary_key_invalid_response(resp.status_code, getattr(resp, "text", "")):
+            mark_primary_key_cooldown(600.0, reason=f"HTTP {resp.status_code}")
+            raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         elif resp.status_code in (429, 500, 502, 503, 504):
-            mark_model_cooldown(model.get("name", ""), 60.0, reason=f"HTTP {resp.status_code}")
+            mark_model_cooldown(cooldown_key, 60.0, reason=f"HTTP {resp.status_code}")
             raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         else:
             log_all(f"⚠️ Gemini 模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
@@ -442,9 +492,12 @@ async def _call_model_json(
             )
     else:
         url = model["url"]
+        tier = model.get("api_key_tier", "default")
+        cooldown_key = model.get("cooldown_key") or model.get("name", "")
+        api_key = getattr(cfg, "GEMINI_PRIMARY_API_KEY", "") if tier == "primary" else getattr(cfg, "GEMINI_API_KEY", "")
         headers = {}
-        if "key=" not in url and getattr(cfg, "GEMINI_API_KEY", ""):
-            headers["x-goog-api-key"] = cfg.GEMINI_API_KEY
+        if "key=" not in url and api_key:
+            headers["x-goog-api-key"] = api_key
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
@@ -461,10 +514,15 @@ async def _call_model_json(
             if raw_text:
                 parsed = _parse_json_response(raw_text)
                 if parsed:
-                    clear_model_cooldown(model.get("name", ""))
+                    clear_model_cooldown(cooldown_key)
+                    if tier == "primary":
+                        clear_primary_key_cooldown()
                 return parsed
+        elif tier == "primary" and _is_primary_key_invalid_response(resp.status_code, getattr(resp, "text", "")):
+            mark_primary_key_cooldown(600.0, reason=f"HTTP {resp.status_code}")
+            raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         elif resp.status_code in (429, 500, 502, 503, 504):
-            mark_model_cooldown(model.get("name", ""), 60.0, reason=f"HTTP {resp.status_code}")
+            mark_model_cooldown(cooldown_key, 60.0, reason=f"HTTP {resp.status_code}")
             raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
         else:
             raise httpx.HTTPStatusError(
@@ -524,6 +582,8 @@ async def _do_translate_gemini_json(
 
     async with _limiter:
         for model_idx, model in enumerate(try_models):
+            if model.get("api_key_tier") == "primary" and is_primary_key_cooling():
+                continue
             curr_model_name = model.get("name", "?")
             has_next_model = (model_idx + 1 < len(try_models))
             next_model_name = try_models[model_idx + 1].get("name", "?") if has_next_model else ""
@@ -704,6 +764,8 @@ async def translate_text_with_model(
 
     async with _limiter:
         for model_idx, model in enumerate(try_models):
+            if model.get("api_key_tier") == "primary" and is_primary_key_cooling():
+                continue
             curr_name = model.get("name", "")
             has_next = (model_idx + 1 < len(try_models))
             for attempt in range(2):
@@ -789,7 +851,7 @@ async def translate_blog_structured(
     """
     started = time.monotonic()
     trace_id = request_id or f"blog-{_get_text_hash(html or str(time.time()))[:12]}"
-    if not html or (not getattr(cfg, "GEMINI_API_KEY", "") and not getattr(cfg, "ZHIPU_API_KEY", "")):
+    if not html or (not getattr(cfg, "GEMINI_PRIMARY_API_KEY", "") and not getattr(cfg, "GEMINI_API_KEY", "") and not getattr(cfg, "ZHIPU_API_KEY", "")):
         log_all(
             f"⚠️ 博客翻译跳过 | trace={trace_id} | source={source} | "
             f"reason={'empty_html' if not html else 'no_api_key'}",

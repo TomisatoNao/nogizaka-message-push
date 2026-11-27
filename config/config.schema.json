@@ -773,6 +773,30 @@
         }
       }
     },
+    "gemini_primary_models": {
+      "type": "array",
+      "description": "主用付费 Gemini Key 的优先翻译模型列表（失效时自动回退至原 Key 与 gemini_models）",
+      "items": {
+        "type": "object",
+        "required": ["name", "url"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "gemini_primary_blog_models": {
+      "type": "array",
+      "description": "主用付费 Gemini Key 的优先博客翻译模型列表（留空时复用 gemini_primary_models）",
+      "items": {
+        "type": "object",
+        "required": ["name", "url"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "format": "uri" }
+        }
+      }
+    },
     "gemini_blog_models": {
       "type": "array",
       "description": "博客翻译模型列表（质量与语境还原优先，深度理解偶像文笔）",

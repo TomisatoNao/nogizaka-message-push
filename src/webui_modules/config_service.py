@@ -410,7 +410,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
     ("── 全局监控调度（JST）──", ["monitor_schedule"]),
 ]
-_OPTIONAL_ORDER = ["qq_send_interval", "napcat_send_timeout_seconds", "translate", "image_tagging", "gemini_models", "gemini_blog_models", "gemini_min_interval", "translate_timeout", "translate_total_timeout"]
+_OPTIONAL_ORDER = ["qq_send_interval", "napcat_send_timeout_seconds", "translate", "image_tagging", "gemini_primary_models", "gemini_primary_blog_models", "gemini_models", "gemini_blog_models", "gemini_min_interval", "translate_timeout", "translate_total_timeout"]
 _OPTIONAL_COMMENT = "── 可选覆盖 ──（不写则用内置默认值）"
 
 
@@ -423,7 +423,7 @@ def _render_value(key: str, val) -> str:
     if key == "accounts" and isinstance(val, dict) and val:
         rows = [f"    {_dump(k)}: {_dump(v)}" for k, v in val.items()]
         return "{\n" + ",\n".join(rows) + "\n  }"
-    if key in ("monitor", "gemini_models", "gemini_blog_models", "qq_official_bots", "napcat_routes", "tg_bots") \
+    if key in ("monitor", "gemini_primary_models", "gemini_primary_blog_models", "gemini_models", "gemini_blog_models", "qq_official_bots", "napcat_routes", "tg_bots") \
             and isinstance(val, list) and val:
         rows = [f"    {_dump(item)}" for item in val]
         return "[\n" + ",\n".join(rows) + "\n  ]"
@@ -743,7 +743,7 @@ def _trigger_reload_report() -> dict:
 
 _SECRET_KEY_RE = re.compile(
     r"^(?:[A-Z][A-Z0-9_]*_(?:TOKEN|COOKIE|REFRESH_TOKEN|CLIENT_SECRET|APP_ID|TARGET_OPENID|SESSIONID|USER_ID)"
-    r"|GEMINI_API_KEY|ZHIPU_API_KEY|INSTAGRAM_SESSIONID|INSTAGRAM_DS_USER_ID|X_AUTH_TOKEN|TIKTOK_SESSIONID"
+    r"|GEMINI_PRIMARY_API_KEY|GEMINI_API_KEY|ZHIPU_API_KEY|INSTAGRAM_SESSIONID|INSTAGRAM_DS_USER_ID|X_AUTH_TOKEN|TIKTOK_SESSIONID"
     r"|CPA_API_KEY|NAPCAT_EVENT_TOKEN)$"
 )
 # 管理端令牌不能从网页写入；旧版全局 TG Token 也只保留迁移检测，

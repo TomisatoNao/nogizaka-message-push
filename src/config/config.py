@@ -70,6 +70,10 @@ _DEFAULTS: dict = {
     ],
     # 博客翻译（Blog：默认留空自动从 gemini_models 派生质量优先顺序；亦可显式单独配置）
     "gemini_blog_models":       [],
+    # 主用付费 Gemini Key 与顶级模型优先序列（留空时仅使用原 GEMINI_API_KEY + gemini_models）
+    "gemini_primary_api_key":    "",
+    "gemini_primary_models":     [],
+    "gemini_primary_blog_models": [],
     "gemini_min_interval":      7.0,
     "translate_max_length":     2500,
     "translate_timeout":        90,
@@ -756,6 +760,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "zhipu_api_key":                "ZHIPU_API_KEY",
     "gemini_models":                "GEMINI_MODELS",
     "gemini_blog_models":           "GEMINI_BLOG_MODELS",
+    "gemini_primary_api_key":       "GEMINI_PRIMARY_API_KEY",
+    "gemini_primary_models":        "GEMINI_PRIMARY_MODELS",
+    "gemini_primary_blog_models":   "GEMINI_PRIMARY_BLOG_MODELS",
     "gemini_min_interval":          "GEMINI_MIN_INTERVAL",
     "translate_max_length":         "TRANSLATE_MAX_LENGTH",
     "translate_timeout":            "TRANSLATE_TIMEOUT",
@@ -786,7 +793,7 @@ _KEY_TO_VAR: dict[str, str] = {
 # 注意：tuple 不可变（如 day_interval），不在其中
 _CONTAINER_KEYS = frozenset({
     "accounts", "monitor_list", "qq_official_bots",
-    "gemini_models", "gemini_blog_models", "gemini_tag_models",
+    "gemini_models", "gemini_blog_models", "gemini_primary_models", "gemini_primary_blog_models", "gemini_tag_models",
     "skip_publish_types", "media_type_map",
     "platforms", "blog_monitor", "blog_records",
     "media", "social", "napcat_routes", "napcat_inbound", "tg_bots",
@@ -1004,6 +1011,7 @@ def _load_config() -> dict:
 
     # 7. 从 .env 补充密钥（覆盖 config.json 中的 $ENV: 占位符）
     cfg["gemini_api_key"] = _env("GEMINI_API_KEY", "")
+    cfg["gemini_primary_api_key"] = _env("GEMINI_PRIMARY_API_KEY", "")
     cfg["zhipu_api_key"]  = _env("ZHIPU_API_KEY", "")
     cfg["proxy"]          = (cfg.get("proxy") or "").strip() or _env("HTTP_PROXY") or _env("HTTPS_PROXY") or _env("ALL_PROXY") or _env("PROXY", "")
     # 新版 NapCat 配置把服务基地址与访问密钥分开；旧版完整
