@@ -22,7 +22,7 @@ from src.config.credentials import (
     get_refresh_state, is_account_fetch_available,
 )
 from src.dedup import load_sent_ids, save_sent_id
-from src.translator import translate_text_with_model
+from src.translator import transcribe_and_translate_audio_with_model, translate_text_with_model
 from src.notifier import (
     PREFLIGHT_DELIVERY_ERROR_CODES,
     matching_member_route_ids,
@@ -193,6 +193,80 @@ async def push_member_messages(member: dict, new_msgs: list,
 
 
 # ──────────────────────────────────────────────
+# 语音音频加载（优先复用归档本地文件，避免重复下载）
+# ──────────────────────────────────────────────
+async def _load_voice_audio_bytes(member: dict, msg: dict) -> tuple[bytes, str, str]:
+    """加载语音消息音频字节，返回 (audio_bytes, mime_type, filename)。
+
+    优先复用归档已落盘的本地音频文件（零重复下载）；若归档未启用或本地文件缺失，
+    则使用账号鉴权请求头直接从上游媒体地址拉取到内存。
+    """
+    max_bytes = int(getattr(cfg, "TRANSLATE_VOICE_MAX_BYTES", 18 * 1024 * 1024) or (18 * 1024 * 1024))
+    local_path = archive.resolve_local_media_path(member, msg)
+    if local_path is not None:
+        try:
+            size = local_path.stat().st_size
+            if 0 < size <= max_bytes:
+                return (
+                    local_path.read_bytes(),
+                    str(msg.get("mime_type") or msg.get("content_type") or ""),
+                    local_path.name,
+                )
+            if size > max_bytes:
+                log_all(
+                    f"⚠️ 语音本地文件过大 ({size / (1024 * 1024):.1f}MB)，跳过 AI 语音识别: {local_path.name}",
+                    is_warning=True,
+                )
+                return b"", "", local_path.name
+        except OSError as exc:
+            log_all(f"⚠️ 读取本地归档语音文件失败 ({local_path.name}): {exc}", is_debug=True)
+
+    file_url = str(msg.get("file") or "").strip()
+    if not file_url:
+        return b"", "", ""
+
+    from src.config.credentials import get_source_headers_for_account
+    headers = get_source_headers_for_account(
+        member.get("account_id", "") or msg.get("account_id", ""),
+        member.get("group_type", "") or msg.get("group_type", ""),
+    )
+    proxy_url = getattr(cfg, "PROXY", "") or None
+    filename = str(
+        msg.get("filename")
+        or msg.get("file_name")
+        or msg.get("name")
+        or file_url.split("?")[0].rsplit("/", 1)[-1]
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30.0, proxy=proxy_url, follow_redirects=True) as client:
+            async with client.stream("GET", file_url, headers=headers) as resp:
+                if resp.status_code != 200:
+                    log_all(f"⚠️ 下载语音用于 AI 识别失败 HTTP {resp.status_code}", is_debug=True)
+                    return b"", "", filename
+                content_type = str(
+                    resp.headers.get("content-type")
+                    or msg.get("mime_type")
+                    or msg.get("content_type")
+                    or ""
+                )
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        log_all(
+                            f"⚠️ 远端语音文件超过上限 ({max_bytes / (1024 * 1024):.1f}MB)，跳过 AI 语音识别",
+                            is_warning=True,
+                        )
+                        return b"", content_type, filename
+                    chunks.append(chunk)
+                return b"".join(chunks), content_type, filename
+    except Exception as exc:
+        log_all(f"⚠️ 下载语音用于 AI 识别异常 ({type(exc).__name__}): {exc}", is_debug=True)
+        return b"", "", filename
+
+
+# ──────────────────────────────────────────────
 # 单条消息处理
 # ──────────────────────────────────────────────
 async def _handle_message(member: dict, msg: dict,
@@ -233,32 +307,81 @@ async def _handle_message(member: dict, msg: dict,
             lane_context.handled_count += 1
         return True
 
-    # 翻译
+    # 翻译与归档（语音消息先行归档落盘以便零重复下载复用本地音频进行 AI 识别与翻译）
     translated = ""
     trans_model = ""
-    if cfg.ENABLE_TRANSLATION and original_text.strip():
-        raw, model_name = await translate_text_with_model(original_text, m_name, group_type)
-        if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
-            log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 翻译失败，仅推送原文 ({raw})", is_error=True)
-        elif raw.strip() == original_text.strip():
-            log_all(f"ℹ️ [成员ID: {m_id} | 名字: {m_name}] 翻译结果与原文一致，跳过翻译推送", is_debug=True)
-        else:
-            translated = raw
-            trans_model = model_name or ""
-            # 日志只保留可定位的元数据，不输出翻译正文：正文可能包含隐私，
-            # 且多行内容会把一条事件拆成大量难以检索的日志行。
-            log_all(
-                f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成 | "
-                f"模型: {trans_model or '未知'} | 原文: {len(original_text)} 字 | "
-                f"译文: {len(translated)} 字",
-                is_debug=True,
-            )
+    msg_for_delivery = msg
+    is_voice_msg = str(msg.get("type") or "").lower() == "voice" and bool(msg.get("file"))
 
-    # 归档（先行下载媒体并持久化，保证本地素材就绪供各推送通道复用）
-    await archive.archive_message(member, msg, translated)
+    if is_voice_msg:
+        # 1) 先行归档并下载语音到本地
+        await archive.archive_message(member, msg, str(msg.get("_translation") or ""))
+        existing_transcript = str(msg.get("_voice_transcript") or "").strip()
+        existing_translation = str(msg.get("_translation") or "").strip()
+        if existing_transcript or existing_translation:
+            # 路由补偿重放场景：复用已识别并归档的语音原文与译文，避免重复调用 AI
+            translated = existing_translation
+            trans_model = str(msg.get("_voice_model") or "")
+        elif cfg.ENABLE_TRANSLATION and getattr(cfg, "ENABLE_VOICE_TRANSCRIPTION", True):
+            audio_bytes, audio_mime, audio_name = await _load_voice_audio_bytes(member, msg)
+            if audio_bytes:
+                v_transcript, v_translation, v_model = await transcribe_and_translate_audio_with_model(
+                    audio_bytes,
+                    mime_type=audio_mime,
+                    member_name=m_name,
+                    group_type=group_type,
+                    filename=audio_name,
+                )
+                if v_transcript or v_translation:
+                    msg_for_delivery = dict(msg)
+                    if v_transcript:
+                        msg_for_delivery["_voice_transcript"] = v_transcript
+                        if not original_text.strip():
+                            msg_for_delivery["text"] = v_transcript
+                    if v_translation:
+                        translated = v_translation
+                        trans_model = v_model or ""
+                    elif v_model:
+                        trans_model = v_model
+                    if trans_model:
+                        msg_for_delivery["_voice_model"] = trans_model
+                    # 幂等回写归档：本地音频已存在不会重复下载，补全语音识别原文与中文译文供归档检索
+                    await archive.archive_message(member, msg_for_delivery, translated)
+                    log_all(
+                        f"🎙️ [成员ID: {m_id} | 名字: {m_name}] 语音识别与翻译完成 | "
+                        f"模型: {trans_model or '未知'} | 原文: {len(v_transcript)} 字 | "
+                        f"译文: {len(translated)} 字",
+                        is_debug=True,
+                    )
+                else:
+                    log_all(
+                        f"ℹ️ [成员ID: {m_id} | 名字: {m_name}] 语音未识别出有效人声或识别失败，仅推送原语音",
+                        is_debug=True,
+                    )
+    else:
+        if cfg.ENABLE_TRANSLATION and original_text.strip():
+            raw, model_name = await translate_text_with_model(original_text, m_name, group_type)
+            if raw.startswith("[翻译失败") or raw.startswith("[消息过长"):
+                log_all(f"⚠️ [成员ID: {m_id} | 名字: {m_name}] 翻译失败，仅推送原文 ({raw})", is_error=True)
+            elif raw.strip() == original_text.strip():
+                log_all(f"ℹ️ [成员ID: {m_id} | 名字: {m_name}] 翻译结果与原文一致，跳过翻译推送", is_debug=True)
+            else:
+                translated = raw
+                trans_model = model_name or ""
+                # 日志只保留可定位的元数据，不输出翻译正文：正文可能包含隐私，
+                # 且多行内容会把一条事件拆成大量难以检索的日志行。
+                log_all(
+                    f"🌐 [成员ID: {m_id} | 名字: {m_name}] 翻译完成 | "
+                    f"模型: {trans_model or '未知'} | 原文: {len(original_text)} 字 | "
+                    f"译文: {len(translated)} 字",
+                    is_debug=True,
+                )
+
+        # 归档（先行下载媒体并持久化，保证本地素材就绪供各推送通道复用）
+        await archive.archive_message(member, msg, translated)
 
     # 推送各通道（若含有媒体，各通道直接复用本地素材，免去重复网络请求）
-    chain = build_message_chain(m_name, updated, msg, translated, model_name=trans_model)
+    chain = build_message_chain(m_name, updated, msg_for_delivery, translated, model_name=trans_model)
     delivered_routes = successful_routes(group_type, m_id, msg_id)
     skip_routes = set(delivered_routes)
     if lane_context is not None:

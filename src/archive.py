@@ -1382,6 +1382,48 @@ async def archive_message(member: dict, msg: dict, translated: str = "") -> None
         log_all(f"⚠️ 归档失败 [{m_name}] id={msg.get('id')}:\n{traceback.format_exc()}", is_error=True)
 
 
+def resolve_local_media_path(member: dict, msg: dict) -> Path | None:
+    """解析单条消息已落盘的本地归档媒体文件路径（供语音 AI 识别等下游免重复下载复用）。"""
+    m_name = member.get("m_name", "") or member.get("name", "")
+    if not m_name:
+        return None
+    member_root = _member_root(m_name)
+    rel = str(msg.get("_local_file") or "").strip()
+    if rel:
+        candidate = member_root / rel
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate
+        except OSError:
+            pass
+
+    ts_str = msg.get("published_at") or msg.get("updated_at", "")
+    msg_id = str(msg.get("id") or "")
+    if not ts_str or not msg_id:
+        return None
+    try:
+        dt = parse_jst_datetime(ts_str)
+    except (ValueError, TypeError):
+        return None
+    dest_dir = _month_dir(m_name, dt) / _media_subdir(str(msg.get("type", "")))
+    if not dest_dir.is_dir():
+        return None
+    ts = dt.strftime("%Y%m%d_%H%M%S")
+    try:
+        for existing in os.listdir(dest_dir):
+            if (
+                existing.startswith(f"{ts}_{msg_id}")
+                or f"_{msg_id}." in existing
+                or f"_{msg_id}_" in existing
+            ) and not existing.endswith(".tmp"):
+                candidate = dest_dir / existing
+                if candidate.is_file() and candidate.stat().st_size > 0:
+                    return candidate
+    except OSError:
+        return None
+    return None
+
+
 async def archive_messages_batch(
     member: dict,
     msgs: list[dict],

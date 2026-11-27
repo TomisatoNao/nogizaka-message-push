@@ -79,6 +79,10 @@ _DEFAULTS: dict = {
     "translate_timeout":        90,
     # 单篇博客翻译总预算；独立于单模型请求超时，避免多模型 failover 无限串行等待
     "translate_total_timeout":  180,
+    # 语音消息 AI 识别与翻译（开启 enable_translation 时默认启用）
+    "enable_voice_transcription": True,
+    "translate_voice_timeout":  60,
+    "translate_voice_max_bytes": 18 * 1024 * 1024,
     # 图片打标签
     "enable_image_tagging":     False,
     "gemini_tag_models": [
@@ -706,6 +710,9 @@ _KEY_TO_VAR: dict[str, str] = {
     "accounts":                     "ACCOUNTS",
     "monitor_list":                 "MONITOR_LIST",
     "enable_translation":           "ENABLE_TRANSLATION",
+    "enable_voice_transcription":   "ENABLE_VOICE_TRANSCRIPTION",
+    "translate_voice_timeout":      "TRANSLATE_VOICE_TIMEOUT",
+    "translate_voice_max_bytes":    "TRANSLATE_VOICE_MAX_BYTES",
     "skip_publish_types":           "SKIP_PUBLISH_TYPES",
     "media_type_map":               "MEDIA_TYPE_MAP",
     "day_start_hour":               "DAY_START_HOUR",

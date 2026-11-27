@@ -479,6 +479,12 @@ def build_message_chain(
     original = msg.get("text", "")
     # 有正文时加换行分隔；纯媒体消息也保留成员名和时间戳。
     header = f"{m_name} {jst_time}\n{original}" if original else f"{m_name} {jst_time}"
+    voice_transcript = str(msg.get("_voice_transcript", "") or "").strip()
+    if msg.get("type") == "voice" and voice_transcript:
+        if original and original.strip() != voice_transcript:
+            header = f"{m_name} {jst_time}\n{original}\n🎙️ 语音原文：\n{voice_transcript}"
+        else:
+            header = f"{m_name} {jst_time}\n🎙️ 语音原文：\n{voice_transcript}"
     chain: list[dict] = [
         {"type": "text", "data": {"text": header}}
     ]

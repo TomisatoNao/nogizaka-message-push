@@ -2,6 +2,7 @@
 # translator.py — Gemini 翻译（解耦段落级对照引擎与模型 Failover）
 # ============================================================
 import asyncio
+import base64
 import hashlib
 import json
 import time
@@ -19,6 +20,7 @@ from src.utils import RateLimiter
 _limiter: RateLimiter = None   # type: ignore
 _http_client: httpx.AsyncClient | None = None   # 共享连接池；未注入时按需临时创建
 _trans_cache: dict[tuple[str, str], str] = {}   # (member_name, text_hash) -> translated
+_voice_cache: dict[tuple[str, str], tuple[str, str, str]] = {}  # (member_name, audio_sha256) -> (transcript, translation, model)
 _blog_cache: dict[tuple[str, str], str] = {}    # (member_name, html_hash) -> translated_html
 _blog_structured_cache: dict[tuple[str, str], tuple] = {}   # (member_name, html_hash) -> (结构化块列表, 模型名)
 _MAX_CACHE_SIZE = 1000
@@ -807,6 +809,279 @@ async def translate_text(text: str, member_name: str = "", group_type: str = "",
     """普通文本消息翻译接口（兼容旧接口，直接返回译文字符串）"""
     res, _ = await translate_text_with_model(text, member_name, group_type, custom_client=custom_client)
     return res
+
+
+_VOICE_PROMPT_TEMPLATE = (
+    "你是一名专业的日语语音听写与日中翻译专家。\n"
+    "下面是一段{group_name}成员{member_name}发送给粉丝的语音消息。\n"
+    "请你先忠实听写语音中的日语原话，再将其翻译为自然、准确的简体中文。\n\n"
+    "【核心要求（极其重要）】：\n"
+    "1. 忠实听写（transcript）：\n"
+    "   - 严格按照语音实际说出的日语内容听写，添加自然标点（如「、」「。」「〜」「！」）。\n"
+    "   - 严禁编造、补全或猜测语音中没有说出的句子；如果语音完全无声或仅有背景噪音/纯音乐且无人声，请将 transcript 和 translation 均返回空字符串 \"\"。\n"
+    "2. 忠实翻译（translation）：\n"
+    "   - 严格对应 transcript 翻译为简体中文，自然接地气，严禁脑补扩写，严禁以偶像或粉丝口吻与用户互动。\n"
+    "   - 专有名词与爱称规范：假名爱称保留假名+酱，如「ミーグリ」➔「线上见面会」。\n"
+    "3. 输出格式：\n"
+    "   - 必须且仅输出合法的 JSON 对象，不要包含任何解释或 Markdown 围栏，格式如下：\n"
+    '   {{"transcript": "听写出的日语原文", "translation": "对应的简体中文译文"}}'
+)
+
+_AUDIO_MIME_NORMALIZE = {
+    "audio/m4a": "audio/mp4",
+    "audio/x-m4a": "audio/mp4",
+    "audio/mp4": "audio/mp4",
+    "video/mp4": "audio/mp4",
+    "audio/mpeg": "audio/mpeg",
+    "audio/mp3": "audio/mpeg",
+    "audio/ogg": "audio/ogg",
+    "audio/opus": "audio/ogg",
+    "audio/wav": "audio/wav",
+    "audio/x-wav": "audio/wav",
+    "audio/aac": "audio/aac",
+    "audio/flac": "audio/flac",
+    "audio/webm": "audio/webm",
+}
+
+_AUDIO_EXT_MIME = {
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".webm": "audio/webm",
+}
+
+
+def sniff_audio_mime(audio_bytes: bytes, declared_mime: str = "", filename: str = "") -> str:
+    """结合魔数、声明 MIME 与扩展名归一化 Gemini 支持的音频 MIME 类型。"""
+    head = audio_bytes[:16] if audio_bytes else b""
+    if len(head) >= 8 and head[4:8] == b"ftyp":
+        return "audio/mp4"
+    if head[:3] == b"ID3" or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+        # 区分 ADTS AAC (0xFFF1 / 0xFFF9) 与 MP3
+        if len(head) >= 2 and head[:2] in (b"\xff\xf1", b"\xff\xf9"):
+            return "audio/aac"
+        return "audio/mpeg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "audio/wav"
+    if head[:4] == b"OggS":
+        return "audio/ogg"
+    if head[:4] == b"fLaC":
+        return "audio/flac"
+
+    norm = str(declared_mime or "").split(";")[0].strip().lower()
+    if norm in _AUDIO_MIME_NORMALIZE:
+        return _AUDIO_MIME_NORMALIZE[norm]
+
+    clean_name = str(filename or "").split("?")[0].strip().lower()
+    for ext, mime in _AUDIO_EXT_MIME.items():
+        if clean_name.endswith(ext):
+            return mime
+    return "audio/mp4"
+
+
+def _parse_voice_json_response(res_text: str) -> tuple[str, str]:
+    """解析语音识别与翻译 JSON 响应，返回 (transcript, translation)。"""
+    raw = str(res_text or "").strip()
+    if raw.startswith("```json"):
+        raw = raw[7:]
+    elif raw.startswith("```"):
+        raw = raw[3:]
+    if raw.endswith("```"):
+        raw = raw[:-3]
+    raw = raw.strip()
+    if not raw:
+        return "", ""
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            transcript = str(
+                data.get("transcript")
+                or data.get("original")
+                or data.get("ja")
+                or data.get("text")
+                or ""
+            ).strip()
+            translation = str(
+                data.get("translation")
+                or data.get("zh")
+                or data.get("translated")
+                or ""
+            ).strip()
+            return transcript, translation
+    except Exception as e:
+        log_all(f"⚠️ 解析语音识别 JSON 响应失败: {e}", is_debug=True)
+    return "", ""
+
+
+async def _call_model_audio_json(
+    model: dict,
+    audio_bytes: bytes,
+    mime_type: str,
+    prompt: str,
+    custom_client: httpx.AsyncClient = None,
+) -> tuple[str, str]:
+    """调用单个 Gemini 原生多模态模型对音频执行识别与翻译。"""
+    url = model["url"]
+    tier = model.get("api_key_tier", "default")
+    cooldown_key = model.get("cooldown_key") or model.get("name", "")
+    api_key = getattr(cfg, "GEMINI_PRIMARY_API_KEY", "") if tier == "primary" else getattr(cfg, "GEMINI_API_KEY", "")
+    headers: dict[str, str] = {}
+    if "key=" not in url and api_key:
+        headers["x-goog-api-key"] = api_key
+
+    voice_timeout = _safe_float_config("TRANSLATE_VOICE_TIMEOUT", 60.0, minimum=10.0)
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type,
+                            "data": base64.b64encode(audio_bytes).decode("ascii"),
+                        }
+                    },
+                    {"text": prompt},
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 4096,
+            "responseMimeType": "application/json",
+        },
+    }
+    resp = await _post_json(
+        url,
+        payload,
+        headers=headers if headers else None,
+        custom_client=custom_client,
+        timeout=voice_timeout,
+    )
+    if resp.status_code == 200:
+        res_txt = _extract_text_gemini(resp.json(), model["name"])
+        if res_txt:
+            transcript, translation = _parse_voice_json_response(res_txt)
+            if transcript or translation:
+                clear_model_cooldown(cooldown_key)
+                if tier == "primary":
+                    clear_primary_key_cooldown()
+                return transcript, translation
+        return "", ""
+    if tier == "primary" and _is_primary_key_invalid_response(resp.status_code, getattr(resp, "text", "")):
+        mark_primary_key_cooldown(600.0, reason=f"语音识别 HTTP {resp.status_code}")
+        raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
+    if resp.status_code in (429, 500, 502, 503, 504):
+        mark_model_cooldown(cooldown_key, 60.0, reason=f"HTTP {resp.status_code}")
+        raise httpx.HTTPStatusError(f"HTTP {resp.status_code}", request=resp.request, response=resp)
+    log_all(f"⚠️ Gemini 语音模型 {model['name']} 返回 HTTP {resp.status_code}", is_debug=True)
+    return "", ""
+
+
+async def transcribe_and_translate_audio_with_model(
+    audio_bytes: bytes,
+    mime_type: str = "",
+    member_name: str = "",
+    group_type: str = "",
+    filename: str = "",
+    custom_client: httpx.AsyncClient = None,
+) -> tuple[str, str, str]:
+    """对成员语音消息执行 AI 识别（日语原文）与中文翻译，返回 (原文, 译文, 模型名)。
+
+    复用与文本翻译完全一致的主用付费 Gemini Key 旗舰层 -> 原 Gemini Key 序列无感自动回退机制；
+    自动跳过仅支持文本的模型（如智谱 GLM）。
+    """
+    if not audio_bytes:
+        return "", "", ""
+
+    max_bytes = int(_safe_float_config("TRANSLATE_VOICE_MAX_BYTES", 18 * 1024 * 1024, minimum=64 * 1024))
+    if len(audio_bytes) > max_bytes:
+        log_all(
+            f"⚠️ 语音文件过大 ({len(audio_bytes) / (1024 * 1024):.1f}MB > {max_bytes / (1024 * 1024):.1f}MB)，跳过 AI 语音识别",
+            is_warning=True,
+        )
+        return "", "", ""
+
+    try_models = [
+        m for m in _get_ordered_models(scenario="message")
+        if m.get("provider", "gemini") == "gemini"
+    ]
+    if not try_models:
+        return "", "", ""
+
+    audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+    cache_key = (member_name, audio_hash)
+    if cache_key in _voice_cache:
+        log_all(f"⚡ 命中语音识别翻译内存缓存 ({member_name})", is_debug=True)
+        return _voice_cache[cache_key]
+
+    resolved_mime = sniff_audio_mime(audio_bytes, declared_mime=mime_type, filename=filename)
+    group_name = _GROUP_DISPLAY.get(group_type, group_type or "坂道系")
+    prompt = _VOICE_PROMPT_TEMPLATE.format(
+        group_name=group_name,
+        member_name=member_name or "未知成员",
+    )
+
+    global _limiter
+    if _limiter is None:
+        _limiter = RateLimiter(lambda: cfg.GEMINI_MIN_INTERVAL)
+
+    async with _limiter:
+        for model_idx, model in enumerate(try_models):
+            if model.get("api_key_tier") == "primary" and is_primary_key_cooling():
+                continue
+            curr_name = model.get("name", "")
+            cooldown_key = model.get("cooldown_key") or curr_name
+            has_next = (model_idx + 1 < len(try_models))
+            for attempt in range(2):
+                try:
+                    transcript, translation = await _call_model_audio_json(
+                        model,
+                        audio_bytes,
+                        resolved_mime,
+                        prompt,
+                        custom_client=custom_client,
+                    )
+                    if transcript or translation:
+                        # 兜底：若模型仅返回日语原文未返回译文，自动补译一次
+                        if transcript and not translation and not _is_already_chinese(transcript):
+                            fallback_zh, _ = await translate_text_with_model(
+                                transcript, member_name, group_type, custom_client=custom_client
+                            )
+                            if fallback_zh and not fallback_zh.startswith("[翻译失败") and not fallback_zh.startswith("[消息过长"):
+                                translation = fallback_zh
+                        if translation and transcript and translation.strip() == transcript.strip():
+                            translation = ""
+                        entry = (transcript, translation, curr_name)
+                        if len(_voice_cache) >= _MAX_CACHE_SIZE:
+                            _voice_cache.pop(next(iter(_voice_cache)))
+                        _voice_cache[cache_key] = entry
+                        return entry
+                    break
+                except httpx.HTTPStatusError as e:
+                    code = e.response.status_code
+                    if code == 429 and not has_next:
+                        await asyncio.sleep((attempt + 1) * 2)
+                        continue
+                    log_all(f"⚠️ 语音模型 {curr_name} HTTP {code}，切换备用模型", is_debug=True)
+                    break
+                except (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException):
+                    mark_model_cooldown(cooldown_key, 60.0, reason="语音响应超时")
+                    log_all(f"⏱️ 语音模型 {curr_name} 响应超时，切换备用模型", is_debug=True)
+                    break
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.NetworkError) as e:
+                    mark_model_cooldown(cooldown_key, 60.0, reason="网络连接异常")
+                    log_all(f"🌐 语音模型 {curr_name} 网络连接失败 ({type(e).__name__})，切换备用模型", is_debug=True)
+                    break
+                except Exception as e:
+                    log_all(f"⚠️ 语音模型 {curr_name} 请求异常: {type(e).__name__}: {e}", is_debug=True)
+                    break
+
+    return "", "", ""
 
 # ── 博客正文节点化拆解：复用 src.blog_content 规范化解析器 ──
 
