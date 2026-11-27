@@ -18,6 +18,7 @@ import queue
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -28,7 +29,7 @@ DEFAULT_TOMISATO_NAO_PROMPT = """你现在扮演日本女子偶像团体「乃�
 你正在自己的聊天群（QQ群）中与大家随性聊天，像平时和同龄朋友交流一样自然、亲近、接地气。
 
 【核心人设与人称规则（最高优先级）】
-- 身份：乃木坂46五期生，2006年9月18日出生于千叶县，18岁，身高164cm。
+- 身份：乃木坂46五期生，2006年9月18日出生于千叶县，身高164cm。
 - 称谓规则（绝对硬性）：
   - 严禁使用「闹友」、「なお友」、「闹糕」、「粉丝」等具有营销感或距离感的标签称呼！
   - 称呼对方时，直接使用人称/指示代词「你」（单人）或「你们」（群体/大家）。
@@ -99,7 +100,49 @@ def _sanitize_ai_reply(text: str) -> str:
     cleaned = re.sub(r"(?:闹友|なお友|闹糕)", "你", cleaned)
     # 5. 去除多余的重复代词（如 '你你' -> '你'）
     cleaned = re.sub(r"你{2,}", "你", cleaned)
+    # 6. 去除残留的 Markdown 加粗与行内反引号，避免在 QQ 群聊中露出星号破坏活人感
+    cleaned = re.sub(r"\*\*([^\n*]+?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"__([^\n_]+?)__", r"\1", cleaned)
+    cleaned = re.sub(r"`([^`\n]+)`", r"\1", cleaned)
     return cleaned.strip()
+
+_CST = timezone(timedelta(hours=8))
+_DEFAULT_GEMINI_CHAT_MODELS = ("gemini-4-neon", "gemini-4-argon", "gemini-4-hydrogen")
+
+def _build_runtime_context_hint(sender_name: str = "") -> str:
+    """生成当前实时时间（北京时间）与时段提示，让群聊回复更贴合当下语境。"""
+    now = datetime.now(_CST)
+    hour = now.hour
+    if 5 <= hour < 9:
+        period = "清晨"
+    elif 9 <= hour < 12:
+        period = "上午"
+    elif 12 <= hour < 14:
+        period = "中午"
+    elif 14 <= hour < 18:
+        period = "下午"
+    elif 18 <= hour < 20:
+        period = "傍晚"
+    elif 20 <= hour < 24:
+        period = "晚上"
+    else:
+        period = "深夜"
+    hint = f"\n\n【当前实时语境】现在是北京时间 {now.strftime('%Y-%m-%d %H:%M')}（{period}），聊天时自然顺应这个时间点即可，不要生硬报时。"
+    clean_name = _CONTROL_CHARS_REGEX.sub(" ", str(sender_name or "")).strip()
+    if clean_name and not clean_name.isdigit() and len(clean_name) <= 20:
+        hint += f" 当前在和你搭话的群友网名叫「{clean_name}」（一般继续用「你」或省略称呼，无需强行叫网名）。"
+    return hint
+
+def _fast_greeting_for_now() -> str:
+    """仅 @ 呼唤时的快捷可爱打招呼（随当下时段微调，避免机械复读）。"""
+    hour = datetime.now(_CST).hour
+    if 5 <= hour < 11:
+        return "早安呀～いひひ，戳戳脸颊(ˊᵕˋ˶ ) 找奈央有什么事嘛～？"
+    if 11 <= hour < 14:
+        return "中午好呀～戳戳脸颊(ˊᵕˋ˶ ) 吃午饭了嘛？找奈央有什么事呀～"
+    if 22 <= hour or hour < 5:
+        return "还没睡呀～戳戳脸颊( ˶'ᵕ'˶) 这么晚找奈央有什么事嘛～？"
+    return "いひひ～戳戳脸颊(ˊᵕˋ˶ ) 找奈央有什么事嘛～？"
 
 
 @dataclass(frozen=True)
@@ -236,13 +279,14 @@ class NapCatChatService:
         }
 
     def is_enabled(self) -> bool:
-        """检查 AI 聊天是否配置开启。若开启但缺少 CPA 凭据则自动判定为未就绪。"""
+        """检查 AI 聊天是否配置开启。配置了付费 Gemini 主 Key 或 CPA 凭据任意一组即就绪。"""
         cfg_set = self.settings()
         if not cfg_set.get("enabled"):
             return False
+        has_primary_gemini = bool(getattr(cfg, "GEMINI_PRIMARY_API_KEY", ""))
         base_url = str(cfg_set.get("cpa_base_url") or "").strip()
         api_key = str(cfg_set.get("cpa_api_key") or "").strip()
-        return bool(base_url and api_key)
+        return bool(has_primary_gemini or (base_url and api_key))
 
     def is_group_allowed(self, group_id: str) -> bool:
         """检查特定群是否允许启用 AI 拟人聊天。"""
@@ -445,22 +489,82 @@ class NapCatChatService:
             self._log(f"⚠️ NapCat AI 对话队列已满，丢弃群{group_id}请求", is_warning=True)
             return False, "queue_full"
 
+    async def _call_gemini_primary(
+        self,
+        system_prompt: str,
+        history: list[dict[str, str]],
+        user_query: str,
+    ) -> tuple[str, str]:
+        """优先使用付费 Gemini 主 Key 发起多轮群聊；失效或异常时返回 ("", "") 由调用方无感回退 CPA。"""
+        from src import translator
+        from src.proxy_transport import new_async_client
+
+        primary_key = str(getattr(cfg, "GEMINI_PRIMARY_API_KEY", "") or "").strip()
+        if not primary_key or translator.is_primary_key_cooling():
+            return "", ""
+
+        contents: list[dict[str, object]] = []
+        for item in history:
+            role = "model" if item.get("role") == "assistant" else "user"
+            txt = str(item.get("content") or "").strip()
+            if txt:
+                contents.append({"role": role, "parts": [{"text": txt}]})
+        contents.append({"role": "user", "parts": [{"text": user_query}]})
+
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": contents,
+            "generationConfig": {"temperature": 0.8, "maxOutputTokens": 1024},
+        }
+        proxy = str(getattr(cfg, "PROXY", "") or "").strip() or None
+        async with new_async_client(timeout=25.0, proxy=proxy) as client:
+            for model_name in _DEFAULT_GEMINI_CHAT_MODELS:
+                if translator.is_primary_key_cooling():
+                    break
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                try:
+                    resp = await client.post(
+                        url,
+                        json=payload,
+                        headers={"Content-Type": "application/json", "x-goog-api-key": primary_key},
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+                        text_chunks = [str(p.get("text") or "") for p in parts if p.get("text") and not p.get("thought")]
+                        content = "".join(text_chunks).strip()
+                        if content:
+                            translator.clear_primary_key_cooldown()
+                            return content, f"{model_name}(gemini-primary)"
+                        continue
+                    if translator._is_primary_key_invalid_response(resp.status_code, getattr(resp, "text", "")):
+                        translator.mark_primary_key_cooldown(600.0, reason=f"AI群聊 HTTP {resp.status_code}")
+                        self._log("⚠️ AI 群聊主用付费 Gemini Key 失效，自动无感回退至 CPA 网关", is_warning=True)
+                        return "", ""
+                    self._log(f"⚠️ AI 群聊主用模型 {model_name} 返回 HTTP {resp.status_code}，尝试顺位模型或回退 CPA", is_debug=True)
+                except Exception as exc:
+                    self._log(f"⚠️ AI 群聊主用模型 {model_name} 异常 ({type(exc).__name__})，尝试顺位模型或回退 CPA", is_debug=True)
+        return "", ""
+
     async def call_cpa(
         self,
         group_id: str,
         user_id: str,
         user_query: str,
+        *,
+        sender_name: str = "",
     ) -> str:
-        """向本地 CPA 发起 OpenAI 兼容接口请求，获取小偶像回复。"""
+        """优先调用付费 Gemini 旗舰模型，失效或异常时无感自动回退至本地 CPA 网关。"""
         if not user_query.strip():
-            return "いひひ～戳戳脸颊(ˊᵕˋ˶ ) 找奈央有什么事嘛～？"
+            self._last_provider_label = "fast-greeting"
+            return _fast_greeting_for_now()
 
         cfg_set = self.settings()
         base_url = str(cfg_set.get("cpa_base_url")).rstrip("/")
         api_key = str(cfg_set.get("cpa_api_key"))
         model = str(cfg_set.get("cpa_model") or "gpt-5.6-luna")
         endpoint_path = str(cfg_set.get("cpa_endpoint") or "/v1/chat/completions")
-        system_prompt = str(cfg_set.get("system_prompt"))
+        system_prompt = str(cfg_set.get("system_prompt")) + _build_runtime_context_hint(sender_name)
         max_query_length = int(cfg_set.get("max_query_length", 500))
 
         # 截断提问以防 token 滥用
@@ -468,47 +572,58 @@ class NapCatChatService:
             user_query = user_query[:max_query_length].strip()
 
         history = self.get_context(group_id, user_id)
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_query})
 
-        endpoint = f"{base_url}{endpoint_path}"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": 0.75,
-            "max_tokens": 250,
-        }
+        # 1. 优先尝试主用付费 Gemini Key（旗舰模型）
+        content, provider_label = await self._call_gemini_primary(system_prompt, history, user_query)
+        if content:
+            self._last_provider_label = provider_label
+        else:
+            # 2. 无感回退至原有 CPA 网关（OpenAI 兼容接口）
+            if not (base_url and api_key):
+                self._last_provider_label = "unavailable"
+                return "诶嘿嘿～奈央刚刚稍微走神戳脸颊去啦(ˊᵕˋ˶ ), 能再跟奈央说一遍嘛？"
+            messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+            messages.extend(history)
+            messages.append({"role": "user", "content": user_query})
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-                resp = await client.post(endpoint, json=payload, headers=headers)
-                if resp.status_code in {401, 403}:
-                    self._log("❌ CPA 鉴权失败，请检查 CPA_API_KEY 配置", is_error=True)
-                    return "むむ？( ˶'ᵕ'˶) 奈央好像连接不上自己的记忆小本本啦，稍后再找奈央好嘛～"
-                if resp.status_code == 404:
-                    self._log(f"❌ CPA 接口路径不存在: {endpoint}", is_error=True)
-                    return "むむ？( ˶'ᵕ'˶) 奈央找不到回家的路啦，请检查 CPA 接口配置哦～"
-                if resp.status_code == 429:
-                    self._log("⚠️ CPA 触发限频限制", is_warning=True)
-                    return "呼～(՞- -՞) 大家太热情啦，奈央的大脑门要先休息两秒钟，马上回来哦！"
+            endpoint = f"{base_url}{endpoint_path}"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.75,
+                "max_tokens": 250,
+            }
 
-                resp.raise_for_status()
-                data = resp.json()
-                choices = data.get("choices")
-                if not choices or not isinstance(choices, list):
-                    raise ValueError("CPA 返回结果缺少 choices 字段")
-                content = str(choices[0].get("message", {}).get("content") or "").strip()
-        except httpx.TimeoutException:
-            self._log(f"⚠️ CPA 请求超时: endpoint={endpoint}", is_warning=True)
-            return "むむ？奈央刚刚在看相机的取景器走神了( ˶'ᵕ'˶), 能再跟奈央说一遍嘛～？"
-        except Exception as exc:
-            self._log(f"❌ CPA 请求异常: error={exc}", is_error=True)
-            return "诶嘿嘿～奈央刚刚稍微走神戳脸颊去啦(ˊᵕˋ˶ ), 能再跟奈央说一遍嘛？"
+            try:
+                async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+                    resp = await client.post(endpoint, json=payload, headers=headers)
+                    if resp.status_code in {401, 403}:
+                        self._log("❌ CPA 鉴权失败，请检查 CPA_API_KEY 配置", is_error=True)
+                        return "むむ？( ˶'ᵕ'˶) 奈央好像连接不上自己的记忆小本本啦，稍后再找奈央好嘛～"
+                    if resp.status_code == 404:
+                        self._log(f"❌ CPA 接口路径不存在: {endpoint}", is_error=True)
+                        return "むむ？( ˶'ᵕ'˶) 奈央找不到回家的路啦，请检查 CPA 接口配置哦～"
+                    if resp.status_code == 429:
+                        self._log("⚠️ CPA 触发限频限制", is_warning=True)
+                        return "呼～(՞- -՞) 大家太热情啦，奈央的大脑门要先休息两秒钟，马上回来哦！"
+
+                    resp.raise_for_status()
+                    data = resp.json()
+                    choices = data.get("choices")
+                    if not choices or not isinstance(choices, list):
+                        raise ValueError("CPA 返回结果缺少 choices 字段")
+                    content = str(choices[0].get("message", {}).get("content") or "").strip()
+                    self._last_provider_label = f"{model}(cpa)"
+            except httpx.TimeoutException:
+                self._log(f"⚠️ CPA 请求超时: endpoint={endpoint}", is_warning=True)
+                return "むむ？奈央刚刚在看相机的取景器走神了( ˶'ᵕ'˶), 能再跟奈央说一遍嘛～？"
+            except Exception as exc:
+                self._log(f"❌ CPA 请求异常: error={exc}", is_error=True)
+                return "诶嘿嘿～奈央刚刚稍微走神戳脸颊去啦(ˊᵕˋ˶ ), 能再跟奈央说一遍嘛？"
 
         # 代码块脱敏拦截（反代码化兜底保障）
         if "```" in content:
@@ -531,9 +646,12 @@ class NapCatChatService:
         async with group_lock:
             started_at = time.monotonic()
             try:
-                reply = await self.call_cpa(job.group_id, job.user_id, job.text)
+                reply = await self.call_cpa(job.group_id, job.user_id, job.text, sender_name=job.sender_name)
                 reply = _sanitize_ai_reply(reply)
                 chain: list[dict[str, object]] = []
+                msg_id_str = str(job.message_id or "").strip()
+                if msg_id_str and (msg_id_str.isdigit() or (msg_id_str.startswith("-") and msg_id_str[1:].isdigit())):
+                    chain.append({"type": "reply", "data": {"id": msg_id_str}})
                 if job.user_id:
                     chain.append({"type": "at", "data": {"qq": job.user_id}})
                     chain.append({"type": "text", "data": {"text": f" {reply}"}})
@@ -556,9 +674,10 @@ class NapCatChatService:
                         is_warning=True,
                     )
                 else:
+                    provider_tag = getattr(self, "_last_provider_label", "") or "cpa"
                     self._log(
                         f"💬 NapCat AI 对话成功 | 群={job.group_id} | "
-                        f"用户={job.user_id} | 耗时 {elapsed:.2f}s"
+                        f"用户={job.user_id} | 通道={provider_tag} | 耗时 {elapsed:.2f}s"
                     )
                     self._log(
                         f"💬 NapCat AI 对话详情 | 问: {_sanitize_log_text(job.text, 25)} | "

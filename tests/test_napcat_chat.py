@@ -397,4 +397,58 @@ def test_legacy_prompt_self_healing():
     assert active_prompt == DEFAULT_TOMISATO_NAO_PROMPT
     assert "严禁使用「闹友」" in active_prompt
 
+@pytest.mark.asyncio
+async def test_ai_chat_uses_primary_paid_gemini_and_falls_back_to_cpa_on_403(monkeypatch):
+    from src import translator
+    from src.config import config as cfg
+    import httpx
 
+    translator.clear_primary_key_cooldown()
+    monkeypatch.setattr(cfg, "GEMINI_PRIMARY_API_KEY", "AQ.fake-paid-chat-key", raising=False)
+    monkeypatch.setattr(cfg, "PROXY", "", raising=False)
+    service = NapCatChatService(config_provider=lambda: _chat_config())
+
+    seen_urls: list[str] = []
+
+    async def fake_post(self, url, **kwargs):
+        seen_urls.append(str(url))
+        if "generativelanguage.googleapis.com" in str(url):
+            return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "奈央刚吃完**草莓大福**啦～"}]}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "CPA 回退回复"}}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    reply1 = await service.call_cpa("123456", "999", "今天吃啥啦？", sender_name="小明")
+    assert reply1 == "奈央刚吃完草莓大福啦～"
+    assert service._last_provider_label == "gemini-4-neon(gemini-primary)"
+    assert any("gemini-4-neon" in u for u in seen_urls)
+
+    # 主用付费 Key 返回 403 -> 同轮立刻无感回退到 CPA
+    seen_urls.clear()
+    async def fake_post_403(self, url, **kwargs):
+        seen_urls.append(str(url))
+        if "generativelanguage.googleapis.com" in str(url):
+            return httpx.Response(403, text="API_KEY_INVALID")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "CPA 无感回退回复！"}}]}, request=httpx.Request("POST", str(url)))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post_403)
+    reply2 = await service.call_cpa("123456", "999", "还在吗？")
+    assert reply2 == "CPA 无感回退回复！"
+    assert translator.is_primary_key_cooling() is True
+    assert service._last_provider_label == "gpt-5.6-luna(cpa)"
+    assert len(seen_urls) == 2
+    translator.clear_primary_key_cooldown()
+
+@pytest.mark.asyncio
+async def test_process_job_includes_native_reply_quote_segment():
+    from src.platforms.napcat_chat import NapCatChatJob
+    sent = []
+    async def mock_sender(gid, chain):
+        sent.append((gid, chain))
+        return True
+    service = NapCatChatService(config_provider=lambda: _chat_config(), sender=mock_sender)
+    job = NapCatChatJob(group_id="123456", user_id="999", message_id="-12345678", text="", received_at=0.0)
+    await service._process_job(job)
+    assert len(sent) == 1
+    _, chain = sent[0]
+    assert chain[0] == {"type": "reply", "data": {"id": "-12345678"}}
+    assert chain[1] == {"type": "at", "data": {"qq": "999"}}
