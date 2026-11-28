@@ -410,7 +410,7 @@ _SECTIONS: list[tuple[str, list[str]]] = [
     ("── 推送节奏 ──",  ["day_interval", "night_interval", "sleep_hours", "alert_cooldown"]),
     ("── 全局监控调度（JST）──", ["monitor_schedule"]),
 ]
-_OPTIONAL_ORDER = ["qq_send_interval", "napcat_send_timeout_seconds", "translate", "image_tagging", "gemini_primary_models", "gemini_primary_blog_models", "gemini_models", "gemini_blog_models", "gemini_min_interval", "translate_timeout", "translate_total_timeout"]
+_OPTIONAL_ORDER = ["qq_send_interval", "napcat_send_timeout_seconds", "translate", "enable_voice_transcription", "image_tagging", "gemini_primary_models", "gemini_primary_blog_models", "gemini_models", "gemini_blog_models", "gemini_min_interval", "translate_timeout", "translate_total_timeout"]
 _OPTIONAL_COMMENT = "── 可选覆盖 ──（不写则用内置默认值）"
 
 

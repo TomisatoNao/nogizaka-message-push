@@ -2136,6 +2136,7 @@
       <div class="admin-settings-title settings-group-title"><span>翻译运行参数</span><span class="settings-group-badge">仅影响翻译请求</span></div>
       <div class="admin-field-grid settings-field-grid">
       <label class="switch"><input id="translateOn" type="checkbox"/><span class="track"></span>启用 AI 智能翻译</label>
+      <label class="switch"><input id="voiceTranscribeOn" type="checkbox"/><span class="track"></span>启用语音消息 AI 识别与翻译</label>
       <label class="field">调用限速间隔（秒）
         <input id="geminiMinInterval" min="0" step="0.5" type="number"/>
       </label>
@@ -2148,7 +2149,13 @@
       <div class="admin-settings-title settings-group-title"><span>服务凭证</span></div>
       <div class="admin-credential-list">
       <div class="admin-credential-row">
-        <span class="admin-credential-name">Google Gemini Key (.env)</span>
+        <span class="admin-credential-name">付费主用 Gemini Key (.env)</span>
+        <span id="geminiPrimaryKeyStatus"></span>
+        <button class="btn small" id="btnFillGeminiPrimaryKey" type="button">填写</button>
+        <button class="btn small danger" id="btnClearGeminiPrimaryKey" type="button" hidden>清空</button>
+      </div>
+      <div class="admin-credential-row">
+        <span class="admin-credential-name">Google Gemini Key（备用/默认）(.env)</span>
         <span id="geminiKeyStatus"></span>
         <button class="btn small" id="btnFillGeminiKey" type="button">填写</button>
         <button class="btn small danger" id="btnClearGeminiKey" type="button" hidden>清空</button>
@@ -2902,7 +2909,7 @@
     <!-- Panel 3: AI Chat -->
     <div class="napcat-subtab-panel" id="subtabPanelAiChat" role="tabpanel">
       <div class="admin-module-heading">
-        <h4 style="margin: 0; font-size: 15px; font-weight: 700;">🐾 AI 拟人群聊（CPA）</h4>
+        <h4 style="margin: 0; font-size: 15px; font-weight: 700;">🐾 AI 拟人群聊（Gemini 旗舰 → 回退 CPA）</h4>
         <div class="admin-control-group">
           <label class="switch admin-compact-switch">
             <input id="aiChatOn" type="checkbox"/>
@@ -2910,6 +2917,7 @@
           </label>
         </div>
       </div>
+      <div class="admin-note">已配置「付费主用 Gemini Key」时优先使用旗舰模型（如 gemini-4-neon）回复；Key 失效、限流或异常时自动无感回退至下方 CPA 网关。</div>
       <div class="admin-account-group" style="margin-top: 10px;">
         <div class="ai-chat-grid">
           <label class="field">CPA 网关基地址 (Base URL)
@@ -3542,7 +3550,7 @@ const CONFIG_REVIEW_LABELS = Object.freeze({
   napcat_routes: "OneBot 路由", tg_bots: "Telegram Bot", qq_official_bots: "QQ 官方 Bot",
   qq_official: "QQ 官方 Bot", social: "社媒配置", napcat_inbound: "OneBot 入站设置",
   day_interval: "白天间隔", night_interval: "夜间间隔", sleep_hours: "休眠时段",
-  alert_cooldown: "告警间隔", translate: "翻译设置", gemini_min_interval: "翻译间隔",
+  alert_cooldown: "告警间隔", translate: "翻译设置", enable_voice_transcription: "语音识别翻译", gemini_min_interval: "翻译间隔",
 });
 const CONFIG_APPLICATION_LABELS = Object.freeze({
   loggers: "日志", accounts: "账号凭证", telegram_bots: "Telegram Bot",
@@ -5878,6 +5886,7 @@ function renderGeneral() {
   $("qqSendInterval").value = config.qq_send_interval ?? 1.5;
   $("napcatSendTimeout").value = config.napcat_send_timeout_seconds ?? 45;
   $("translateOn").checked = config.translate !== false;
+  if ($("voiceTranscribeOn")) $("voiceTranscribeOn").checked = config.enable_voice_transcription !== false;
   $("geminiMinInterval").value = config.gemini_min_interval ?? 7.0;
   $("translateTimeout").value = config.translate_timeout ?? 30;
   const wa = config.web_admin || {};
@@ -5912,6 +5921,8 @@ function renderGeneral() {
   }).filter((x) => x && x.openid);
   renderCmdOpenids();
   const envBadge = (v) => v ? '<span class="admin-status-badge ok">✓ 已配置</span>' : '<span class="admin-status-badge err">✗ 未配置</span>';
+  if ($("geminiPrimaryKeyStatus")) $("geminiPrimaryKeyStatus").innerHTML = envBadge(envStatus.GEMINI_PRIMARY_API_KEY);
+  if ($("btnClearGeminiPrimaryKey")) $("btnClearGeminiPrimaryKey").hidden = !envStatus.GEMINI_PRIMARY_API_KEY;
   $("geminiKeyStatus").innerHTML = envBadge(envStatus.GEMINI_API_KEY);
   if ($("zhipuKeyStatus")) $("zhipuKeyStatus").innerHTML = envBadge(envStatus.ZHIPU_API_KEY);
   if ($("btnClearGeminiKey")) $("btnClearGeminiKey").hidden = !envStatus.GEMINI_API_KEY;
@@ -6509,6 +6520,7 @@ function collectGeneral() {
   config.qq_send_interval = num("qqSendInterval", true) ?? 1.5;
   config.napcat_send_timeout_seconds = num("napcatSendTimeout") ?? 45;
   config.translate = $("translateOn").checked;
+  if ($("voiceTranscribeOn")) config.enable_voice_transcription = $("voiceTranscribeOn").checked;
   config.gemini_min_interval = num("geminiMinInterval", true) ?? 7.0;
   config.translate_timeout = num("translateTimeout") ?? 30;
   config.web_admin = {
@@ -7062,6 +7074,14 @@ async function clearEnvSecret(envKey, name) {
     msg("清空失败：" + e.message, "err");
   }
 }
+
+if ($("btnFillGeminiPrimaryKey")) {
+  $("btnFillGeminiPrimaryKey").addEventListener("click", () => openSecretDialog(
+    "填写付费主用 Gemini API Key", "保存并热重载后立即生效（翻译、语音识别与 AI 群聊均优先使用此 Key，失效自动回退原 Key/CPA）。",
+    [{ env: "GEMINI_PRIMARY_API_KEY", label: "主用 API Key", required: true, placeholder: "AQ... 或 AIza...",
+       help: "付费 Gemini Token；若失效或触发 401/403，系统将自动冷却并无感回退至备用 Key 与 CPA 网关。" }], null));
+}
+if ($("btnClearGeminiPrimaryKey")) $("btnClearGeminiPrimaryKey").addEventListener("click", () => clearEnvSecret("GEMINI_PRIMARY_API_KEY", "付费主用 Gemini Key"));
 
 $("btnFillGeminiKey").addEventListener("click", () => openSecretDialog(
   "填写 Gemini API Key", "保存并热重载后立即生效（翻译每次调用时读取最新值）。",
@@ -10486,9 +10506,10 @@ function updateNapcatAdvancedStatus() {
   if (aiPill) {
     const isOn = $("aiChatOn") ? $("aiChatOn").checked : false;
     const model = $("aiChatModel") ? ($("aiChatModel").value || "冨里奈央") : "冨里奈央";
+    const routeLabel = envStatus.GEMINI_PRIMARY_API_KEY ? ("Gemini 旗舰 → " + model) : model;
     if (isOn) {
       aiPill.className = "napcat-status-pill active";
-      aiPill.innerHTML = "💬 AI 拟人群聊: <em>已启用 (" + model + ")</em>";
+      aiPill.innerHTML = "💬 AI 拟人群聊: <em>已启用 (" + routeLabel + ")</em>";
     } else {
       aiPill.className = "napcat-status-pill";
       aiPill.innerHTML = "💬 AI 拟人群聊: <em>未启用</em>";

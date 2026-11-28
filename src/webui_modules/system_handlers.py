@@ -53,6 +53,7 @@ def env_status(raw_config: dict | None = None) -> dict:
     布尔值，运行时不会读取它。
     """
     status = {
+        "GEMINI_PRIMARY_API_KEY": bool(os.getenv("GEMINI_PRIMARY_API_KEY")),
         "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
         "ZHIPU_API_KEY": bool(os.getenv("ZHIPU_API_KEY")),
         "INSTAGRAM_SESSIONID": bool(os.getenv("INSTAGRAM_SESSIONID")),
