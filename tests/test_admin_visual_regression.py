@@ -150,6 +150,7 @@ def _api_payload(path: str) -> dict:
             "cred_status": {"demo_main": {"ok": True}},
             "qq_bot_status": [],
             "env_status": {
+                "GEMINI_PRIMARY_API_KEY": False,
                 "GEMINI_API_KEY": False,
                 "ZHIPU_API_KEY": False,
                 "legacy_tg_token": False,
@@ -498,9 +499,9 @@ def test_admin_tabs_visual_regression(admin_static_server, viewport_name, tmp_pa
             )
             for tab in tabs_to_capture:
                 if tab != "status":
-                    # 每次从导航起点切换，避免移动端滚动位置依赖前一个页签，导致快照漂移。
+                    # 每次从导航起点与页面顶部切换，避免移动端滚动位置依赖前一个页签，导致快照漂移。
                     page.evaluate(
-                        "() => { const tabs = document.querySelector('.header-nav .nav-tabs'); if (tabs) tabs.scrollLeft = 0; }"
+                        "() => { window.scrollTo(0, 0); const tabs = document.querySelector('.header-nav .nav-tabs'); if (tabs) tabs.scrollLeft = 0; }"
                     )
                     page.locator(f'.nav-tab[data-tab="{tab}"]').click()
                     page.locator(f"#tab-{tab}.active .admin-module").first.wait_for(state="visible", timeout=10000)
